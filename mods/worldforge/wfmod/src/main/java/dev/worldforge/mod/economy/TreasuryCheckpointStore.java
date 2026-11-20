@@ -26,7 +26,7 @@ public final class TreasuryCheckpointStore {
     private static final Pattern SNAPSHOT_NAME = Pattern.compile("snapshot-\\d{20}-[0-9a-f]{64}\\.json");
     private final Path directory;
 
-    public record Checkpoint(String snapshotJson, long nextSequence, String checksum) { }
+    public record Checkpoint(String snapshotJson, long nextSequence, String checksum, String archiveChecksum) { }
 
     public TreasuryCheckpointStore(Path directory) throws IOException {
         if (directory == null) throw new IllegalArgumentException("Checkpoint directory is required");
@@ -71,7 +71,7 @@ public final class TreasuryCheckpointStore {
         manifest.put("sha256", checksum);
         manifest.put("archiveSha256", archiveDigest);
         atomicWrite(directory.resolve("CURRENT.json"), Json.write(manifest));
-        return new Checkpoint(snapshotJson, state.nextSequence(), checksum);
+        return new Checkpoint(snapshotJson, state.nextSequence(), checksum, archiveDigest);
     }
 
     /** Loads a checkpoint only when the currently verified archive has the same immutable prefix through the checkpoint. */
@@ -83,11 +83,38 @@ public final class TreasuryCheckpointStore {
                 || !(manifest.get("archiveSha256") instanceof String expected)
                 || !expected.matches("[0-9a-f]{64}"))
             throw new IOException("Treasury checkpoint is missing its archive fingerprint");
-        if (archive.nextSequence() < checkpoint.nextSequence()
-                || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
-                archive.archiveDigestThrough(checkpoint.nextSequence()).getBytes(StandardCharsets.US_ASCII)))
-            throw new IOException("Treasury checkpoint does not match the verified archive contents");
+        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
+                checkpoint.archiveChecksum().getBytes(StandardCharsets.US_ASCII)))
+            throw new IOException("Treasury checkpoint archive fingerprint metadata changed");
+        verify(checkpoint, archive);
         return checkpoint;
+    }
+
+    /**
+     * Verifies a checkpoint object independently of how it was obtained. Restore callers
+     * must not be able to pair a valid snapshot with a different archive that happens to
+     * end at the same sequence number.
+     */
+    public static void verify(Checkpoint checkpoint, TreasuryJournalArchive archive) throws IOException {
+        if (checkpoint == null || archive == null)
+            throw new IllegalArgumentException("Treasury checkpoint and archive are required");
+        String actualSnapshotChecksum = sha256(checkpoint.snapshotJson());
+        if (checkpoint.checksum() == null
+                || !MessageDigest.isEqual(checkpoint.checksum().getBytes(StandardCharsets.US_ASCII),
+                actualSnapshotChecksum.getBytes(StandardCharsets.US_ASCII)))
+            throw new IOException("Treasury checkpoint snapshot checksum mismatch");
+        if (checkpoint.archiveChecksum() == null || !checkpoint.archiveChecksum().matches("[0-9a-f]{64}"))
+            throw new IOException("Treasury checkpoint archive fingerprint is missing");
+        TreasuryLedgerSnapshot.State state;
+        try { state = TreasuryLedgerSnapshot.decode(checkpoint.snapshotJson()); }
+        catch (RuntimeException invalid) { throw new IOException("Treasury checkpoint snapshot is invalid", invalid); }
+        if (checkpoint.nextSequence() != state.nextSequence()
+                || archive.nextSequence() < checkpoint.nextSequence())
+            throw new IOException("Treasury checkpoint sequence does not match its archive");
+        String actualArchiveChecksum = archive.archiveDigestThrough(checkpoint.nextSequence());
+        if (!MessageDigest.isEqual(checkpoint.archiveChecksum().getBytes(StandardCharsets.US_ASCII),
+                actualArchiveChecksum.getBytes(StandardCharsets.US_ASCII)))
+            throw new IOException("Treasury checkpoint does not match the verified archive contents");
     }
 
     /** Loads only the committed snapshot; invalid or missing data fails closed. */
@@ -128,7 +155,11 @@ public final class TreasuryCheckpointStore {
                 || !filename.equals(String.format(java.util.Locale.ROOT, "snapshot-%020d-%s.json",
                 nextSequence, actual)))
             throw new IOException("Treasury checkpoint manifest does not match snapshot metadata");
-        return new Checkpoint(snapshotJson, nextSequence, actual);
+        Object archiveChecksumValue = manifest.get("archiveSha256");
+        if (!(archiveChecksumValue instanceof String archiveChecksum)
+                || !archiveChecksum.matches("[0-9a-f]{64}"))
+            throw new IOException("Invalid treasury checkpoint archive fingerprint");
+        return new Checkpoint(snapshotJson, nextSequence, actual, archiveChecksum);
     }
 
     private static void atomicWrite(Path destination, String content) throws IOException {

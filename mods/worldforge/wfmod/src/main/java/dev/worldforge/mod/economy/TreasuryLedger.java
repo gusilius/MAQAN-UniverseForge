@@ -150,8 +150,7 @@ public final class TreasuryLedger {
      */
     public static TreasuryLedger restoreFromCheckpoint(TreasuryCheckpointStore.Checkpoint checkpoint,
                                                         TreasuryJournalArchive archive) throws java.io.IOException {
-        if (checkpoint == null || archive == null)
-            throw new IllegalArgumentException("Treasury checkpoint and archive are required");
+        TreasuryCheckpointStore.verify(checkpoint, archive);
         TreasuryLedgerSnapshot.State state;
         try {
             state = TreasuryLedgerSnapshot.decode(checkpoint.snapshotJson());

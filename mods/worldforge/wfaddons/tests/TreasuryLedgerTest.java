@@ -630,6 +630,22 @@ public final class TreasuryLedgerTest {
                         new TreasuryJournalArchive(migrationRoot.resolve("empty-suffix"), 2));
             } catch (java.io.IOException expectedFailure) { rejectedSuffix = true; }
             ok(rejectedSuffix, "checkpoint restore fails closed when the archive does not contain its full prefix");
+            boolean rejectedDifferentArchive = false;
+            try {
+                java.nio.file.Path alternateArchiveDir = migrationRoot.resolve("alternate-archive");
+                TreasuryJournalArchive alternateArchive = new TreasuryJournalArchive(alternateArchiveDir, 1);
+                java.util.List<TreasuryLedger.Entry> alteredHistory = new java.util.ArrayList<>(migrationLedger.journal());
+                TreasuryLedger.Entry originalFirst = alteredHistory.get(0);
+                alteredHistory.set(0, new TreasuryLedger.Entry(originalFirst.sequence(), originalFirst.transactionId(),
+                        originalFirst.accountId(), originalFirst.counterpartyId(), originalFirst.currency(),
+                        originalFirst.amount(), originalFirst.credit(), originalFirst.kind(), originalFirst.category(),
+                        originalFirst.reference(), originalFirst.worldMinute(), originalFirst.balanceAfter(),
+                        "different archive history"));
+                alternateArchive.appendAll(alteredHistory);
+                TreasuryLedger.restoreFromCheckpoint(restoredCheckpoint, alternateArchive);
+            } catch (java.io.IOException expectedFailure) { rejectedDifferentArchive = true; }
+            ok(rejectedDifferentArchive,
+                    "checkpoint restore refuses a different archive with the same sequence boundary");
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(migrationRoot)) {
                 files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
