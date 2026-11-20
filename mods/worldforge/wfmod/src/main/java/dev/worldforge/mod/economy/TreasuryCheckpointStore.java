@@ -47,9 +47,9 @@ public final class TreasuryCheckpointStore {
         } catch (RuntimeException ex) {
             throw new IOException("Treasury checkpoint snapshot failed validation", ex);
         }
-        String archiveDigest = archive.archiveDigest();
+        String archiveDigest = archive.archiveDigestThrough(state.nextSequence());
         long archiveNext = archive.nextSequence();
-        if (archiveNext != state.nextSequence())
+        if (archiveNext < state.nextSequence())
             throw new IOException("Treasury archive is at next sequence " + archiveNext
                     + " but snapshot requires " + state.nextSequence());
 
@@ -74,7 +74,7 @@ public final class TreasuryCheckpointStore {
         return new Checkpoint(snapshotJson, state.nextSequence(), checksum);
     }
 
-    /** Loads a checkpoint only when the currently verified archive is byte-for-byte the same chain. */
+    /** Loads a checkpoint only when the currently verified archive has the same immutable prefix through the checkpoint. */
     public synchronized Checkpoint load(TreasuryJournalArchive archive) throws IOException {
         if (archive == null) throw new IllegalArgumentException("Verified treasury archive is required");
         Checkpoint checkpoint = load();
@@ -83,9 +83,9 @@ public final class TreasuryCheckpointStore {
                 || !(manifest.get("archiveSha256") instanceof String expected)
                 || !expected.matches("[0-9a-f]{64}"))
             throw new IOException("Treasury checkpoint is missing its archive fingerprint");
-        if (archive.nextSequence() != checkpoint.nextSequence()
+        if (archive.nextSequence() < checkpoint.nextSequence()
                 || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
-                archive.archiveDigest().getBytes(StandardCharsets.US_ASCII)))
+                archive.archiveDigestThrough(checkpoint.nextSequence()).getBytes(StandardCharsets.US_ASCII)))
             throw new IOException("Treasury checkpoint does not match the verified archive contents");
         return checkpoint;
     }

@@ -5,7 +5,6 @@ import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryCheckpointStore;
-import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
@@ -379,11 +378,15 @@ public final class TreasuryLedgerTest {
             checkpointArchive.append(checkpointLedger.journal());
             TreasuryCheckpointStore checkpointStore = new TreasuryCheckpointStore(checkpointDir);
             TreasuryCheckpointStore.Checkpoint published = checkpointStore.publish(checkpointJson, checkpointArchive);
+            TreasuryLedger.Entry postCheckpointEntry = new TreasuryLedger.Entry(3, "tx:post-checkpoint",
+                    "checkpoint:realm", "external", "silver", 2, false, TreasuryLedger.Kind.UPKEEP,
+                    "test", "post-checkpoint", 5761, 273, "after checkpoint");
+            checkpointArchive.append(List.of(postCheckpointEntry));
             TreasuryCheckpointStore.Checkpoint loaded = new TreasuryCheckpointStore(checkpointDir).load(checkpointArchive);
             ok(published.nextSequence() == loaded.nextSequence()
                             && loaded.snapshotJson().equals(checkpointJson)
                             && loaded.checksum().equals(published.checksum()),
-                    "treasury checkpoint manifest atomically links a verified archive boundary to its snapshot");
+                    "treasury checkpoint remains valid when later journal entries are appended after its verified prefix");
             boolean archiveFingerprintMismatchRejected = false;
             try {
                 TreasuryLedger otherLedger = new TreasuryLedger();
@@ -431,13 +434,20 @@ public final class TreasuryLedgerTest {
 
         boolean segmentInternalGapRejected = false;
         try {
-            TreasuryLedger.Entry first = new TreasuryLedger.Entry(1, "tx:1", "a", "", "silver", 1,
-                    true, TreasuryLedger.Kind.TAX, "test", "one", 1, 1, "");
-            TreasuryLedger.Entry third = new TreasuryLedger.Entry(3, "tx:3", "a", "", "silver", 1,
-                    true, TreasuryLedger.Kind.TAX, "test", "three", 2, 2, "");
-            TreasuryJournalSegment.decode(TreasuryJournalSegment.encode(List.of(first, third)));
+            TreasuryLedger.Entry first = new TreasuryLedger.Entry(11, "tx:11", "a", "", "silver", 1,
+                    true, TreasuryLedger.Kind.TAX, "test", "eleven", 1, 1, "");
+            TreasuryLedger.Entry third = new TreasuryLedger.Entry(13, "tx:13", "a", "", "silver", 1,
+                    true, TreasuryLedger.Kind.TAX, "test", "thirteen", 2, 2, "");
+            TreasuryJournalSegment.encode(List.of(first, third));
         } catch (IllegalArgumentException expected) { segmentInternalGapRejected = true; }
-        ok(segmentInternalGapRejected, "treasury segment rejects missing sequence numbers inside a segment");
+        ok(segmentInternalGapRejected, "treasury segment encoder rejects internal gaps");
+        TreasuryLedger.Entry laterFirst = new TreasuryLedger.Entry(11, "tx:11", "a", "", "silver", 1,
+                true, TreasuryLedger.Kind.TAX, "test", "eleven", 1, 1, "");
+        TreasuryLedger.Entry laterSecond = new TreasuryLedger.Entry(12, "tx:12", "a", "", "silver", 1,
+                true, TreasuryLedger.Kind.TAX, "test", "twelve", 2, 2, "");
+        ok(TreasuryJournalSegment.decode(TreasuryJournalSegment.encode(List.of(laterFirst, laterSecond)))
+                        .firstSequence() == 11,
+                "treasury archive segments may begin after sequence one while remaining internally contiguous");
 
         boolean checkpointTamperRejected = false;
         try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }

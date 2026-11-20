@@ -38,17 +38,41 @@ public final class TreasuryJournalArchive {
     }
 
     public synchronized long nextSequence() { return nextSequence; }
-    /** Stable fingerprint of the verified archive contents and segment boundaries. */
+    /** Stable fingerprint of the complete currently verified archive. */
     public synchronized String archiveDigest() throws IOException {
+        return archiveDigestThrough(nextSequence);
+    }
+
+    /**
+     * Fingerprints exactly the archived entries with sequence less than nextSequence.
+     * Later appended history is deliberately excluded, so older checkpoints remain valid.
+     */
+    public synchronized String archiveDigestThrough(long checkpointNextSequence) throws IOException {
+        if (checkpointNextSequence < 1 || checkpointNextSequence > nextSequence)
+            throw new IOException("Treasury archive does not contain checkpoint prefix ending at " + checkpointNextSequence);
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long expected = 1;
             for (Path path : segmentFiles()) {
                 TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
                         Files.readString(path, StandardCharsets.UTF_8));
-                String line = path.getFileName() + ":" + decoded.firstSequence() + ":"
-                        + decoded.lastSequence() + ":" + decoded.checksum() + "\n";
-                digest.update(line.getBytes(StandardCharsets.UTF_8));
+                if (decoded.firstSequence() != expected)
+                    throw new IOException("Treasury archive sequence gap while fingerprinting");
+                if (decoded.firstSequence() >= checkpointNextSequence) break;
+                List<TreasuryLedger.Entry> prefix = decoded.entries().stream()
+                        .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
+                if (!prefix.isEmpty()) {
+                    TreasuryJournalSegment.Decoded prefixSegment = TreasuryJournalSegment.decode(
+                            TreasuryJournalSegment.encode(prefix));
+                    String line = prefixSegment.firstSequence() + ":" + prefixSegment.lastSequence()
+                            + ":" + prefixSegment.checksum() + "\n";
+                    digest.update(line.getBytes(StandardCharsets.UTF_8));
+                }
+                expected = decoded.lastSequence() + 1;
+                if (decoded.lastSequence() >= checkpointNextSequence - 1) break;
             }
+            if (expected < checkpointNextSequence)
+                throw new IOException("Treasury archive is missing checkpoint prefix entries");
             byte[] bytes = digest.digest();
             StringBuilder hex = new StringBuilder(bytes.length * 2);
             for (byte value : bytes) hex.append(String.format("%02x", value & 0xff));

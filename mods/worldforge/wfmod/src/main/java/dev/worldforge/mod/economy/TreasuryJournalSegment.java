@@ -33,10 +33,12 @@ public final class TreasuryJournalSegment {
     public static String encode(List<TreasuryLedger.Entry> entries) {
         if (entries == null || entries.isEmpty() || entries.size() > MAX_ENTRIES)
             throw new IllegalArgumentException("Treasury segment entry count must be 1.." + MAX_ENTRIES);
-        long previous = 0;
+        if (entries.get(0) == null || entries.get(0).sequence() < 1)
+            throw new IllegalArgumentException("Treasury segment must start at a positive sequence");
+        long previous = entries.get(0).sequence() - 1;
         for (TreasuryLedger.Entry entry : entries) {
-            if (entry == null || entry.sequence() <= previous)
-                throw new IllegalArgumentException("Treasury segment entries must have strictly increasing sequences");
+            if (entry == null || entry.sequence() != previous + 1)
+                throw new IllegalArgumentException("Treasury segment entries must have contiguous sequences");
             previous = entry.sequence();
         }
         long first = entries.get(0).sequence();
@@ -61,7 +63,7 @@ public final class TreasuryJournalSegment {
         String expectedChecksum = requiredString(root.get("sha256"), "segment checksum");
 
         List<TreasuryLedger.Entry> entries = new ArrayList<>(rows.size());
-        long previous = 0;
+        long previous = first - 1;
         for (Object row : rows) {
             if (!(row instanceof Map<?, ?> m))
                 throw new IllegalArgumentException("Invalid treasury segment entry");
