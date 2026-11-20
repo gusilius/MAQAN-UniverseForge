@@ -164,6 +164,7 @@ public final class ResidentLifeEvents {
                 String secondDating = string(second.props.get("family.dating"));
                 boolean mutualDating = second.id.equals(firstDating) && first.id.equals(secondDating);
                 if (mutualDating && affinity < 20) {
+                    FamilyPlanning.cancelEngagement(first, second, year, "relationship-ended");
                     first.props.remove("family.dating");
                     second.props.remove("family.dating");
                     first.props.remove("family.dating_name");
@@ -193,10 +194,17 @@ public final class ResidentLifeEvents {
                     second.props.put("family.last_event", "dating:" + first.id);
                     mutualDating = true;
                 }
+                if (mutualDating && affinity >= 65 && !FamilyPlanning.engagedTo(first, second)
+                        && Math.floorMod(Objects.hash(first.id, second.id, year, "engagement"), 3) == 0) {
+                    FamilyPlanning.engage(first, second, year);
+                }
+                int engagementYear = number(first.props.get("family.engagement_year"), year);
                 if (Objects.equals(first.gender, second.gender) || affinity < 75
+                        || !FamilyPlanning.engagedTo(first, second) || year - engagementYear < 1
                         || Math.floorMod(Objects.hash(first.id, second.id, year, "marriage"), 4) != 0) continue;
                 try {
                     registry.marry(first.id, second.id, year);
+                    FamilyPlanning.completeMarriage(first, second);
                     first.props.remove("family.dating");
                     second.props.remove("family.dating");
                     first.props.remove("family.dating_name");
