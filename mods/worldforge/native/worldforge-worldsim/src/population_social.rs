@@ -121,6 +121,49 @@ pub fn evaluate(
     Ok(out)
 }
 
+
+/// Adapter for the canonical WorldSnapshot model. It uses existing Character
+/// trait/attribute data and SocialRelation records; it does not create a second
+/// identity registry or scan all possible character pairs. Only endpoints in
+/// the budgeted relationship slice are projected into temporary profiles.
+pub fn evaluate_world_snapshot(
+    snapshot: &crate::WorldSnapshot,
+    catalog: &Catalog,
+    budget: usize,
+) -> Result<Vec<Outcome>, Error> {
+    if budget == 0 { return Ok(Vec::new()); }
+    let mut contacts = Vec::with_capacity(budget.min(snapshot.social_relations.len()));
+    let mut required_ids = BTreeSet::new();
+    for relation in snapshot.social_relations.iter().take(budget) {
+        let context = if relation.married { "marriage" }
+            else if relation.dating { "courtship" }
+            else if relation.employed { "work" }
+            else { "social" };
+        contacts.push(Contact {
+            a: relation.character_a.clone(),
+            b: relation.character_b.clone(),
+            context: context.into(),
+            relationship: relation.relationship.saturating_add(relation.love).clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            last_contact_tick: relation.last_contact_day,
+        });
+        required_ids.insert(relation.character_a.as_str());
+        required_ids.insert(relation.character_b.as_str());
+    }
+    if contacts.is_empty() { return Ok(Vec::new()); }
+    let mut profiles = Vec::with_capacity(required_ids.len());
+    for character in &snapshot.characters {
+        if !character.alive || !required_ids.contains(character.id.as_str()) { continue; }
+        profiles.push(Profile {
+            id: character.id.clone(),
+            traits: character.trait_ids.iter().cloned().collect(),
+            attributes: character.attributes.iter()
+                .map(|(key, value)| (key.clone(), (*value).clamp(i16::MIN as i32, i16::MAX as i32) as i16))
+                .collect(),
+        });
+    }
+    evaluate(&profiles, &contacts, catalog, snapshot.seed, snapshot.day, budget)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
