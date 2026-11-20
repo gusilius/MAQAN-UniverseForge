@@ -85,12 +85,16 @@ public final class WorldSimMod {
     private static JsonObject emergenceBindings = new JsonObject();
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
+    private static final int STRUCTURE_MATERIALIZATION_BUDGET_PER_TICK = 32;
     private static final int PEOPLE_MATERIALIZATION_BUDGET_PER_TICK = 256;
     /** True while one or more authored image maps are being sampled off-thread. */
     private static volatile boolean imageGeographyPending;
     private static WorldSimComputeScheduler.Result pendingApplyResult;
+    private static JsonObject pendingApplyEmergenceFrame;
+    private static JsonObject pendingApplyDecisionFrame;
     private static JsonObject pendingCandidateEmergenceState;
     private static EmergentPeopleProgress emergentPeopleProgress;
+    private static EmergentStructureProgress emergentStructureProgress;
 
     private static final class EmergentBandProgress {
         final List<dev.worldforge.people.Character> residents;
@@ -206,6 +210,14 @@ public final class WorldSimMod {
         return sources;
     }
 
+    /** Tick-budgeted, retry-safe settlement-site materialization for one immutable genesis frame. */
+    private static final class EmergentStructureProgress {
+        final JsonObject state;
+        final Set<String> completedBands = new HashSet<>();
+        boolean dirty;
+        EmergentStructureProgress(JsonObject state) { this.state = state; }
+    }
+
     private static final class EmergentPeopleProgress {
         final JsonObject state;
         final int year;
@@ -272,8 +284,11 @@ public final class WorldSimMod {
         COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
         pendingComputeRevision = Long.MIN_VALUE;
         pendingApplyResult = null;
+        pendingApplyEmergenceFrame = null;
+        pendingApplyDecisionFrame = null;
         pendingCandidateEmergenceState = null;
         emergentPeopleProgress = null;
+        emergentStructureProgress = null;
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergenceState = null;
@@ -410,6 +425,8 @@ public final class WorldSimMod {
                             ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
                 } else {
                     pendingApplyResult = completed;
+                    pendingApplyEmergenceFrame = null;
+                    pendingApplyDecisionFrame = null;
                     pendingCandidateEmergenceState = null;
                     emergentPeopleProgress = null;
                 }
@@ -422,6 +439,8 @@ public final class WorldSimMod {
                     return; // Continue the same authoritative frame on the next server tick.
                 }
                 pendingApplyResult = null;
+                pendingApplyEmergenceFrame = null;
+                pendingApplyDecisionFrame = null;
                 pendingCandidateEmergenceState = null;
                 emergentPeopleProgress = null;
                 pendingComputeRevision = Long.MIN_VALUE;
@@ -492,8 +511,15 @@ public final class WorldSimMod {
     /** Applies a completed immutable native frame on the authoritative Minecraft server thread only. */
     private boolean applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
         long day = result.ticket().revision();
-        JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
-        JsonObject frame = GSON.fromJson(new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        // Native output can be large. Reuse parsed frames across tick-sized materialization batches.
+        if (pendingApplyEmergenceFrame == null || pendingApplyDecisionFrame == null) {
+            pendingApplyEmergenceFrame = GSON.fromJson(
+                    new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
+            pendingApplyDecisionFrame = GSON.fromJson(
+                    new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        }
+        JsonObject emergenceFrame = pendingApplyEmergenceFrame;
+        JsonObject frame = pendingApplyDecisionFrame;
         requireNativeSuccess(emergenceFrame, "emergence");
         requireNativeSuccess(frame, "decision");
         if (emergenceFrame == null || !emergenceFrame.has("state")
@@ -2235,7 +2261,26 @@ public final class WorldSimMod {
     private static boolean syncEmergentSettlementStructures(MinecraftServer server, JsonObject state) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray())
             return true;
-        boolean changed = false;
+        if (emergentStructureProgress == null || emergentStructureProgress.state != state)
+            emergentStructureProgress = new EmergentStructureProgress(state);
+        EmergentStructureProgress progress = emergentStructureProgress;
+        int budget = STRUCTURE_MATERIALIZATION_BUDGET_PER_TICK;
+
+        // Build the polity membership index once, not once for every settlement band.
+        Map<String, String> foundingPolityByBand = new HashMap<>();
+        if (state.has("polities") && state.get("polities").isJsonArray()) {
+            for (var element : state.getAsJsonArray("polities")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject polity = element.getAsJsonObject();
+                String polityId = polity.has("id") ? polity.get("id").getAsString() : "";
+                if (polityId.isBlank() || !polity.has("settlement_ids")
+                        || !polity.get("settlement_ids").isJsonArray()) continue;
+                for (var member : polity.getAsJsonArray("settlement_ids"))
+                    if (member.isJsonPrimitive()) foundingPolityByBand.putIfAbsent(member.getAsString(), polityId);
+            }
+        }
+        Set<String> boundSettlementIds = emergenceBoundSettlementIds();
+        boolean remaining = false;
         for (EmergenceSource source : emergenceSources()) {
             if (source.registry == null) continue;
             String dimension = source.settlementDimension(server);
@@ -2249,6 +2294,13 @@ public final class WorldSimMod {
                 if (!source.id.equals(band.has("map_id") ? band.get("map_id").getAsString() : "")
                         || !band.has("settled") || !band.get("settled").getAsBoolean()) continue;
                 String bandId = band.get("id").getAsString();
+                String progressKey = source.id + "|" + bandId;
+                if (progress.completedBands.contains(progressKey)) continue;
+                if (budget <= 0) {
+                    remaining = true;
+                    break;
+                }
+
                 String settlementId = settlementIdForBand(band);
                 Colony colony = SettleMod.colony(settlementId);
                 boolean colonyCreated = false;
@@ -2258,15 +2310,12 @@ public final class WorldSimMod {
                     int anchorRadius = (int) Math.max(64, Math.min(512,
                             Math.round(96.0 * Math.max(0.001, source.blocksPerPixel))));
                     colony = SettleMod.nearbyBlueprintSettlement(dimension, source.map.name,
-                            x, z, anchorRadius, emergenceBoundSettlementIds());
+                            x, z, anchorRadius, boundSettlementIds);
                 } else if (colony == null) {
-                    colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64,
-                            emergenceBoundSettlementIds());
+                    colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64, boundSettlementIds);
                 }
                 if (colony == null) {
                     // The band ID is a temporary structural label, not a final display name.
-                    // syncEmergentPeople replaces it with the canonical race/culture name
-                    // after residents are attached.
                     colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
                             settlementId, x, z, "worldsim:settlement:" + bandId);
                     colonyCreated = true;
@@ -2276,27 +2325,9 @@ public final class WorldSimMod {
                 if (colony == null || colony.s == null)
                     throw new IllegalStateException("Could not establish canonical settlement site for " + bandId);
 
-                // Classify the settlement from its founding population target and local
-                // geography now, before canonical residents and political ownership are
-                // attached. Settlement.refreshType uses bestFounding(), so infrastructure
-                // requirements are deferred until the existing construction system fulfils them.
                 colony.s.types = SettleMod.TYPES;
                 String previousType = colony.s.typeId;
-                String foundingPolityId = "";
-                if (state.has("polities") && state.get("polities").isJsonArray()) {
-                    for (var polityElement : state.getAsJsonArray("polities")) {
-                        if (!polityElement.isJsonObject()) continue;
-                        JsonObject polity = polityElement.getAsJsonObject();
-                        if (!polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
-                        for (var member : polity.getAsJsonArray("settlement_ids")) {
-                            if (member.isJsonPrimitive() && bandId.equals(member.getAsString())) {
-                                foundingPolityId = polity.has("id") ? polity.get("id").getAsString() : "";
-                                break;
-                            }
-                        }
-                        if (!foundingPolityId.isBlank()) break;
-                    }
-                }
+                String foundingPolityId = foundingPolityByBand.getOrDefault(bandId, "");
                 Map<String, Double> foundingRaceProfile = emergentFoundingRaceProfile(
                         source.seed, foundingPolityId.isBlank() ? bandId : foundingPolityId);
                 int foundingPopulation = (int) Math.max(1L, Math.min(100_000L,
@@ -2309,14 +2340,27 @@ public final class WorldSimMod {
                 }
                 String priorBinding = settlementIdForBand(band);
                 bindPhysicalSettlement(bandId, settlementId);
-                changed |= colonyCreated || !Objects.equals(previousType, foundingType)
+                boundSettlementIds.add(settlementId);
+                progress.dirty |= colonyCreated || !Objects.equals(previousType, foundingType)
                         || !Objects.equals(priorBinding, settlementId);
+                progress.completedBands.add(progressKey);
+                budget--;
             }
+            if (remaining) break;
         }
-        if (changed && !SettleMod.saveDurably(server)) {
+
+        if (remaining) {
+            PROFILER.setGauge("worldsim.genesis.structures.pending", 1);
+            return false;
+        }
+        // Save once after the complete staged batch. A failed save leaves the cursor
+        // intact, so the next tick retries the durable commit without recreating sites.
+        if (progress.dirty && !SettleMod.saveDurably(server)) {
             LOGGER.error("wf_worldsim: canonical settlement structures could not be persisted; population phase remains blocked");
             return false;
         }
+        emergentStructureProgress = null;
+        PROFILER.setGauge("worldsim.genesis.structures.pending", 0);
         return true;
     }
 
