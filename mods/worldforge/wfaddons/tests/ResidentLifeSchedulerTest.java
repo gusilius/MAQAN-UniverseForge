@@ -36,6 +36,14 @@ public final class ResidentLifeSchedulerTest {
             check(Integer.valueOf(2000).equals(person.props.get("family.development_year")),
                     "every resident's development stage advances");
         }
+
+        Character sameYearArrival = registry.create("Same-year arrival", "House late", "test", "f", 1982);
+        boolean stageCatchup = ResidentLifeEvents.advanceYearly(registry, 2000, null, 3, calls + 100L);
+        check(stageCatchup, "same-year population additions receive bounded stage catch-up");
+        check(sameYearArrival.props.get("population.life_stage") instanceof String,
+                "same-year arrival receives its calendar-derived life stage");
+        check(sameYearArrival.props.get("population.age_years") instanceof Number,
+                "same-year arrival receives its calendar-derived age");
         System.out.println("ResidentLifeSchedulerTest: OK");
     }
 }
