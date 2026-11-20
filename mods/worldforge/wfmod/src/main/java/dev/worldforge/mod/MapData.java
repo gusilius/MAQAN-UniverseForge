@@ -46,17 +46,17 @@ public final class MapData {
 
     private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "wilderness.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json", "world-blueprint.json", "generation-profile.json"};
 
-    private final short[] height;
-    private final byte[] biome;
+    // Core terrain rasters are decoded on demand into a bounded LRU of 256x256 tiles.
+    private final RasterTileLayer height;
+    private final RasterTileLayer biome;
     /** 255 marks land intentionally left wild by the selected occupancy profile. */
-    private final byte[] wilderness;
-    private final byte[] river;              // 0 суша, 160 озеро, 255 река (может быть null)
-    private final short[] riverLevel;        // уровень воды реки (как height16), 0 если не река
+    private final RasterTileLayer wilderness;
+    private final RasterTileLayer river;     // 0 суша, 160 озеро, 255 река (может быть null)
     private final Noise warp = new Noise(0x5EED1234L);
 
     private MapData(String name, String displayName, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
-                    String[][] cand, double[] spawn, short[] height, byte[] biome, byte[] river, short[] riverLevel,
-                    RegionData regions, byte[] regionMap, TitleData titles, byte[] wilderness,
+                    String[][] cand, double[] spawn, RasterTileLayer height, RasterTileLayer biome, RasterTileLayer river,
+                    RegionData regions, byte[] regionMap, TitleData titles, RasterTileLayer wilderness,
                     PlanetWorldProfile planetProfile, Map<String, byte[]> mapItems,
                     List<SettlementSeed> settlementSeeds) {
         this.name = name;
@@ -74,7 +74,6 @@ public final class MapData {
         this.height = height;
         this.biome = biome;
         this.river = river;
-        this.riverLevel = riverLevel;
         this.regions = regions;
         this.regionMap = regionMap;
         this.titles = titles;
@@ -191,40 +190,12 @@ public final class MapData {
             spawn = new double[]{((Number) sp.get(0)).doubleValue(), ((Number) sp.get(1)).doubleValue()};
         }
 
-        Raster hr = decode(files.get("height16.png"), w, h, "height16.png");
-        short[] height = new short[w * h];
-        for (int z = 0; z < h; z++) for (int x = 0; x < w; x++) height[z * w + x] = (short) hr.getSample(x, z, 0);
-        Raster br = decode(files.get("biomes.png"), w, h, "biomes.png");
-        byte[] biome = new byte[w * h];
-        for (int z = 0; z < h; z++) for (int x = 0; x < w; x++) biome[z * w + x] = (byte) br.getSample(x, z, 0);
-        byte[] wilderness = null;
-        if (files.containsKey("wilderness.png")) {
-            Raster wr = decode(files.get("wilderness.png"), w, h, "wilderness.png");
-            wilderness = new byte[w * h];
-            for (int z = 0; z < h; z++) for (int x = 0; x < w; x++)
-                wilderness[z * w + x] = (byte) wr.getSample(x, z, 0);
-        }
-        byte[] river = null;
-        short[] rl = null;
-        if (files.containsKey("rivers.png")) {
-            Raster rr = decode(files.get("rivers.png"), w, h, "rivers.png");
-            river = new byte[w * h];
-            for (int z = 0; z < h; z++) for (int x = 0; x < w; x++) river[z * w + x] = (byte) rr.getSample(x, z, 0);
-            rl = new short[w * h];
-            for (int z = 0; z < h; z++) {
-                for (int x = 0; x < w; x++) {
-                    if (river[z * w + x] == 0) continue;
-                    int mn = 65535;
-                    for (int dz = -3; dz <= 3; dz++) {
-                        for (int dx = -3; dx <= 3; dx++) {
-                            int xx = Math.min(w - 1, Math.max(0, x + dx)), zz = Math.min(h - 1, Math.max(0, z + dz));
-                            mn = Math.min(mn, height[zz * w + xx] & 0xFFFF);
-                        }
-                    }
-                    rl[z * w + x] = (short) mn;
-                }
-            }
-        }
+        RasterTileLayer height = RasterTileLayer.load(files.get("height16.png"), w, h, "height16.png");
+        RasterTileLayer biome = RasterTileLayer.load(files.get("biomes.png"), w, h, "biomes.png");
+        RasterTileLayer wilderness = files.containsKey("wilderness.png")
+                ? RasterTileLayer.load(files.get("wilderness.png"), w, h, "wilderness.png") : null;
+        RasterTileLayer river = files.containsKey("rivers.png")
+                ? RasterTileLayer.load(files.get("rivers.png"), w, h, "rivers.png") : null;
         RegionData regions = null;
         byte[] regionMap = null;
         if (files.containsKey("regions.png") && files.containsKey("regions.json")) {
@@ -288,7 +259,7 @@ public final class MapData {
                         + "' does not match map id '" + name + "'");
         }
         return new MapData(name, displayName, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn,
-                height, biome, river, rl, regions, regionMap, titles, wilderness, planetProfile, mapItems, settlementSeeds);
+                height, biome, river, regions, regionMap, titles, wilderness, planetProfile, mapItems, settlementSeeds);
     }
 
     private static Raster decode(byte[] png, int w, int h, String what) throws IOException {
@@ -311,7 +282,7 @@ public final class MapData {
     }
 
     private double rawY(int x, int z) {
-        int v = height[clampZ(z) * w + clampX(x)] & 0xFFFF;
+        int v = height.sample(clampX(x), clampZ(z));
         return minY + v / 65535.0 * (maxY - minY);
     }
 
@@ -332,13 +303,17 @@ public final class MapData {
         return pz * w + px;
     }
 
+    private int sampleIndex(RasterTileLayer layer, int index) {
+        return layer.sample(index % w, index / w);
+    }
+
     /** True only when the source package actually supplied rivers.png. */
     public boolean hasRiverLayer() { return river != null; }
 
     /** Whether this pixel is intentionally wild and excluded from initial civilization materialization. */
     public boolean isWildernessPx(int x, int z) {
         if (wilderness == null) return false;
-        return (wilderness[clampZ(z) * w + clampX(x)] & 0xFF) >= 128;
+        return wilderness.sample(clampX(x), clampZ(z)) >= 128;
     }
 
     public boolean hasWildernessLayer() { return wilderness != null; }
@@ -352,21 +327,30 @@ public final class MapData {
 
     /** Индекс биома в точке мира; границы слегка «дрожат», чтобы не было квадратов по пикселям. */
     public int biomeIndexAt(double bx, double bz) {
-        int i = biome[pixelIndex(bx, bz)] & 0xFF;
+        int i = sampleIndex(biome, pixelIndex(bx, bz));
         return i < keys.length ? i : 0;
     }
 
     /** 0 суша, 160 озеро, 255 река. */
     public int riverAt(double bx, double bz) {
-        return river == null ? 0 : river[pixelIndex(bx, bz)] & 0xFF;
+        return river == null ? 0 : sampleIndex(river, pixelIndex(bx, bz));
     }
 
     /** Уровень воды реки в блоках Y или -1, если здесь нет реки. */
     public int riverY(double bx, double bz) {
         if (river == null) return -1;
         int i = pixelIndex(bx, bz);
-        if (river[i] == 0) return -1;
-        return (int) Math.floor(minY + (riverLevel[i] & 0xFFFF) / 65535.0 * (maxY - minY));
+        int x = i % w, z = i / w;
+        if (river.sample(x, z) == 0) return -1;
+        // Water level is the local terrain minimum in a 7x7 window. Compute it only
+        // for river pixels actually queried by generated chunks, not for every map pixel.
+        int minimum = 65535;
+        for (int dz = -3; dz <= 3; dz++) {
+            int zz = clampZ(z + dz);
+            for (int dx = -3; dx <= 3; dx++)
+                minimum = Math.min(minimum, height.sample(clampX(x + dx), zz));
+        }
+        return (int) Math.floor(minY + minimum / 65535.0 * (maxY - minY));
     }
 
     /** Номер региона в точке мира (0 = нет региона или регионы не заданы). */
@@ -383,17 +367,17 @@ public final class MapData {
 
     /** Сырая высота пикселя 0..65535. */
     public int rawHeightPx(int x, int z) {
-        return height[clampZ(z) * w + clampX(x)] & 0xFFFF;
+        return height.sample(clampX(x), clampZ(z));
     }
 
     public int biomeAtPx(int x, int z) {
-        int i = biome[clampZ(z) * w + clampX(x)] & 0xFF;
+        int i = biome.sample(clampX(x), clampZ(z));
         return i < keys.length ? i : 0;
     }
 
     /** 0 суша, 160 озеро, 255 река. */
     public int riverAtPx(int x, int z) {
-        return river == null ? 0 : river[clampZ(z) * w + clampX(x)] & 0xFF;
+        return river == null ? 0 : river.sample(clampX(x), clampZ(z));
     }
 
     public String biomeKey(int idx) {
@@ -422,9 +406,9 @@ public final class MapData {
         int bx = 0, bz = 0;
         for (int z = 0; z < h; z += 2) {
             for (int x = 0; x < w; x += 2) {
-                int i = z * w + x;
-                if (!isSpawnable(keys[biome[i] & 0xFF])) continue;
-                if (minY + (height[i] & 0xFFFF) / 65535.0 * (maxY - minY) < seaLevel + 3) continue;
+                int biomeIndex = biome.sample(x, z);
+                if (biomeIndex >= keys.length || !isSpawnable(keys[biomeIndex])) continue;
+                if (minY + height.sample(x, z) / 65535.0 * (maxY - minY) < seaLevel + 3) continue;
                 long dx = x - w / 2, dz = z - h / 2, d = dx * dx + dz * dz;
                 if (d < best) {
                     best = d;
