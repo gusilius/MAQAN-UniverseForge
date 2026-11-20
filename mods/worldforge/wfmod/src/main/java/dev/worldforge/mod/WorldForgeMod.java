@@ -83,10 +83,7 @@ public class WorldForgeMod {
     private static volatile WorldId worldId;
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
-    /** Shadow archive/checkpoint stay current while legacy JSON remains authoritative. */
-    private static volatile long mirroredTreasuryVersion = -1L;
-    private static TreasuryJournalArchive treasuryArchive;
-    private static TreasuryCheckpointStore treasuryCheckpoints;
+    private static TreasuryArchiveStore treasuryStore;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -157,126 +154,61 @@ public class WorldForgeMod {
         catch (IOException ex) { LOGGER.error("WorldForge action journal save failed: {}", ex.toString()); }
     }
 
+    private static Path treasuryStoreRoot(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("treasury-store");
+    }
+
+    /** Loads the committed archive/checkpoint; legacy JSON is consulted only for first migration. */
     private static void loadTreasury(MinecraftServer server) {
         treasuryLoadFailed = false;
-        Path file = treasuryFile(server);
+        Path legacy = treasuryFile(server);
         try {
-            TreasuryService.replace(Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger());
-            TreasuryLedger loaded = TreasuryService.current();
+            treasuryStore = new TreasuryArchiveStore(treasuryStoreRoot(server));
+            TreasuryLedger loaded = treasuryStore.loadOrMigrate(legacy);
+            TreasuryService.replace(loaded);
             persistedTreasuryVersion = loaded.mutationVersion();
-            treasuryArchive = null;
-            treasuryCheckpoints = null;
-            mirroredTreasuryVersion = -1L;
-            try {
-                syncTreasuryShadow(server, loaded);
-            } catch (Exception shadowFailure) {
-                LOGGER.error("WorldForge treasury shadow migration failed; legacy JSON remains canonical: {}",
-                        shadowFailure.toString());
-            }
-            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries",
-                    loaded.accountCount(), loaded.journalSize());
+            LOGGER.info("WorldForge treasury: loaded canonical archive accounts={} journalEntries={} nextSequence={} mutationVersion={}",
+                    loaded.accountCount(), loaded.journalSize(), loaded.nextSequence(), loaded.mutationVersion());
         } catch (Exception ex) {
-            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());
+            LOGGER.error("WorldForge treasury load failed; refusing to overwrite legacy JSON or committed archive: {}",
+                    ex.toString());
             treasuryLoadFailed = true;
             persistedTreasuryVersion = -1L;
             TreasuryService.replace(new TreasuryLedger());
+            throw new IllegalStateException("WorldForge cannot start with an invalid treasury store", ex);
         }
     }
 
-    /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
+    /** Flushes the canonical archive/checkpoint after addons have migrated their balances. */
     public static boolean saveTreasuryNow(MinecraftServer server) { return saveTreasury(server); }
 
     private static synchronized boolean saveTreasury(MinecraftServer server) {
-        if (server == null || treasuryLoadFailed) {
-            LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
+        if (server == null || treasuryLoadFailed || treasuryStore == null) {
+            LOGGER.error("WorldForge treasury save skipped because its canonical store is unavailable");
             return false;
         }
         TreasuryLedger ledger = TreasuryService.current();
-        // Hold the canonical ledger monitor across dirty-check, snapshot and atomic replacement.
-        // Otherwise a concurrent writer could mutate immediately after a no-op check and receive
-        // a false durable acknowledgement before the next autosave.
         synchronized (ledger) {
-            boolean legacyDirty = ledger.mutationVersion() != persistedTreasuryVersion;
-            boolean shadowDirty = ledger.mutationVersion() != mirroredTreasuryVersion
-                    || treasuryArchive == null || treasuryCheckpoints == null;
-            if (!legacyDirty && !shadowDirty) return true;
-            if (legacyDirty) {
-            Path file = treasuryFile(server);
+            long currentVersion = ledger.mutationVersion();
+            if (currentVersion == persistedTreasuryVersion) return true;
             long startedNanos = System.nanoTime();
-            long writtenVersion;
             try {
-                Files.createDirectories(file.getParent());
-                Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-                try {
-                    // Force the complete legacy snapshot to stable storage before publishing it.
-                    // A non-atomic fallback could expose a truncated canonical ledger on crash.
-                    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(temp,
-                            java.nio.file.StandardOpenOption.CREATE,
-                            java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
-                            java.nio.file.StandardOpenOption.WRITE);
-                         BufferedWriter writer = new BufferedWriter(java.nio.channels.Channels.newWriter(
-                                 channel, StandardCharsets.UTF_8))) {
-                        writtenVersion = ledger.writeJsonVersioned(writer);
-                        writer.flush();
-                        channel.force(true);
-                    }
-                    Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                    Files.deleteIfExists(temp);
-                    throw new IOException("Atomic treasury snapshot replacement is not supported by this filesystem", unsupported);
-                } catch (IOException failure) {
-                    try { Files.deleteIfExists(temp); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
-                    throw failure;
-                }
+                long writtenVersion = treasuryStore.save(ledger);
+                if (writtenVersion != currentVersion)
+                    throw new IOException("Treasury changed while its canonical checkpoint was being published");
                 persistedTreasuryVersion = writtenVersion;
                 long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-                int accounts = ledger.accountCount(), entries = ledger.journalSize();
-                LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
-                        accounts, entries, writtenVersion, elapsedMillis);
-                List<TreasuryLedger.JournalStat> topSources = ledger.topJournalStats(8);
-                if (!topSources.isEmpty()) LOGGER.info("WorldForge treasury: journal source totals={}",
-                        topSources.stream().map(stat -> stat.kind() + "/" + stat.category() + "=" + stat.entries()).toList());
+                LOGGER.info("WorldForge treasury: durable archive/checkpoint accounts={} journalEntries={} nextSequence={} mutationVersion={} elapsedMs={}",
+                        ledger.accountCount(), ledger.journalSize(), ledger.nextSequence(), writtenVersion, elapsedMillis);
                 if (elapsedMillis >= 1000)
-                    LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
-            } catch (IOException ex) {
-                LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
+                    LOGGER.warn("WorldForge treasury archive/checkpoint save exceeded 1s; journalEntries={} elapsedMs={}",
+                            ledger.journalSize(), elapsedMillis);
+                return true;
+            } catch (IOException | RuntimeException ex) {
+                LOGGER.error("WorldForge treasury canonical save failed; ledger remains dirty for retry: {}", ex.toString());
                 return false;
             }
-            }
-            try {
-                syncTreasuryShadow(server, ledger);
-            } catch (IOException shadowFailure) {
-                LOGGER.error("WorldForge treasury shadow archive/checkpoint failed; legacy JSON remains canonical and shadow will retry: {}",
-                        shadowFailure.toString());
-                return false;
-            }
-            return true;
-        }
-    }
-
-    /** Mirrors only the unarchived suffix, then atomically advances the snapshot manifest. */
-    private static void syncTreasuryShadow(MinecraftServer server, TreasuryLedger ledger) throws IOException {
-        Path root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
-                .resolve("worldforge").resolve("treasury-store");
-        if (treasuryArchive == null)
-            treasuryArchive = new TreasuryJournalArchive(root.resolve("archive"), 1);
-        if (treasuryCheckpoints == null)
-            treasuryCheckpoints = new TreasuryCheckpointStore(root.resolve("checkpoints"));
-        try {
-            long archiveNext = treasuryArchive.nextSequence();
-            if (archiveNext > ledger.nextSequence())
-                throw new IOException("Treasury shadow archive is ahead of the canonical ledger");
-            if (archiveNext < ledger.nextSequence())
-                treasuryArchive.appendAll(ledger.entriesFromSequence(archiveNext));
-            if (treasuryArchive.nextSequence() != ledger.nextSequence())
-                throw new IOException("Treasury shadow archive did not reach the canonical ledger sequence");
-            treasuryCheckpoints.publish(TreasuryLedgerSnapshot.capture(ledger), treasuryArchive);
-            mirroredTreasuryVersion = ledger.mutationVersion();
-            LOGGER.info("WorldForge treasury: shadow archive synced nextSequence={} accounts={} mutationVersion={}",
-                    treasuryArchive.nextSequence(), ledger.accountCount(), mirroredTreasuryVersion);
-        } catch (RuntimeException invalidState) {
-            throw new IOException("Treasury shadow synchronization rejected inconsistent ledger state", invalidState);
         }
     }
 
@@ -412,9 +344,7 @@ public class WorldForgeMod {
         EditorManager.forget();
         treasuryTicks = 0;
         persistedTreasuryVersion = -1L;
-        mirroredTreasuryVersion = -1L;
-        treasuryArchive = null;
-        treasuryCheckpoints = null;
+        treasuryStore = null;
         worldId = null;
         dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
         actionExecutionLoadFailed = false;

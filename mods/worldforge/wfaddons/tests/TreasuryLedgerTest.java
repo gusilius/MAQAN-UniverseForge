@@ -6,6 +6,7 @@ import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryCheckpointStore;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.economy.TreasuryArchiveStore;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
 import java.util.*;
@@ -772,6 +773,48 @@ public final class TreasuryLedgerTest {
             }
         } catch (java.io.IOException ex) {
             ok(false, "legacy treasury archive migration completes and verifies: " + ex.getMessage());
+        }
+
+        try {
+            java.nio.file.Path storeRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-canonical-store-");
+            java.nio.file.Path legacyFile = storeRoot.resolve("wf_treasury.json");
+            TreasuryLedger legacySource = new TreasuryLedger();
+            legacySource.open("store:treasury", "store:realm", "silver", 250);
+            legacySource.open("store:empty", "store:empty", "silver", 0);
+            String legacyBytes = legacySource.toJson();
+            java.nio.file.Files.writeString(legacyFile, legacyBytes);
+            TreasuryArchiveStore canonicalStore = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"));
+            TreasuryLedger migrated = canonicalStore.loadOrMigrate(legacyFile);
+            ok(migrated.accountCount() == 2
+                            && close(migrated.balance("store:treasury"), 250)
+                            && java.nio.file.Files.readString(legacyFile).equals(legacyBytes)
+                            && java.nio.file.Files.isRegularFile(storeRoot.resolve("treasury-store/checkpoints/CURRENT.json")),
+                    "canonical treasury store migrates legacy JSON once and leaves the source untouched");
+            migrated.open("store:later", "store:later", "silver", 40);
+            TreasuryJournalArchive storeArchive = new TreasuryJournalArchive(storeRoot.resolve("treasury-store/archive"), 1);
+            storeArchive.appendAll(migrated.entriesFromSequence(canonicalStore.nextSequence()));
+            TreasuryArchiveStore reopenedStore = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"));
+            TreasuryLedger reopenedLedger = reopenedStore.loadOrMigrate(legacyFile);
+            ok(reopenedLedger.hasAccount("store:later")
+                            && close(reopenedLedger.balance("store:later"), 40)
+                            && reopenedLedger.accountCount() == 3
+                            && java.nio.file.Files.readString(legacyFile).equals(legacyBytes),
+                    "canonical treasury startup restores an archived suffix and never rereads legacy JSON");
+            reopenedLedger.open("store:final", "store:final", "silver", 5);
+            long committedVersion = reopenedStore.save(reopenedLedger);
+            TreasuryLedger finalReload = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
+                    .loadOrMigrate(legacyFile);
+            ok(committedVersion == finalReload.mutationVersion()
+                            && finalReload.hasAccount("store:final")
+                            && close(finalReload.balance("store:final"), 5),
+                    "canonical treasury save appends only new entries and atomically publishes a verified checkpoint");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(storeRoot)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(file -> {
+                    try { java.nio.file.Files.deleteIfExists(file); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "canonical treasury archive store lifecycle: " + ex.getMessage());
         }
 
         System.out.println(failures==0?"ALL OK":failures+" FAILED");

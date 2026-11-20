@@ -1,0 +1,73 @@
+package dev.worldforge.mod.economy;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+/**
+ * Canonical on-disk treasury store: immutable journal segments plus an atomically
+ * published snapshot manifest. A legacy JSON ledger is read only for first migration;
+ * after CURRENT.json exists it is never consulted again.
+ */
+public final class TreasuryArchiveStore {
+    private final Path root;
+    private final TreasuryJournalArchive archive;
+    private final TreasuryCheckpointStore checkpoints;
+
+    public TreasuryArchiveStore(Path root) throws IOException {
+        if (root == null) throw new IllegalArgumentException("Treasury store root is required");
+        this.root = root;
+        Files.createDirectories(root);
+        this.archive = new TreasuryJournalArchive(root.resolve("archive"), 1);
+        this.checkpoints = new TreasuryCheckpointStore(root.resolve("checkpoints"));
+    }
+
+    /**
+     * A committed checkpoint always wins over legacy JSON. If no manifest exists,
+     * import the legacy ledger (or an empty new-world ledger), then commit and reload
+     * through the exact same verification/replay path used on subsequent startups.
+     */
+    public synchronized TreasuryLedger loadOrMigrate(Path legacyJson) throws IOException {
+        Path manifest = root.resolve("checkpoints").resolve("CURRENT.json");
+        if (Files.isRegularFile(manifest)) {
+            TreasuryCheckpointStore.Checkpoint checkpoint = checkpoints.load(archive);
+            return TreasuryLedger.restoreFromCheckpoint(checkpoint, archive);
+        }
+
+        TreasuryLedger legacy;
+        try {
+            legacy = legacyJson != null && Files.isRegularFile(legacyJson)
+                    ? TreasuryLedger.fromJson(Files.readString(legacyJson))
+                    : new TreasuryLedger();
+        } catch (RuntimeException invalidLegacy) {
+            throw new IOException("Legacy treasury JSON is invalid; refusing to replace it", invalidLegacy);
+        }
+        TreasuryArchiveMigration.migrate(legacy, archive, checkpoints);
+        TreasuryCheckpointStore.Checkpoint committed = checkpoints.load(archive);
+        return TreasuryLedger.restoreFromCheckpoint(committed, archive);
+    }
+
+    /** Appends only the not-yet-archived suffix and publishes CURRENT last. */
+    public synchronized long save(TreasuryLedger ledger) throws IOException {
+        if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
+        synchronized (ledger) {
+            long archiveNext = archive.nextSequence();
+            if (archiveNext > ledger.nextSequence())
+                throw new IOException("Treasury archive is ahead of the live ledger");
+            if (archiveNext < ledger.nextSequence())
+                archive.appendAll(ledger.entriesFromSequence(archiveNext));
+            if (archive.nextSequence() != ledger.nextSequence())
+                throw new IOException("Treasury archive did not reach the live ledger sequence");
+
+            String snapshot = TreasuryLedgerSnapshot.capture(ledger);
+            TreasuryCheckpointStore.Checkpoint published = checkpoints.publish(snapshot, archive);
+            TreasuryCheckpointStore.Checkpoint verified = checkpoints.load(archive);
+            if (!published.checksum().equals(verified.checksum())
+                    || published.nextSequence() != verified.nextSequence())
+                throw new IOException("Treasury checkpoint publication did not round-trip");
+            return TreasuryLedgerSnapshot.decode(verified.snapshotJson()).mutationVersion();
+        }
+    }
+
+    public long nextSequence() { return archive.nextSequence(); }
+}
