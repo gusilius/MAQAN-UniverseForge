@@ -9,6 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Profile {
     pub id: String,
+    /// Fictional species/ancestry identity from the world's race catalogue.
+    /// Empty means unknown/unassigned and never creates an automatic penalty.
+    pub race_id: String,
+    /// Culture is independent from race; shared culture can bridge differences.
+    pub culture_id: String,
     /// Catalog-defined traits. Trait names are not hardcoded here.
     pub traits: BTreeSet<String>,
     /// Catalog-defined attributes, normally normalized to a documented scale.
@@ -29,6 +34,14 @@ pub struct Catalog {
     /// Trait/attribute/context weights supplied by game catalogs.
     pub weights: BTreeMap<String, i16>,
     pub context_base: BTreeMap<String, i16>,
+    /// Directed attitudes: (observer race, encountered race) -> opinion [-100, 100].
+    /// These are world/culture-specific definitions, not universal race rules.
+    pub intergroup_attitudes: BTreeMap<(String, String), i16>,
+    /// Only explicitly catalogued traits contribute to susceptibility to group bias.
+    /// Values are signed/weighted; absent traits mean no such predisposition.
+    pub bias_susceptibility_traits: BTreeMap<String, i16>,
+    /// Cultural affinity can offset intergroup tension without erasing individual history.
+    pub shared_culture_affinity: i16,
     pub positive_threshold: i16,
     pub negative_threshold: i16,
 }
@@ -79,6 +92,31 @@ fn profile_score(profile: &Profile, catalog: &Catalog) -> i32 {
     trait_score.saturating_add(attr_score)
 }
 
+
+/// Directional intergroup attitude is applied per character, not as a blanket
+/// rule for a race. Neutral/missing race IDs and missing catalogue entries add
+/// zero. A character must have an explicitly configured susceptibility trait
+/// before a negative group attitude can affect the contact score.
+fn intergroup_score(observer: &Profile, encountered: &Profile, catalog: &Catalog) -> i32 {
+    if observer.race_id.is_empty() || encountered.race_id.is_empty()
+        || observer.race_id == encountered.race_id {
+        return 0;
+    }
+    let attitude = catalog.intergroup_attitudes
+        .get(&(observer.race_id.clone(), encountered.race_id.clone()))
+        .copied().unwrap_or(0) as i32;
+    if attitude == 0 { return 0; }
+    let susceptibility: i32 = observer.traits.iter()
+        .map(|trait_id| catalog.bias_susceptibility_traits.get(trait_id).copied().unwrap_or(0) as i32)
+        .sum();
+    let bias = attitude.saturating_mul(susceptibility) / 100;
+    let cultural_bridge = if !observer.culture_id.is_empty()
+        && observer.culture_id == encountered.culture_id {
+        catalog.shared_culture_affinity as i32
+    } else { 0 };
+    bias.saturating_add(cultural_bridge)
+}
+
 /// Processes only explicitly supplied unique candidate contacts up to budget.
 /// Unknown profile IDs are skipped. No all-pairs expansion occurs.
 pub fn evaluate(
@@ -108,6 +146,10 @@ pub fn evaluate(
         let Some(pb) = index.get(b.as_str()) else { continue };
         let mut score = catalog.context_base.get(&contact.context).copied().unwrap_or(0) as i32;
         score = score.saturating_add(profile_score(pa, catalog)).saturating_add(profile_score(pb, catalog));
+        // Apply both directions independently: one character may be prejudiced
+        // while the other is welcoming. No race-wide/global hostility is implied.
+        score = score.saturating_add(intergroup_score(pa, pb, catalog));
+        score = score.saturating_add(intergroup_score(pb, pa, catalog));
         score = score.saturating_add((contact.relationship as i32) / 10);
         // Deterministic variability (-5..+5), with no RNG state to persist.
         let jitter = (stable_hash(seed, tick, a, b, &contact.context) % 11) as i32 - 5;
@@ -155,6 +197,8 @@ pub fn evaluate_world_snapshot(
         if !character.alive || !required_ids.contains(character.id.as_str()) { continue; }
         profiles.push(Profile {
             id: character.id.clone(),
+            race_id: character.race_id.clone(),
+            culture_id: character.culture_id.clone(),
             traits: character.trait_ids.iter().cloned().collect(),
             attributes: character.attributes.iter()
                 .map(|(key, value)| (key.clone(), (*value).clamp(i16::MIN as i32, i16::MAX as i32) as i16))
@@ -168,7 +212,7 @@ pub fn evaluate_world_snapshot(
 mod tests {
     use super::*;
     fn profile(id: &str, trait_id: &str) -> Profile {
-        Profile { id: id.into(), traits: BTreeSet::from([trait_id.into()]), attributes: BTreeMap::new() }
+        Profile { id: id.into(), traits: BTreeSet::from([trait_id.into()]), attributes: BTreeMap::new(), ..Default::default() }
     }
     fn contact(a: &str, b: &str, context: &str) -> Contact {
         Contact { a: a.into(), b: b.into(), context: context.into(), relationship: 0, last_contact_tick: 0 }
@@ -249,6 +293,54 @@ mod tests {
             wars: vec![], armies: vec![], social_relations: relations, named_entities: vec![], geography: vec![] };
         let out = evaluate_world_snapshot(&snapshot, &Catalog::default(), 3).unwrap();
         assert_eq!(out.len(), 3);
+    }
+
+
+    #[test]
+    fn intergroup_attitude_only_affects_characters_with_susceptibility_traits() {
+        let mut a = profile("a", "prejudiced");
+        a.race_id = "folk_a".into();
+        let mut b = profile("b", "kind");
+        b.race_id = "folk_b".into();
+        let catalog = Catalog {
+            intergroup_attitudes: BTreeMap::from([(("folk_a".into(), "folk_b".into()), -80)]),
+            bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
+            positive_threshold: 1, negative_threshold: -1, ..Default::default()
+        };
+        let out = evaluate(&[a.clone(), b.clone()], &[contact("a", "b", "talk")], &catalog, 5, 10, 1).unwrap();
+        assert_eq!(out[0].affinity_delta, -1);
+        a.traits.clear();
+        let neutral = evaluate(&[a, b], &[contact("a", "b", "talk")], &catalog, 5, 10, 1).unwrap();
+        assert_eq!(neutral[0].affinity_delta, 0);
+    }
+
+    #[test]
+    fn shared_culture_can_bridge_but_not_erase_intergroup_tension() {
+        let mut a = profile("a", "prejudiced");
+        a.race_id = "folk_a".into();
+        a.culture_id = "river_culture".into();
+        let mut b = profile("b", "kind");
+        b.race_id = "folk_b".into();
+        b.culture_id = "river_culture".into();
+        let catalog = Catalog {
+            intergroup_attitudes: BTreeMap::from([(("folk_a".into(), "folk_b".into()), -50)]),
+            bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
+            shared_culture_affinity: 20,
+            positive_threshold: 1, negative_threshold: -1, ..Default::default()
+        };
+        let out = evaluate(&[a,b], &[contact("a", "b", "talk")], &catalog, 3, 4, 1).unwrap();
+        assert_eq!(out[0].affinity_delta, -1);
+    }
+
+    #[test]
+    fn missing_race_or_attitude_catalog_is_neutral() {
+        let mut a = profile("a", "prejudiced");
+        a.race_id = "folk_a".into();
+        let b = profile("b", "kind");
+        let catalog = Catalog { bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
+            positive_threshold: 1, negative_threshold: -1, ..Default::default() };
+        let out = evaluate(&[a,b], &[contact("a", "b", "talk")], &catalog, 1, 1, 1).unwrap();
+        assert_eq!(out[0].affinity_delta, 0);
     }
 
 }
