@@ -86,6 +86,12 @@ public final class Trade {
     public final List<String> chronicle = new ArrayList<>();
     private int next = 1;
 
+    // A trade-day snapshot is scoped to one tick. Race composition can require a full
+    // canonical Character census; never repeat it per good, price lookup, or candidate route.
+    private Map<String, Map<String, Double>> activeTickRaces;
+    private Map<String, Map<String, Double>> activeTickTerrain;
+    private Map<String, Double> activeTickConsumption;
+
     public Trade(TradeDefs defs) { this.defs = defs; }
 
     public Market market(String realm) {
@@ -101,12 +107,20 @@ public final class Trade {
     // ---------- выпуск, спрос, цены ----------
 
     private Map<String, Double> terrainOf(String realm) {
-        Map<String, Double> t = DemoApi.terrain(realm);
-        return t.isEmpty() ? Map.of("plains", 1.0) : t;
+        if (activeTickTerrain != null) return activeTickTerrain.computeIfAbsent(realm, key -> {
+            Map<String, Double> value = DemoApi.terrain(key);
+            return value.isEmpty() ? Map.of("plains", 1.0) : Map.copyOf(value);
+        });
+        Map<String, Double> value = DemoApi.terrain(realm);
+        return value.isEmpty() ? Map.of("plains", 1.0) : value;
     }
     private Map<String, Double> racesOf(String realm) {
-        Map<String, Double> r = DemoApi.races(realm);
-        return r.isEmpty() ? Map.of("human", 1.0) : r;
+        if (activeTickRaces != null) return activeTickRaces.computeIfAbsent(realm, key -> {
+            Map<String, Double> value = DemoApi.races(key);
+            return value.isEmpty() ? Map.of("human", 1.0) : Map.copyOf(value);
+        });
+        Map<String, Double> value = DemoApi.races(realm);
+        return value.isEmpty() ? Map.of("human", 1.0) : value;
     }
 
     public double shockFactor(String realm, String good) {
@@ -125,6 +139,14 @@ public final class Trade {
     }
 
     public double consumption(String realm, TradeDefs.Good g) {
+        if (activeTickConsumption != null) {
+            String key = realm + "|" + g.id();
+            return activeTickConsumption.computeIfAbsent(key, ignored -> calculateConsumption(realm, g));
+        }
+        return calculateConsumption(realm, g);
+    }
+
+    private double calculateConsumption(String realm, TradeDefs.Good g) {
         double size = hooks.size(realm) / 100.0, f = 0;
         for (var e : racesOf(realm).entrySet()) f += e.getValue() * g.races().getOrDefault(e.getKey(), 1.0);
         return size * g.need() * f;
@@ -158,6 +180,19 @@ public final class Trade {
     // ---------- день ----------
 
     public List<String> tick(int day, Collection<String> realms) {
+        activeTickRaces = new HashMap<>();
+        activeTickTerrain = new HashMap<>();
+        activeTickConsumption = new HashMap<>();
+        try {
+            return tickWithSnapshot(day, realms);
+        } finally {
+            activeTickRaces = null;
+            activeTickTerrain = null;
+            activeTickConsumption = null;
+        }
+    }
+
+    private List<String> tickWithSnapshot(int day, Collection<String> realms) {
         List<String> ev = new ArrayList<>();
         for (String r : realms) {
             Market m = market(r);

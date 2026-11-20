@@ -22,6 +22,22 @@ public class TradeTest {
         DemoApi.registerTerrain("t", r -> switch (r) { case "field" -> Map.of("plains", 1.0); case "peak" -> Map.of("mountains", 1.0); case "port" -> Map.of("coast", 1.0); default -> Map.of(); });
         DemoApi.registerRaces("t", r -> switch (r) { case "peak" -> Map.of("dwarf", 1.0); case "port" -> Map.of("triton", 0.5, "human", 0.5); default -> Map.of("human", 1.0); });
 
+        int[] raceProfileReads = {0};
+        DemoApi.registerRaces("trade-tick-cache", realm -> {
+            raceProfileReads[0]++;
+            return Map.of("human", 1.0);
+        });
+        Trade cacheProbe = new Trade(d);
+        cacheProbe.hooks = new Trade.Hooks() {
+            @Override public List<String> neighbors(String realm) {
+                return realm.equals("field") ? List.of("peak", "port") : List.of("field");
+            }
+        };
+        for (String realm : List.of("field", "peak", "port")) cacheProbe.market(realm).autoTrade = true;
+        cacheProbe.tick(1, List.of("field", "peak", "port"));
+        ok(raceProfileReads[0] == 3,
+                "trade day snapshots race census once per realm despite per-good and route lookups: " + raceProfileReads[0]);
+
         Trade t = new Trade(d);
         Map<String, Double> tre = new HashMap<>();
         Set<String> war = new HashSet<>();
