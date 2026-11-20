@@ -167,6 +167,31 @@ public final class TreasuryJournalArchive {
                     + " but archive requires " + (nextSequence - 1));
     }
 
+    /**
+     * Appends an arbitrarily large ordered journal stream using bounded segment buffers.
+     * Earlier chunks remain valid if a later chunk fails; retrying the same iterable is safe
+     * because append() verifies already-published segments byte-for-byte.
+     */
+    public synchronized long appendAll(Iterable<TreasuryLedger.Entry> entries) throws IOException {
+        if (entries == null) throw new IllegalArgumentException("Treasury entries are required");
+        List<TreasuryLedger.Entry> batch = new ArrayList<>(TreasuryJournalSegment.MAX_ENTRIES);
+        long appended = 0;
+        for (TreasuryLedger.Entry entry : entries) {
+            if (entry == null) throw new IllegalArgumentException("Treasury entry is required");
+            batch.add(entry);
+            if (batch.size() == TreasuryJournalSegment.MAX_ENTRIES) {
+                append(batch);
+                appended += batch.size();
+                batch.clear();
+            }
+        }
+        if (!batch.isEmpty()) {
+            append(batch);
+            appended += batch.size();
+        }
+        return appended;
+    }
+
     public synchronized List<TreasuryLedger.Entry> readAll() throws IOException {
         List<TreasuryLedger.Entry> entries = new ArrayList<>();
         forEachEntry(entries::add);

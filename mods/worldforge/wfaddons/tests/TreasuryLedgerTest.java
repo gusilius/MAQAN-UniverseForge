@@ -558,6 +558,36 @@ public final class TreasuryLedgerTest {
             ok(false, "treasury archive filesystem durability tests complete: " + ex.getMessage());
         }
 
+        try {
+            java.nio.file.Path batchedArchiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-batched-archive-");
+            TreasuryJournalArchive batchedArchive = new TreasuryJournalArchive(batchedArchiveDir, 1);
+            java.util.List<TreasuryLedger.Entry> largeBatch = new java.util.ArrayList<>(TreasuryJournalSegment.MAX_ENTRIES + 1);
+            for (int i = 1; i <= TreasuryJournalSegment.MAX_ENTRIES + 1; i++) {
+                largeBatch.add(new TreasuryLedger.Entry(i, "tx:batch:" + i, "batch:account", "external",
+                        "silver", 1, true, TreasuryLedger.Kind.PRODUCTION, "batch", "batch:" + i,
+                        i, i, "bounded archive batch"));
+            }
+            long archivedEntries = batchedArchive.appendAll(largeBatch);
+            ok(archivedEntries == largeBatch.size()
+                            && batchedArchive.nextSequence() == (long) largeBatch.size() + 1
+                            && batchedArchive.readAll().size() == largeBatch.size(),
+                    "large treasury journal batches are split into bounded contiguous archive segments");
+            long[] suffixCount = {0};
+            batchedArchive.forEachEntryFrom(TreasuryJournalSegment.MAX_ENTRIES, ignored -> suffixCount[0]++);
+            ok(suffixCount[0] == 2,
+                    "batched treasury archive resumes from an exact sequence across a segment boundary");
+            ok(batchedArchive.appendAll(largeBatch)
+                            && batchedArchive.nextSequence() == (long) largeBatch.size() + 1,
+                    "retrying a partially or fully published large treasury batch is idempotent");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(batchedArchiveDir)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "bounded treasury archive batching tests complete: " + ex.getMessage());
+        }
+
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
     }
