@@ -715,6 +715,55 @@ public final class TreasuryLedgerTest {
             } catch (java.io.IOException expectedFailure) { rejectedDifferentArchive = true; }
             ok(rejectedDifferentArchive,
                     "checkpoint restore refuses a different archive with the same sequence boundary");
+            java.nio.file.Path replayRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-suffix-replay-");
+            TreasuryLedger replaySource = new TreasuryLedger();
+            replaySource.open("replay:treasury", "replay:treasury", "silver", 1000);
+            replaySource.open("replay:debtor", "replay:debtor", "silver", 0);
+            TreasuryJournalArchive replayArchive = new TreasuryJournalArchive(replayRoot.resolve("archive"), 1);
+            replayArchive.appendAll(replaySource.journal());
+            TreasuryCheckpointStore replayCheckpoints = new TreasuryCheckpointStore(replayRoot.resolve("checkpoints"));
+            TreasuryCheckpointStore.Checkpoint replayCheckpoint = replayCheckpoints.publish(
+                    TreasuryLedgerSnapshot.capture(replaySource), replayArchive);
+            long replayCursor = replaySource.nextSequence();
+            replaySource.open("replay:empty", "replay:empty", "silver", 0);
+            replaySource.open("replay:funded", "replay:funded", "silver", 50);
+            boolean replayMutationsApplied = replaySource.setCreditLimit("replay:debtor", 200)
+                    && replaySource.borrow("replay:debtor", 80, 10, "replay:loan")
+                    && replaySource.accrueInterest("replay:debtor", 0.10, 11, "replay:interest")
+                    && replaySource.repayDebt("replay:debtor", 20, 12, "replay:repayment")
+                    && replaySource.transfer("replay:treasury", "replay:debtor", 100,
+                            TreasuryLedger.Kind.TRADE, "replay-test", "replay:transfer", 13, "suffix transfer");
+            ok(replayMutationsApplied, "treasury suffix fixture applies account, credit, debt and transfer mutations");
+            replayArchive.appendAll(replaySource.entriesFromSequence(replayCursor));
+            TreasuryCheckpointStore.Checkpoint replayLoaded = replayCheckpoints.load(replayArchive);
+            TreasuryLedger replayed = TreasuryLedger.restoreFromCheckpoint(replayLoaded, replayArchive);
+            boolean replayAccountsMatch = replayed.accountCount() == replaySource.accountCount()
+                    && replayed.hasAccount("replay:empty") && replayed.hasAccount("replay:funded")
+                    && close(replayed.balance("replay:treasury"), replaySource.balance("replay:treasury"))
+                    && close(replayed.balance("replay:debtor"), replaySource.balance("replay:debtor"))
+                    && close(replayed.balance("replay:funded"), replaySource.balance("replay:funded"));
+            TreasuryLedger.Account replayedDebtor = replayed.account("replay:debtor");
+            TreasuryLedger.Account sourceDebtor = replaySource.account("replay:debtor");
+            boolean replayDebtMatches = close(replayedDebtor.creditLimit, sourceDebtor.creditLimit)
+                    && close(replayedDebtor.debt, sourceDebtor.debt)
+                    && replayedDebtor.bankrupt == sourceDebtor.bankrupt
+                    && close(replayedDebtor.debt, 68)
+                    && close(replayedDebtor.balance, 92);
+            ok(replayAccountsMatch && replayDebtMatches
+                            && replayed.nextSequence() == replaySource.nextSequence()
+                            && replayed.journalSize() == replaySource.journalSize()
+                            && replayed.mutationVersion() == replaySource.mutationVersion()
+                            && replayed.hasTransaction("replay:treasury", TreasuryLedger.Kind.TRADE, "replay:transfer")
+                            && replayed.hasDebit("replay:treasury", TreasuryLedger.Kind.TRADE, "replay:transfer")
+                            && replayed.hasCredit("replay:debtor", TreasuryLedger.Kind.TRADE, "replay:transfer")
+                            && close(replayed.totalDebits("replay:treasury", TreasuryLedger.Kind.TRADE, "replay-test"),
+                                    replaySource.totalDebits("replay:treasury", TreasuryLedger.Kind.TRADE, "replay-test")),
+                    "checkpoint restore replays suffix account creation, opening cash, credit limits, debt and transfer indexes");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(replayRoot)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(migrationRoot)) {
                 files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
