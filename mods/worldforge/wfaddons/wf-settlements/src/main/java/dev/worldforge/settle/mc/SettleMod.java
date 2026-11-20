@@ -121,8 +121,42 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
+        if (interval < 1) return;
+        if (colonySimulationIndexInterval == interval && colonySimulationIndexBuiltAt != Long.MIN_VALUE
+                && tick >= colonySimulationIndexBuiltAt && tick - colonySimulationIndexBuiltAt < 20L) return;
+        Map<Integer, List<Colony>> mutable = new HashMap<>();
+        Set<String> activeIds = new HashSet<>();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
+            int phase = ColonySimulationCadence.phase(colony.s.id, interval);
+            mutable.computeIfAbsent(phase, ignored -> new ArrayList<>()).add(colony);
+            activeIds.add(colony.s.id);
+            LAST_SIMULATED_WORLD_MINUTE.putIfAbsent(colony.s.id, worldMinute);
+        }
+        Map<Integer, List<Colony>> frozen = new HashMap<>();
+        mutable.forEach((phase, colonies) -> {
+            colonies.sort(Comparator.comparing(colony -> colony.s.id));
+            frozen.put(phase, List.copyOf(colonies));
+        });
+        LAST_SIMULATED_WORLD_MINUTE.keySet().retainAll(activeIds);
+        COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
+        colonySimulationIndexInterval = interval;
+        colonySimulationIndexBuiltAt = tick;
+    }
+
+    private static List<Colony> coloniesDueForSimulation(long tick, int interval) {
+        if (interval < 1 || tick < 1) return List.of();
+        int phase = (int) Math.floorMod(tick - 1L, interval);
+        return COLONY_SIMULATION_PHASES.getOrDefault(phase, List.of());
+    }
+
     /** Last shared-calendar minute simulated by each colony; runtime-only and rebuilt on server start. */
     private static final Map<String, Long> LAST_SIMULATED_WORLD_MINUTE = new HashMap<>();
+    /** Phase buckets avoid scanning the complete colony registry on every server tick. */
+    private static Map<Integer, List<Colony>> COLONY_SIMULATION_PHASES = Map.of();
+    private static long colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+    private static int colonySimulationIndexInterval = -1;
     /** Static profession definitions are synchronized once per server lifecycle, not every tick. */
     private static boolean professionsSynced;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
@@ -1318,6 +1352,9 @@ public class SettleMod {
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
         LAST_SIMULATED_WORLD_MINUTE.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
         professionsSynced = false;
         ColonyInterestIndex.clear();
         IMPORTED_BLUEPRINTS.clear();
@@ -1328,8 +1365,7 @@ public class SettleMod {
         DEFS = loadDefs(e.getServer());
         load(e.getServer());
         long initialWorldMinute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        for (Colony colony : COLONIES.values())
-            if (colony != null && colony.s != null) LAST_SIMULATED_WORLD_MINUTE.put(colony.s.id, initialWorldMinute);
+        refreshColonySimulationIndex(dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks(), 0L, initialWorldMinute);
     }
 
     @SubscribeEvent
@@ -1337,12 +1373,18 @@ public class SettleMod {
         if (DEFS != null) save(e.getServer());
         Bodies.LIVE.clear();
         LAST_SIMULATED_WORLD_MINUTE.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
     }
 
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
         COLONIES.clear();
         LAST_SIMULATED_WORLD_MINUTE.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
         ColonyInterestIndex.clear();
         professionsSynced = false;
         IMPORTED_BLUEPRINTS.clear();
@@ -2019,9 +2061,10 @@ public class SettleMod {
             long worldMinute = clock.worldMinute();
             int worldYear = clock.year();
             double speed = clock.multiplier();
+            refreshColonySimulationIndex(simulationInterval, ticks, worldMinute);
             if (speed > 0) {
-                for (Colony c : COLONIES.values()) {
-                    if (c == null || c.s == null || !ColonySimulationCadence.due(c.s.id, ticks, simulationInterval)) continue;
+                for (Colony c : coloniesDueForSimulation(ticks, simulationInterval)) {
+                    if (c == null || c.s == null || COLONIES.get(c.s.id) != c) continue;
                     try {
                         // Stable colony phases spread work across the interval. The shared calendar,
                         // not wall ticks, preserves exact speed changes and prevents pause catch-up.
