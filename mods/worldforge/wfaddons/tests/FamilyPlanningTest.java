@@ -43,6 +43,13 @@ public final class FamilyPlanningTest {
         check(((Number) mother.props.get("family.last_birth_year")).intValue() == year + 1,
                 "birth cooldown is persisted");
 
+        Character betrothedA = registry.create("BetrothedA", "house-b", "culture", "f", year - 22);
+        Character betrothedB = registry.create("BetrothedB", "house-b", "culture", "m", year - 23);
+        check(FamilyPlanning.engage(betrothedA, betrothedB, year), "mutual engagement can be created");
+        check(FamilyPlanning.engagedTo(betrothedA, betrothedB), "engagement is reciprocal and persisted");
+        FamilyPlanning.cancelEngagement(betrothedA, betrothedB, year + 1, "changed-opinions");
+        check(!FamilyPlanning.engagedTo(betrothedA, betrothedB), "broken engagement clears both sides");
+
         Character unwilling = registry.create("Unwilling", "house-u", "culture", "f", year - 25);
         Character partner = registry.create("PartnerU", "house-u", "culture", "m", year - 27);
         registry.marry(unwilling.id, partner.id, year);
