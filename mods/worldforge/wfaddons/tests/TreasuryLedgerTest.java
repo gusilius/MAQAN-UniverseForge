@@ -48,9 +48,10 @@ public final class TreasuryLedgerTest {
                         && tailView.get(tailView.size() - 1).sequence() == revisionLedger.nextSequence() - 1,
                 "treasury archive cursor exposes only the contiguous unarchived suffix without copying history");
         StringWriter versionedSnapshot = new StringWriter();
+        long versionBeforeFullSnapshot = revisionLedger.mutationVersion();
         try {
             long writtenVersion = revisionLedger.writeJsonVersioned(versionedSnapshot);
-            ok(writtenVersion == versionAfterLimit
+            ok(writtenVersion == versionBeforeFullSnapshot
                     && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 2,
                     "versioned streaming snapshot returns the exact revision represented by its bytes");
         } catch (java.io.IOException ex) { ok(false, "versioned streaming snapshot completes"); }
