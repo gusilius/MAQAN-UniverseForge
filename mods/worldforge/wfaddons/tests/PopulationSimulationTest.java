@@ -613,6 +613,17 @@ public final class PopulationSimulationTest {
             ok(false, "durable Population baseline initializes, reloads and validates world identity");
         }
 
+        // Regression: cached registry membership must not cache the mutable alive flag.
+        CharacterRegistry cachedLifeStateRegistry = new CharacterRegistry();
+        Character cachedLifeState = cachedLifeStateRegistry.create("Cached Life State", "", "north", "m", 270);
+        PopulationComputeBridge.captureForWorldDay("population-life-state-test", 300, 1, 0,
+                java.util.List.of(cachedLifeStateRegistry));
+        PopulationSimulation.die(cachedLifeStateRegistry, cachedLifeState.id, 300, "test");
+        PopulationComputeBridge.Captured afterCachedDeath = PopulationComputeBridge.captureForWorldDay(
+                "population-life-state-test", 300, 2, 0, java.util.List.of(cachedLifeStateRegistry));
+        ok(afterCachedDeath.characterIds().isEmpty(),
+                "cached population membership re-filters mutable alive state after death");
+
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry));
         ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 0,
