@@ -38,7 +38,7 @@ public final class PopulationComputeBridge {
     private static final class RegistryIndex {
         private final List<CharacterRegistry> registries;
         private final long[] revisions;
-        private final Character[] living;
+        private final Character[] members;
         private RegistryIndex(Collection<CharacterRegistry> source) {
             registries = List.copyOf(source);
             revisions = new long[registries.size()];
@@ -46,14 +46,14 @@ public final class PopulationComputeBridge {
             for (int i = 0; i < registries.size(); i++) {
                 CharacterRegistry registry = Objects.requireNonNull(registries.get(i));
                 revisions[i] = registry.revision();
-                for (Character character : registry.all()) if (character.alive) values.add(character);
+                for (Character character : registry.all()) values.add(character);
             }
             values.sort(Comparator.comparing(character -> character.globalId));
             for (int i = 1; i < values.size(); i++) {
                 if (values.get(i - 1).globalId.equals(values.get(i).globalId))
                     throw new IllegalStateException("Duplicate canonical Character UUID: " + values.get(i).globalId);
             }
-            living = values.toArray(Character[]::new);
+            members = values.toArray(Character[]::new);
         }
         private boolean matches(Collection<CharacterRegistry> source) {
             if (source.size() != registries.size()) return false;
@@ -64,13 +64,13 @@ public final class PopulationComputeBridge {
             }
             return true;
         }
-        private Character[] living() { return living; }
+        private Character[] members() { return members; }
         private Character find(String globalId) {
-            int low = 0, high = living.length - 1;
+            int low = 0, high = members.length - 1;
             while (low <= high) {
                 int mid = (low + high) >>> 1;
-                int cmp = living[mid].globalId.compareTo(globalId);
-                if (cmp == 0) return living[mid];
+                int cmp = members[mid].globalId.compareTo(globalId);
+                if (cmp == 0) return members[mid];
                 if (cmp < 0) low = mid + 1; else high = mid - 1;
             }
             return null;
@@ -107,12 +107,13 @@ public final class PopulationComputeBridge {
         DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
         RegistryIndex registryIndex = indexFor(registries);
-        Character[] ordered = registryIndex.living();
+        Character[] ordered = registryIndex.members();
         List<Object> people = new ArrayList<>(ordered.length);
         List<String> ids = new ArrayList<>(ordered.length);
         Map<String,Integer> birthYears = new HashMap<>();
         Map<String,Long> priorDays = new HashMap<>(), elapsedById = new HashMap<>();
         for (Character c : ordered) {
+            if (!c.alive) continue; // cached membership must not cache mutable life-state
             Object rawWorldDay=c.props.get("population.last_simulated_world_day");
             long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
             long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
