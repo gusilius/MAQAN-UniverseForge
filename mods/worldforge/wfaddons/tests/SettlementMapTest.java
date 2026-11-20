@@ -164,6 +164,8 @@ public final class SettlementMapTest {
                         && TreasuryService.current().balance("settlement:legacy_scope_test") == 0,
                 "legacy unscoped money and commodity accounts migrate once into dimension-scoped accounts");
 
+        ok(dev.worldforge.mod.Json.write(map.toMap()).equals(map.toJson()),
+                "structured terrain snapshots serialize identically without a JSON parse round-trip");
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
