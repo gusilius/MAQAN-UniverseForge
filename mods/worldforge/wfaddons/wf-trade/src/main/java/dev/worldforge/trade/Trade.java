@@ -180,7 +180,7 @@ public final class Trade {
     // ---------- день ----------
 
     public List<String> tick(int day, Collection<String> realms) {
-        activeTickRaces = new HashMap<>();
+        activeTickRaces = new HashMap<>(DemoApi.races(realms));
         activeTickTerrain = new HashMap<>();
         activeTickConsumption = new HashMap<>();
         try {
