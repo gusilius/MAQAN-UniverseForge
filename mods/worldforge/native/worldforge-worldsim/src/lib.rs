@@ -8,6 +8,7 @@ pub mod jni;
 pub mod worldgen;
 pub mod emergence;
 pub mod population;
+pub mod population_social;
 pub mod army;
 pub mod strategic_army;
 pub mod troops;
