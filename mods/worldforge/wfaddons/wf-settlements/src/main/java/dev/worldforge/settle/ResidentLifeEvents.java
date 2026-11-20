@@ -2,6 +2,7 @@ package dev.worldforge.settle;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
