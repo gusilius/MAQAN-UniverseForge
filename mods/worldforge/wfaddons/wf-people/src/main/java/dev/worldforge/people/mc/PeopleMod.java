@@ -145,6 +145,7 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
+        NpcSpawner.clearRuntimeState();
         identityPartitionsReady = false;
         REGS.clear();
         DIMENSION_REGISTRIES.clear();

@@ -23,6 +23,14 @@ import java.util.*;
 final class NpcSpawner {
     static final double NEAR = SimulationLod.PEOPLE_SPAWN_RADIUS, FAR = SimulationLod.PEOPLE_RETAIN_RADIUS;
     static final int PER_PLAYER = 24;
+    private static final int COURT_RECONCILE_EVERY_PASSES = 6;
+    private static final Map<MapData, Long> LAST_COURT_RECONCILE_PASS = new WeakHashMap<>();
+    private static long passCounter;
+
+    static void clearRuntimeState() {
+        LAST_COURT_RECONCILE_PASS.clear();
+        passCounter = 0;
+    }
 
     private record Target(Character c, Role role, double x, double z, double dist2) {}
     private record SpawnAnchor(double x, double z, List<Target> targets) {}
@@ -62,6 +70,7 @@ final class NpcSpawner {
     private NpcSpawner() {}
 
     static void pass(MinecraftServer server) {
+        long currentPass = ++passCounter;
         for (ServerLevel level : server.getAllLevels()) {
             List<ServerPlayer> players = new ArrayList<>();
             for (ServerPlayer p : level.players()) if (!p.isSpectator()) players.add(p);
@@ -70,11 +79,15 @@ final class NpcSpawner {
             if (map == null || map.titles == null) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
-            try {
-                Courts.ensure(map.titles, EditorManager.editorFor(map), registry,
-                        PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(map), PeopleMod.YEAR);
-            } catch (Exception ex) {
-                PeopleMod.LOGGER.error("wf_people: Courts.ensure: {}", ex.toString());
+            long lastCourtPass = LAST_COURT_RECONCILE_PASS.getOrDefault(map, Long.MIN_VALUE);
+            if (lastCourtPass == Long.MIN_VALUE || currentPass - lastCourtPass >= COURT_RECONCILE_EVERY_PASSES) {
+                try {
+                    Courts.ensure(map.titles, EditorManager.editorFor(map), registry,
+                            PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(map), PeopleMod.YEAR);
+                    LAST_COURT_RECONCILE_PASS.put(map, currentPass);
+                } catch (Exception ex) {
+                    PeopleMod.LOGGER.error("wf_people: Courts.ensure: {}", ex.toString());
+                }
             }
 
             Map<String, WFNpc> bodies = new LinkedHashMap<>();
