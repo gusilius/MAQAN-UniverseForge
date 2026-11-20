@@ -604,6 +604,7 @@ public final class TreasuryLedgerTest {
                     migrationLedger, migrationArchive, migrationCheckpoints);
             TreasuryCheckpointStore.Checkpoint restoredCheckpoint = migrationCheckpoints.load(migrationArchive);
             TreasuryLedgerSnapshot.State restoredState = TreasuryLedgerSnapshot.decode(restoredCheckpoint.snapshotJson());
+            TreasuryLedger restoredLedger = TreasuryLedger.restoreFromCheckpoint(restoredCheckpoint, migrationArchive);
             ok(migration.nextSequence() == migrationLedger.nextSequence()
                             && migration.archivedEntries() == migrationLedger.journalSize()
                             && migrationArchive.nextSequence() == migrationLedger.nextSequence()
@@ -615,6 +616,20 @@ public final class TreasuryLedgerTest {
                             && close(restoredState.accounts().stream().filter(a -> a.id().equals("migration:merchant"))
                             .findFirst().orElseThrow().balance(), migrationLedger.balance("migration:merchant")),
                     "migrated treasury checkpoint preserves both sides of a double-entry transfer");
+            ok(restoredLedger.nextSequence() == migrationLedger.nextSequence()
+                            && restoredLedger.journalSize() == migrationLedger.journalSize()
+                            && close(restoredLedger.balance("migration:treasury"), migrationLedger.balance("migration:treasury"))
+                            && close(restoredLedger.balance("migration:merchant"), migrationLedger.balance("migration:merchant"))
+                            && restoredLedger.hasTransaction("migration:treasury", TreasuryLedger.Kind.TRADE, "migration:transfer")
+                            && close(restoredLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test"),
+                                    migrationLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test")),
+                    "checkpoint restore rebuilds balances, journal indexes, debit totals and idempotency keys");
+            boolean rejectedSuffix = false;
+            try {
+                restoredLedger = TreasuryLedger.restoreFromCheckpoint(restoredCheckpoint,
+                        new TreasuryJournalArchive(migrationRoot.resolve("empty-suffix"), 2));
+            } catch (java.io.IOException expectedFailure) { rejectedSuffix = true; }
+            ok(rejectedSuffix, "checkpoint restore fails closed when the archive does not contain its full prefix");
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(migrationRoot)) {
                 files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }

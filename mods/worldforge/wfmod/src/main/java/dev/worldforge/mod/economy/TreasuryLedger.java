@@ -124,6 +124,96 @@ public final class TreasuryLedger {
                 Set.copyOf(postedCredits), Set.copyOf(armyFieldRationDebitAccounts));
     }
 
+    /**
+     * Rebuilds the live ledger from an exact checkpoint/archive pair. This deliberately
+     * accepts only an archive ending at the checkpoint boundary: replaying a suffix requires
+     * durable account-mutation events (zero-balance account creation and credit-limit changes
+     * are not journal postings yet), so applying a suffix here would silently lose state.
+     */
+    public static TreasuryLedger restoreFromCheckpoint(TreasuryCheckpointStore.Checkpoint checkpoint,
+                                                        TreasuryJournalArchive archive) throws java.io.IOException {
+        if (checkpoint == null || archive == null)
+            throw new IllegalArgumentException("Treasury checkpoint and archive are required");
+        TreasuryLedgerSnapshot.State state;
+        try {
+            state = TreasuryLedgerSnapshot.decode(checkpoint.snapshotJson());
+        } catch (RuntimeException invalid) {
+            throw new java.io.IOException("Treasury checkpoint state is invalid", invalid);
+        }
+        if (checkpoint.nextSequence() != state.nextSequence()
+                || archive.nextSequence() != state.nextSequence())
+            throw new java.io.IOException("Treasury archive must end exactly at the checkpoint sequence; suffix replay is not yet supported");
+
+        TreasuryLedger restored = new TreasuryLedger();
+        restored.restoring = true;
+        for (TreasuryLedgerSnapshot.AccountState saved : state.accounts()) {
+            Account account = new Account(saved.id(), saved.ownerId(), saved.currency(), saved.balance());
+            account.creditLimit = saved.creditLimit();
+            account.debt = saved.debt();
+            account.bankrupt = saved.bankrupt();
+            if (restored.accounts.putIfAbsent(account.id, account) != null)
+                throw new java.io.IOException("Duplicate account in treasury checkpoint: " + account.id);
+        }
+
+        Set<String> references = new HashSet<>();
+        Set<String> debits = new HashSet<>();
+        Set<String> credits = new HashSet<>();
+        Set<String> rationAccounts = new HashSet<>();
+        Map<String, List<Entry>> transactions = new HashMap<>();
+        long[] expected = {1};
+        try {
+            archive.forEachEntryFrom(1, entry -> {
+                if (entry.sequence() != expected[0]++)
+                    throw new IllegalStateException("Treasury archive sequence discontinuity");
+                Account account = restored.accounts.get(entry.accountId());
+                if (account == null || !account.currency.equals(entry.currency()))
+                    throw new IllegalStateException("Treasury archive references an unknown or mismatched account: " + entry.accountId());
+                String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+                references.add(key);
+                (entry.credit() ? credits : debits).add(key);
+                if (!entry.credit() && entry.kind() == Kind.LOGISTICS
+                        && "army-field-rations".equals(entry.category()))
+                    rationAccounts.add(entry.accountId());
+                restored.journal.add(entry);
+                restored.indexEntry(entry);
+                transactions.computeIfAbsent(entry.transactionId(), ignored -> new ArrayList<>()).add(entry);
+            });
+        } catch (RuntimeException invalid) {
+            throw new java.io.IOException("Treasury archive entries failed ledger reconstruction", invalid);
+        }
+        if (expected[0] != state.nextSequence())
+            throw new java.io.IOException("Treasury archive does not contain the complete checkpoint history");
+        if (!references.equals(state.postedReferences()) || !debits.equals(state.postedDebits())
+                || !credits.equals(state.postedCredits())
+                || !rationAccounts.equals(state.armyFieldRationDebitAccounts()))
+            throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive");
+
+        for (Map.Entry<String, List<Entry>> transaction : transactions.entrySet()) {
+            List<Entry> postings = transaction.getValue();
+            if (postings.size() == 1) {
+                Entry single = postings.get(0);
+                if (restored.accounts.containsKey(single.counterpartyId()))
+                    throw new java.io.IOException("Treasury archive is missing a matching double-entry posting: " + transaction.getKey());
+                continue;
+            }
+            if (postings.size() != 2)
+                throw new java.io.IOException("Invalid treasury transaction cardinality: " + transaction.getKey());
+            Entry a = postings.get(0), b = postings.get(1);
+            if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
+                    || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
+                    || !a.currency().equals(b.currency()) || a.kind() != b.kind()
+                    || !a.category().equals(b.category()) || !a.reference().equals(b.reference())
+                    || a.worldMinute() != b.worldMinute() || Math.abs(a.amount() - b.amount()) > 1e-8)
+                throw new java.io.IOException("Unbalanced treasury transaction: " + transaction.getKey());
+        }
+
+        restored.sequence = state.nextSequence();
+        restored.transactionSequence = state.nextTransactionSequence();
+        restored.mutationVersion = state.mutationVersion();
+        restored.restoring = false;
+        return restored;
+    }
+
     /** Next global journal sequence; 1 means no journal entries have been posted. */
     public synchronized long nextSequence() { return sequence; }
 
