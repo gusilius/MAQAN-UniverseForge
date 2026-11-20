@@ -782,6 +782,7 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
+        NpcSpawner.clearRuntimeState();
         identityPartitionsReady = false;
         saveAll(e.getServer());
         REGS.clear();
