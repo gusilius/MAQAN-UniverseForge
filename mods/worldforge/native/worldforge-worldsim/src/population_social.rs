@@ -232,7 +232,7 @@ mod tests {
     fn stable_output_is_independent_of_pair_orientation() {
         let people = vec![profile("a", "kind"), profile("b", "kind")];
         let catalog = Catalog { weights: BTreeMap::from([("kind".into(), 4)]),
-            context_base: BTreeMap::from([("talk".into(), 2)]), positive_threshold: 1, negative_threshold: -1 };
+            context_base: BTreeMap::from([("talk".into(), 2)]), positive_threshold: 1, negative_threshold: -1, ..Default::default() };
         let ab = evaluate(&people, &[contact("a", "b", "talk")], &catalog, 7, 90, 1).unwrap();
         let ba = evaluate(&people, &[contact("b", "a", "talk")], &catalog, 7, 90, 1).unwrap();
         assert_eq!(ab, ba);
@@ -277,7 +277,7 @@ mod tests {
             named_entities: vec![], geography: vec![],
         };
         let catalog = Catalog { weights: BTreeMap::from([("generous".into(), 20), ("empathy".into(), 20)]),
-            context_base: BTreeMap::from([("work".into(), 5)]), positive_threshold: 1, negative_threshold: -1 };
+            context_base: BTreeMap::from([("work".into(), 5)]), positive_threshold: 1, negative_threshold: -1, ..Default::default() };
         let outcomes = evaluate_world_snapshot(&snapshot, &catalog, 10).unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].context, "work");
