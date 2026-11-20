@@ -70,7 +70,14 @@ public final class TreasuryCheckpointStore {
         manifest.put("nextSequence", state.nextSequence());
         manifest.put("sha256", checksum);
         manifest.put("archiveSha256", archiveDigest);
-        atomicWrite(directory.resolve("CURRENT.json"), Json.write(manifest));
+        Path currentPath = directory.resolve("CURRENT.json");
+        if (Files.isRegularFile(currentPath)) {
+            // Preserve only a checkpoint that is already committed and archive-verified.
+            load(archive);
+            atomicWrite(directory.resolve("PREVIOUS.json"),
+                    Files.readString(currentPath, StandardCharsets.UTF_8));
+        }
+        atomicWrite(currentPath, Json.write(manifest));
         return new Checkpoint(snapshotJson, state.nextSequence(), checksum, archiveDigest);
     }
 
@@ -105,47 +112,21 @@ public final class TreasuryCheckpointStore {
             primaryFailure = invalidCurrent;
         }
 
-        java.util.List<Checkpoint> candidates = new java.util.ArrayList<>();
-        try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(directory, "snapshot-*.json")) {
-            for (Path snapshotPath : files) {
-                String filename = snapshotPath.getFileName().toString();
-                if (!SNAPSHOT_NAME.matcher(filename).matches()) continue;
-                try {
-                    String snapshotJson = Files.readString(snapshotPath, StandardCharsets.UTF_8);
-                    String checksum = sha256(snapshotJson);
-                    TreasuryLedgerSnapshot.State state = TreasuryLedgerSnapshot.decode(snapshotJson);
-                    String expectedName = String.format(java.util.Locale.ROOT,
-                            "snapshot-%020d-%s.json", state.nextSequence(), checksum);
-                    if (!filename.equals(expectedName) || state.nextSequence() > archive.nextSequence()) continue;
-                    String archiveChecksum = archive.archiveDigestThrough(state.nextSequence());
-                    Checkpoint candidate = new Checkpoint(snapshotJson, state.nextSequence(), checksum, archiveChecksum);
-                    verify(candidate, archive);
-                    candidates.add(candidate);
-                } catch (RuntimeException | IOException invalidCandidate) {
-                    // An orphan, truncated, or stale snapshot is not a recovery point.
-                }
-            }
-        } catch (IOException scanFailure) {
-            scanFailure.addSuppressed(primaryFailure);
-            throw scanFailure;
-        }
-
-        candidates.sort(java.util.Comparator.comparingLong(Checkpoint::nextSequence).reversed());
-        IOException recoveryFailure = new IOException("No valid treasury checkpoint snapshot could be recovered",
-                primaryFailure);
-        for (Checkpoint candidate : candidates) {
+        Path previousPath = directory.resolve("PREVIOUS.json");
+        if (Files.isRegularFile(previousPath)) {
             try {
-                Checkpoint republished = publish(candidate.snapshotJson(), archive);
-                Checkpoint verified = load(archive);
-                if (!republished.checksum().equals(verified.checksum())
-                        || republished.nextSequence() != verified.nextSequence())
-                    throw new IOException("Recovered treasury checkpoint did not round-trip");
-                return verified;
-            } catch (IOException failedCandidate) {
-                recoveryFailure.addSuppressed(failedCandidate);
+                Checkpoint previous = loadManifest(previousPath, archive);
+                // PREVIOUS is advanced before CURRENT, so it can only name a committed
+                // checkpoint. Restore the pointer, then use the ordinary verified path.
+                atomicWrite(directory.resolve("CURRENT.json"),
+                        Files.readString(previousPath, StandardCharsets.UTF_8));
+                return load(archive);
+            } catch (IOException invalidPrevious) {
+                primaryFailure.addSuppressed(invalidPrevious);
             }
         }
-        throw recoveryFailure;
+        throw new IOException("Neither CURRENT nor PREVIOUS treasury checkpoint is recoverable",
+                primaryFailure);
     }
 
     /**
@@ -177,7 +158,10 @@ public final class TreasuryCheckpointStore {
 
     /** Loads only the committed snapshot; invalid or missing data fails closed. */
     public synchronized Checkpoint load() throws IOException {
-        Path manifestPath = directory.resolve("CURRENT.json");
+        return loadManifest(directory.resolve("CURRENT.json"), null);
+    }
+
+    private Checkpoint loadManifest(Path manifestPath, TreasuryJournalArchive archive) throws IOException {
         if (!Files.isRegularFile(manifestPath))
             throw new IOException("Treasury checkpoint manifest is missing");
         Object parsed;
@@ -217,7 +201,9 @@ public final class TreasuryCheckpointStore {
         if (!(archiveChecksumValue instanceof String archiveChecksum)
                 || !archiveChecksum.matches("[0-9a-f]{64}"))
             throw new IOException("Invalid treasury checkpoint archive fingerprint");
-        return new Checkpoint(snapshotJson, nextSequence, actual, archiveChecksum);
+        Checkpoint checkpoint = new Checkpoint(snapshotJson, nextSequence, actual, archiveChecksum);
+        if (archive != null) verify(checkpoint, archive);
+        return checkpoint;
     }
 
     private static void atomicWrite(Path destination, String content) throws IOException {

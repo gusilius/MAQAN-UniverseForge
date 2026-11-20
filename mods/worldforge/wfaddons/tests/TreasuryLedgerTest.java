@@ -810,13 +810,6 @@ public final class TreasuryLedgerTest {
                     "canonical treasury save appends only new entries and atomically publishes a verified checkpoint");
             java.nio.file.Path checkpointDir = storeRoot.resolve("treasury-store/checkpoints");
             java.nio.file.Path currentManifest = checkpointDir.resolve("CURRENT.json");
-            java.nio.file.Files.writeString(currentManifest, "{ interrupted");
-            TreasuryLedger recoveredPointer = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
-                    .loadOrMigrate(legacyFile);
-            ok(recoveredPointer.hasAccount("store:final")
-                            && close(recoveredPointer.balance("store:final"), 5)
-                            && !java.nio.file.Files.readString(currentManifest).equals("{ interrupted"),
-                    "treasury checkpoint recovery repairs a damaged CURRENT pointer from a verified snapshot");
             Object manifestObject = Json.parse(java.nio.file.Files.readString(currentManifest));
             String snapshotName = String.valueOf(((Map<?, ?>) manifestObject).get("snapshot"));
             java.nio.file.Path newestSnapshot = checkpointDir.resolve(snapshotName);
@@ -827,8 +820,15 @@ public final class TreasuryLedgerTest {
             ok(recoveredPrevious.hasAccount("store:final")
                             && close(recoveredPrevious.balance("store:final"), 5)
                             && recoveredPrevious.mutationVersion() == committedVersion,
-                    "treasury checkpoint recovery falls back to the previous snapshot and replays the journal suffix");
+                    "treasury checkpoint recovery uses PREVIOUS and replays the journal suffix after snapshot damage");
             java.nio.file.Files.writeString(newestSnapshot, validNewestSnapshot);
+            java.nio.file.Files.writeString(currentManifest, "{ interrupted");
+            TreasuryLedger recoveredPointer = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
+                    .loadOrMigrate(legacyFile);
+            ok(recoveredPointer.hasAccount("store:final")
+                            && close(recoveredPointer.balance("store:final"), 5)
+                            && !java.nio.file.Files.readString(currentManifest).equals("{ interrupted"),
+                    "treasury checkpoint recovery repairs a damaged CURRENT pointer from PREVIOUS");
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(storeRoot)) {
                 files.sorted(java.util.Comparator.reverseOrder()).forEach(file -> {
                     try { java.nio.file.Files.deleteIfExists(file); } catch (java.io.IOException ignored) { }
