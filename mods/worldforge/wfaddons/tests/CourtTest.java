@@ -108,8 +108,8 @@ public class CourtTest {
             familyCourt.tick(365); // the gestation window must elapse before the birth event
             if (mother.children.isEmpty()) continue;
             int childrenAfterCourt = mother.children.size();
-            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == 301,
-                    "court birth publishes the shared family-year marker");
+            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == familyCourt.year(),
+                    "court birth publishes the actual shared family-year marker");
             ResidentLifeEvents.yearly(family, 301);
             ok(mother.children.size() == childrenAfterCourt,
                     "settlement family pass does not duplicate a birth already resolved by court simulation");
