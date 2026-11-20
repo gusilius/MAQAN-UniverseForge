@@ -236,7 +236,7 @@ public final class ResidentLifeEventsTest {
         guardedRegistry.create("Один", "", "north", "m", 1990);
         guardedRegistry.create("Два", "", "north", "f", 1991);
         for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
-        check(registryPassField(guardedRegistry, "stageYear") == 2030
+        check(registryPassField(guardedRegistry, "lastCallYear") == 2030
                         && registryPassField(guardedRegistry, "stageSize") == 2
                         && registryPassField(guardedRegistry, "familyYear") == 2030,
                 "hundreds of settlement callbacks share one canonical registry/year pass");

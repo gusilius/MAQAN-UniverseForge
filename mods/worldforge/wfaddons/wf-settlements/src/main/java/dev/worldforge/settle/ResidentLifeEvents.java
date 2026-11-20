@@ -8,6 +8,7 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Deterministic yearly family/social event pass for the canonical Character registry.
@@ -17,6 +18,7 @@ public final class ResidentLifeEvents {
 
     private static final int MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR = 32;
     private static final Map<CharacterRegistry, RegistryPassState> REGISTRY_PASSES = new WeakHashMap<>();
+    private static final AtomicLong SYNCHRONOUS_TOKENS = new AtomicLong();
 
     private static final class YearSession {
         final int year;
@@ -31,7 +33,7 @@ public final class ResidentLifeEvents {
         YearSession(CharacterRegistry registry, int year) {
             this.year = year;
             this.worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
-            this.people = registry.all();
+            this.people = new ArrayList<>(registry.all());
             this.initialSize = registry.size();
         }
     }
@@ -43,7 +45,7 @@ public final class ResidentLifeEvents {
         long lastAdvanceToken = Long.MIN_VALUE;
         StageRefresh(CharacterRegistry registry, int year, int start, int end) {
             this.year = year;
-            this.people = registry.all();
+            this.people = new ArrayList<>(registry.all());
             this.cursor = start;
             this.end = end;
         }
@@ -61,22 +63,18 @@ public final class ResidentLifeEvents {
 
     private ResidentLifeEvents() {}
 
-    private static void trace(String message) {
-        if (Boolean.getBoolean("wf.test.traceResidentLife")) System.out.println("LIFE_TRACE " + message);
-    }
-
     public static void yearly(CharacterRegistry registry, int year) { yearly(registry, year, null); }
 
     /** Synchronous compatibility API for domain tests and non-server callers. */
     public static void yearly(CharacterRegistry registry, int year, NameBank names) {
         if (registry == null || year < 1) return;
-        long token = 0;
-        while (true) {
-            trace("sync-call year=" + year + " token=" + token + " size=" + registry.size());
-            boolean complete = advanceYearly(registry, year, names, Integer.MAX_VALUE, token++);
-            trace("sync-return year=" + year + " complete=" + complete + " token=" + (token - 1));
-            if (complete) break;
+        // Every synchronous invocation needs a globally unique token. Reusing token 0
+        // caused same-year calls to return a stale cached result and spin forever.
+        for (int attempt = 0; attempt < 4; attempt++) {
+            long token = SYNCHRONOUS_TOKENS.incrementAndGet();
+            if (advanceYearly(registry, year, names, Integer.MAX_VALUE, token)) return;
         }
+        throw new IllegalStateException("ResidentLifeEvents yearly pass did not complete within 4 synchronous advances (year=" + year + ")");
     }
 
     /**
@@ -125,14 +123,14 @@ public final class ResidentLifeEvents {
                 continue;
             }
             int end = Math.min(workSize, session.cursor + remaining);
-            trace("phase=" + session.phase + " cursor=" + session.cursor + " end=" + end + " size=" + workSize);
+            
             if (session.phase == 0) {
                 List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
                 registry.refreshLifeStages(batch, session.year);
                 for (Character person : batch) {
-                    trace("pregnancy-check person=" + person.id + " year=" + session.year);
+                    
                     Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
-                    trace("pregnancy-done person=" + person.id + " newborn=" + (newborn == null ? "none" : newborn.id));
+                    
                     if (newborn != null) session.newborns.add(newborn);
                     if (person.alive && (person.spouse == null || person.spouse.isBlank())
                             && PopulationSimulation.age(person, session.year) >= 18)
@@ -144,9 +142,9 @@ public final class ResidentLifeEvents {
             } else if (session.phase == 2) {
                 for (int index = session.cursor; index < end; index++) {
                     Character reviewed = personAt(session, index);
-                    trace("marital-before index=" + index + " person=" + reviewed.id);
+                    
                     processMaritalConflict(registry, reviewed, session.year);
-                    trace("marital-after index=" + index + " person=" + reviewed.id);
+                    
                 }
             } else {
                 for (int i = session.cursor; i < end; i++)
@@ -158,7 +156,7 @@ public final class ResidentLifeEvents {
         }
 
         if (session.phase >= 4) {
-            trace("family-pass-complete year=" + session.year + " initial=" + session.initialSize + " current=" + registry.size());
+            
             synchronized (REGISTRY_PASSES) {
                 state.familyYear = session.year;
                 state.stageSize = session.initialSize;
@@ -175,7 +173,7 @@ public final class ResidentLifeEvents {
 
     private static boolean advanceStageRefresh(CharacterRegistry registry, RegistryPassState state,
                                                 int year, int residentBudget, long tickToken) {
-        trace("stage-refresh-enter year=" + year + " stageSize=" + state.stageSize + " registrySize=" + registry.size());
+        
         if (registry.size() <= state.stageSize) return true;
         StageRefresh refresh = state.stageRefresh;
         if (refresh == null || refresh.year != year) {
@@ -186,10 +184,10 @@ public final class ResidentLifeEvents {
         refresh.lastAdvanceToken = tickToken;
         int end = Math.min(refresh.end, refresh.cursor + residentBudget);
         if (end > refresh.cursor) {
-            trace("stage-refresh-before batchStart=" + refresh.cursor + " end=" + end);
+            
             List<Character> batch = new ArrayList<>(refresh.people.subList(refresh.cursor, end));
             registry.refreshLifeStages(batch, year);
-            trace("stage-refresh-after batchStart=" + refresh.cursor + " end=" + end);
+            
             refresh.cursor = end;
         }
         if (refresh.cursor >= refresh.end) {
@@ -232,9 +230,9 @@ public final class ResidentLifeEvents {
                     // Preserve the stable fallback if a data pack has no compatible name pool.
                 }
             }
-            trace("birth-before-add mother=" + mother.id + " father=" + biologicalFather.id);
+            
             Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
-            trace("birth-after-add child=" + child.id);
+            
             child.traits.add("curious");
             child.props.put("family.father_name", biologicalFather.name);
             child.props.put("family.mother_name", mother.name);
@@ -242,9 +240,9 @@ public final class ResidentLifeEvents {
             ResidentSocial.adjust(mother, child.globalId, 35);
             ResidentSocial.adjust(child, biologicalFather.globalId, 35);
             ResidentSocial.adjust(child, mother.globalId, 35);
-            trace("birth-before-complete child=" + child.id);
+            
             FamilyPlanning.complete(mother, biologicalFather, year, child.id);
-            trace("birth-after-complete child=" + child.id);
+            
             return child;
         }
         Character spouse = mother.spouse == null || mother.spouse.isBlank() ? null : registry.get(mother.spouse);
@@ -260,9 +258,9 @@ public final class ResidentLifeEvents {
         Character spouse = registry.get(person.spouse);
         if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)
                 || year <= number(person.props.get("family.marital_review_year"), 0)) return;
-        trace("marital-score-before person=" + person.id + " spouse=" + spouse.id);
+        
         int affinity = Math.min(ResidentSocial.score(person, spouse.globalId), ResidentSocial.score(spouse, person.globalId));
-        trace("marital-score-after person=" + person.id + " affinity=" + affinity);
+        
         person.props.put("family.marital_review_year", year);
         spouse.props.put("family.marital_review_year", year);
         int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
