@@ -4,7 +4,7 @@
 //! This module never searches the whole population or creates all possible pairs.
 //! Work is bounded by the caller's candidate list and explicit budget.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Profile {
@@ -36,7 +36,7 @@ pub struct Catalog {
     pub context_base: BTreeMap<String, i16>,
     /// Directed attitudes: (observer race, encountered race) -> opinion [-100, 100].
     /// These are world/culture-specific definitions, not universal race rules.
-    pub intergroup_attitudes: BTreeMap<(String, String), i16>,
+    pub intergroup_attitudes: BTreeMap<String, BTreeMap<String, i16>>,
     /// Only explicitly catalogued traits contribute to susceptibility to group bias.
     /// Values are signed/weighted; absent traits mean no such predisposition.
     pub bias_susceptibility_traits: BTreeMap<String, i16>,
@@ -103,7 +103,8 @@ fn intergroup_score(observer: &Profile, encountered: &Profile, catalog: &Catalog
         return 0;
     }
     let attitude = catalog.intergroup_attitudes
-        .get(&(observer.race_id.clone(), encountered.race_id.clone()))
+        .get(&observer.race_id)
+        .and_then(|targets| targets.get(&encountered.race_id))
         .copied().unwrap_or(0) as i32;
     if attitude == 0 { return 0; }
     let susceptibility: i32 = observer.traits.iter()
@@ -128,22 +129,25 @@ pub fn evaluate(
     budget: usize,
 ) -> Result<Vec<Outcome>, Error> {
     if budget == 0 || candidates.is_empty() { return Ok(Vec::new()); }
-    let mut index = BTreeMap::new();
+    let mut index = HashMap::with_capacity(profiles.len());
     for profile in profiles {
         if profile.id.trim().is_empty() { return Err(Error::EmptyId); }
         if index.insert(profile.id.as_str(), profile).is_some() {
             return Err(Error::DuplicateProfile(profile.id.clone()));
         }
     }
-    let mut seen = BTreeSet::new();
+    let mut seen = HashSet::with_capacity(budget.min(candidates.len()));
     let mut out = Vec::with_capacity(budget.min(candidates.len()));
     for contact in candidates.iter().take(budget) {
         if contact.a.trim().is_empty() || contact.b.trim().is_empty() { return Err(Error::EmptyId); }
         if contact.a == contact.b { return Err(Error::SelfContact(contact.a.clone())); }
+        let Some((a_index, pa)) = index.get_key_value(contact.a.as_str()) else { continue };
+        let Some((b_index, pb)) = index.get_key_value(contact.b.as_str()) else { continue };
+        // Deduplicate using stable profile positions, avoiding per-contact String clones.
+        let pair = if a_index < b_index { (a_index.as_ptr() as usize, b_index.as_ptr() as usize) }
+            else { (b_index.as_ptr() as usize, a_index.as_ptr() as usize) };
+        if !seen.insert(pair) { return Err(Error::DuplicateContact(contact.a.clone(), contact.b.clone())); }
         let (a, b) = if contact.a < contact.b { (&contact.a, &contact.b) } else { (&contact.b, &contact.a) };
-        if !seen.insert((a.clone(), b.clone())) { return Err(Error::DuplicateContact(a.clone(), b.clone())); }
-        let Some(pa) = index.get(a.as_str()) else { continue };
-        let Some(pb) = index.get(b.as_str()) else { continue };
         let mut score = catalog.context_base.get(&contact.context).copied().unwrap_or(0) as i32;
         score = score.saturating_add(profile_score(pa, catalog)).saturating_add(profile_score(pb, catalog));
         // Apply both directions independently: one character may be prejudiced
@@ -303,7 +307,7 @@ mod tests {
         let mut b = profile("b", "kind");
         b.race_id = "folk_b".into();
         let catalog = Catalog {
-            intergroup_attitudes: BTreeMap::from([(("folk_a".into(), "folk_b".into()), -80)]),
+            intergroup_attitudes: BTreeMap::from([("folk_a".into(), BTreeMap::from([("folk_b".into(), -80)]))]),
             bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
             positive_threshold: 1, negative_threshold: -1, ..Default::default()
         };
@@ -323,7 +327,7 @@ mod tests {
         b.race_id = "folk_b".into();
         b.culture_id = "river_culture".into();
         let catalog = Catalog {
-            intergroup_attitudes: BTreeMap::from([(("folk_a".into(), "folk_b".into()), -50)]),
+            intergroup_attitudes: BTreeMap::from([("folk_a".into(), BTreeMap::from([("folk_b".into(), -50)]))]),
             bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
             shared_culture_affinity: 20,
             positive_threshold: 1, negative_threshold: -1, ..Default::default()
