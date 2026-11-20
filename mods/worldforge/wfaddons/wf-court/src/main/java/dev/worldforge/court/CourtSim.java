@@ -235,7 +235,7 @@ public final class CourtSim {
                 if (day < dueDay) continue;
                 String fatherId = FamilyPlanning.dueFatherId(c, day);
                 Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
-                if (biologicalFather == null || !biologicalFather.alive) {
+                if (biologicalFather == null) {
                     FamilyPlanning.cancel(c, biologicalFather, "father-unavailable", y);
                 } else {
                     bear(biologicalFather, c);
