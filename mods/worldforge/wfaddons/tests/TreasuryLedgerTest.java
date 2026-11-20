@@ -466,6 +466,16 @@ public final class TreasuryLedgerTest {
         }
         ok(nonOneArchivePrefixVerified,
                 "treasury archive checkpoint fingerprints honor a configured non-one starting sequence");
+        boolean checkpointBeforeRetainedRangeRejected = false;
+        try {
+            java.nio.file.Path nonOneArchiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-before-retained-");
+            TreasuryJournalArchive nonOneArchive = new TreasuryJournalArchive(nonOneArchiveDir, 11);
+            nonOneArchive.archiveDigestThrough(10);
+        } catch (java.io.IOException expected) {
+            checkpointBeforeRetainedRangeRejected = expected.getMessage().contains("retained range");
+        }
+        ok(checkpointBeforeRetainedRangeRejected,
+                "treasury archive rejects checkpoint boundaries before the retained history starts");
 
         boolean checkpointTamperRejected = false;
         try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }

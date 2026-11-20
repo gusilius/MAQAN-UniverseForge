@@ -50,8 +50,9 @@ public final class TreasuryJournalArchive {
      * Later appended history is deliberately excluded, so older checkpoints remain valid.
      */
     public synchronized String archiveDigestThrough(long checkpointNextSequence) throws IOException {
-        if (checkpointNextSequence < 1 || checkpointNextSequence > nextSequence)
-            throw new IOException("Treasury archive does not contain checkpoint prefix ending at " + checkpointNextSequence);
+        if (checkpointNextSequence < firstSequence || checkpointNextSequence > nextSequence)
+            throw new IOException("Treasury archive does not contain checkpoint prefix in retained range ["
+                    + firstSequence + ", " + nextSequence + "]");
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long expected = firstSequence;
