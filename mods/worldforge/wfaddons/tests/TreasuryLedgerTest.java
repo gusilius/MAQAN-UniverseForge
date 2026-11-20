@@ -4,6 +4,7 @@ import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
+import dev.worldforge.mod.economy.TreasuryCheckpointStore;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
@@ -370,6 +371,42 @@ public final class TreasuryLedgerTest {
                         && checkpoint.postedReferences().containsAll(checkpoint.postedCredits())
                         && checkpoint.postedReferences().containsAll(checkpoint.postedDebits()),
                 "treasury checkpoint captures balances, limits, sequence and idempotency indexes");
+        try {
+            java.nio.file.Path checkpointDir = java.nio.file.Files.createTempDirectory("maqan-treasury-checkpoint-");
+            java.nio.file.Path archiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-checkpoint-archive-");
+            TreasuryJournalArchive checkpointArchive = new TreasuryJournalArchive(archiveDir, 1);
+            checkpointArchive.append(checkpointLedger.journal());
+            TreasuryCheckpointStore checkpointStore = new TreasuryCheckpointStore(checkpointDir);
+            TreasuryCheckpointStore.Checkpoint published = checkpointStore.publish(checkpointJson, checkpointArchive);
+            TreasuryCheckpointStore.Checkpoint loaded = new TreasuryCheckpointStore(checkpointDir).load();
+            ok(published.nextSequence() == loaded.nextSequence()
+                            && loaded.snapshotJson().equals(checkpointJson)
+                            && loaded.checksum().equals(published.checksum()),
+                    "treasury checkpoint manifest atomically links a verified archive boundary to its snapshot");
+            boolean archiveBoundaryRejected = false;
+            try {
+                TreasuryCheckpointStore mismatchedStore = new TreasuryCheckpointStore(
+                        java.nio.file.Files.createTempDirectory("maqan-treasury-checkpoint-mismatch-"));
+                mismatchedStore.publish(checkpointJson, new TreasuryJournalArchive(
+                        java.nio.file.Files.createTempDirectory("maqan-treasury-empty-archive-"), 1));
+            } catch (java.io.IOException expected) {
+                archiveBoundaryRejected = expected.getMessage().contains("snapshot requires");
+            }
+            ok(archiveBoundaryRejected, "treasury checkpoint refuses a snapshot ahead of the durable archive");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(checkpointDir)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(archiveDir)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "treasury checkpoint publication tests complete: " + ex.getMessage());
+        }
+
         boolean checkpointTamperRejected = false;
         try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }
         catch (IllegalArgumentException expected) { checkpointTamperRejected = expected.getMessage().contains("checksum"); }
