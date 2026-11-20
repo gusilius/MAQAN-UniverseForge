@@ -798,6 +798,24 @@ public final class Settlement {
         });
     }
 
+    /**
+     * Fast path for a worker reference obtained directly from this settlement's worker list
+     * during the current server-thread pass. The caller guarantees membership; avoiding a
+     * linear identity scan here prevents one O(population) search for every AI action.
+     */
+    public boolean updateWorkerKnownMember(Worker worker, Consumer<Worker> update) {
+        if (worker == null || update == null) throw new IllegalArgumentException("worker update is required");
+        return mutate(() -> {
+            List<Object> before = workerMutationState(worker);
+            try {
+                update.accept(worker);
+            } finally {
+                if (!before.equals(workerMutationState(worker))) markMutation();
+            }
+            return true;
+        });
+    }
+
     private static List<Object> workerMutationState(Worker worker) {
         List<Object> state = new ArrayList<>(25);
         state.add(worker.name);
