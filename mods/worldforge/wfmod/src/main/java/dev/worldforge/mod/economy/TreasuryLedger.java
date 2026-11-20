@@ -177,6 +177,7 @@ public final class TreasuryLedger {
         Set<String> debits = new HashSet<>();
         Set<String> credits = new HashSet<>();
         Set<String> rationAccounts = new HashSet<>();
+        Map<String, Double> lastBalances = new HashMap<>();
         List<Entry> currentTransaction = new ArrayList<>(2);
         String[] currentTransactionId = {null};
         long[] expected = {1};
@@ -203,6 +204,7 @@ public final class TreasuryLedger {
                     throw new IllegalStateException("Invalid treasury transaction cardinality: " + entry.transactionId());
                 restored.journal.add(entry);
                 restored.indexEntry(entry);
+                lastBalances.put(entry.accountId(), entry.balanceAfter());
             });
         } catch (RuntimeException invalid) {
             throw new java.io.IOException("Treasury archive entries failed ledger reconstruction", invalid);
@@ -213,6 +215,12 @@ public final class TreasuryLedger {
                 || !credits.equals(state.postedCredits())
                 || !rationAccounts.equals(state.armyFieldRationDebitAccounts()))
             throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive");
+
+        for (Account account : restored.accounts.values()) {
+            double journalBalance = lastBalances.getOrDefault(account.id, 0.0);
+            if (Math.abs(journalBalance - account.balance) > 1e-8)
+                throw new java.io.IOException("Treasury checkpoint cash balance does not match its last journal posting: " + account.id);
+        }
 
         if (!currentTransaction.isEmpty())
             validateArchivedTransaction(currentTransaction, restored.accounts);
