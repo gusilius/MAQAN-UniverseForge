@@ -956,12 +956,13 @@ public final class WorldSimMod {
         boolean imageGeographyPending = false;
         for (EmergenceSource source : sources) {
             if (source.map == null) continue;
-            Map<String, Object> prepared = MapGeography.snapshotIfReady(source.map);
+            JsonObject prepared = MapGeography.snapshotIfReady(source.map,
+                    values -> GSON.toJsonTree(values).getAsJsonObject());
             if (prepared == null) {
                 imageGeographyPending = true;
                 continue;
             }
-            geography.add(GSON.toJsonTree(prepared).getAsJsonObject());
+            geography.add(prepared);
         }
         WorldSimMod.imageGeographyPending = imageGeographyPending;
         PROFILER.setGauge("worldsim.geography.pending", imageGeographyPending ? 1 : 0);

@@ -13,6 +13,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 /**
  * Deterministic natural-geography evidence extracted from a WorldForge map package.
@@ -37,7 +38,7 @@ public final class MapGeography {
                 thread.setPriority(Thread.MIN_PRIORITY);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
-    private static final Map<MapData, CompletableFuture<Map<String, Object>>> PENDING =
+    private static final Map<MapData, CompletableFuture<?>> PENDING =
             new WeakHashMap<>();
 
     private MapGeography() { }
@@ -46,15 +47,16 @@ public final class MapGeography {
      * Schedules expensive image sampling once and returns only completed immutable data.
      * A null result means the simulation frame should wait; it never blocks the server tick.
      */
-    public static Map<String, Object> snapshotIfReady(MapData map) {
-        if (map == null) return null;
-        CompletableFuture<Map<String, Object>> future;
+    public static <T> T snapshotIfReady(MapData map, Function<Map<String, Object>, T> converter) {
+        if (map == null || converter == null) return null;
+        CompletableFuture<T> future;
         synchronized (PENDING) {
-            future = PENDING.get(map);
+            @SuppressWarnings("unchecked") CompletableFuture<T> existing = (CompletableFuture<T>) PENDING.get(map);
+            future = existing;
             if (future == null) {
                 try {
                     future = CompletableFuture.supplyAsync(
-                            () -> describe(map), GEOLOGY_WORKER);
+                            () -> converter.apply(describe(map)), GEOLOGY_WORKER);
                     PENDING.put(map, future);
                 } catch (java.util.concurrent.RejectedExecutionException saturated) {
                     return null;
