@@ -32,8 +32,8 @@ public final class FamilyPlanning {
         if (engagedTo(first, second)) return true;
         Object firstTarget = first.props.get("family.engaged_to");
         Object secondTarget = second.props.get("family.engaged_to");
-        if (firstTarget instanceof String s && !s.isBlank()
-                || secondTarget instanceof String s && !s.isBlank()) return false;
+        if (firstTarget instanceof String firstId && !firstId.isBlank()
+                || secondTarget instanceof String secondId && !secondId.isBlank()) return false;
         first.props.put("family.engaged_to", second.id);
         second.props.put("family.engaged_to", first.id);
         first.props.put("family.engagement_year", year);
