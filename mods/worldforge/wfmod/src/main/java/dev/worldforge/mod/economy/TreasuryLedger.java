@@ -124,6 +124,9 @@ public final class TreasuryLedger {
                 Set.copyOf(postedCredits), Set.copyOf(armyFieldRationDebitAccounts));
     }
 
+    /** Next global journal sequence; 1 means no journal entries have been posted. */
+    public synchronized long nextSequence() { return sequence; }
+
     public synchronized int accountCount() { return accounts.size(); }
     public synchronized int journalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }

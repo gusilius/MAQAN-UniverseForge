@@ -576,7 +576,8 @@ public final class TreasuryLedgerTest {
             batchedArchive.forEachEntryFrom(TreasuryJournalSegment.MAX_ENTRIES, ignored -> suffixCount[0]++);
             ok(suffixCount[0] == 2,
                     "batched treasury archive resumes from an exact sequence across a segment boundary");
-            ok(batchedArchive.appendAll(largeBatch)
+            long retriedEntries = batchedArchive.appendAll(largeBatch);
+            ok(retriedEntries == largeBatch.size()
                             && batchedArchive.nextSequence() == (long) largeBatch.size() + 1,
                     "retrying a partially or fully published large treasury batch is idempotent");
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(batchedArchiveDir)) {
@@ -586,6 +587,41 @@ public final class TreasuryLedgerTest {
             }
         } catch (java.io.IOException ex) {
             ok(false, "bounded treasury archive batching tests complete: " + ex.getMessage());
+        }
+
+        try {
+            java.nio.file.Path migrationRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-migration-");
+            TreasuryLedger migrationLedger = new TreasuryLedger();
+            migrationLedger.open("migration:treasury", "migration:realm", "silver", 500);
+            migrationLedger.open("migration:merchant", "migration:merchant", "silver", 20);
+            migrationLedger.transfer("migration:treasury", "migration:merchant", 75,
+                    TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 42, "migration transfer");
+            TreasuryJournalArchive migrationArchive = new TreasuryJournalArchive(migrationRoot.resolve("archive"), 1);
+            TreasuryCheckpointStore migrationCheckpoints = new TreasuryCheckpointStore(migrationRoot.resolve("checkpoints"));
+            TreasuryArchiveMigration.Result migration = TreasuryArchiveMigration.migrate(
+                    migrationLedger, migrationArchive, migrationCheckpoints);
+            TreasuryArchiveMigration.Result migrationRetry = TreasuryArchiveMigration.migrate(
+                    migrationLedger, migrationArchive, migrationCheckpoints);
+            TreasuryCheckpointStore.Checkpoint restoredCheckpoint = migrationCheckpoints.load(migrationArchive);
+            TreasuryLedgerSnapshot.State restoredState = TreasuryLedgerSnapshot.decode(restoredCheckpoint.snapshotJson());
+            ok(migration.nextSequence() == migrationLedger.nextSequence()
+                            && migration.archivedEntries() == migrationLedger.journalSize()
+                            && migrationArchive.nextSequence() == migrationLedger.nextSequence()
+                            && migrationRetry.nextSequence() == migration.nextSequence()
+                            && restoredState.accounts().size() == migrationLedger.accountCount(),
+                    "legacy treasury migration archives the complete journal and safely retries checkpoint publication");
+            ok(close(restoredState.accounts().stream().filter(a -> a.id().equals("migration:treasury"))
+                            .findFirst().orElseThrow().balance(), migrationLedger.balance("migration:treasury"))
+                            && close(restoredState.accounts().stream().filter(a -> a.id().equals("migration:merchant"))
+                            .findFirst().orElseThrow().balance(), migrationLedger.balance("migration:merchant")),
+                    "migrated treasury checkpoint preserves both sides of a double-entry transfer");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(migrationRoot)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "legacy treasury archive migration completes and verifies: " + ex.getMessage());
         }
 
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
