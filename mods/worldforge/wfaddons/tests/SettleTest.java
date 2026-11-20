@@ -194,6 +194,10 @@ public class SettleTest {
         SettlementTestAccess.flowLoad(restoredFlow,corruptedFlow);
         ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
+        Settlement snapshotProbe = fresh(d, 2);
+        ok(Json.write(snapshotProbe.toMap()).equals(snapshotProbe.toJson()),
+                "structured settlement snapshots serialize identically without a JSON parse round-trip");
+
         Settlement s = fresh(d, 4);
         Worker lifeResident = s.workers.get(0);
         lifeResident.lifeAction = "sleeping";
