@@ -396,7 +396,7 @@ public final class TreasuryLedgerTest {
                 "checksummed treasury segment round-trips the complete ordered double-entry audit");
         boolean checksumRejected = false;
         try {
-            TreasuryJournalSegment.decode(segmentJson.replace("archived transfer", "altered transfer"));
+            TreasuryJournalSegment.decode(segmentJson.replace((char) 34 + "lastSequence" + (char) 34 + ":3", (char) 34 + "lastSequence" + (char) 34 + ":4"));
         } catch (IllegalArgumentException expected) { checksumRejected = expected.getMessage().contains("checksum"); }
         ok(checksumRejected, "treasury segment rejects payload tampering before archive replay");
         boolean emptySegmentRejected = false;
