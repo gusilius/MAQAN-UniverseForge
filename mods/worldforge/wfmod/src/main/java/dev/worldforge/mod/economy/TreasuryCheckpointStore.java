@@ -91,6 +91,64 @@ public final class TreasuryCheckpointStore {
     }
 
     /**
+     * Loads CURRENT when valid. If the pointer or its snapshot was damaged, scans
+     * immutable snapshots, chooses the newest one whose checksum and archive prefix
+     * both verify, and atomically republishes CURRENT. Journal entries after that
+     * snapshot are replayed by TreasuryLedger.restoreFromCheckpoint.
+     */
+    public synchronized Checkpoint loadOrRecover(TreasuryJournalArchive archive) throws IOException {
+        if (archive == null) throw new IllegalArgumentException("Verified treasury archive is required");
+        IOException primaryFailure;
+        try {
+            return load(archive);
+        } catch (IOException invalidCurrent) {
+            primaryFailure = invalidCurrent;
+        }
+
+        java.util.List<Checkpoint> candidates = new java.util.ArrayList<>();
+        try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(directory, "snapshot-*.json")) {
+            for (Path snapshotPath : files) {
+                String filename = snapshotPath.getFileName().toString();
+                if (!SNAPSHOT_NAME.matcher(filename).matches()) continue;
+                try {
+                    String snapshotJson = Files.readString(snapshotPath, StandardCharsets.UTF_8);
+                    String checksum = sha256(snapshotJson);
+                    TreasuryLedgerSnapshot.State state = TreasuryLedgerSnapshot.decode(snapshotJson);
+                    String expectedName = String.format(java.util.Locale.ROOT,
+                            "snapshot-%020d-%s.json", state.nextSequence(), checksum);
+                    if (!filename.equals(expectedName) || state.nextSequence() > archive.nextSequence()) continue;
+                    String archiveChecksum = archive.archiveDigestThrough(state.nextSequence());
+                    Checkpoint candidate = new Checkpoint(snapshotJson, state.nextSequence(), checksum, archiveChecksum);
+                    verify(candidate, archive);
+                    candidates.add(candidate);
+                } catch (RuntimeException | IOException invalidCandidate) {
+                    // An orphan, truncated, or stale snapshot is not a recovery point.
+                }
+            }
+        } catch (IOException scanFailure) {
+            scanFailure.addSuppressed(primaryFailure);
+            throw scanFailure;
+        }
+
+        candidates.sort(java.util.Comparator.comparingLong(Checkpoint::nextSequence).reversed());
+        IOException recoveryFailure = new IOException("No valid treasury checkpoint snapshot could be recovered",
+                primaryFailure);
+        for (Checkpoint candidate : candidates) {
+            try {
+                Checkpoint republished = publish(candidate.snapshotJson(), archive);
+                Checkpoint verified = load(archive);
+                if (!republished.checksum().equals(verified.checksum())
+                        || republished.nextSequence() != verified.nextSequence())
+                    throw new IOException("Recovered treasury checkpoint did not round-trip");
+                return verified;
+            } catch (IOException failedCandidate) {
+                recoveryFailure.addSuppressed(failedCandidate);
+            }
+        }
+        throw recoveryFailure;
+    }
+
+    /**
      * Verifies a checkpoint object independently of how it was obtained. Restore callers
      * must not be able to pair a valid snapshot with a different archive that happens to
      * end at the same sequence number.

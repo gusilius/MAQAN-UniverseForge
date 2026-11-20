@@ -30,7 +30,7 @@ public final class TreasuryArchiveStore {
     public synchronized TreasuryLedger loadOrMigrate(Path legacyJson) throws IOException {
         Path manifest = root.resolve("checkpoints").resolve("CURRENT.json");
         if (Files.isRegularFile(manifest)) {
-            TreasuryCheckpointStore.Checkpoint checkpoint = checkpoints.load(archive);
+            TreasuryCheckpointStore.Checkpoint checkpoint = checkpoints.loadOrRecover(archive);
             // During the old shadow period the legacy JSON could be committed while shadow
             // synchronization failed. If that intact legacy ledger is ahead, import only
             // its verified suffix instead of silently rolling those transactions back.
