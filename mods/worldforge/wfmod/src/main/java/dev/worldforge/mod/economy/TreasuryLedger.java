@@ -215,6 +215,13 @@ public final class TreasuryLedger {
                 || !rationAccounts.equals(state.armyFieldRationDebitAccounts()))
             throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive");
 
+        // Restore validated retry keys into the live ledger; otherwise a retried event
+        // after restart could be posted a second time.
+        restored.postedReferences.addAll(references);
+        restored.postedDebits.addAll(debits);
+        restored.postedCredits.addAll(credits);
+        restored.armyFieldRationDebitAccounts.addAll(rationAccounts);
+
         for (Account account : restored.accounts.values()) {
             double journalBalance = lastBalances.getOrDefault(account.id, 0.0);
             if (Math.abs(journalBalance - account.balance) > 1e-8)

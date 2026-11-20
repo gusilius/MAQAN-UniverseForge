@@ -628,6 +628,8 @@ public final class TreasuryLedgerTest {
                             && close(restoredLedger.balance("migration:treasury"), migrationLedger.balance("migration:treasury"))
                             && close(restoredLedger.balance("migration:merchant"), migrationLedger.balance("migration:merchant"))
                             && restoredLedger.hasTransaction("migration:treasury", TreasuryLedger.Kind.TRADE, "migration:transfer")
+                            && restoredLedger.hasDebit("migration:treasury", TreasuryLedger.Kind.TRADE, "migration:transfer")
+                            && restoredLedger.hasCredit("migration:merchant", TreasuryLedger.Kind.TRADE, "migration:transfer")
                             && close(restoredLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test"),
                                     migrationLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test")),
                     "checkpoint restore rebuilds balances, journal indexes, debit totals and idempotency keys");
