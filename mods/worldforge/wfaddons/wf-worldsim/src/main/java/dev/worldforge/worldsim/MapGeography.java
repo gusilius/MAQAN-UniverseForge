@@ -14,14 +14,33 @@ import java.util.Map;
  * proxies because .worldmap has no separate climate or resource raster.
  */
 public final class MapGeography {
-    private static final int MAX_SAMPLES = 4096;
+    private static final int DEFAULT_SAMPLE_BUDGET = 16_384;
+    private static final int MIN_SAMPLE_BUDGET = 4_096;
+    private static final int MAX_SAMPLE_BUDGET = 65_536;
+    private static final String SAMPLE_BUDGET_PROPERTY = "worldforge.worldsim.map_sample_budget";
 
     private MapGeography() { }
 
+    /**
+     * Image-backed worlds may be much larger than the original prototype maps.
+     * The budget is configurable per server; it bounds snapshot size, not map extent.
+     */
+    private static int sampleBudget() {
+        String configured = System.getProperty(SAMPLE_BUDGET_PROPERTY);
+        if (configured == null || configured.isBlank()) return DEFAULT_SAMPLE_BUDGET;
+        try {
+            return Math.max(MIN_SAMPLE_BUDGET,
+                    Math.min(MAX_SAMPLE_BUDGET, Integer.parseInt(configured.trim())));
+        } catch (NumberFormatException ignored) {
+            return DEFAULT_SAMPLE_BUDGET;
+        }
+    }
+
     public static Map<String, Object> describe(MapData map) {
         if (map == null) throw new IllegalArgumentException("map is required");
-        int area = Math.multiplyExact(map.w, map.h);
-        int stride = Math.max(1, (int) Math.ceil(Math.sqrt(area / (double) MAX_SAMPLES)));
+        long area = Math.multiplyExact((long) map.w, (long) map.h);
+        int budget = sampleBudget();
+        int stride = Math.max(1, (int) Math.ceil(Math.sqrt(area / (double) budget)));
         List<Map<String, Object>> cells = new ArrayList<>();
         int land = 0, rivers = 0, viable = 0;
 
@@ -65,6 +84,8 @@ public final class MapGeography {
         result.put("political_layers_ignored", true);
         result.put("political_ownership_included", false);
         result.put("sample_stride", stride);
+        result.put("sample_budget", budget);
+        result.put("world_area_pixels", area);
         result.put("sampled_cells", cells.size());
         result.put("land_samples", land);
         result.put("river_samples", rivers);
