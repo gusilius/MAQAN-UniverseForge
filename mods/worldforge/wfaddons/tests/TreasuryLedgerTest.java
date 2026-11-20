@@ -556,6 +556,16 @@ public final class TreasuryLedgerTest {
             reopenedArchive.forEachEntryFrom(2, suffixEntries::add);
             ok(suffixEntries.equals(segmentSource.journal().subList(1, segmentSource.journalSize())),
                     "treasury archive streams an exact suffix from a checkpoint without materializing its prefix");
+            java.util.List<TreasuryLedger.Entry> firstPage = reopenedArchive.readPage(1, 2);
+            java.util.List<TreasuryLedger.Entry> secondPage = reopenedArchive.readPage(firstPage.get(1).sequence() + 1, 2);
+            ok(firstPage.size() == 2 && secondPage.size() == 1
+                            && firstPage.get(0).sequence() == 1 && firstPage.get(1).sequence() == 2
+                            && secondPage.get(0).sequence() == 3,
+                    "treasury archive exposes bounded sequence pages without loading the full journal");
+            boolean oversizedPageRejected = false;
+            try { reopenedArchive.readPage(1, 4097); }
+            catch (IllegalArgumentException expected) { oversizedPageRejected = true; }
+            ok(oversizedPageRejected, "treasury archive enforces a hard upper bound on page memory");
             java.util.List<TreasuryLedger.Entry> emptySuffix = new java.util.ArrayList<>();
             reopenedArchive.forEachEntryFrom(reopenedArchive.nextSequence(), emptySuffix::add);
             ok(emptySuffix.isEmpty(), "treasury archive accepts a suffix starting immediately after its last entry");

@@ -168,6 +168,35 @@ public final class TreasuryJournalArchive {
     }
 
     /**
+     * Reads a bounded journal page by global sequence. The returned list never exceeds
+     * maxEntries; callers can request the next page using last.sequence() + 1.
+     */
+    public synchronized List<TreasuryLedger.Entry> readPage(long firstSequence, int maxEntries) throws IOException {
+        if (maxEntries < 1 || maxEntries > 4096)
+            throw new IllegalArgumentException("Treasury page size must be between 1 and 4096");
+        if (firstSequence < firstSequence() || firstSequence > nextSequence)
+            throw new IOException("Requested treasury page starts outside the retained archive");
+        if (firstSequence == nextSequence) return List.of();
+        List<TreasuryLedger.Entry> page = new ArrayList<>(Math.min(maxEntries, TreasuryJournalSegment.MAX_ENTRIES));
+        try {
+            forEachEntryFrom(firstSequence, entry -> {
+                page.add(entry);
+                if (page.size() == maxEntries) throw PageLimitReached.INSTANCE;
+            });
+        } catch (PageLimitReached completePage) {
+            // The requested bounded page is complete; later archive entries are intentionally unread.
+        }
+        return List.copyOf(page);
+    }
+
+    private long firstSequence() { return firstSequence; }
+
+    private static final class PageLimitReached extends RuntimeException {
+        private static final PageLimitReached INSTANCE = new PageLimitReached();
+        private PageLimitReached() { super(null, null, false, false); }
+    }
+
+    /**
      * Appends an arbitrarily large ordered journal stream using bounded segment buffers.
      * Earlier chunks remain valid if a later chunk fails; retrying the same iterable is safe
      * because append() verifies already-published segments byte-for-byte.
