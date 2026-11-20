@@ -695,6 +695,27 @@ mod tests {
     }
 
     #[test]
+    fn higher_occupancy_profile_increases_settlement_density_without_changing_world_extent() {
+        let base = map();
+        let low = GeographicMap { population_density_pct: 0, ..base.clone() };
+        let high = GeographicMap { population_density_pct: 100, ..base };
+        assert!(observed_map_scale(&high) < observed_map_scale(&low));
+    }
+
+    #[test]
+    fn profile_wilderness_is_never_bootstrapped_as_a_settlement() {
+        let mut wild = map();
+        for cell in &mut wild.cells { cell.wilderness = true; }
+        let mut bands = Vec::new();
+        let mut polities = Vec::new();
+        let mut events = Vec::new();
+        bootstrap_initial_civilizations(&wild, 424242, &mut bands, &mut polities, &mut events);
+        bootstrap(&wild, 424242, &mut bands, &mut events);
+        assert!(bands.is_empty(), "wilderness cells must remain free of initial settlement bands");
+        assert!(polities.is_empty(), "wilderness-only regions must not form states");
+    }
+
+    #[test]
     fn observed_vanilla_frontier_spacing_stays_bounded_as_the_world_expands() {
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
