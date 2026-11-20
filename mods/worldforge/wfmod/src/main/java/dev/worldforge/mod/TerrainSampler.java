@@ -19,7 +19,8 @@ public final class TerrainSampler {
     public TerrainSampler(MapData m, float detail) {
         this.m = m;
         this.detail = detail;
-        long s = m.name.hashCode() * 0x9E3779B97F4A7C15L;
+        long s = m.planetProfile != null ? m.planetProfile.seed
+                : m.name.hashCode() * 0x9E3779B97F4A7C15L;
         this.detailNoise = new Noise(s ^ 0x1111L);
         this.caveA = new Noise(s ^ 0x2222L);
         this.caveB = new Noise(s ^ 0x3333L);

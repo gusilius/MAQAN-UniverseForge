@@ -48,6 +48,7 @@ import dev.worldforge.mod.identity.WorldIdentityStore;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -58,9 +59,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * WorldForge: генерация мира по картинке.
- * Карты лежат в config/worldforge/maps/<имя>.worldmap (или папкой <имя>/).
- * Измерение подключается датапаком: "generator": {"type": "worldforge:image", "map": "<имя>"}.
+ * WorldForge planetary surface adapter. Image-backed and procedural planet sources
+ * feed the same terrain, biome, chunk and WorldSim pipeline. Minecraft dimensions are
+ * only physical surface instances; they are not the identity of celestial bodies.
  */
 @Mod(WorldForgeMod.MOD_ID)
 public class WorldForgeMod {
@@ -83,7 +84,9 @@ public class WorldForgeMod {
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         GENERATORS.register("image", () -> MapChunkGenerator.CODEC);
+        GENERATORS.register("planet", () -> MapChunkGenerator.CODEC);
         BIOME_SOURCES.register("image", () -> MapBiomeSource.CODEC);
+        BIOME_SOURCES.register("planet", () -> MapBiomeSource.CODEC);
         GENERATORS.register(bus);
         BIOME_SOURCES.register(bus);
         net.minecraftforge.fml.ModLoadingContext.get().registerConfig(
@@ -217,19 +220,30 @@ public class WorldForgeMod {
     public static MapData map(String id) {
         return MAPS.computeIfAbsent(id, n -> {
             try {
-                MapData d = null;
+                MapData d;
                 if (n.contains(":")) {
+                    String localId = n.substring(n.indexOf(':') + 1);
                     try {
                         d = loadFromDatapack(n);
-                    } catch (IOException e) {
-                        LOGGER.warn("WorldForge: в датапаках нет карты '{}' ({}), ищу в config", n, e.getMessage());
-                        d = MapData.load(n.substring(n.indexOf(':') + 1), mapsDir());
+                    } catch (FileNotFoundException absentDatapackMap) {
+                        try {
+                            d = MapData.load(localId, mapsDir());
+                        } catch (FileNotFoundException absentLocalMap) {
+                            d = loadProceduralPlanetOrThrow(n, absentLocalMap);
+                        }
                     }
                 } else {
-                    d = MapData.load(n, mapsDir());
+                    try {
+                        d = MapData.load(n, mapsDir());
+                    } catch (FileNotFoundException absentMap) {
+                        d = loadProceduralPlanetOrThrow(n, absentMap);
+                    }
                 }
                 EditorManager.applySaved(ServerLifecycleHooks.getCurrentServer(), d);
-                LOGGER.info("WorldForge: planet={} dimension_map_id={} image={} size={}x{} blocks_per_pixel={}", d.displayName, n, n, d.w, d.h, d.bpp);
+                String planetId = d.planetProfile == null ? n : d.planetProfile.planetId;
+                String sourceMode = d.planetProfile == null ? "image" : d.planetProfile.generationMode;
+                LOGGER.info("WorldForge: planet_id={} source_mode={} surface_id={} display_name={} virtual_size={}x{} blocks_per_pixel={}",
+                        planetId, sourceMode, n, d.displayName, d.w, d.h, d.bpp);
                 return d;
             } catch (IOException | RuntimeException e) {
                 LOGGER.error("WorldForge: explicit map '{}' is unavailable; refusing to substitute synthetic terrain from a fallback map. Expected source under {}",
@@ -237,6 +251,36 @@ public class WorldForgeMod {
                 throw new IllegalStateException("Required WorldForge map '" + n + "' could not be loaded", e);
             }
         });
+    }
+
+    private static MapData loadProceduralPlanetOrThrow(String id, FileNotFoundException missingImageMap) throws IOException {
+        PlanetWorldProfile profile = loadPlanetProfile(id);
+        if (profile == null || !"procedural".equals(profile.generationMode)) throw missingImageMap;
+        LOGGER.info("WorldForge: creating procedural surface planet_id={} seed={} pixels={}x{}",
+                profile.planetId, profile.seed, profile.widthPx, profile.heightPx);
+        return MapData.procedural(id, profile);
+    }
+
+    /** Planet identity/profile lives outside the Minecraft dimension namespace. */
+    private static PlanetWorldProfile loadPlanetProfile(String id) throws IOException {
+        ResourceLocation key = new ResourceLocation(id.contains(":") ? id : "worldforge:" + id);
+        Path planetDir = mapsDir().getParent().resolve("planets");
+        Path profileFile = planetDir.resolve(key.getNamespace()).resolve(key.getPath() + ".planet.json");
+        if (!Files.isRegularFile(profileFile) && "worldforge".equals(key.getNamespace()))
+            profileFile = planetDir.resolve(key.getPath() + ".planet.json");
+        if (Files.isRegularFile(profileFile))
+            return PlanetWorldProfile.parse(Files.readAllBytes(profileFile));
+
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) {
+            ResourceLocation resource = new ResourceLocation(key.getNamespace(),
+                    "worldforge_planets/" + key.getPath() + ".json");
+            Optional<Resource> found = server.getResourceManager().getResource(resource);
+            if (found.isPresent()) try (InputStream input = found.get().open()) {
+                return PlanetWorldProfile.parse(input.readAllBytes());
+            }
+        }
+        return null;
     }
 
     private static MapData loadFromDatapack(String id) throws IOException {

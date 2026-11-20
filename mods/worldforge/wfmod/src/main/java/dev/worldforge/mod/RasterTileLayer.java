@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.Semaphore;
+import java.util.function.IntBinaryOperator;
 
 /**
  * PNG-backed raster with on-demand rectangular decoding and a strictly bounded tile cache.
@@ -33,14 +34,23 @@ final class RasterTileLayer {
     private final int width;
     private final int height;
     private final String label;
+    private final IntBinaryOperator proceduralSampler;
     private final LinkedHashMap<Long, FutureTask<Tile>> cache =
             new LinkedHashMap<>(16, 0.75f, true);
 
-    private RasterTileLayer(byte[] png, int width, int height, String label) {
+    private RasterTileLayer(byte[] png, int width, int height, String label, IntBinaryOperator proceduralSampler) {
         this.png = png;
         this.width = width;
         this.height = height;
         this.label = label;
+        this.proceduralSampler = proceduralSampler;
+    }
+
+    /** Virtual deterministic raster; never allocates a full planet-sized pixel array. */
+    static RasterTileLayer procedural(int width, int height, String label, IntBinaryOperator sampler) {
+        if (width < 1 || height < 1 || sampler == null)
+            throw new IllegalArgumentException("Invalid procedural raster: " + label);
+        return new RasterTileLayer(null, width, height, label, sampler);
     }
 
     static RasterTileLayer load(byte[] png, int expectedWidth, int expectedHeight, String label)
@@ -62,7 +72,7 @@ final class RasterTileLayer {
                 reader.dispose();
             }
         }
-        return new RasterTileLayer(png, expectedWidth, expectedHeight, label);
+        return new RasterTileLayer(png, expectedWidth, expectedHeight, label, null);
     }
 
     int sample(int x, int z) {
@@ -72,30 +82,32 @@ final class RasterTileLayer {
         int tileZ = z / TILE_SIZE;
         long key = ((long) tileZ << 32) | (tileX & 0xffff_ffffL);
 
-        // Reserve capacity BEFORE publishing a new in-flight task. Otherwise many chunk
-        // workers can enqueue an unbounded number of FutureTasks while only two decode.
-        DECODE_PERMITS.acquireUninterruptibly();
+        // Fast path: cached and in-flight tiles never wait behind unrelated decodes.
         FutureTask<Tile> task;
-        boolean run = false;
         synchronized (cache) {
             task = cache.get(key);
-            if (task == null) {
-                final int originX = tileX * TILE_SIZE;
-                final int originZ = tileZ * TILE_SIZE;
-                task = new FutureTask<>(() -> decodeTile(originX, originZ));
-                cache.put(key, task);
-                run = true;
-            }
-            trimCompletedTiles();
+            if (task != null) trimCompletedTiles();
         }
-        if (!run) DECODE_PERMITS.release();
-
-        if (run) {
-            try {
-                task.run();
-            } finally {
-                DECODE_PERMITS.release();
+        boolean run = false;
+        if (task == null) {
+            // Reserve capacity before publishing a task, keeping the pending queue bounded.
+            DECODE_PERMITS.acquireUninterruptibly();
+            synchronized (cache) {
+                task = cache.get(key);
+                if (task == null) {
+                    final int originX = tileX * TILE_SIZE;
+                    final int originZ = tileZ * TILE_SIZE;
+                    task = new FutureTask<>(() -> decodeTile(originX, originZ));
+                    cache.put(key, task);
+                    run = true;
+                }
+                trimCompletedTiles();
             }
+            if (!run) DECODE_PERMITS.release();
+        }
+        if (run) {
+            try { task.run(); }
+            finally { DECODE_PERMITS.release(); }
         }
         try {
             Tile tile = task.get();
@@ -130,6 +142,17 @@ final class RasterTileLayer {
     private Tile decodeTile(int originX, int originZ) throws IOException {
         int tileWidth = Math.min(TILE_SIZE, width - originX);
         int tileHeight = Math.min(TILE_SIZE, height - originZ);
+        if (proceduralSampler != null) {
+            short[] samples = new short[tileWidth * tileHeight];
+            for (int z = 0; z < tileHeight; z++) {
+                int worldZ = originZ + z;
+                for (int x = 0; x < tileWidth; x++) {
+                    int value = proceduralSampler.applyAsInt(originX + x, worldZ);
+                    samples[z * tileWidth + x] = (short) Math.max(0, Math.min(65535, value));
+                }
+            }
+            return new Tile(originX, originZ, tileWidth, samples);
+        }
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(png))) {
             if (input == null) throw new IOException("Cannot open raster: " + label);
             Iterator<ImageReader> readers = ImageIO.getImageReaders(input);

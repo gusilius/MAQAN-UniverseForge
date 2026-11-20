@@ -91,6 +91,32 @@ public final class MapData {
     }
 
     /** Загрузка из config/worldforge/maps: <имя>.worldmap (zip) или папка <имя>/ (можно с вложенной out/). */
+    /** Procedural planet using the same MapData/TerrainSampler/chunk generator path as image worlds. */
+    public static MapData procedural(String sourceId, PlanetWorldProfile profile) {
+        if (profile == null || !"procedural".equals(profile.generationMode))
+            throw new IllegalArgumentException("A procedural planet profile is required");
+        ProceduralPlanetTerrain terrain = new ProceduralPlanetTerrain(profile);
+        int w=profile.widthPx,h=profile.heightPx;
+        String[] keys={"deep_ocean","shallow_sea","beach","desert","mountains",
+                "forest","plains","snowy_mountains","taiga","savanna","glacier"};
+        String[][] candidates={
+                {"minecraft:deep_ocean","minecraft:ocean"},{"minecraft:ocean","minecraft:beach"},
+                {"minecraft:beach"},{"minecraft:desert"},{"minecraft:windswept_hills","minecraft:mountains"},
+                {"minecraft:forest"},{"minecraft:plains"},{"minecraft:snowy_slopes","minecraft:jagged_peaks"},
+                {"minecraft:taiga"},{"minecraft:savanna"},{"minecraft:ice_spikes"}};
+        int[] rgb={0x244B78,0x397DAA,0xD8C58B,0xD8B66A,0x817D78,
+                0x397348,0x8DB360,0xD8E5EA,0x587B67,0xB7A34A,0xDDEEFF};
+        RasterTileLayer height=RasterTileLayer.procedural(w,h,"procedural-height16",terrain::heightSample);
+        RasterTileLayer biome=RasterTileLayer.procedural(w,h,"procedural-biomes",terrain::biomeSample);
+        RasterTileLayer river=RasterTileLayer.procedural(w,h,"procedural-rivers",terrain::riverSample);
+        RasterTileLayer wilderness=RasterTileLayer.procedural(w,h,"procedural-wilderness",terrain::wildernessSample);
+        int[] spawnPixel=terrain.findSpawn();
+        double[] spawn={spawnPixel[0]/(double)w,spawnPixel[1]/(double)h};
+        return new MapData(sourceId,profile.displayName,w,h,profile.blocksPerPixel,
+                profile.seaLevel,profile.minY,profile.maxY,keys,rgb,candidates,spawn,
+                height,biome,river,null,null,null,wilderness,profile,Map.of(),List.of());
+    }
+
     public static MapData load(String name, Path mapsDir) throws IOException {
         Map<String, byte[]> files = new HashMap<>();
         Path zip = mapsDir.resolve(name + ".worldmap");
@@ -161,8 +187,7 @@ public final class MapData {
         int minY = ((Number) meta.get("min_y")).intValue(), maxY = ((Number) meta.get("max_y")).intValue();
         String displayName = meta.get("display_name") instanceof String value && !value.isBlank() ? value : name;
         Object configuredPlanetId = meta.get("planet_id");
-        if (configuredPlanetId instanceof String value && !value.isBlank() && !value.equals(name))
-            throw new IOException("Map planet_id '" + value + "' does not match dimension generator map id '" + name + "'");
+        // planet_id is a celestial-body identity, independent of a surface/dimension resource key.
 
         @SuppressWarnings("unchecked")
         List<Object> bl = (List<Object>) meta.get("biomes");
@@ -252,9 +277,6 @@ public final class MapData {
             if (planetProfile.widthPx != w || planetProfile.heightPx != h
                     || Math.abs(planetProfile.blocksPerPixel - bpp) > 0.0001)
                 throw new IOException("generation-profile.json dimensions/scale do not match meta.json for map '" + name + "'");
-            if (!planetProfile.planetId.isBlank() && !planetProfile.planetId.equals(name))
-                throw new IOException("generation-profile.json planet_id '" + planetProfile.planetId
-                        + "' does not match map id '" + name + "'");
         }
         return new MapData(name, displayName, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn,
                 height, biome, river, regions, regionMap, titles, wilderness, planetProfile, mapItems, settlementSeeds);
@@ -293,16 +315,16 @@ public final class MapData {
         return (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
     }
 
-    private int pixelIndex(double bx, double bz) {
+    private long pixelIndex(double bx, double bz) {
         double wx = warp.noise2(bx * 0.045, bz * 0.045) * bpp * 1.4;
         double wz = warp.noise2(bx * 0.045 + 100, bz * 0.045 - 100) * bpp * 1.4;
         int px = clampX((int) Math.floor((bx + wx) / bpp + w * 0.5));
         int pz = clampZ((int) Math.floor((bz + wz) / bpp + h * 0.5));
-        return pz * w + px;
+        return (long) pz * w + px;
     }
 
-    private int sampleIndex(RasterTileLayer layer, int index) {
-        return layer.sample(index % w, index / w);
+    private int sampleIndex(RasterTileLayer layer, long index) {
+        return layer.sample((int) (index % w), (int) (index / w));
     }
 
     /** True only when the source package actually supplied rivers.png. */
@@ -337,8 +359,8 @@ public final class MapData {
     /** Уровень воды реки в блоках Y или -1, если здесь нет реки. */
     public int riverY(double bx, double bz) {
         if (river == null) return -1;
-        int i = pixelIndex(bx, bz);
-        int x = i % w, z = i / w;
+        long i = pixelIndex(bx, bz);
+        int x = (int) (i % w), z = (int) (i / w);
         if (river.sample(x, z) == 0) return -1;
         // Water level is the local terrain minimum in a 7x7 window. Compute it only
         // for river pixels actually queried by generated chunks, not for every map pixel.
