@@ -47,10 +47,12 @@ public final class ResidentLifeEventsTest {
 
         WorldForgeApi.clock().reset();
         boolean married = false;
+        int marriageYear = -1;
         for (int year = 2000; year < 2040 && !married; year++) {
             WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
             married = father.id.equals(mother.spouse) && mother.id.equals(father.spouse);
+            if (married) marriageYear = year;
         }
         check(married, "mutual high affinity can lead to a persistent marriage event");
         check(father.name.equals(mother.props.get("family.spouse_name"))
@@ -63,7 +65,7 @@ public final class ResidentLifeEventsTest {
                 "family events retain the original Character identities");
 
         boolean childBorn = false;
-        for (int year = 2040; year < 2080 && !childBorn; year++) {
+        for (int year = marriageYear + 1; marriageYear > 0 && year < marriageYear + 40 && !childBorn; year++) {
             WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
             childBorn = !mother.children.isEmpty() && !father.children.isEmpty();
