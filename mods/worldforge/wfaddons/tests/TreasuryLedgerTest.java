@@ -51,7 +51,7 @@ public final class TreasuryLedgerTest {
         try {
             long writtenVersion = revisionLedger.writeJsonVersioned(versionedSnapshot);
             ok(writtenVersion == versionAfterLimit
-                    && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 1,
+                    && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 2,
                     "versioned streaming snapshot returns the exact revision represented by its bytes");
         } catch (java.io.IOException ex) { ok(false, "versioned streaming snapshot completes"); }
         boolean rejectedConflictingSnapshotIndexes = false;

@@ -169,7 +169,7 @@ public class WorldForgeMod {
             mirroredTreasuryVersion = -1L;
             try {
                 syncTreasuryShadow(server, loaded);
-            } catch (IOException shadowFailure) {
+            } catch (Exception shadowFailure) {
                 LOGGER.error("WorldForge treasury shadow migration failed; legacy JSON remains canonical: {}",
                         shadowFailure.toString());
             }
@@ -239,7 +239,6 @@ public class WorldForgeMod {
                         topSources.stream().map(stat -> stat.kind() + "/" + stat.category() + "=" + stat.entries()).toList());
                 if (elapsedMillis >= 1000)
                     LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
-                return true;
             } catch (IOException ex) {
                 LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
                 return false;
