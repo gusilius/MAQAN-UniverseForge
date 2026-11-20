@@ -558,6 +558,43 @@ public final class PopulationSimulationTest {
                         && bridgeEvents.stream().anyMatch(event -> event.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
                                 && event.from().equals("infant") && event.to().equals("child")),
                 "validated population frame applies one Character batch and preserves lifecycle events");
+        // The sorted population index must retain the correct owning registry for every result.
+        CharacterRegistry firstOwnerRegistry = new CharacterRegistry();
+        Character firstOwnerPerson = firstOwnerRegistry.create("First Owner", "", "north", "m", 280);
+        CharacterRegistry secondOwnerRegistry = new CharacterRegistry();
+        Character secondOwnerPerson = secondOwnerRegistry.create("Second Owner", "", "south", "f", 285);
+        java.util.List<CharacterRegistry> multiOwnerRegistries =
+                java.util.List.of(firstOwnerRegistry, secondOwnerRegistry);
+        PopulationComputeBridge.Captured multiOwnerCapture = PopulationComputeBridge.capture(
+                "population-multi-owner-test", 301, 1, multiOwnerRegistries);
+        java.util.List<Object> multiOwnerPeople = new java.util.ArrayList<>();
+        for (Character person : java.util.List.of(firstOwnerPerson, secondOwnerPerson)) {
+            java.util.Map<String,Object> result = new java.util.LinkedHashMap<>();
+            result.put("id", person.globalId);
+            result.put("needs", java.util.Map.of());
+            result.put("intent", "idle");
+            int age = 301 - person.birthYear;
+            result.put("age_years", age);
+            result.put("life_stage", age < 6 ? "infant" : age < 13 ? "child" : age < 18 ? "adolescent" : age < 60 ? "adult" : "elder");
+            result.put("simulated_days", "1");
+            result.put("last_simulated_year", 301);
+            result.put("world_day", "0");
+            multiOwnerPeople.add(result);
+        }
+        java.util.Map<String,Object> multiOwnerRoot = new java.util.LinkedHashMap<>();
+        multiOwnerRoot.put("schema_version", 1);
+        multiOwnerRoot.put("world_id", "population-multi-owner-test");
+        multiOwnerRoot.put("year", 301);
+        multiOwnerRoot.put("elapsed_days", 1);
+        multiOwnerRoot.put("world_day", "0");
+        multiOwnerRoot.put("characters", multiOwnerPeople);
+        ok(PopulationComputeBridge.apply(multiOwnerCapture,
+                        dev.worldforge.mod.Json.write(multiOwnerRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        multiOwnerRegistries)
+                        && Long.parseLong(String.valueOf(firstOwnerPerson.props.get("population.simulated_days"))) == 1
+                        && Long.parseLong(String.valueOf(secondOwnerPerson.props.get("population.simulated_days"))) == 1,
+                "cached owner index applies sorted multi-registry results to the correct canonical registries");
+
         PopulationComputeBridge.Captured staleCapture = PopulationComputeBridge.capture(
                 "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
         PopulationSimulation.setNeed(bridgeChild, Need.HUNGER, 9);
