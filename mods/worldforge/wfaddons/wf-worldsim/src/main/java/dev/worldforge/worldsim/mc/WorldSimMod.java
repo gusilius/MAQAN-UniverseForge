@@ -449,6 +449,7 @@ public final class WorldSimMod {
         try {
             long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
+            if (PROFILER.gauge("worldsim.geography.pending") > 0) return;
             if (!hasObservedGeography(snapshot)) {
                 PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 1);
                 return;
@@ -950,9 +951,17 @@ public final class WorldSimMod {
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
+        boolean imageGeographyPending = false;
         for (EmergenceSource source : sources) {
-            if (source.map != null) geography.add(GSON.toJsonTree(MapGeography.describe(source.map)));
+            if (source.map == null) continue;
+            Map<String, Object> prepared = MapGeography.snapshotIfReady(source.map);
+            if (prepared == null) {
+                imageGeographyPending = true;
+                continue;
+            }
+            geography.add(GSON.toJsonTree(prepared));
         }
+        PROFILER.setGauge("worldsim.geography.pending", imageGeographyPending ? 1 : 0);
         // Every loaded vanilla-like dimension contributes its own observed geography.
         for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
         // WorldSim must never consume sovereignty or political borders from an image map.

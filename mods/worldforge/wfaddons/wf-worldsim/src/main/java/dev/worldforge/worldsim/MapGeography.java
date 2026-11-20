@@ -8,6 +8,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Deterministic natural-geography evidence extracted from a WorldForge map package.
@@ -20,8 +25,50 @@ public final class MapGeography {
     private static final int MIN_SAMPLE_BUDGET = 4_096;
     private static final int MAX_SAMPLE_BUDGET = 65_536;
     private static final String SAMPLE_BUDGET_PROPERTY = "worldforge.worldsim.map_sample_budget";
+    /**
+     * Raster inspection can take seconds on a continental image. It must never run on the
+     * Minecraft server thread. A single daemon worker and a tiny bounded queue prevent
+     * background CPU/memory spikes when several maps are loaded together.
+     */
+    private static final ThreadPoolExecutor GEOLOGY_WORKER = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(4), task -> {
+                Thread thread = new Thread(task, "WorldForge-Geography");
+                thread.setDaemon(true);
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
+    private static final Map<MapData, CompletableFuture<Map<String, Object>>> PENDING =
+            new WeakHashMap<>();
 
     private MapGeography() { }
+
+    /**
+     * Schedules expensive image sampling once and returns only completed immutable data.
+     * A null result means the simulation frame should wait; it never blocks the server tick.
+     */
+    public static Map<String, Object> snapshotIfReady(MapData map) {
+        if (map == null) return null;
+        CompletableFuture<Map<String, Object>> future;
+        synchronized (PENDING) {
+            future = PENDING.get(map);
+            if (future == null) {
+                try {
+                    future = CompletableFuture.supplyAsync(() -> describe(map), GEOLOGY_WORKER);
+                    PENDING.put(map, future);
+                } catch (java.util.concurrent.RejectedExecutionException saturated) {
+                    return null;
+                }
+            }
+        }
+        if (!future.isDone()) return null;
+        try {
+            return future.join();
+        } catch (java.util.concurrent.CompletionException failure) {
+            synchronized (PENDING) { PENDING.remove(map, future); }
+            throw new IllegalStateException("Unable to prepare geography snapshot for map " + map.name,
+                    failure.getCause() == null ? failure : failure.getCause());
+        }
+    }
 
     /**
      * Image-backed worlds may be much larger than the original prototype maps.
