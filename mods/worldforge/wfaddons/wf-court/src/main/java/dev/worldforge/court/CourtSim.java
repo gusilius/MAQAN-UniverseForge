@@ -254,9 +254,10 @@ public final class CourtSim {
         Random r = rnd("child", father.id.hashCode() + mother.id.hashCode() + day);
         NameBank.Pool pool = names.pool(names.culture(father.culture));
         boolean m = r.nextBoolean();
-        List<String> l = m ? pool.male : pool.female;
-        if (l.isEmpty()) return;
-        Character kid = reg.addChild(father, mother, l.get(r.nextInt(l.size())), m ? "m" : "f", year());
+        List<String> l = pool == null ? List.of() : (m ? pool.male : pool.female);
+        String childName = l.isEmpty() ? "Child of " + mother.name + " and " + father.name
+                : l.get(r.nextInt(l.size()));
+        Character kid = reg.addChild(father, mother, childName, m ? "m" : "f", year());
         // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
         // Character lifecycle event, regardless of which domain clock reaches the year first.
         FamilyPlanning.complete(mother, father, year(), kid.id);
