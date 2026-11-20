@@ -19,6 +19,50 @@ public final class FamilyPlanning {
                 && number(mother.props.get(PREFIX + "due_day"), -1L) >= 0L;
     }
 
+    public static boolean engagedTo(Character first, Character second) {
+        return first != null && second != null
+                && second.id.equals(first.props.get("family.engaged_to"))
+                && first.id.equals(second.props.get("family.engaged_to"));
+    }
+
+    /** Creates a mutual, persisted betrothal; dating alone never silently becomes marriage. */
+    public static boolean engage(Character first, Character second, int year) {
+        if (first == null || second == null || first == second || !first.alive || !second.alive
+                || !first.spouse.isBlank() || !second.spouse.isBlank()) return false;
+        if (engagedTo(first, second)) return true;
+        Object firstTarget = first.props.get("family.engaged_to");
+        Object secondTarget = second.props.get("family.engaged_to");
+        if (firstTarget instanceof String s && !s.isBlank()
+                || secondTarget instanceof String s && !s.isBlank()) return false;
+        first.props.put("family.engaged_to", second.id);
+        second.props.put("family.engaged_to", first.id);
+        first.props.put("family.engagement_year", year);
+        second.props.put("family.engagement_year", year);
+        first.props.put("family.last_event", "engaged:" + second.id);
+        second.props.put("family.last_event", "engaged:" + first.id);
+        return true;
+    }
+
+    public static void cancelEngagement(Character first, Character second, int year, String reason) {
+        if (first == null || second == null || !engagedTo(first, second)) return;
+        first.props.remove("family.engaged_to");
+        second.props.remove("family.engaged_to");
+        first.props.remove("family.engagement_year");
+        second.props.remove("family.engagement_year");
+        first.props.put("family.engagement_ended_year", year);
+        second.props.put("family.engagement_ended_year", year);
+        first.props.put("family.last_event", "engagement-ended:" + second.id + ":" + reason);
+        second.props.put("family.last_event", "engagement-ended:" + first.id + ":" + reason);
+    }
+
+    public static void completeMarriage(Character first, Character second) {
+        if (first == null || second == null) return;
+        for (String key : new String[]{"family.engaged_to", "family.engagement_year"}) {
+            first.props.remove(key);
+            second.props.remove(key);
+        }
+    }
+
     /** Annual conception opportunity. Base probability is deliberately low. */
     public static boolean tryConceive(Character mother, Character father, int year,
                                       long worldDay, long worldSeed) {
