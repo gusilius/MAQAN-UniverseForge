@@ -33,7 +33,11 @@ public class TradeTest {
                 return realm.equals("field") ? List.of("peak", "port") : List.of("field");
             }
         };
-        for (String realm : List.of("field", "peak", "port")) cacheProbe.market(realm).autoTrade = true;
+        for (String realm : List.of("field", "peak", "port")) {
+            Trade.Market market = new Trade.Market();
+            market.autoTrade = true;
+            cacheProbe.markets.put(realm, market);
+        }
         cacheProbe.tick(1, List.of("field", "peak", "port"));
         ok(raceProfileReads[0] == 3,
                 "trade day snapshots race census once per realm despite per-good and route lookups: " + raceProfileReads[0]);
