@@ -168,19 +168,72 @@ pub fn evaluate(
 }
 
 
-/// Adapter for the canonical WorldSnapshot model. It uses existing Character
-/// trait/attribute data and SocialRelation records; it does not create a second
-/// identity registry or scan all possible character pairs. Only endpoints in
-/// the budgeted relationship slice are projected into temporary profiles.
-pub fn evaluate_world_snapshot(
+/// Reusable borrowed index over the canonical Character collection.
+/// Build once per immutable snapshot and reuse for many bounded social batches.
+/// It stores references, not cloned Characters or duplicate identity records.
+pub struct CharacterProfileIndex<'a> {
+    by_id: HashMap<&'a str, &'a crate::Character>,
+}
+
+impl<'a> CharacterProfileIndex<'a> {
+    pub fn new(characters: &'a [crate::Character]) -> Result<Self, Error> {
+        let mut by_id = HashMap::with_capacity(characters.len());
+        for character in characters {
+            if character.id.trim().is_empty() { return Err(Error::EmptyId); }
+            if by_id.insert(character.id.as_str(), character).is_some() {
+                return Err(Error::DuplicateProfile(character.id.clone()));
+            }
+        }
+        Ok(Self { by_id })
+    }
+
+    pub fn len(&self) -> usize { self.by_id.len() }
+    pub fn is_empty(&self) -> bool { self.by_id.is_empty() }
+
+    fn project(&self, id: &str) -> Option<Profile> {
+        let character = *self.by_id.get(id)?;
+        if !character.alive { return None; }
+        Some(Profile {
+            id: character.id.clone(),
+            race_id: character.race_id.clone(),
+            culture_id: character.culture_id.clone(),
+            traits: character.trait_ids.iter().cloned().collect(),
+            attributes: character.attributes.iter()
+                .map(|(key, value)| (key.clone(), (*value).clamp(i16::MIN as i32, i16::MAX as i32) as i16))
+                .collect(),
+        })
+    }
+}
+
+/// Fair bounded cursor. Advancing the cursor prevents a fixed prefix of the
+/// relationship list from monopolizing every simulation batch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SocialCursor {
+    next_relation: usize,
+}
+
+impl SocialCursor {
+    pub fn position(&self) -> usize { self.next_relation }
+    pub fn reset(&mut self) { self.next_relation = 0; }
+}
+
+/// Evaluates at most budget relationships using a reusable Character index.
+/// Cost per batch is O(budget + number of distinct endpoints), not O(population).
+pub fn evaluate_indexed_snapshot(
     snapshot: &crate::WorldSnapshot,
+    index: &CharacterProfileIndex<'_>,
     catalog: &Catalog,
+    cursor: &mut SocialCursor,
     budget: usize,
 ) -> Result<Vec<Outcome>, Error> {
-    if budget == 0 { return Ok(Vec::new()); }
-    let mut contacts = Vec::with_capacity(budget.min(snapshot.social_relations.len()));
-    let mut required_ids = BTreeSet::new();
-    for relation in snapshot.social_relations.iter().take(budget) {
+    let total = snapshot.social_relations.len();
+    if budget == 0 || total == 0 { return Ok(Vec::new()); }
+    let count = budget.min(total);
+    let start = cursor.next_relation % total;
+    let mut contacts = Vec::with_capacity(count);
+    let mut profiles_by_id: HashMap<String, Profile> = HashMap::with_capacity(count.saturating_mul(2));
+    for offset in 0..count {
+        let relation = &snapshot.social_relations[(start + offset) % total];
         let context = if relation.married { "marriage" }
             else if relation.dating { "courtship" }
             else if relation.employed { "work" }
@@ -189,27 +242,32 @@ pub fn evaluate_world_snapshot(
             a: relation.character_a.clone(),
             b: relation.character_b.clone(),
             context: context.into(),
-            relationship: relation.relationship.saturating_add(relation.love).clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            relationship: relation.relationship.saturating_add(relation.love)
+                .clamp(i16::MIN as i32, i16::MAX as i32) as i16,
             last_contact_tick: relation.last_contact_day,
         });
-        required_ids.insert(relation.character_a.as_str());
-        required_ids.insert(relation.character_b.as_str());
+        for id in [&relation.character_a, &relation.character_b] {
+            if !profiles_by_id.contains_key(id.as_str()) {
+                if let Some(profile) = index.project(id) {
+                    profiles_by_id.insert(id.clone(), profile);
+                }
+            }
+        }
     }
-    if contacts.is_empty() { return Ok(Vec::new()); }
-    let mut profiles = Vec::with_capacity(required_ids.len());
-    for character in &snapshot.characters {
-        if !character.alive || !required_ids.contains(character.id.as_str()) { continue; }
-        profiles.push(Profile {
-            id: character.id.clone(),
-            race_id: character.race_id.clone(),
-            culture_id: character.culture_id.clone(),
-            traits: character.trait_ids.iter().cloned().collect(),
-            attributes: character.attributes.iter()
-                .map(|(key, value)| (key.clone(), (*value).clamp(i16::MIN as i32, i16::MAX as i32) as i16))
-                .collect(),
-        });
-    }
+    cursor.next_relation = (start + count) % total;
+    let profiles: Vec<Profile> = profiles_by_id.into_values().collect();
     evaluate(&profiles, &contacts, catalog, snapshot.seed, snapshot.day, budget)
+}
+
+/// Convenience adapter for one-off use. Repeated callers should construct
+/// CharacterProfileIndex once and use evaluate_indexed_snapshot instead.
+pub fn evaluate_world_snapshot(
+    snapshot: &crate::WorldSnapshot,
+    catalog: &Catalog,
+    budget: usize,
+) -> Result<Vec<Outcome>, Error> {
+    let index = CharacterProfileIndex::new(&snapshot.characters)?;
+    evaluate_indexed_snapshot(snapshot, &index, catalog, &mut SocialCursor::default(), budget)
 }
 
 #[cfg(test)]
@@ -345,6 +403,39 @@ mod tests {
             positive_threshold: 1, negative_threshold: -1, ..Default::default() };
         let out = evaluate(&[a,b], &[contact("a", "b", "talk")], &catalog, 1, 1, 1).unwrap();
         assert_eq!(out[0].affinity_delta, 0);
+    }
+
+
+    #[test]
+    fn reusable_index_and_cursor_process_all_relationships_without_starvation() {
+        use crate::{Character, SocialRelation, WorldSnapshot};
+        let chars = (0..6).map(|i| Character { id: format!("p{i}"), realm_id: "r".into(), alive: true, ..Default::default() }).collect::<Vec<_>>();
+        let relations = (0..6).map(|i| SocialRelation { character_a: format!("p{i}"),
+            character_b: format!("p{}", (i+1)%6), relationship: 0, love: 0,
+            married: false, dating: false, employed: false, last_contact_day: 0 }).collect();
+        let snapshot = WorldSnapshot { world_id: "w".into(), seed: 1, day: 1, realms: vec![],
+            titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![],
+            settlements: vec![], characters: chars, workforce: vec![], capabilities: vec![],
+            catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![],
+            wars: vec![], armies: vec![], social_relations: relations, named_entities: vec![], geography: vec![] };
+        let index = CharacterProfileIndex::new(&snapshot.characters).unwrap();
+        assert_eq!(index.len(), 6);
+        let mut cursor = SocialCursor::default();
+        let first = evaluate_indexed_snapshot(&snapshot, &index, &mut Catalog::default(), &mut cursor, 2).unwrap();
+        let second = evaluate_indexed_snapshot(&snapshot, &index, &mut Catalog::default(), &mut cursor, 2).unwrap();
+        let third = evaluate_indexed_snapshot(&snapshot, &index, &mut Catalog::default(), &mut cursor, 2).unwrap();
+        assert_eq!(first.len()+second.len()+third.len(), 6);
+        assert_eq!(cursor.position(), 0);
+    }
+
+    #[test]
+    fn reusable_index_rejects_duplicate_canonical_ids() {
+        use crate::Character;
+        let chars = vec![
+            Character { id: "same".into(), ..Default::default() },
+            Character { id: "same".into(), ..Default::default() },
+        ];
+        assert!(matches!(CharacterProfileIndex::new(&chars), Err(Error::DuplicateProfile(_))));
     }
 
 }
