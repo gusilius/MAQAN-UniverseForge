@@ -185,11 +185,28 @@ public class WorldForgeMod {
             try {
                 Files.createDirectories(file.getParent());
                 Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-                try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-                    writtenVersion = ledger.writeJsonVersioned(writer);
+                try {
+                    // Force the complete legacy snapshot to stable storage before publishing it.
+                    // A non-atomic fallback could expose a truncated canonical ledger on crash.
+                    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(temp,
+                            java.nio.file.StandardOpenOption.CREATE,
+                            java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                            java.nio.file.StandardOpenOption.WRITE);
+                         BufferedWriter writer = new BufferedWriter(java.nio.channels.Channels.newWriter(
+                                 channel, StandardCharsets.UTF_8))) {
+                        writtenVersion = ledger.writeJsonVersioned(writer);
+                        writer.flush();
+                        channel.force(true);
+                    }
+                    Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.deleteIfExists(temp);
+                    throw new IOException("Atomic treasury snapshot replacement is not supported by this filesystem", unsupported);
+                } catch (IOException failure) {
+                    try { Files.deleteIfExists(temp); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
                 }
-                try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
-                catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
                 persistedTreasuryVersion = writtenVersion;
                 long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
                 int accounts = ledger.accountCount(), entries = ledger.journalSize();
