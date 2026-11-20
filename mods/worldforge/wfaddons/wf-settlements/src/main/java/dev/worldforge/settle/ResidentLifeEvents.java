@@ -140,7 +140,8 @@ public final class ResidentLifeEvents {
                 state.session = null;
                 state.stageRefresh = null;
             }
-            return advanceStageRefresh(registry, state, session.year, residentBudget, tickToken);
+            // Stage catch-up runs on the next server tick; do not spend a second budget in this one.
+            return false;
         }
         return false;
     }
@@ -149,7 +150,7 @@ public final class ResidentLifeEvents {
                                                 int year, int residentBudget, long tickToken) {
         if (registry.size() <= state.stageSize) return true;
         StageRefresh refresh = state.stageRefresh;
-        if (refresh == null || refresh.year != year || refresh.end < registry.size()) {
+        if (refresh == null || refresh.year != year) {
             refresh = new StageRefresh(registry, year, state.stageSize, registry.size());
             state.stageRefresh = refresh;
         }
