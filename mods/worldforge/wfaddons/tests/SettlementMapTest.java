@@ -122,7 +122,12 @@ public final class SettlementMapTest {
         Settlement periodicEconomy = new Settlement("periodic_economy_test", "Periodic economy test", defs);
         periodicEconomy.setCanonicalPopulation(100);
         periodicEconomy.add(Defs.SILVER, 1000);
-        long journalBeforeAccrual = TreasuryService.current().journalSize();
+        periodicEconomy.add("wood", 100);
+        periodicEconomy.add("planks", 100);
+        Building periodicMarket = periodicEconomy.place("market", 0, 0);
+        periodicMarket.state = Building.State.DONE;
+        long journalBeforeAccrual = TreasuryService.current()
+                .entriesForAccount("settlement:periodic_economy_test").size();
         periodicEconomy.tick(60); // one world day in the settlement clock
         ok(TreasuryService.current().journalSize() == journalBeforeAccrual
                         && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1000) < 1e-8,
@@ -135,9 +140,9 @@ public final class SettlementMapTest {
                         && periodicEntries.stream().filter(entry -> entry.category().equals("population-tax")).count() == 1
                         && periodicEntries.stream().filter(entry -> entry.category().startsWith("building-upkeep:")).count() == 1,
                 "one period produces one tax receipt and one aggregate upkeep receipt per settlement category");
-        ok(periodicReloaded.amount(Defs.SILVER) < 1000
-                        && periodicReloaded.amount(Defs.SILVER) > 0,
-                "periodic postings reconcile reserved operating expenses against the persisted treasury balance");
+        ok(periodicReloaded.amount(Defs.SILVER) > 1000
+                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1870) < 1e-6,
+                "periodic tax credits and building upkeep reconcile to the exact persisted balance after reload");
 
         TreasuryService.replace(new TreasuryLedger());
         Settlement funded = new Settlement("treasury_settlement_test", "Treasury settlement test", defs);
