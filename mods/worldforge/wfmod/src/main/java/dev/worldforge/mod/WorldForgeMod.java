@@ -195,6 +195,9 @@ public class WorldForgeMod {
                 int accounts = ledger.accountCount(), entries = ledger.journalSize();
                 LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
                         accounts, entries, writtenVersion, elapsedMillis);
+                List<TreasuryLedger.JournalStat> topSources = ledger.topJournalStats(8);
+                if (!topSources.isEmpty()) LOGGER.info("WorldForge treasury: journal source totals={}",
+                        topSources.stream().map(stat -> stat.kind() + "/" + stat.category() + "=" + stat.entries()).toList());
                 if (elapsedMillis >= 1000)
                     LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
                 return true;

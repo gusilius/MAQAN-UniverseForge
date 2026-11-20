@@ -24,6 +24,8 @@ public final class TreasuryLedger {
     public record Entry(long sequence, String transactionId, String accountId, String counterpartyId,
                         String currency, double amount, boolean credit, Kind kind, String category,
                         String reference, long worldMinute, double balanceAfter, String memo) { }
+    /** Bounded-cardinality aggregate for diagnosing which economic domain grows the audit journal. */
+    public record JournalStat(Kind kind, String category, long entries) { }
 
     private final Map<String, Account> accounts = new LinkedHashMap<>();
     private final List<Entry> journal = new ArrayList<>();
@@ -36,6 +38,7 @@ public final class TreasuryLedger {
     private final Map<String, List<Entry>> entriesByAccount = new HashMap<>();
     private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
     private final Map<String, Double> debitTotals = new HashMap<>();
+    private final Map<String, Long> journalCountsByKindCategory = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private long mutationVersion;
@@ -147,8 +150,30 @@ public final class TreasuryLedger {
         return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(category);
     }
 
+    private static String categoryGroup(String category) {
+        String value = clean(category);
+        int separator = value.indexOf(':');
+        return separator > 0 ? value.substring(0, separator) : value;
+    }
+
+    /** Top journal sources are maintained on append/load; diagnostics never rescan millions of rows. */
+    public synchronized List<JournalStat> topJournalStats(int limit) {
+        int bounded = Math.max(0, Math.min(32, limit));
+        return journalCountsByKindCategory.entrySet().stream()
+                .map(entry -> {
+                    int separator = entry.getKey().indexOf(0);
+                    Kind kind = Kind.valueOf(entry.getKey().substring(0, separator));
+                    String category = entry.getKey().substring(separator + 1);
+                    return new JournalStat(kind, category, entry.getValue());
+                })
+                .sorted(Comparator.comparingLong(JournalStat::entries).reversed()
+                        .thenComparing(stat -> stat.kind().name()).thenComparing(JournalStat::category))
+                .limit(bounded).toList();
+    }
+
     private void indexEntry(Entry entry) {
         entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>()).add(entry);
+        journalCountsByKindCategory.merge(entry.kind().name() + (char) 0 + categoryGroup(entry.category()), 1L, Long::sum);
         entriesByReference.computeIfAbsent(referenceKey(entry.accountId(), entry.kind(), entry.reference()),
                 ignored -> new ArrayList<>()).add(entry);
         accountsWithEntries.add(entry.accountId());

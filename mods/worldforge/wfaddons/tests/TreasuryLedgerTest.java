@@ -223,6 +223,20 @@ public final class TreasuryLedgerTest {
                         "army-field-rations"), 3),
                 "debit category aggregates are rebuilt from the durable journal");
 
+        TreasuryLedger categoryStats = new TreasuryLedger();
+        categoryStats.open("stats:account", "stats:account", "silver", 100);
+        categoryStats.deposit("stats:account", 1, TreasuryLedger.Kind.UPKEEP,
+                "building-upkeep:17", "stats:one", 1, "building");
+        categoryStats.deposit("stats:account", 1, TreasuryLedger.Kind.UPKEEP,
+                "building-upkeep:18", "stats:two", 2, "building");
+        categoryStats.deposit("stats:account", 1, TreasuryLedger.Kind.TAX,
+                "population-tax", "stats:three", 3, "tax");
+        ok(categoryStats.topJournalStats(2).get(0).kind() == TreasuryLedger.Kind.UPKEEP
+                        && categoryStats.topJournalStats(2).get(0).category().equals("building-upkeep")
+                        && categoryStats.topJournalStats(2).get(0).entries() == 2
+                        && TreasuryLedger.fromJson(categoryStats.toJson()).topJournalStats(1).get(0).entries() == 2,
+                "journal source aggregates group per-building receipts and rebuild on restore without rescanning");
+
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)
                 && restored.journal().size()==ledger.journal().size(),
