@@ -27,12 +27,14 @@ import java.util.function.Consumer;
 public final class TreasuryJournalArchive {
     private static final Pattern FILE_NAME = Pattern.compile("segment-(\\d{20})-(\\d{20})\\.json");
     private final Path directory;
+    private final long firstSequence;
     private long nextSequence;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
         if (directory == null || firstExpectedSequence < 1)
             throw new IllegalArgumentException("Archive directory and positive starting sequence are required");
         this.directory = directory;
+        this.firstSequence = firstExpectedSequence;
         Files.createDirectories(directory);
         this.nextSequence = verifyExisting(firstExpectedSequence);
     }
@@ -123,14 +125,45 @@ public final class TreasuryJournalArchive {
         }
     }
 
-    /** Streams verified entries one segment at a time; callers need not retain the whole archive. */
+    /** Streams the complete verified archive one segment at a time. */
     public synchronized void forEachEntry(Consumer<TreasuryLedger.Entry> consumer) throws IOException {
+        forEachEntryFrom(firstSequence, consumer);
+    }
+
+    /**
+     * Streams the archive suffix beginning at an exact global sequence.
+     * No whole-history list is materialized; every segment and every sequence boundary is checked.
+     */
+    public synchronized void forEachEntryFrom(long requestedFirstSequence,
+                                              Consumer<TreasuryLedger.Entry> consumer) throws IOException {
         if (consumer == null) throw new IllegalArgumentException("Entry consumer is required");
+        if (requestedFirstSequence < firstSequence || requestedFirstSequence > nextSequence)
+            throw new IOException("Requested treasury archive sequence is outside the retained range");
+        long expected = requestedFirstSequence;
+        if (requestedFirstSequence == nextSequence) return;
         for (Path path : segmentFiles()) {
-            TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
-                    Files.readString(path, StandardCharsets.UTF_8));
-            for (TreasuryLedger.Entry entry : decoded.entries()) consumer.accept(entry);
+            TreasuryJournalSegment.Decoded decoded;
+            try {
+                decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+            } catch (RuntimeException invalid) {
+                throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
+            }
+            if (decoded.lastSequence() < requestedFirstSequence) continue;
+            if (decoded.firstSequence() > expected)
+                throw new IOException("Treasury archive suffix has a sequence gap at " + expected);
+            for (TreasuryLedger.Entry entry : decoded.entries()) {
+                if (entry.sequence() < requestedFirstSequence) continue;
+                if (entry.sequence() != expected)
+                    throw new IOException("Treasury archive suffix expected sequence " + expected
+                            + " but found " + entry.sequence());
+                consumer.accept(entry);
+                expected++;
+            }
+            if (expected == nextSequence) break;
         }
+        if (expected != nextSequence)
+            throw new IOException("Treasury archive suffix ended at " + (expected - 1)
+                    + " but archive requires " + (nextSequence - 1));
     }
 
     public synchronized List<TreasuryLedger.Entry> readAll() throws IOException {

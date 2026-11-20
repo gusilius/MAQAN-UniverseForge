@@ -499,6 +499,13 @@ public final class TreasuryLedgerTest {
             ok(reopenedArchive.nextSequence() == 4
                             && reopenedArchive.readAll().equals(segmentSource.journal()),
                     "treasury archive restart verifies checksums and restores the next expected sequence");
+            java.util.List<TreasuryLedger.Entry> suffixEntries = new java.util.ArrayList<>();
+            reopenedArchive.forEachEntryFrom(2, suffixEntries::add);
+            ok(suffixEntries.equals(segmentSource.journal().subList(1, segmentSource.journalSize())),
+                    "treasury archive streams an exact suffix from a checkpoint without materializing its prefix");
+            java.util.List<TreasuryLedger.Entry> emptySuffix = new java.util.ArrayList<>();
+            reopenedArchive.forEachEntryFrom(reopenedArchive.nextSequence(), emptySuffix::add);
+            ok(emptySuffix.isEmpty(), "treasury archive accepts a suffix starting immediately after its last entry");
             boolean gapRejected = false;
             try { reopenedArchive.append(List.of(new TreasuryLedger.Entry(5, "tx:gap", "x", "y",
                     "silver", 1, false, TreasuryLedger.Kind.TRADE, "test", "gap", 1, 0, ""))); }
