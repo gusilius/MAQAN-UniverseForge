@@ -63,19 +63,13 @@ public final class ResidentLifeEvents {
         for (Character person : people) {
             if (!person.alive || year <= number(person.props.get("social.last_family_year"), 0)) continue;
             person.props.put("social.last_family_year", year);
-            Character spouse = person.spouse == null || person.spouse.isBlank() ? null : registry.get(person.spouse);
-            if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)) continue;
-            Character mother = "f".equalsIgnoreCase(person.gender) ? person : "f".equalsIgnoreCase(spouse.gender) ? spouse : null;
-            Character father = mother == person ? spouse : mother == spouse ? person : null;
-            if (mother == null || father == null) continue;
+            if (!"f".equalsIgnoreCase(person.gender)) continue;
+            Character mother = person;
             long worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
-            String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
-            if (dueFatherId.isBlank()) {
-                FamilyPlanning.tryConceive(mother, father, year, worldDay,
-                        Objects.hash(mother.globalId, father.globalId));
-                continue;
-            }
-            Character biologicalFather = registry.get(dueFatherId);
+            if (FamilyPlanning.isPregnant(mother)) {
+                String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
+                if (dueFatherId.isBlank()) continue;
+                Character biologicalFather = registry.get(dueFatherId);
             if (biologicalFather == null || !biologicalFather.alive) {
                 FamilyPlanning.cancel(mother, biologicalFather, "father-unavailable", year);
                 continue;
@@ -102,6 +96,12 @@ public final class ResidentLifeEvents {
             ResidentSocial.adjust(child, biologicalFather.globalId, 35);
             ResidentSocial.adjust(child, mother.globalId, 35);
             FamilyPlanning.complete(mother, biologicalFather, year, child.id);
+                continue;
+            }
+            Character spouse = mother.spouse == null || mother.spouse.isBlank() ? null : registry.get(mother.spouse);
+            if (spouse == null || !spouse.alive || !mother.id.equals(spouse.spouse)) continue;
+            FamilyPlanning.tryConceive(mother, spouse, year, worldDay,
+                    Objects.hash(mother.globalId, spouse.globalId));
         }
         advanceChildhood(registry, people, year);
 
