@@ -486,6 +486,69 @@ mod tests {
     }
 
     #[test]
+    fn indexed_hot_path_matches_profile_evaluator_for_traits_and_racial_attitudes() {
+        use crate::{Character, SocialRelation, WorldSnapshot};
+        let mut a = Character { id: "a".into(), realm_id: "r".into(), alive: true,
+            race_id: "folk_a".into(), culture_id: "shared".into(), ..Default::default() };
+        a.trait_ids.push("prejudiced".into());
+        a.attributes.insert("empathy".into(), 50);
+        let b = Character { id: "b".into(), realm_id: "r".into(), alive: true,
+            race_id: "folk_b".into(), culture_id: "shared".into(), ..Default::default() };
+        let snapshot = WorldSnapshot { world_id: "w".into(), seed: 71, day: 99, realms: vec![],
+            titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![],
+            settlements: vec![], characters: vec![a.clone(), b.clone()], workforce: vec![],
+            capabilities: vec![], catalog_entries: vec![], diplomatic_relations: vec![],
+            vassal_contracts: vec![], wars: vec![], armies: vec![],
+            social_relations: vec![SocialRelation { character_a: "a".into(), character_b: "b".into(),
+                relationship: 31, love: 22, married: false, dating: true, employed: false, last_contact_day: 80 }],
+            named_entities: vec![], geography: vec![] };
+        let catalog = Catalog {
+            weights: BTreeMap::from([("prejudiced".into(), -2), ("empathy".into(), 20)]),
+            context_base: BTreeMap::from([("courtship".into(), 7)]),
+            intergroup_attitudes: BTreeMap::from([("folk_a".into(), BTreeMap::from([("folk_b".into(), -60)]))]),
+            bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
+            shared_culture_affinity: 15, positive_threshold: 1, negative_threshold: -1,
+        };
+        let profile_a = Profile { id: a.id.clone(), race_id: a.race_id.clone(), culture_id: a.culture_id.clone(),
+            traits: BTreeSet::from(["prejudiced".into()]), attributes: BTreeMap::from([("empathy".into(), 50)]) };
+        let profile_b = Profile { id: b.id.clone(), race_id: b.race_id.clone(), culture_id: b.culture_id.clone(),
+            traits: BTreeSet::new(), attributes: BTreeMap::new() };
+        let contact = Contact { a: "a".into(), b: "b".into(), context: "courtship".into(),
+            relationship: 53, last_contact_tick: 80 };
+        let expected = evaluate(&[profile_a, profile_b], &[contact], &catalog, 71, 99, 1).unwrap();
+        let index = CharacterProfileIndex::new(&snapshot.characters).unwrap();
+        let actual = evaluate_indexed_snapshot(&snapshot, &index, &catalog, &mut SocialCursor::default(), 1).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn indexed_batch_keeps_work_bounded_for_hundred_thousand_relationships() {
+        use crate::{Character, SocialRelation, WorldSnapshot};
+        const N: usize = 100_000;
+        let mut characters = Vec::with_capacity(N);
+        let mut relations = Vec::with_capacity(N);
+        for i in 0..N {
+            characters.push(Character { id: format!("p{i:06}"), realm_id: "r".into(), alive: true, ..Default::default() });
+            relations.push(SocialRelation { character_a: format!("p{i:06}"),
+                character_b: format!("p{:06}", (i + 1) % N), relationship: 0, love: 0,
+                married: false, dating: false, employed: false, last_contact_day: 0 });
+        }
+        let snapshot = WorldSnapshot { world_id: "stress".into(), seed: 3, day: 10, realms: vec![],
+            titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![],
+            settlements: vec![], characters, workforce: vec![], capabilities: vec![],
+            catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![],
+            wars: vec![], armies: vec![], social_relations: relations, named_entities: vec![], geography: vec![] };
+        let index = CharacterProfileIndex::new(&snapshot.characters).unwrap();
+        let mut cursor = SocialCursor::default();
+        let catalog = Catalog::default();
+        let first = evaluate_indexed_snapshot(&snapshot, &index, &catalog, &mut cursor, 256).unwrap();
+        let second = evaluate_indexed_snapshot(&snapshot, &index, &catalog, &mut cursor, 256).unwrap();
+        assert_eq!(first.len(), 256);
+        assert_eq!(second.len(), 256);
+        assert_eq!(cursor.position(), 512);
+    }
+
+    #[test]
     fn reusable_index_rejects_duplicate_canonical_ids() {
         use crate::Character;
         let chars = vec![
