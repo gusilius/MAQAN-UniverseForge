@@ -209,4 +209,46 @@ mod tests {
         let out = evaluate(&people, &[contact("a", "missing", "talk")], &Catalog::default(), 0, 0, 1).unwrap();
         assert!(out.is_empty());
     }
+
+    #[test]
+    fn canonical_snapshot_adapter_uses_traits_attributes_and_work_context() {
+        use crate::{Character, SocialRelation, WorldSnapshot};
+        let mut a = Character { id: "a".into(), realm_id: "r".into(), alive: true, ..Default::default() };
+        a.trait_ids.push("generous".into());
+        a.attributes.insert("empathy".into(), 100);
+        let mut b = Character { id: "b".into(), realm_id: "r".into(), alive: true, ..Default::default() };
+        b.trait_ids.push("generous".into());
+        let snapshot = WorldSnapshot {
+            world_id: "w".into(), seed: 9, day: 12, realms: vec![], titles: vec![],
+            government_definitions: vec![], realm_governments: vec![], borders: vec![],
+            settlements: vec![], characters: vec![a,b], workforce: vec![], capabilities: vec![],
+            catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![],
+            wars: vec![], armies: vec![],
+            social_relations: vec![SocialRelation { character_a: "a".into(), character_b: "b".into(),
+                relationship: 40, love: 10, married: false, dating: false, employed: true, last_contact_day: 8 }],
+            named_entities: vec![], geography: vec![],
+        };
+        let catalog = Catalog { weights: BTreeMap::from([("generous".into(), 20), ("empathy".into(), 20)]),
+            context_base: BTreeMap::from([("work".into(), 5)]), positive_threshold: 1, negative_threshold: -1 };
+        let outcomes = evaluate_world_snapshot(&snapshot, &catalog, 10).unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].context, "work");
+        assert_eq!(outcomes[0].affinity_delta, 1);
+    }
+
+    #[test]
+    fn snapshot_adapter_limits_relationships_before_processing() {
+        use crate::{Character, SocialRelation, WorldSnapshot};
+        let chars = (0..20).map(|i| Character { id: format!("p{i}"), realm_id: "r".into(), alive: true, ..Default::default() }).collect();
+        let relations = (0..20).map(|i| SocialRelation { character_a: format!("p{i}"), character_b: format!("p{}", i+1),
+            relationship: 0, love: 0, married: false, dating: false, employed: false, last_contact_day: 0 }).collect();
+        let snapshot = WorldSnapshot { world_id: "w".into(), seed: 1, day: 1, realms: vec![],
+            titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![],
+            settlements: vec![], characters: chars, workforce: vec![], capabilities: vec![],
+            catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![],
+            wars: vec![], armies: vec![], social_relations: relations, named_entities: vec![], geography: vec![] };
+        let out = evaluate_world_snapshot(&snapshot, &Catalog::default(), 3).unwrap();
+        assert_eq!(out.len(), 3);
+    }
+
 }
