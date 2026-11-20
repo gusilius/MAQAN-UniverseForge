@@ -217,7 +217,7 @@ public final class Colony {
         m.put("genesisProvisioningSpec", genesisProvisioningSpec);
         m.put("autonomousFoundingPopulation", autonomousFoundingPopulation);
         m.put("vanillaInfrastructureChunks", new ArrayList<>(vanillaInfrastructureChunks));
-        m.put("settlement", Json.parse(s.toJson()));
+        m.put("settlement", s.toMap());
         List<Object> l = new ArrayList<>();
         for (Map.Entry<Integer, Site> e : sites.entrySet()) {
             Site st = e.getValue();
