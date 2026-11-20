@@ -492,12 +492,11 @@ public final class WorldSimMod {
     /** Applies a completed immutable native frame on the authoritative Minecraft server thread only. */
     private boolean applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
         long day = result.ticket().revision();
-        JsonObject snapshot = GSON.fromJson(new String(result.snapshot(), StandardCharsets.UTF_8), JsonObject.class);
         JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
         JsonObject frame = GSON.fromJson(new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
         requireNativeSuccess(emergenceFrame, "emergence");
         requireNativeSuccess(frame, "decision");
-        if (snapshot == null || emergenceFrame == null || !emergenceFrame.has("state")
+        if (emergenceFrame == null || !emergenceFrame.has("state")
                 || !emergenceFrame.get("state").isJsonObject()) {
             throw new IllegalStateException("Native emergence engine returned an invalid state frame");
         }
