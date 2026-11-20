@@ -126,6 +126,8 @@ public final class SettlementMapTest {
         periodicEconomy.add("planks", 100);
         Building periodicMarket = periodicEconomy.place("market", 0, 0);
         periodicMarket.state = Building.State.DONE;
+        Building periodicTavern = periodicEconomy.place("tavern", 8, 0);
+        periodicTavern.state = Building.State.DONE;
         long journalBeforeAccrual = TreasuryService.current()
                 .entriesForAccount("settlement:periodic_economy_test").size();
         periodicEconomy.tick(60); // one world day in the settlement clock
@@ -138,10 +140,10 @@ public final class SettlementMapTest {
                 "settlement:periodic_economy_test");
         ok(periodicEntries.size() == journalBeforeAccrual + 2
                         && periodicEntries.stream().filter(entry -> entry.category().equals("population-tax")).count() == 1
-                        && periodicEntries.stream().filter(entry -> entry.category().startsWith("building-upkeep:")).count() == 1,
+                        && periodicEntries.stream().filter(entry -> entry.category().equals("building-upkeep")).count() == 1,
                 "one period produces one tax receipt and one aggregate upkeep receipt per settlement category");
         ok(periodicReloaded.amount(Defs.SILVER) > 1000
-                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1870) < 1e-6,
+                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1810) < 1e-6,
                 "periodic tax credits and building upkeep reconcile to the exact persisted balance after reload");
 
         TreasuryService.replace(new TreasuryLedger());

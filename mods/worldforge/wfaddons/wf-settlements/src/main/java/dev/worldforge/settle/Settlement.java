@@ -1806,7 +1806,8 @@ public final class Settlement {
             if (b.state != Building.State.DONE || b.paused || b.def.upkeep <= 0) continue;
             double c = b.def.upkeep / 60 * dt;
             if (amount(Defs.SILVER) + 1e-9 >= c) {
-                accruePeriodic(false, Defs.SILVER, c, "building-upkeep:" + b.uid);
+                // One settlement-period receipt for all operating buildings, not one receipt per building.
+                accruePeriodic(false, Defs.SILVER, c, "building-upkeep");
                 flow.record(time, Defs.SILVER, c, false);
             } else b.unpaid = true;
         }
