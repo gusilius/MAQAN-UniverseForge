@@ -562,6 +562,12 @@ public final class TreasuryLedgerTest {
                             && firstPage.get(0).sequence() == 1 && firstPage.get(1).sequence() == 2
                             && secondPage.get(0).sequence() == 3,
                     "treasury archive exposes bounded sequence pages without loading the full journal");
+            TreasuryJournalArchive.AccountPage accountPage = reopenedArchive.readAccountPage(
+                    "segment:source", 1, 1);
+            ok(accountPage.entries().size() == 1
+                            && accountPage.entries().get(0).accountId().equals("segment:source")
+                            && accountPage.nextSequence() > accountPage.entries().get(0).sequence(),
+                    "treasury archive pages account history by global cursor without a growing account index");
             boolean oversizedPageRejected = false;
             try { reopenedArchive.readPage(1, 4097); }
             catch (IllegalArgumentException expected) { oversizedPageRejected = true; }

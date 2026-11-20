@@ -167,6 +167,60 @@ public final class TreasuryJournalArchive {
                     + " but archive requires " + (nextSequence - 1));
     }
 
+    /** A bounded account-history page; nextSequence is the exclusive resume cursor. */
+    public record AccountPage(List<TreasuryLedger.Entry> entries, long nextSequence, boolean complete) {
+        public AccountPage {
+            entries = List.copyOf(entries);
+        }
+    }
+
+    /**
+     * Reads account history directly from immutable segments without constructing an
+     * account-sized in-memory index. The cursor advances over scanned global entries,
+     * not just matches, so callers can resume without rescanning earlier history.
+     */
+    public synchronized AccountPage readAccountPage(String accountId, long firstSequence,
+                                                     int maxEntries) throws IOException {
+        if (accountId == null || accountId.isBlank())
+            throw new IllegalArgumentException("Treasury account ID is required");
+        if (maxEntries < 1 || maxEntries > 4096)
+            throw new IllegalArgumentException("Treasury page size must be between 1 and 4096");
+        if (firstSequence < this.firstSequence || firstSequence > nextSequence)
+            throw new IOException("Requested treasury account page starts outside the retained archive");
+        List<TreasuryLedger.Entry> matches = new ArrayList<>(Math.min(maxEntries, 128));
+        long[] cursor = {firstSequence};
+        boolean[] full = {false};
+        if (firstSequence < nextSequence) {
+            for (Path path : segmentFiles()) {
+                TreasuryJournalSegment.Decoded decoded;
+                try {
+                    decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+                } catch (RuntimeException invalid) {
+                    throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
+                }
+                if (decoded.lastSequence() < cursor[0]) continue;
+                if (decoded.firstSequence() > cursor[0])
+                    throw new IOException("Treasury archive account page has a sequence gap at " + cursor[0]);
+                for (TreasuryLedger.Entry entry : decoded.entries()) {
+                    if (entry.sequence() < cursor[0]) continue;
+                    if (entry.sequence() != cursor[0])
+                        throw new IOException("Treasury archive account page expected sequence " + cursor[0]
+                                + " but found " + entry.sequence());
+                    cursor[0]++;
+                    if (accountId.equals(entry.accountId())) matches.add(entry);
+                    if (matches.size() == maxEntries) {
+                        full[0] = true;
+                        break;
+                    }
+                }
+                if (full[0] || cursor[0] == nextSequence) break;
+            }
+            if (!full[0] && cursor[0] != nextSequence)
+                throw new IOException("Treasury archive account page ended before the committed sequence");
+        }
+        return new AccountPage(matches, cursor[0], cursor[0] == nextSequence);
+    }
+
     /**
      * Reads a bounded journal page by global sequence. The returned list never exceeds
      * maxEntries; callers can request the next page using last.sequence() + 1.
