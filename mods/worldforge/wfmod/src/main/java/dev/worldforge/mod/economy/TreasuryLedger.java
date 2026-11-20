@@ -113,6 +113,17 @@ public final class TreasuryLedger {
     private static long minute(long v) { if(v<0) throw new IllegalArgumentException("worldMinute cannot be negative"); return v; }
     public synchronized String lastError() { return lastError; }
     public synchronized long mutationVersion() { return mutationVersion; }
+
+    /** Immutable state required to checkpoint account balances and crash-retry identity. */
+    synchronized TreasuryLedgerSnapshot.State checkpointState() {
+        List<TreasuryLedgerSnapshot.AccountState> accountStates = accounts.values().stream()
+                .map(a -> new TreasuryLedgerSnapshot.AccountState(a.id, a.ownerId, a.currency,
+                        a.balance, a.creditLimit, a.debt, a.bankrupt)).toList();
+        return new TreasuryLedgerSnapshot.State(sequence, transactionSequence, mutationVersion,
+                accountStates, Set.copyOf(postedReferences), Set.copyOf(postedDebits),
+                Set.copyOf(postedCredits), Set.copyOf(armyFieldRationDebitAccounts));
+    }
+
     public synchronized int accountCount() { return accounts.size(); }
     public synchronized int journalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }

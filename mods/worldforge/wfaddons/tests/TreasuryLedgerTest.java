@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryJournalArchive;
+import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
@@ -356,6 +357,31 @@ public final class TreasuryLedgerTest {
                         && TreasuryApi.spendOnce("legacy-positive", 5, "army-test", "army-spend-once", 10)
                         && close(TreasuryApi.netBalance("legacy-positive"), 20),
                 "idempotent military spending cannot debit twice");
+        TreasuryLedger checkpointLedger = new TreasuryLedger();
+        checkpointLedger.open("checkpoint:realm", "realm:checkpoint", "silver", 240);
+        checkpointLedger.setCreditLimit("checkpoint:realm", 80);
+        checkpointLedger.depositOnce("checkpoint:realm", 35, TreasuryLedger.Kind.TAX,
+                "realm-tax", "checkpoint-tax:year-4", 5760, "annual tax");
+        String checkpointJson = TreasuryLedgerSnapshot.capture(checkpointLedger);
+        TreasuryLedgerSnapshot.State checkpoint = TreasuryLedgerSnapshot.decode(checkpointJson);
+        ok(checkpoint.nextSequence() == 3 && checkpoint.accounts().size() == 1
+                        && close(checkpoint.accounts().get(0).balance(), 275)
+                        && close(checkpoint.accounts().get(0).creditLimit(), 80)
+                        && checkpoint.postedReferences().containsAll(checkpoint.postedCredits())
+                        && checkpoint.postedReferences().containsAll(checkpoint.postedDebits()),
+                "treasury checkpoint captures balances, limits, sequence and idempotency indexes");
+        boolean checkpointTamperRejected = false;
+        try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }
+        catch (IllegalArgumentException expected) { checkpointTamperRejected = expected.getMessage().contains("checksum"); }
+        ok(checkpointTamperRejected, "treasury checkpoint rejects altered payloads");
+        boolean inconsistentBankruptcyRejected = false;
+        try {
+            TreasuryLedgerSnapshot.encode(new TreasuryLedgerSnapshot.State(1, 1, 0,
+                    List.of(new TreasuryLedgerSnapshot.AccountState("bad", "bad", "silver",
+                            0, 10, 20, false)), Set.of(), Set.of(), Set.of(), Set.of()));
+        } catch (IllegalArgumentException expected) { inconsistentBankruptcyRejected = true; }
+        ok(inconsistentBankruptcyRejected, "treasury checkpoint rejects inconsistent account solvency flags");
+
         TreasuryLedger segmentSource = new TreasuryLedger();
         segmentSource.open("segment:source", "segment:source", "silver", 100);
         segmentSource.open("segment:target", "segment:target", "silver", 0);
