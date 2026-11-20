@@ -1690,7 +1690,8 @@ public class SettleMod {
         List<dev.worldforge.settle.Worker> workers = settlement.workers;
         int workerCount = workers.size();
         if (workerCount == 0) {
-            dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
+            dev.worldforge.settle.ResidentLifeEvents.advanceYearly(registry, settlement.year(), PeopleMod.NAMES,
+                    dev.worldforge.mod.MaqanPerformanceConfig.familyEventsResidentsPerTick(), ticks);
             return;
         }
         ResidentLifeIndex residentIndex = residentLifeIndex(colony, ticks);
@@ -1868,7 +1869,8 @@ public class SettleMod {
                 return LifeSimulation.Outcome.BLOCKED;
             });
         }
-        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
+        dev.worldforge.settle.ResidentLifeEvents.advanceYearly(registry, settlement.year(), PeopleMod.NAMES,
+                    dev.worldforge.mod.MaqanPerformanceConfig.familyEventsResidentsPerTick(), ticks);
     }
 
     private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,

@@ -183,13 +183,19 @@ public final class CharacterRegistry {
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
-        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }
+        refreshLifeStages(byId.values(), year);
     }
 
-    private void refreshLifeStagesBatched(int year) {
+    /** Refreshes only the supplied stable batch; safe for resumable server-tick processing. */
+    public void refreshLifeStages(Collection<Character> people, int year) {
+        if (people == null || people.isEmpty()) return;
+        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(people, year); }
+    }
+
+    private void refreshLifeStagesBatched(Collection<Character> people, int year) {
         boolean changed = false;
         boolean lifecyclePublished = false;
-        for (Character character : byId.values()) {
+        for (Character character : people) {
             if (!character.alive) continue;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
@@ -202,8 +208,6 @@ public final class CharacterRegistry {
             Object previousAge = character.props.put("population.age_years", age);
             if (!Objects.equals(previousAge, age)) changed = true;
         }
-        // publish() already advanced the lane for lifecycle changes; age-only refreshes
-        // still invalidate snapshots without counting the same character transition twice.
         if (changed && !lifecyclePublished) recordDomainMutation();
     }
 
