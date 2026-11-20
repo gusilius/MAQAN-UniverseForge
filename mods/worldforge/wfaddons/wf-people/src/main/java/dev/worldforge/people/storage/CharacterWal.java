@@ -122,7 +122,9 @@ public final class CharacterWal implements AutoCloseable {
             int magic = header.getInt(); short version = header.getShort(); short reserved = header.getShort();
             long sequence = header.getLong(); int idLength = header.getInt(); int payloadLength = header.getInt();
             if (magic != MAGIC || version != VERSION || reserved != 0 || sequence != expected
-                    || idLength < 1 || idLength > MAX_ID || payloadLength < 0 || payloadLength > MAX_PAYLOAD) break;
+                    || idLength < 1 || idLength > MAX_ID || payloadLength < 0 || payloadLength > MAX_PAYLOAD)
+                throw new IOException("Corrupt Character WAL frame header at byte " + position);
+            
             long length = HEADER + (long) idLength + payloadLength + Integer.BYTES;
             if (length > size - position) break;
             ByteBuffer body = ByteBuffer.allocate(idLength + payloadLength + Integer.BYTES);
@@ -134,7 +136,8 @@ public final class CharacterWal implements AutoCloseable {
             crcData.putShort(version).putShort(reserved).putLong(sequence).putInt(idLength).putInt(payloadLength);
             crcData.put(id).put(payload);
             CRC32C crc = new CRC32C(); crc.update(crcData.array(), 0, crcData.position());
-            if ((int) crc.getValue() != stored) break;
+            if ((int) crc.getValue() != stored)
+                throw new IOException("Character WAL checksum mismatch at byte " + position);
             result.add(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload));
             position += length; expected++;
         }
