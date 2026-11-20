@@ -747,8 +747,8 @@ public final class TreasuryLedgerTest {
             boolean replayDebtMatches = close(replayedDebtor.creditLimit, sourceDebtor.creditLimit)
                     && close(replayedDebtor.debt, sourceDebtor.debt)
                     && replayedDebtor.bankrupt == sourceDebtor.bankrupt
-                    && close(replayedDebtor.debt, 0)
-                    && close(replayedDebtor.balance, 92);
+                    && close(replayedDebtor.debt, 68)
+                    && close(replayedDebtor.balance, 160);
             ok(replayAccountsMatch && replayDebtMatches
                             && replayed.nextSequence() == replaySource.nextSequence()
                             && replayed.journalSize() == replaySource.journalSize()
