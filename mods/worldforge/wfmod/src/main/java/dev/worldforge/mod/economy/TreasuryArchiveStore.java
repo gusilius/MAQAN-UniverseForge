@@ -98,6 +98,7 @@ public final class TreasuryArchiveStore {
             if (!published.checksum().equals(verified.checksum())
                     || published.nextSequence() != verified.nextSequence())
                 throw new IOException("Treasury checkpoint publication did not round-trip");
+            ledger.acknowledgeArchivedThrough(archive.nextSequence());
             return TreasuryLedgerSnapshot.decode(verified.snapshotJson()).mutationVersion();
         }
     }

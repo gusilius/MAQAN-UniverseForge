@@ -29,6 +29,9 @@ public final class TreasuryLedger {
 
     private final Map<String, Account> accounts = new LinkedHashMap<>();
     private final List<Entry> journal = new ArrayList<>();
+    /** Durable history is queried from its archive; only entries after this cursor remain in journal. */
+    private TreasuryJournalArchive historyArchive;
+    private long archivedThroughSequence;
     private final Set<String> postedReferences = new HashSet<>();
     private final Set<String> postedDebits = new HashSet<>();
     private final Set<String> postedCredits = new HashSet<>();
@@ -325,6 +328,8 @@ public final class TreasuryLedger {
             throw new java.io.IOException("Treasury archive suffix is incomplete");
 
         restored.sequence = archive.nextSequence();
+        restored.historyArchive = archive;
+        restored.archivedThroughSequence = archive.nextSequence() - 1;
         restored.transactionSequence = Math.max(state.nextTransactionSequence(), restored.transactionSequence);
         restored.mutationVersion = state.mutationVersion() + suffixEntries[0] + extraAccountMutations[0];
         restored.restoring = false;
@@ -347,19 +352,40 @@ public final class TreasuryLedger {
     public synchronized long nextSequence() { return sequence; }
 
     public synchronized int accountCount() { return accounts.size(); }
-    public synchronized int journalSize() { return journal.size(); }
+    public synchronized int journalSize() { return (int) Math.min(Integer.MAX_VALUE, sequence - 1); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
-    public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
-    /** Bounded view of the not-yet-archived tail; consume while holding this ledger monitor. */
+
+    /** Explicit compatibility export. Normal restore and save paths never materialize archived history. */
+    public synchronized List<Entry> journal() {
+        List<Entry> result = new ArrayList<>();
+        if (historyArchive != null) {
+            try { historyArchive.forEachEntry(result::add); }
+            catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
+        result.addAll(journal);
+        return List.copyOf(result);
+    }
+
+    /** Bounded view of the unarchived operational tail, starting at an exact global sequence. */
     public synchronized List<Entry> entriesFromSequence(long firstSequence) {
-        if (firstSequence < 1 || firstSequence > sequence)
-            throw new IllegalArgumentException("Treasury archive cursor is outside the journal range");
-        int start = Math.toIntExact(firstSequence - 1);
+        long firstUnarchived = archivedThroughSequence + 1;
+        if (firstSequence < firstUnarchived || firstSequence > sequence)
+            throw new IllegalArgumentException("Treasury archive cursor is outside the unarchived journal tail");
+        int start = Math.toIntExact(firstSequence - firstUnarchived);
         if (start > journal.size()
                 || (start < journal.size() && journal.get(start).sequence() != firstSequence)
-                || journal.size() != sequence - 1)
-            throw new IllegalStateException("Treasury journal is not a complete contiguous sequence from 1");
-        return Collections.unmodifiableList(journal.subList(start, journal.size()));
+                || journal.size() != sequence - firstUnarchived)
+            throw new IllegalStateException("Treasury unarchived journal tail is not contiguous");
+        return List.copyOf(journal.subList(start, journal.size()));
+    }
+
+    /** Drop the in-memory tail only after its complete sequence has been durably archived and checkpointed. */
+    public synchronized void acknowledgeArchivedThrough(long exclusiveNextSequence) {
+        if (exclusiveNextSequence != sequence || exclusiveNextSequence < archivedThroughSequence + 1
+                || journal.size() != sequence - archivedThroughSequence - 1)
+            throw new IllegalStateException("Cannot acknowledge an incomplete treasury archive boundary");
+        archivedThroughSequence = exclusiveNextSequence - 1;
+        journal.clear();
     }
     public synchronized Account account(String id) { return accounts.get(id); }
     public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
@@ -372,6 +398,18 @@ public final class TreasuryLedger {
     public synchronized List<Entry> entriesForAccount(String accountId) {
         if (accountId == null || accountId.isBlank()) return List.of();
         List<Entry> result = new ArrayList<>();
+        if (historyArchive != null) {
+            try {
+                long cursor = 1;
+                while (cursor < historyArchive.nextSequence()) {
+                    TreasuryJournalArchive.AccountPage page = historyArchive.readAccountPage(accountId, cursor, 512);
+                    result.addAll(page.entries());
+                    if (page.complete()) break;
+                    if (page.nextSequence() <= cursor) throw new java.io.IOException("Treasury account history cursor did not advance");
+                    cursor = page.nextSequence();
+                }
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
         for (Entry entry : journal)
             if (accountId.equals(entry.accountId())) result.add(entry);
         return List.copyOf(result);
@@ -384,6 +422,14 @@ public final class TreasuryLedger {
     public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
         String key = referenceKey(accountId, kind, reference);
         List<Entry> result = new ArrayList<>(2);
+        if (historyArchive != null) {
+            try {
+                historyArchive.forEachEntry(entry -> {
+                    if (key.equals(referenceKey(entry.accountId(), entry.kind(), entry.reference())))
+                        result.add(entry);
+                });
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
         for (Entry entry : journal) {
             if (key.equals(referenceKey(entry.accountId(), entry.kind(), entry.reference())))
                 result.add(entry);
