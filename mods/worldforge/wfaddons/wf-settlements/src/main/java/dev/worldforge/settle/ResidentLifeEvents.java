@@ -72,7 +72,7 @@ public final class ResidentLifeEvents {
                 String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
                 if (dueFatherId.isBlank()) continue;
                 Character biologicalFather = registry.get(dueFatherId);
-            if (biologicalFather == null || !biologicalFather.alive) {
+            if (biologicalFather == null) {
                 FamilyPlanning.cancel(mother, biologicalFather, "father-unavailable", year);
                 continue;
             }
