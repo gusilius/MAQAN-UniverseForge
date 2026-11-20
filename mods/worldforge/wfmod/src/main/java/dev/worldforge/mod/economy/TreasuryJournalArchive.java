@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -36,6 +38,28 @@ public final class TreasuryJournalArchive {
     }
 
     public synchronized long nextSequence() { return nextSequence; }
+    /** Stable fingerprint of the verified archive contents and segment boundaries. */
+    public synchronized String archiveDigest() throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Path path : segmentFiles()) {
+                TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
+                        Files.readString(path, StandardCharsets.UTF_8));
+                String line = path.getFileName() + ":" + decoded.firstSequence() + ":"
+                        + decoded.lastSequence() + ":" + decoded.checksum() + "\n";
+                digest.update(line.getBytes(StandardCharsets.UTF_8));
+            }
+            byte[] bytes = digest.digest();
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte value : bytes) hex.append(String.format("%02x", value & 0xff));
+            return hex.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        } catch (RuntimeException invalid) {
+            throw new IOException("Treasury archive failed validation while fingerprinting", invalid);
+        }
+    }
+
 
     /** Returns true after a new segment is durably published or an identical retry is verified. */
     public synchronized boolean append(List<TreasuryLedger.Entry> entries) throws IOException {

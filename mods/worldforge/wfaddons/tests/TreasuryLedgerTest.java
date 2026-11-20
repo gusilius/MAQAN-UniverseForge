@@ -5,6 +5,7 @@ import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryCheckpointStore;
+import dev.worldforge.mod.economy.TreasuryJournalSegment;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
@@ -378,11 +379,31 @@ public final class TreasuryLedgerTest {
             checkpointArchive.append(checkpointLedger.journal());
             TreasuryCheckpointStore checkpointStore = new TreasuryCheckpointStore(checkpointDir);
             TreasuryCheckpointStore.Checkpoint published = checkpointStore.publish(checkpointJson, checkpointArchive);
-            TreasuryCheckpointStore.Checkpoint loaded = new TreasuryCheckpointStore(checkpointDir).load();
+            TreasuryCheckpointStore.Checkpoint loaded = new TreasuryCheckpointStore(checkpointDir).load(checkpointArchive);
             ok(published.nextSequence() == loaded.nextSequence()
                             && loaded.snapshotJson().equals(checkpointJson)
                             && loaded.checksum().equals(published.checksum()),
                     "treasury checkpoint manifest atomically links a verified archive boundary to its snapshot");
+            boolean archiveFingerprintMismatchRejected = false;
+            try {
+                TreasuryLedger otherLedger = new TreasuryLedger();
+                otherLedger.open("other:account", "other:account", "silver", 999);
+                otherLedger.deposit("other:account", 1, TreasuryLedger.Kind.TAX,
+                        "different", "different-ref", 1, "different archive");
+                java.nio.file.Path otherArchiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-other-archive-");
+                TreasuryJournalArchive otherArchive = new TreasuryJournalArchive(otherArchiveDir, 1);
+                otherArchive.append(otherLedger.journal());
+                new TreasuryCheckpointStore(checkpointDir).load(otherArchive);
+                archiveFingerprintMismatchRejected = false;
+                try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(otherArchiveDir)) {
+                    files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                    });
+                }
+            } catch (java.io.IOException expected) {
+                archiveFingerprintMismatchRejected = expected.getMessage().contains("does not match");
+            }
+            ok(archiveFingerprintMismatchRejected, "treasury checkpoint refuses a different archive with the same sequence boundary");
             boolean archiveBoundaryRejected = false;
             try {
                 TreasuryCheckpointStore mismatchedStore = new TreasuryCheckpointStore(
@@ -406,6 +427,17 @@ public final class TreasuryLedgerTest {
         } catch (java.io.IOException ex) {
             ok(false, "treasury checkpoint publication tests complete: " + ex.getMessage());
         }
+
+
+        boolean segmentInternalGapRejected = false;
+        try {
+            TreasuryLedger.Entry first = new TreasuryLedger.Entry(1, "tx:1", "a", "", "silver", 1,
+                    true, TreasuryLedger.Kind.TAX, "test", "one", 1, 1, "");
+            TreasuryLedger.Entry third = new TreasuryLedger.Entry(3, "tx:3", "a", "", "silver", 1,
+                    true, TreasuryLedger.Kind.TAX, "test", "three", 2, 2, "");
+            TreasuryJournalSegment.decode(TreasuryJournalSegment.encode(List.of(first, third)));
+        } catch (IllegalArgumentException expected) { segmentInternalGapRejected = true; }
+        ok(segmentInternalGapRejected, "treasury segment rejects missing sequence numbers inside a segment");
 
         boolean checkpointTamperRejected = false;
         try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }

@@ -47,6 +47,7 @@ public final class TreasuryCheckpointStore {
         } catch (RuntimeException ex) {
             throw new IOException("Treasury checkpoint snapshot failed validation", ex);
         }
+        String archiveDigest = archive.archiveDigest();
         long archiveNext = archive.nextSequence();
         if (archiveNext != state.nextSequence())
             throw new IOException("Treasury archive is at next sequence " + archiveNext
@@ -68,8 +69,25 @@ public final class TreasuryCheckpointStore {
         manifest.put("snapshot", filename);
         manifest.put("nextSequence", state.nextSequence());
         manifest.put("sha256", checksum);
+        manifest.put("archiveSha256", archiveDigest);
         atomicWrite(directory.resolve("CURRENT.json"), Json.write(manifest));
         return new Checkpoint(snapshotJson, state.nextSequence(), checksum);
+    }
+
+    /** Loads a checkpoint only when the currently verified archive is byte-for-byte the same chain. */
+    public synchronized Checkpoint load(TreasuryJournalArchive archive) throws IOException {
+        if (archive == null) throw new IllegalArgumentException("Verified treasury archive is required");
+        Checkpoint checkpoint = load();
+        Object parsed = Json.parse(Files.readString(directory.resolve("CURRENT.json"), StandardCharsets.UTF_8));
+        if (!(parsed instanceof Map<?, ?> manifest)
+                || !(manifest.get("archiveSha256") instanceof String expected)
+                || !expected.matches("[0-9a-f]{64}"))
+            throw new IOException("Treasury checkpoint is missing its archive fingerprint");
+        if (archive.nextSequence() != checkpoint.nextSequence()
+                || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
+                archive.archiveDigest().getBytes(StandardCharsets.US_ASCII)))
+            throw new IOException("Treasury checkpoint does not match the verified archive contents");
+        return checkpoint;
     }
 
     /** Loads only the committed snapshot; invalid or missing data fails closed. */
