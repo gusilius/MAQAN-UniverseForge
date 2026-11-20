@@ -2,6 +2,7 @@ package dev.worldforge.tests;
 
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryJournalSegment;
+import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
@@ -380,6 +381,42 @@ public final class TreasuryLedgerTest {
         try {
             TreasuryJournalSegment.decode(segmentJson.replace("\\"lastSequence\\":3", "\\"lastSequence\\":4"));
         } catch (IllegalArgumentException expected) { sequenceGapRejected = true; }
+        ok(sequenceGapRejected, "treasury segment rejects altered sequence bounds");
+
+        try {
+            java.nio.file.Path archiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-archive-");
+            TreasuryJournalArchive archive = new TreasuryJournalArchive(archiveDir, 1);
+            ok(archive.append(segmentSource.journal()) && archive.nextSequence() == 4,
+                    "treasury archive durably publishes a contiguous segment and advances its checkpoint");
+            ok(archive.append(segmentSource.journal()) && archive.readAll().size() == segmentSource.journalSize(),
+                    "treasury archive accepts an identical retry without duplicating history");
+            TreasuryJournalArchive reopenedArchive = new TreasuryJournalArchive(archiveDir, 1);
+            ok(reopenedArchive.nextSequence() == 4
+                            && reopenedArchive.readAll().equals(segmentSource.journal()),
+                    "treasury archive restart verifies checksums and restores the next expected sequence");
+            boolean gapRejected = false;
+            try { reopenedArchive.append(List.of(new TreasuryLedger.Entry(5, "tx:gap", "x", "y",
+                    "silver", 1, false, TreasuryLedger.Kind.TRADE, "test", "gap", 1, 0, ""))); }
+            catch (java.io.IOException expected) { gapRejected = expected.getMessage().contains("expected sequence"); }
+            ok(gapRejected, "treasury archive refuses to publish a sequence gap");
+            java.nio.file.Path segmentFile;
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(archiveDir)) {
+                segmentFile = files.filter(path -> path.getFileName().toString().endsWith(".json")).findFirst().orElseThrow();
+            }
+            String originalSegment = java.nio.file.Files.readString(segmentFile);
+            java.nio.file.Files.writeString(segmentFile, originalSegment.replace("archived transfer", "tampered"));
+            boolean corruptArchiveRejected = false;
+            try { new TreasuryJournalArchive(archiveDir, 1); }
+            catch (java.io.IOException expected) { corruptArchiveRejected = true; }
+            ok(corruptArchiveRejected, "treasury archive refuses startup when a persisted segment is corrupted");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(archiveDir)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "treasury archive filesystem durability tests complete: " + ex.getMessage());
+        }
 
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
