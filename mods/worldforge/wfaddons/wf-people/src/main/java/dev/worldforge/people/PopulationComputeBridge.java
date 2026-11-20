@@ -44,23 +44,56 @@ public final class PopulationComputeBridge {
         private RegistryIndex(Collection<CharacterRegistry> source) {
             registries = List.copyOf(source);
             revisions = new long[registries.size()];
-            record Member(Character character, CharacterRegistry owner) {}
-            ArrayList<Member> values = new ArrayList<>();
+            int memberCount = 0;
+            for (CharacterRegistry registry : registries) memberCount = Math.addExact(memberCount, registry.all().size());
+            members = new Character[memberCount];
+            owners = new CharacterRegistry[memberCount];
+            int cursor = 0;
             for (int i = 0; i < registries.size(); i++) {
                 CharacterRegistry registry = Objects.requireNonNull(registries.get(i));
                 revisions[i] = registry.revision();
-                for (Character character : registry.all()) values.add(new Member(character, registry));
+                for (Character character : registry.all()) {
+                    members[cursor] = character;
+                    owners[cursor] = registry;
+                    cursor++;
+                }
             }
-            values.sort(Comparator.comparing(member -> member.character().globalId));
-            members = new Character[values.size()];
-            owners = new CharacterRegistry[values.size()];
-            for (int i = 0; i < values.size(); i++) {
-                Member member = values.get(i);
-                if (i > 0 && members[i - 1].globalId.equals(member.character().globalId))
-                    throw new IllegalStateException("Duplicate canonical Character UUID: " + member.character().globalId);
-                members[i] = member.character();
-                owners[i] = member.owner();
+            sortMembersAndOwners();
+            for (int i = 1; i < members.length; i++) {
+                if (members[i - 1].globalId.equals(members[i].globalId))
+                    throw new IllegalStateException("Duplicate canonical Character UUID: " + members[i].globalId);
             }
+        }
+        /** In-place paired heapsort avoids allocating one wrapper object per NPC during index rebuild. */
+        private void sortMembersAndOwners() {
+            int size = members.length;
+            for (int root = size / 2 - 1; root >= 0; root--) siftDown(root, size);
+            for (int end = size - 1; end > 0; end--) {
+                swap(0, end);
+                siftDown(0, end);
+            }
+        }
+        private void siftDown(int root, int end) {
+            while (true) {
+                int child = root * 2 + 1;
+                if (child >= end) return;
+                if (child + 1 < end && compare(child, child + 1) < 0) child++;
+                if (compare(root, child) >= 0) return;
+                swap(root, child);
+                root = child;
+            }
+        }
+        private int compare(int left, int right) {
+            return members[left].globalId.compareTo(members[right].globalId);
+        }
+        private void swap(int left, int right) {
+            Character character = members[left];
+            members[left] = members[right];
+            members[right] = character;
+            CharacterRegistry owner = owners[left];
+            owners[left] = owners[right];
+            owners[right] = owner;
+        }
         }
         private boolean matches(Collection<CharacterRegistry> source) {
             if (source.size() != registries.size()) return false;
