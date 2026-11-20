@@ -303,12 +303,29 @@ public class TradeMod {
     @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }
     @SubscribeEvent public void onReload(AddReloadListenerEvent e) { e.addListener((ResourceManagerReloadListener) TradeMod::loadDefs); }
     @SubscribeEvent public void onStopping(ServerStoppingEvent e) {
-        if (TRADE.hasPendingDay()) {
-            // Never persist a half-applied economic day. The world clock will replay it on next start.
+        try {
+            // Graceful shutdown completes the in-flight day before writing the durable trade snapshot.
+            // This exceptional shutdown path may do extra work; normal server ticks remain budgeted.
+            if (TRADE.hasPendingDay()) {
+                List<String> ids = activeTradeRealms;
+                if (ids == null) {
+                    ids = new ArrayList<>();
+                    for (TitleData.Realm realm : realms()) ids.add(realm.id);
+                }
+                TRADE.tick(nextSimulationDay, ids);
+                WorldLayer.SHOPS.tick();
+                if (pendingSimulationDays > 0) {
+                    nextSimulationDay++;
+                    pendingSimulationDays--;
+                }
+                activeTradeRealms = null;
+            }
+            save(e.getServer());
+        } catch (Exception ex) {
+            LOGGER.error("wf_trade: не удалось завершить экономический день при остановке; сохранение последнего целого снимка", ex);
             TRADE.cancelPendingDay();
-            activeTradeRealms = null;
-            LOGGER.warn("wf_trade: незавершённый экономический день отменён; сохранён последний целый снимок");
-        } else save(e.getServer());
+            save(e.getServer());
+        }
     }
 
     @SubscribeEvent
