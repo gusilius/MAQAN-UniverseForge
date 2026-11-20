@@ -124,6 +124,24 @@ public final class TreasuryLedger {
                 Set.copyOf(postedCredits), Set.copyOf(armyFieldRationDebitAccounts));
     }
 
+    private static void validateArchivedTransaction(List<Entry> postings, Map<String, Account> accounts) {
+        if (postings.size() == 1) {
+            Entry single = postings.get(0);
+            if (accounts.containsKey(single.counterpartyId()))
+                throw new IllegalStateException("Treasury archive is missing a matching double-entry posting: " + single.transactionId());
+            return;
+        }
+        if (postings.size() != 2)
+            throw new IllegalStateException("Invalid treasury transaction cardinality: " + postings.get(0).transactionId());
+        Entry a = postings.get(0), b = postings.get(1);
+        if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
+                || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
+                || !a.currency().equals(b.currency()) || a.kind() != b.kind()
+                || !a.category().equals(b.category()) || !a.reference().equals(b.reference())
+                || a.worldMinute() != b.worldMinute() || Math.abs(a.amount() - b.amount()) > 1e-8)
+            throw new IllegalStateException("Unbalanced treasury transaction: " + a.transactionId());
+    }
+
     /**
      * Rebuilds the live ledger from an exact checkpoint/archive pair. This deliberately
      * accepts only an archive ending at the checkpoint boundary: replaying a suffix requires
@@ -159,7 +177,8 @@ public final class TreasuryLedger {
         Set<String> debits = new HashSet<>();
         Set<String> credits = new HashSet<>();
         Set<String> rationAccounts = new HashSet<>();
-        Map<String, List<Entry>> transactions = new HashMap<>();
+        List<Entry> currentTransaction = new ArrayList<>(2);
+        String[] currentTransactionId = {null};
         long[] expected = {1};
         try {
             archive.forEachEntryFrom(1, entry -> {
@@ -174,9 +193,16 @@ public final class TreasuryLedger {
                 if (!entry.credit() && entry.kind() == Kind.LOGISTICS
                         && "army-field-rations".equals(entry.category()))
                     rationAccounts.add(entry.accountId());
+                if (currentTransactionId[0] != null && !currentTransactionId[0].equals(entry.transactionId())) {
+                    validateArchivedTransaction(currentTransaction, restored.accounts);
+                    currentTransaction.clear();
+                }
+                currentTransactionId[0] = entry.transactionId();
+                currentTransaction.add(entry);
+                if (currentTransaction.size() > 2)
+                    throw new IllegalStateException("Invalid treasury transaction cardinality: " + entry.transactionId());
                 restored.journal.add(entry);
                 restored.indexEntry(entry);
-                transactions.computeIfAbsent(entry.transactionId(), ignored -> new ArrayList<>()).add(entry);
             });
         } catch (RuntimeException invalid) {
             throw new java.io.IOException("Treasury archive entries failed ledger reconstruction", invalid);
@@ -188,24 +214,8 @@ public final class TreasuryLedger {
                 || !rationAccounts.equals(state.armyFieldRationDebitAccounts()))
             throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive");
 
-        for (Map.Entry<String, List<Entry>> transaction : transactions.entrySet()) {
-            List<Entry> postings = transaction.getValue();
-            if (postings.size() == 1) {
-                Entry single = postings.get(0);
-                if (restored.accounts.containsKey(single.counterpartyId()))
-                    throw new java.io.IOException("Treasury archive is missing a matching double-entry posting: " + transaction.getKey());
-                continue;
-            }
-            if (postings.size() != 2)
-                throw new java.io.IOException("Invalid treasury transaction cardinality: " + transaction.getKey());
-            Entry a = postings.get(0), b = postings.get(1);
-            if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
-                    || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
-                    || !a.currency().equals(b.currency()) || a.kind() != b.kind()
-                    || !a.category().equals(b.category()) || !a.reference().equals(b.reference())
-                    || a.worldMinute() != b.worldMinute() || Math.abs(a.amount() - b.amount()) > 1e-8)
-                throw new java.io.IOException("Unbalanced treasury transaction: " + transaction.getKey());
-        }
+        if (!currentTransaction.isEmpty())
+            validateArchivedTransaction(currentTransaction, restored.accounts);
 
         restored.sequence = state.nextSequence();
         restored.transactionSequence = state.nextTransactionSequence();
