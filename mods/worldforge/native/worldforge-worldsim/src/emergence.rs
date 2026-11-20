@@ -361,7 +361,7 @@ fn bootstrap_initial_civilizations(
     {
         candidates.sort_by(|a, b| {
             b.founding_site.cmp(&a.founding_site)
-                .then_with(|| b.suitability.cmp(&a.suitability)
+                .then_with(|| b.suitability.cmp(&a.suitability))
                 .then_with(|| roll(seed, "initial-site-order", &map.map_id,
                     &format!("{}:{}", a.x, a.z), 0)
                     .cmp(&roll(seed, "initial-site-order", &map.map_id,
