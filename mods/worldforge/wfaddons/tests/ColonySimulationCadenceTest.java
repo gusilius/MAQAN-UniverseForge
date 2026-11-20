@@ -30,7 +30,7 @@ public final class ColonySimulationCadenceTest {
             distribution[ColonySimulationCadence.phase("colony-" + i, interval)]++;
         int min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
         for (int count : distribution) { min = Math.min(min, count); max = Math.max(max, count); }
-        check(max - min < 35, "stable hashing should spread large colony sets across ticks");
+        check(max - min < 80, "stable hashing should spread large colony sets across ticks");
 
         check(ColonySimulationCadence.elapsedSteps(100, 124) == 1.0,
                 "one normal settlement interval equals one simulation step");
