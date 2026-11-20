@@ -1981,7 +1981,7 @@ public final class Settlement {
 
     // ------------------------------------------------------------------ сохранение
 
-    public String toJson() {
+    public Map<String, Object> toMap() {
         for (String resource : new TreeSet<>(stock.keySet())) amount(resource);
         amount(Defs.SILVER);
         syncAllResourceMirrors();
@@ -2037,8 +2037,10 @@ public final class Settlement {
         root.put("departures", ds);
         root.put("placement_receipts", new TreeMap<>(placementReceipts));
         root.put("log", new ArrayList<Object>(log));
-        return Json.write(root);
+        return root;
     }
+
+    public String toJson() { return Json.write(toMap()); }
 
     public static Settlement fromJson(String json, Defs defs) { return fromJson(json, defs, null); }
 
