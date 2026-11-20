@@ -79,7 +79,6 @@ public final class TreasuryArchiveStore {
         if (compared[0] != archive.nextSequence() - 1)
             throw new IOException("Legacy treasury does not contain the complete committed archive prefix");
     }
-    }
 
     /** Appends only the not-yet-archived suffix and publishes CURRENT last. */
     public synchronized long save(TreasuryLedger ledger) throws IOException {
