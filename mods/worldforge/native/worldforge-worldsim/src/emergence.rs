@@ -151,9 +151,13 @@ fn observed_map_scale(map: &GeographicMap) -> u64 {
     if !found { return map_scale(map); }
     let observed_span = u64::from(max_x.saturating_sub(min_x).max(max_z.saturating_sub(min_z)).saturating_add(1));
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
+    let occupancy_spacing_pct = 100_u64
+        .saturating_sub(u64::from(map.population_density_pct.min(100)) * 45 / 100);
     map_scale(map)
         .min((observed_span / 12).max(minimum_spacing))
         .min(256_u64.max(minimum_spacing))
+        .saturating_mul(occupancy_spacing_pct)
+        .checked_div(100).unwrap_or(minimum_spacing)
         .max(minimum_spacing).max(1)
 }
 
@@ -174,7 +178,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
         .map(|band| (band.x, band.z)).collect::<Vec<_>>();
     for cell in candidates {
         let density_scale = 20 + u64::from(map.population_density_pct.min(100)) * 80 / 100;
-    let chance = u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100;
+        let chance = u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100;
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
         if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < spacing * spacing) { continue; }
@@ -309,8 +313,7 @@ fn bootstrap_initial_civilizations(
     }
     // Image-worldgen already produced the canonical political hierarchy for this map.
     // Occupancy profiles may add settlements and population, never duplicate sovereigns.
-    if map.political_layers_present || map.cells.is_empty()
-        || polities.iter().any(|polity| polity.map_id == map.map_id) {
+    if map.cells.is_empty() || polities.iter().any(|polity| polity.map_id == map.map_id) {
         return;
     }
 
@@ -357,7 +360,9 @@ fn bootstrap_initial_civilizations(
                 .then_with(|| a.x.cmp(&b.x))
         });
 
-        let target_communities = 4 + (roll(seed, "authored-polity-size", &map.map_id,
+        let density_bonus = u64::from(map.population_density_pct.min(100)) * 4 / 100;
+        let target_communities = 3 + density_bonus as usize
+            + (roll(seed, "authored-polity-size", &map.map_id,
             &format!("{group_x}:{group_z}"), 0) % 5) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in candidates {
@@ -379,7 +384,9 @@ fn bootstrap_initial_civilizations(
             let location_key = format!("{}:{}:{}", group_key, cell.x, cell.z);
             let id = format!("band_{:016x}", roll(seed, "initial-band-id", &location_key, "", 0));
             if bands.iter().any(|band| band.id == id) { continue; }
-            let residents = 32 + roll(seed, "initial-community-size", &location_key, "", 0) % 9;
+            let density_bonus = u64::from(map.population_density_pct.min(100)) * 48 / 100;
+            let residents = 8 + density_bonus
+                + roll(seed, "initial-community-size", &location_key, "", 0) % 9;
             bands.push(EmergentBand {
                 id: id.clone(),
                 map_id: map.map_id.clone(),
@@ -482,7 +489,6 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     // collapsed distant communities into a few oversized states on authored maps.
     let spacing = (observed_map_scale(map) * 2).max(u64::from(map.sample_stride.max(1)) * 3);
     const MAX_FOUNDING_COMMUNITIES: usize = 8;
-    if map.political_layers_present { return; }
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
             && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land && !cell.wilderness)
