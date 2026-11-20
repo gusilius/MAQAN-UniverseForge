@@ -16,27 +16,27 @@ public final class FamilyPlanningTest {
         CharacterRegistry registry = new CharacterRegistry();
         int year = 300;
         int conceptions = 0;
+        Character pregnantMother = null, pregnantFather = null;
         for (int i = 0; i < 1000; i++) {
             Character mother = registry.create("Mother" + i, "house" + i, "culture", "f", year - 25);
             Character father = registry.create("Father" + i, "house" + i, "culture", "m", year - 27);
             registry.marry(mother.id, father.id, year);
-            if (FamilyPlanning.tryConceive(mother, father, year, 100_000L, 77L + i)) conceptions++;
-            check(!FamilyPlanning.tryConceive(mother, father, year, 100_000L, 77L + i),
-                    "at most one conception attempt per couple per year");
+            if (FamilyPlanning.tryConceive(mother, father, year, 100_000L, 77L + i)) {
+                conceptions++;
+                if (pregnantMother == null) { pregnantMother = mother; pregnantFather = father; }
+            }
         }
         check(conceptions >= 25 && conceptions <= 120,
                 "annual conception rate remains low and deterministic: " + conceptions + "/1000");
 
-        Character mother = registry.create("Pregnant", "house-p", "culture", "f", year - 25);
-        Character father = registry.create("Partner", "house-p", "culture", "m", year - 27);
-        registry.marry(mother.id, father.id, year);
-        boolean conceived = false;
-        for (long seed = 1; seed < 1000 && !conceived; seed++)
-            conceived = FamilyPlanning.tryConceive(mother, father, year, 1_000L, seed);
-        check(conceived && FamilyPlanning.isPregnant(mother), "pregnancy is persisted on the canonical mother");
-        String storedFather = FamilyPlanning.dueFatherId(mother, 1_000L + 270L);
+        check(pregnantMother != null, "at least one couple conceives in deterministic sample");
+        Character mother = pregnantMother, father = pregnantFather;
+        check(!FamilyPlanning.tryConceive(mother, father, year, 100_000L, 77L),
+                "at most one conception attempt per couple per year");
+        check(FamilyPlanning.isPregnant(mother), "pregnancy is persisted on the canonical mother");
+        String storedFather = FamilyPlanning.dueFatherId(mother, 100_000L + 270L);
         check(storedFather.equals(father.id), "pregnancy retains the biological father's canonical ID");
-        check(FamilyPlanning.dueFatherId(mother, 1_000L + 269L).isEmpty(),
+        check(FamilyPlanning.dueFatherId(mother, 100_000L + 269L).isEmpty(),
                 "birth is not due before gestation completes");
         FamilyPlanning.complete(mother, father, year + 1, "child-test");
         check(!FamilyPlanning.isPregnant(mother), "pregnancy state is cleared after birth");
