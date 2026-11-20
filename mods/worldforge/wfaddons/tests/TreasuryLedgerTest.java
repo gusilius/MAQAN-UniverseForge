@@ -594,8 +594,15 @@ public final class TreasuryLedgerTest {
             TreasuryLedger migrationLedger = new TreasuryLedger();
             migrationLedger.open("migration:treasury", "migration:realm", "silver", 500);
             migrationLedger.open("migration:merchant", "migration:merchant", "silver", 20);
+            migrationLedger.open("migration:empty", "migration:empty", "silver", 0);
+            migrationLedger.open("migration:borrower", "migration:borrower", "silver", 0);
+            boolean borrowerStateApplied = migrationLedger.setCreditLimit("migration:borrower", 105)
+                    && migrationLedger.borrow("migration:borrower", 100, 40, "migration:loan")
+                    && migrationLedger.accrueInterest("migration:borrower", 0.10, 41, "migration:interest")
+                    && migrationLedger.repayDebt("migration:borrower", 25, 42, "migration:repayment");
+            ok(borrowerStateApplied, "migration fixture creates credit, interest and repayment state");
             migrationLedger.transfer("migration:treasury", "migration:merchant", 75,
-                    TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 42, "migration transfer");
+                    TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 43, "migration transfer");
             TreasuryJournalArchive migrationArchive = new TreasuryJournalArchive(migrationRoot.resolve("archive"), 1);
             TreasuryCheckpointStore migrationCheckpoints = new TreasuryCheckpointStore(migrationRoot.resolve("checkpoints"));
             TreasuryArchiveMigration.Result migration = TreasuryArchiveMigration.migrate(
@@ -624,6 +631,18 @@ public final class TreasuryLedgerTest {
                             && close(restoredLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test"),
                                     migrationLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test")),
                     "checkpoint restore rebuilds balances, journal indexes, debit totals and idempotency keys");
+            TreasuryLedger.Account restoredBorrower = restoredLedger.account("migration:borrower");
+            TreasuryLedger.Account originalBorrower = migrationLedger.account("migration:borrower");
+            ok(restoredLedger.hasAccount("migration:empty")
+                            && close(restoredLedger.balance("migration:empty"), 0)
+                            && close(restoredBorrower.balance, originalBorrower.balance)
+                            && close(restoredBorrower.creditLimit, originalBorrower.creditLimit)
+                            && close(restoredBorrower.debt, originalBorrower.debt)
+                            && restoredBorrower.bankrupt == originalBorrower.bankrupt
+                            && close(restoredBorrower.debt, 85)
+                            && close(restoredBorrower.balance, 75)
+                            && !restoredBorrower.bankrupt,
+                    "checkpoint restore preserves empty accounts, credit limits, loan, interest, repayment and solvency");
             boolean rejectedSuffix = false;
             try {
                 restoredLedger = TreasuryLedger.restoreFromCheckpoint(restoredCheckpoint,
