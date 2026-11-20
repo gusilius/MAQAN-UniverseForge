@@ -61,6 +61,10 @@ public class TradeMod {
     public static final Trade TRADE = new Trade(DEFS);
     private static final int STEP = 100, SAVE_EVERY = 6000;
     private static long ticks;
+    // Offline catch-up is a backlog, not permission to execute an unbounded number
+    // of full realm/goods/caravan passes inside one Minecraft server tick.
+    private static long pendingSimulationDays;
+    private static int nextSimulationDay;
     private static boolean armyLoaded;
     private static Map<String, Set<String>> adjacency = new HashMap<>();
     private static int adjacencyDay = -999;
@@ -315,11 +319,22 @@ public class TradeMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int days = WorldForgeApi.clock().pull("wf_trade");
-                int today = day();
+                int days = Math.max(0, WorldForgeApi.clock().pull("wf_trade"));
+                if (days > 0) {
+                    int today = day();
+                    if (pendingSimulationDays == 0) nextSimulationDay = today - days + 1;
+                    pendingSimulationDays = Math.min(Long.MAX_VALUE - days, pendingSimulationDays) + days;
+                }
+            }
+            // One complete economic day per server tick. Backlog remains durable in
+            // memory and is drained in order without a 60-second catch-up spike.
+            if (pendingSimulationDays > 0) {
                 List<String> ids = new ArrayList<>();
                 for (TitleData.Realm r : realms()) ids.add(r.id);
-                for (int i = days - 1; i >= 0; i--) { TRADE.tick(today - i, ids); WorldLayer.SHOPS.tick(); }
+                TRADE.tick(nextSimulationDay, ids);
+                WorldLayer.SHOPS.tick();
+                nextSimulationDay++;
+                pendingSimulationDays--;
             }
             if (ticks % SAVE_EVERY == 0) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_trade: ошибка тика: {}", ex.toString()); }
