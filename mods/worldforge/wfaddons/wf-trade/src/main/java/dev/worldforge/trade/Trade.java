@@ -181,6 +181,11 @@ public final class Trade {
 
     public List<String> tick(int day, Collection<String> realms) {
         activeTickRaces = new HashMap<>(DemoApi.races(realms));
+        // Mark empty censuses explicitly too: otherwise every good lookup would
+        // re-run the legacy provider for an uninhabited realm during this same tick.
+        if (realms != null) for (String realm : realms)
+            if (realm != null && !realm.isBlank())
+                activeTickRaces.putIfAbsent(realm, Map.of("human", 1.0));
         activeTickTerrain = new HashMap<>();
         activeTickConsumption = new HashMap<>();
         try {
