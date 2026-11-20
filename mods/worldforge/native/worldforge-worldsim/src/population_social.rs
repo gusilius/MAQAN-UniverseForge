@@ -83,7 +83,6 @@ fn profile_score(profile: &Profile, catalog: &Catalog) -> i32 {
 /// Unknown profile IDs are skipped. No all-pairs expansion occurs.
 pub fn evaluate(
     profiles: &[Profile],
-,
     candidates: &[Contact],
     catalog: &Catalog,
     seed: u64,
