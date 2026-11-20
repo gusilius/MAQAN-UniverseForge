@@ -86,6 +86,8 @@ public final class WorldSimMod {
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
     private static final int PEOPLE_MATERIALIZATION_BUDGET_PER_TICK = 256;
+    /** True while one or more authored image maps are being sampled off-thread. */
+    private static volatile boolean imageGeographyPending;
     private static WorldSimComputeScheduler.Result pendingApplyResult;
     private static JsonObject pendingCandidateEmergenceState;
     private static EmergentPeopleProgress emergentPeopleProgress;
@@ -449,7 +451,7 @@ public final class WorldSimMod {
         try {
             long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
-            if (PROFILER.gauge("worldsim.geography.pending") > 0) return;
+            if (imageGeographyPending) return;
             if (!hasObservedGeography(snapshot)) {
                 PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 1);
                 return;
@@ -961,6 +963,7 @@ public final class WorldSimMod {
             }
             geography.add(GSON.toJsonTree(prepared));
         }
+        WorldSimMod.imageGeographyPending = imageGeographyPending;
         PROFILER.setGauge("worldsim.geography.pending", imageGeographyPending ? 1 : 0);
         // Every loaded vanilla-like dimension contributes its own observed geography.
         for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
