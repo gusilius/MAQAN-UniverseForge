@@ -52,6 +52,9 @@ public final class ResidentLifeEvents {
     private static final class RegistryPassState {
         int familyYear = Integer.MIN_VALUE;
         int stageSize = -1;
+        int lastCallYear = Integer.MIN_VALUE;
+        long lastCallToken = Long.MIN_VALUE;
+        boolean lastCallResult;
         YearSession session;
         StageRefresh stageRefresh;
     }
@@ -82,8 +85,13 @@ public final class ResidentLifeEvents {
         }
         YearSession session = state.session;
         if (session != null && session.year != year) year = session.year;
-        if (state.familyYear == year && session == null)
-            return advanceStageRefresh(registry, state, year, residentBudget, tickToken);
+        // Guard callback routes, including stage refresh, against same-tick duplicate work.
+        if (state.lastCallYear == year && state.lastCallToken == tickToken) return state.lastCallResult;
+        if (state.familyYear == year && session == null) {
+            boolean refreshed = advanceStageRefresh(registry, state, year, residentBudget, tickToken);
+            state.lastCallYear = year; state.lastCallToken = tickToken; state.lastCallResult = refreshed;
+            return refreshed;
+        }
         if (session == null) {
             session = new YearSession(registry, year);
             state.session = session;
@@ -141,8 +149,10 @@ public final class ResidentLifeEvents {
                 state.stageRefresh = null;
             }
             // Stage catch-up runs on the next server tick; do not spend a second budget in this one.
+            state.lastCallYear = year; state.lastCallToken = tickToken; state.lastCallResult = false;
             return false;
         }
+        state.lastCallYear = year; state.lastCallToken = tickToken; state.lastCallResult = false;
         return false;
     }
 

@@ -105,6 +105,8 @@ public class TradeTest {
         // караван игрока
         String P = "p:1";
         int g0 = gold[0];
+        // Deterministic fixture: restore source stock before dispatch checks.
+        t.market("peak").stock.put("iron", 1000.0);
         double stock0 = t.market("peak").stock.get("iron");
         Trade.Caravan c = t.dispatch(P, "peak", "field", "iron", 20, 2, 41);
         ok(c != null && gold[0] < g0, "караван снаряжён: " + t.lastError);
@@ -114,7 +116,7 @@ public class TradeTest {
         gold[0] = 3; ok(t.dispatch(P, "peak", "field", "iron", 10, 0, 41) == null && t.lastError.contains("денег"), "нет денег"); gold[0] = g0 - 100;
         double tre0 = TreasuryApi.balance("field");
         for (int day = 42; day <= 45; day++) t.tick(day, realms);
-        ok(c.status.equals("доставлен"), "доставлен: " + c.status);
+        ok(c != null && c.status.equals("доставлен"), "доставлен: " + (c == null ? "караван не создан" : c.status));
         ok(TreasuryApi.balance("field") > tre0, "пошлина в казну: " + (TreasuryApi.balance("field") - tre0));
         ok(c.revenue > c.spent, "горное железо на равнине приносит прибыль: " + Math.round(c.revenue) + " > " + Math.round(c.spent));
 
@@ -126,7 +128,9 @@ public class TradeTest {
         ok(t.dispatch(P, "peak", "field", "iron", 5, 0, 46) == null && t.lastError.contains("война"), "война: " + t.lastError);
         war.clear();
         // война в пути
+        t.market("peak").stock.put("iron", Math.max(t.market("peak").stock.get("iron"), 100.0));
         Trade.Caravan w = t.dispatch(P, "peak", "field", "iron", 5, 0, 46);
+        ok(w != null, "караван для теста войны в пути создан");
         war.add("peak>field"); int g1 = gold[0];
         t.tick(47, realms);
         ok(w.status.startsWith("вернулся") && gold[0] > g1, "война во время пути: " + w.status);
