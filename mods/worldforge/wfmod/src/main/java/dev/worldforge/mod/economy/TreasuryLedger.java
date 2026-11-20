@@ -34,9 +34,6 @@ public final class TreasuryLedger {
     private final Set<String> postedCredits = new HashSet<>();
     /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
     private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
-    /** Append-only secondary indexes keep journal queries proportional to the selected account/reference. */
-    private final Map<String, List<Entry>> entriesByAccount = new HashMap<>();
-    private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
     private final Map<String, Double> debitTotals = new HashMap<>();
     private final Map<String, Long> journalCountsByKindCategory = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
@@ -368,15 +365,30 @@ public final class TreasuryLedger {
     public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
     public synchronized double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
 
-    /** Account-scoped immutable journal view in original append order. */
+    /**
+     * Account-scoped journal view in original append order. History is scanned on demand
+     * rather than retained in a second per-account collection alongside the canonical journal.
+     */
     public synchronized List<Entry> entriesForAccount(String accountId) {
-        return Collections.unmodifiableList(entriesByAccount.getOrDefault(accountId, List.of()));
+        if (accountId == null || accountId.isBlank()) return List.of();
+        List<Entry> result = new ArrayList<>();
+        for (Entry entry : journal)
+            if (accountId.equals(entry.accountId())) result.add(entry);
+        return List.copyOf(result);
     }
 
-    /** O(1) lookup of the postings sharing one account/kind/reference idempotency key. */
+    /**
+     * Returns postings for one idempotency key. The compact posted-reference sets remain
+     * the O(1) duplicate guard; full Entry objects are not duplicated in a reference index.
+     */
     public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
-        return Collections.unmodifiableList(entriesByReference.getOrDefault(
-                referenceKey(accountId, kind, reference), List.of()));
+        String key = referenceKey(accountId, kind, reference);
+        List<Entry> result = new ArrayList<>(2);
+        for (Entry entry : journal) {
+            if (key.equals(referenceKey(entry.accountId(), entry.kind(), entry.reference())))
+                result.add(entry);
+        }
+        return List.copyOf(result);
     }
 
     public synchronized boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
@@ -419,10 +431,7 @@ public final class TreasuryLedger {
     }
 
     private void indexEntry(Entry entry) {
-        entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>()).add(entry);
         journalCountsByKindCategory.merge(entry.kind().name() + (char) 0 + categoryGroup(entry.category()), 1L, Long::sum);
-        entriesByReference.computeIfAbsent(referenceKey(entry.accountId(), entry.kind(), entry.reference()),
-                ignored -> new ArrayList<>()).add(entry);
         accountsWithEntries.add(entry.accountId());
         if (!entry.credit()) debitTotals.merge(
                 debitTotalKey(entry.accountId(), entry.kind(), entry.category()), entry.amount(), Double::sum);
