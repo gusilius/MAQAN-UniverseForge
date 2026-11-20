@@ -77,7 +77,7 @@ public final class FamilyPlanning {
         int age = year - mother.birthYear;
         // One annual roll, meaningful but not guaranteed. Rare fertility traits
         // improve the chance; hard caps prevent runaway population growth.
-        int baseChance = age <= 29 ? 2600 : age <= 34 ? 2200 : age <= 39 ? 1500 : age <= 42 ? 800 : 300;
+        int baseChance = age <= 29 ? 4200 : age <= 34 ? 3600 : age <= 39 ? 2500 : age <= 42 ? 1400 : 500;
         int fertility = clamp(number(mother.props.get("family.fertility"), 100L), 0, 250);
         int modifier = clamp(number(mother.props.get("family.conception_modifier"), 100L), 0, 250);
         int traitModifier = CharacterStats.traits(mother).contains("fecund") ? 150 : 100;
