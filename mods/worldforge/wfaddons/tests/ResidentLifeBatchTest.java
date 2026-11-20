@@ -15,8 +15,9 @@ public final class ResidentLifeBatchTest {
         while (visited < size) {
             ResidentLifeBatch.Window window = ResidentLifeBatch.next(size, cursor, budget);
             check(window.count() > 0 && window.count() <= budget, "batch must respect budget");
+            check(window.start() + window.count() <= size, "batch must not wrap across the end of the resident list");
             for (int i = 0; i < window.count(); i++)
-                check(firstCycle.add((window.start() + i) % size), "a resident must not repeat before a full cycle");
+                check(firstCycle.add(window.start() + i), "a resident must not repeat before a full cycle");
             visited += window.count();
             cursor = window.nextCursor();
         }

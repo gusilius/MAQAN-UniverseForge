@@ -7,7 +7,8 @@ public final class ResidentLifeBatch {
     public record Window(int start, int count, int nextCursor) {}
 
     /**
-     * Returns at most {@code budget} consecutive residents, wrapping around the current list.
+     * Returns a contiguous slice that never crosses the list boundary. Wrapping is handled
+     * by the next call so each resident is visited at most once per full cycle.
      * The caller stores nextCursor per settlement. Size changes are safe because the cursor is
      * normalized against the current population every time.
      */
@@ -16,7 +17,9 @@ public final class ResidentLifeBatch {
         if (budget < 0) throw new IllegalArgumentException("budget cannot be negative");
         if (size == 0 || budget == 0) return new Window(0, 0, 0);
         int start = Math.floorMod(cursor, size);
-        int count = Math.min(size, budget);
+        // Clamp at the end of the current list. A wrapped batch would revisit the
+        // beginning before the cursor completes its first full population cycle.
+        int count = Math.min(Math.min(size, budget), size - start);
         return new Window(start, count, (start + count) % size);
     }
 }

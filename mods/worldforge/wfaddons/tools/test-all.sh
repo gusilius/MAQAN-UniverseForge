@@ -56,7 +56,7 @@ javac -proc:none -encoding UTF-8 -d "$OUT/classes" "${SRC[@]}" tests/*.java test
 if [ "${3:-}" = "--image-identity-only" ]; then
   [ -n "$ACTUAL_PACK" ] || { echo "ERROR: --image-identity-only requires an actual .worldmap argument"; exit 2; }
   echo "== ImageWorldIdentityTest (actual map)"
-  java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"
+  python3 tools/run-java-test.py 120 "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"
   exit $?
 fi
 
