@@ -25,7 +25,6 @@ public final class ResidentLifeEvents {
         final int initialSize;
         final List<Character> newborns = new ArrayList<>();
         final List<Character> eligibleSingles = new ArrayList<>();
-        final Map<String, List<Character>> childrenByParent = new HashMap<>();
         int phase;
         int cursor;
         long lastAdvanceToken = Long.MIN_VALUE;
@@ -82,7 +81,6 @@ public final class ResidentLifeEvents {
                 // Newborns are appended to the canonical registry and tracked separately;
                 // no population-sized snapshot or duplicate reference list is allocated.
                 for (Character newborn : session.newborns) {
-                    indexChild(session, newborn);
                     registry.refreshLifeStages(List.of(newborn), session.year);
                 }
                 session.phase = 1;
@@ -101,7 +99,6 @@ public final class ResidentLifeEvents {
                 List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
                 registry.refreshLifeStages(batch, session.year);
                 for (Character person : batch) {
-                    indexChild(session, person);
                     Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
                     if (newborn != null) session.newborns.add(newborn);
                     if (person.alive && (person.spouse == null || person.spouse.isBlank())
@@ -110,7 +107,7 @@ public final class ResidentLifeEvents {
                 }
             } else if (session.phase == 1) {
                 for (int index = session.cursor; index < end; index++)
-                    advanceChildhoodPerson(registry, personAt(session, index), session.year, session.childrenByParent);
+                    advanceChildhoodPerson(registry, personAt(session, index), session.year);
             } else if (session.phase == 2) {
                 for (int index = session.cursor; index < end; index++)
                     processMaritalConflict(registry, personAt(session, index), session.year);
@@ -136,13 +133,6 @@ public final class ResidentLifeEvents {
     private static Character personAt(YearSession session, int index) {
         return index < session.initialSize ? session.people.get(index)
                 : session.newborns.get(index - session.initialSize);
-    }
-
-    private static void indexChild(YearSession session, Character person) {
-        if (!person.father.isBlank())
-            session.childrenByParent.computeIfAbsent(person.father, ignored -> new ArrayList<>()).add(person);
-        if (!person.mother.isBlank())
-            session.childrenByParent.computeIfAbsent(person.mother, ignored -> new ArrayList<>()).add(person);
     }
 
     private static Character processPregnancy(CharacterRegistry registry, Character person, int year,
@@ -297,8 +287,7 @@ public final class ResidentLifeEvents {
         }
     }
 
-    private static void advanceChildhoodPerson(CharacterRegistry registry, Character child, int year,
-                                               Map<String, List<Character>> childrenByParent) {
+    private static void advanceChildhoodPerson(CharacterRegistry registry, Character child, int year) {
         if (!child.alive || year <= number(child.props.get("family.development_year"), 0)) return;
         int age = PopulationSimulation.age(child, year);
         if (age >= 18) {
@@ -317,7 +306,7 @@ public final class ResidentLifeEvents {
             guardian = ResidentSocial.score(child, father.globalId) >= ResidentSocial.score(child, mother.globalId) ? father : mother;
         else if (fatherAlive) guardian = father;
         else if (motherAlive) guardian = mother;
-        else guardian = findKinGuardian(registry, child, year, childrenByParent);
+        else guardian = findKinGuardian(registry, child, year);
         child.props.put("family.guardian_id", guardian == null ? "" : guardian.id);
         child.props.put("family.care_status", guardian == null ? "orphaned" :
                 fatherAlive && motherAlive ? "two_parent_home" :
@@ -361,13 +350,12 @@ public final class ResidentLifeEvents {
         if (age == 18) child.props.put("family.adulthood_year", year);
     }
 
-    private static Character findKinGuardian(CharacterRegistry registry, Character child, int year,
-                                             Map<String, List<Character>> childrenByParent) {
+    private static Character findKinGuardian(CharacterRegistry registry, Character child, int year) {
         Set<String> candidateIds = new HashSet<>();
         addGrandparents(registry, child.father, candidateIds);
         addGrandparents(registry, child.mother, candidateIds);
-        addParentSiblings(registry, child.father, candidateIds, childrenByParent);
-        addParentSiblings(registry, child.mother, candidateIds, childrenByParent);
+        addParentSiblings(registry, child.father, candidateIds);
+        addParentSiblings(registry, child.mother, candidateIds);
         return candidateIds.stream().map(registry::get).filter(Objects::nonNull)
                 .filter(candidate -> candidate.alive && PopulationSimulation.age(candidate, year) >= 18)
                 .min(Comparator.comparingInt(candidate -> Math.abs(PopulationSimulation.age(candidate, year) - 35)))
@@ -382,19 +370,23 @@ public final class ResidentLifeEvents {
         if (!parent.mother.isBlank()) candidates.add(parent.mother);
     }
 
-    private static void addParentSiblings(CharacterRegistry registry, String parentId, Set<String> candidates,
-                                          Map<String, List<Character>> childrenByParent) {
+    private static void addParentSiblings(CharacterRegistry registry, String parentId, Set<String> candidates) {
         if (parentId == null || parentId.isBlank()) return;
         Character parent = registry.get(parentId);
         if (parent == null) return;
-        if (!parent.father.isBlank()) {
-            for (Character sibling : childrenByParent.getOrDefault(parent.father, List.of()))
-                if (!sibling.id.equals(parentId)) candidates.add(sibling.id);
-        }
-        if (!parent.mother.isBlank()) {
-            for (Character sibling : childrenByParent.getOrDefault(parent.mother, List.of()))
-                if (!sibling.id.equals(parentId)) candidates.add(sibling.id);
-        }
+        // Parent links already own their canonical child lists. Walk only the two
+        // grandparent households instead of building a population-sized reverse index each year.
+        addChildrenOf(registry, parent.father, parentId, candidates);
+        addChildrenOf(registry, parent.mother, parentId, candidates);
+    }
+
+    private static void addChildrenOf(CharacterRegistry registry, String grandparentId,
+                                      String parentId, Set<String> candidates) {
+        if (grandparentId == null || grandparentId.isBlank()) return;
+        Character grandparent = registry.get(grandparentId);
+        if (grandparent == null) return;
+        for (String siblingId : grandparent.children)
+            if (siblingId != null && !siblingId.equals(parentId)) candidates.add(siblingId);
     }
 
     private static boolean closeFamily(CharacterRegistry registry, Character a, Character b) {
