@@ -71,7 +71,7 @@ for source in tests/*.java; do
     continue
   fi
   echo "== $test_name"
-  if java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
+  if python3 tools/run-java-test.py 120 "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
     passed=$((passed + 1))
   else
     failed=$((failed + 1))
@@ -80,7 +80,7 @@ done
 
 if [ -n "$ACTUAL_PACK" ]; then
   echo "== ImageWorldIdentityTest (actual image-generated map)"
-  if java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
+  if python3 tools/run-java-test.py 120 "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
     passed=$((passed + 1))
   else
     failed=$((failed + 1))
