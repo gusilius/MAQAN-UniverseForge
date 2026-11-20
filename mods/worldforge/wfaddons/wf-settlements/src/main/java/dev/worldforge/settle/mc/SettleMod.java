@@ -157,8 +157,6 @@ public class SettleMod {
     private static final Map<String, Integer> LIFE_AI_CURSORS = new HashMap<>();
     /** Short-lived resident indexes avoid repeated O(residents) companion searches for each resident. */
     private static final Map<String, ResidentLifeIndex> RESIDENT_LIFE_INDEXES = new HashMap<>();
-    private static final int LIFE_AI_BATCH_SIZE = 96;
-    private static final int LIFE_AI_URGENT_BATCH_SIZE = 384;
     private static final long RESIDENT_LIFE_INDEX_REFRESH_TICKS = 20L;
 
     private static final class ResidentLifeIndex {
@@ -222,7 +220,7 @@ public class SettleMod {
         long cellX = residentSpatialCell(worker.x), cellZ = residentSpatialCell(worker.z);
         double nearest = 32.0 * 32.0;
         dev.worldforge.settle.Worker best = null;
-        for (long dx = -1; dx <= 1; dx++) for (long dz = -1; dz <= 1; dz++) {
+        for (long dx = -2; dx <= 2; dx++) for (long dz = -2; dz <= 2; dz++) {
             List<dev.worldforge.settle.Worker> candidates =
                     index.bySpatialCell.get(residentSpatialKey(cellX + dx, cellZ + dz));
             if (candidates == null) continue;
@@ -1439,6 +1437,8 @@ public class SettleMod {
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
         LAST_SIMULATED_WORLD_MINUTE.clear();
+        LIFE_AI_CURSORS.clear();
+        RESIDENT_LIFE_INDEXES.clear();
         COLONY_SIMULATION_PHASES = Map.of();
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
         colonySimulationIndexInterval = -1;
@@ -1695,7 +1695,9 @@ public class SettleMod {
         }
         ResidentLifeIndex residentIndex = residentLifeIndex(colony, ticks);
         int previousCursor = LIFE_AI_CURSORS.getOrDefault(settlement.id, 0);
-        int batchLimit = settlement.raidIncoming ? LIFE_AI_URGENT_BATCH_SIZE : LIFE_AI_BATCH_SIZE;
+        int batchLimit = settlement.raidIncoming
+                ? dev.worldforge.mod.MaqanPerformanceConfig.lifeAiUrgentResidentsPerPass()
+                : dev.worldforge.mod.MaqanPerformanceConfig.lifeAiResidentsPerPass();
         ResidentLifeBatch.Window window = ResidentLifeBatch.next(workerCount, previousCursor, batchLimit);
         LIFE_AI_CURSORS.put(settlement.id, window.nextCursor());
         for (int offset = 0; offset < window.count(); offset++) {

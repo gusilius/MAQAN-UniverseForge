@@ -24,6 +24,8 @@ public final class MaqanPerformanceConfig {
     public static final ForgeConfigSpec.IntValue MAX_WORKER_SPAWNS_PER_TICK;
     public static final ForgeConfigSpec.IntValue SETTLEMENT_SIMULATION_INTERVAL_TICKS;
     public static final ForgeConfigSpec.IntValue LIFE_AI_INTERVAL_STEPS;
+    public static final ForgeConfigSpec.IntValue LIFE_AI_RESIDENTS_PER_PASS;
+    public static final ForgeConfigSpec.IntValue LIFE_AI_URGENT_RESIDENTS_PER_PASS;
     public static final ForgeConfigSpec.IntValue MAX_ACTIVE_WORKER_BODIES_PER_COLONY;
 
     public static final ForgeConfigSpec.IntValue ARMY_MAX_MATERIALIZED_BODIES;
@@ -68,6 +70,10 @@ public final class MaqanPerformanceConfig {
                 .defineInRange("settlementSimulationIntervalTicks", 20, 5, 200);
         LIFE_AI_INTERVAL_STEPS = BUILDER.comment("Run non-urgent resident life AI every N settlement steps.")
                 .defineInRange("lifeAiIntervalSteps", 1, 1, 20);
+        LIFE_AI_RESIDENTS_PER_PASS = BUILDER.comment("Maximum residents receiving ordinary life-AI processing per active settlement pass. Does not limit population.")
+                .defineInRange("lifeAiResidentsPerPass", 96, 1, 4096);
+        LIFE_AI_URGENT_RESIDENTS_PER_PASS = BUILDER.comment("Maximum residents receiving urgent life-AI processing per raid/emergency pass.")
+                .defineInRange("lifeAiUrgentResidentsPerPass", 384, 1, 16384);
 
         OVERRIDE_WORKER_SPAWN_RADIUS = BUILDER.define("overrideWorkerSpawnRadius", false);
         OVERRIDE_WORKER_DESPAWN_RADIUS = BUILDER.define("overrideWorkerDespawnRadius", false);
@@ -136,6 +142,8 @@ public final class MaqanPerformanceConfig {
     public static int lifeAiIntervalSteps() {
         return preset(LIFE_AI_INTERVAL_STEPS.get(), OVERRIDE_LIFE_AI_INTERVAL.get(), 2, 1, 1);
     }
+    public static int lifeAiResidentsPerPass() { return LIFE_AI_RESIDENTS_PER_PASS.get(); }
+    public static int lifeAiUrgentResidentsPerPass() { return LIFE_AI_URGENT_RESIDENTS_PER_PASS.get(); }
     public static int armyMaxMaterializedBodies() {
         return preset(ARMY_MAX_MATERIALIZED_BODIES.get(), OVERRIDE_ARMY_MAX_BODIES.get(), 48, 96, 256);
     }
