@@ -351,7 +351,7 @@ public final class TreasuryLedger {
         List<Entry> accountEntries = entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>());
         List<Entry> referenceEntries = entriesByReference.computeIfAbsent(
                 referenceKey(entry.accountId(), entry.kind(), entry.reference()), ignored -> new ArrayList<>());
-        journalIndexBySequence.put(entry.sequence(), journal.size());
+        journalIndexBySequence.put(entry.sequence(), journal.size() - 1);
         accountIndexBySequence.put(entry.sequence(), accountEntries.size());
         referenceIndexBySequence.put(entry.sequence(), referenceEntries.size());
         accountEntries.add(entry);
