@@ -224,6 +224,35 @@ impl SocialCursor {
     pub fn reset(&mut self) { self.next_relation = 0; }
 }
 
+fn character_profile_score(character: &crate::Character, catalog: &Catalog) -> i32 {
+    let traits: i32 = character.trait_ids.iter()
+        .map(|tag| catalog.weights.get(tag).copied().unwrap_or(0) as i32).sum();
+    let attributes: i32 = character.attributes.iter()
+        .map(|(key, value)| catalog.weights.get(key).copied().unwrap_or(0) as i32
+            * (*value).clamp(i16::MIN as i32, i16::MAX as i32) / 100).sum();
+    traits.saturating_add(attributes)
+}
+
+fn character_intergroup_score(
+    observer: &crate::Character,
+    encountered: &crate::Character,
+    catalog: &Catalog,
+) -> i32 {
+    if observer.race_id.is_empty() || encountered.race_id.is_empty()
+        || observer.race_id == encountered.race_id { return 0; }
+    let attitude = catalog.intergroup_attitudes.get(&observer.race_id)
+        .and_then(|targets| targets.get(&encountered.race_id)).copied().unwrap_or(0) as i32;
+    if attitude == 0 { return 0; }
+    let susceptibility: i32 = observer.trait_ids.iter()
+        .map(|trait_id| catalog.bias_susceptibility_traits.get(trait_id).copied().unwrap_or(0) as i32).sum();
+    let bias = attitude.saturating_mul(susceptibility) / 100;
+    let cultural_bridge = if !observer.culture_id.is_empty()
+        && observer.culture_id == encountered.culture_id {
+        catalog.shared_culture_affinity as i32
+    } else { 0 };
+    bias.saturating_add(cultural_bridge)
+}
+
 /// Evaluates at most budget relationships using a reusable Character index.
 /// Cost per batch is O(budget + number of distinct endpoints), not O(population).
 pub fn evaluate_indexed_snapshot(
@@ -237,33 +266,53 @@ pub fn evaluate_indexed_snapshot(
     if budget == 0 || total == 0 { return Ok(Vec::new()); }
     let count = budget.min(total);
     let start = cursor.next_relation % total;
-    let mut contacts = Vec::with_capacity(count);
-    let mut profiles_by_id: HashMap<String, Profile> = HashMap::with_capacity(count.saturating_mul(2));
+    let mut seen: HashSet<(usize, usize)> = HashSet::with_capacity(count);
+    let mut out = Vec::with_capacity(count);
     for offset in 0..count {
         let relation = &snapshot.social_relations[(start + offset) % total];
+        if relation.character_a.trim().is_empty() || relation.character_b.trim().is_empty() {
+            return Err(Error::EmptyId);
+        }
+        if relation.character_a == relation.character_b {
+            return Err(Error::SelfContact(relation.character_a.clone()));
+        }
+        let a_pos = index.by_id.binary_search_by(|person|
+            person.id.as_str().cmp(relation.character_a.as_str())).ok();
+        let b_pos = index.by_id.binary_search_by(|person|
+            person.id.as_str().cmp(relation.character_b.as_str())).ok();
+        let (Some(a_pos), Some(b_pos)) = (a_pos, b_pos) else { continue };
+        let pair = if a_pos < b_pos { (a_pos, b_pos) } else { (b_pos, a_pos) };
+        if !seen.insert(pair) {
+            return Err(Error::DuplicateContact(
+                relation.character_a.clone(), relation.character_b.clone()));
+        }
+        let a_character = index.by_id[a_pos];
+        let b_character = index.by_id[b_pos];
+        if !a_character.alive || !b_character.alive { continue; }
         let context = if relation.married { "marriage" }
             else if relation.dating { "courtship" }
-            else if relation.employed { "work" }
-            else { "social" };
-        contacts.push(Contact {
-            a: relation.character_a.clone(),
-            b: relation.character_b.clone(),
-            context: context.into(),
-            relationship: relation.relationship.saturating_add(relation.love)
-                .clamp(i16::MIN as i32, i16::MAX as i32) as i16,
-            last_contact_tick: relation.last_contact_day,
+            else if relation.employed { "work" } else { "social" };
+        let mut score = catalog.context_base.get(context).copied().unwrap_or(0) as i32;
+        score = score.saturating_add(character_profile_score(a_character, catalog))
+            .saturating_add(character_profile_score(b_character, catalog));
+        score = score.saturating_add(character_intergroup_score(a_character, b_character, catalog))
+            .saturating_add(character_intergroup_score(b_character, a_character, catalog));
+        score = score.saturating_add((relation.relationship.saturating_add(relation.love)
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16 as i32) / 10);
+        let (first, second) = if relation.character_a < relation.character_b {
+            (&relation.character_a, &relation.character_b)
+        } else { (&relation.character_b, &relation.character_a) };
+        let jitter = (stable_hash(snapshot.seed, snapshot.day, first, second, context) % 11) as i32 - 5;
+        let score_i16 = score.saturating_add(jitter).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        let affinity_delta = if score_i16 >= catalog.positive_threshold { 1 }
+            else if score_i16 <= catalog.negative_threshold { -1 } else { 0 };
+        out.push(Outcome {
+            a: first.clone(), b: second.clone(), context: context.into(),
+            score: score_i16, affinity_delta, tick: snapshot.day,
         });
-        for id in [&relation.character_a, &relation.character_b] {
-            if !profiles_by_id.contains_key(id.as_str()) {
-                if let Some(profile) = index.project(id) {
-                    profiles_by_id.insert(id.clone(), profile);
-                }
-            }
-        }
     }
     cursor.next_relation = (start + count) % total;
-    let profiles: Vec<Profile> = profiles_by_id.into_values().collect();
-    evaluate(&profiles, &contacts, catalog, snapshot.seed, snapshot.day, budget)
+    Ok(out)
 }
 
 /// Convenience adapter for one-off use. Repeated callers should construct
