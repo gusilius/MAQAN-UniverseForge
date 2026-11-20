@@ -103,8 +103,10 @@ public class CourtTest {
             family.marry(mother.id, father.id, 300);
             CourtSim familyCourt = new CourtSim(s.d, null, family, s.defs, s.names, seed, 300);
             familyCourt.day = 364;
-            familyCourt.tick(1);
-            if (mother.children.isEmpty()) continue; // choose a deterministic seed that produces the annual birth
+            familyCourt.tick(1); // first annual pass may begin a pregnancy
+            if (!mother.children.isEmpty()) continue;
+            familyCourt.tick(365); // the gestation window must elapse before the birth event
+            if (mother.children.isEmpty()) continue;
             int childrenAfterCourt = mother.children.size();
             ok(((Number) mother.props.get("family.last_birth_year")).intValue() == 301,
                     "court birth publishes the shared family-year marker");
