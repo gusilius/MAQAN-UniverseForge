@@ -92,40 +92,6 @@ public final class TreasuryLedgerTest {
         ok(concurrentAfter == concurrentBefore + 100,
                 "each concurrent logical transfer publishes exactly one economy revision");
 
-        TreasuryLedger hourly = new TreasuryLedger();
-        hourly.open("hourly:account", "hourly:account", "silver", 0);
-        boolean hourlyAccepted = true;
-        for (int i = 0; i < 5000; i++) {
-            hourlyAccepted &= hourly.deposit("hourly:account", 0.01, TreasuryLedger.Kind.PRODUCTION,
-                    "settlement-tax-flow", "settlement:capital:tax", 100 + (i % 60),
-                    "routine hourly settlement income");
-        }
-        ok(hourlyAccepted && close(hourly.balance("hourly:account"), 50)
-                        && hourly.journalSize() == 1
-                        && hourly.entriesForReference("hourly:account", TreasuryLedger.Kind.PRODUCTION,
-                                "settlement:capital:tax").size() == 1
-                        && close(hourly.entriesForReference("hourly:account", TreasuryLedger.Kind.PRODUCTION,
-                                "settlement:capital:tax").get(0).amount(), 50),
-                "5,000 repeated operating postings in one hour compact into one exact-value audit entry");
-        hourly.deposit("hourly:account", 1, TreasuryLedger.Kind.PRODUCTION,
-                "settlement-tax-flow", "settlement:capital:tax", 3600, "routine hourly settlement income");
-        TreasuryLedger hourlyRestored = TreasuryLedger.fromJson(hourly.toJson());
-        ok(hourly.journalSize() == 2 && hourlyRestored.journalSize() == 2
-                        && close(hourlyRestored.balance("hourly:account"), 51)
-                        && close(hourlyRestored.journal().get(0).amount(), 50),
-                "hourly treasury aggregates remain bounded by period and survive snapshot recovery");
-
-        TreasuryLedger hourlyDebits = new TreasuryLedger();
-        hourlyDebits.open("hourly:debit", "hourly:debit", "silver", 100);
-        for (int i = 0; i < 1000; i++)
-            hourlyDebits.withdraw("hourly:debit", 0.1, TreasuryLedger.Kind.CONSUMPTION,
-                    "population-upkeep", "settlement:capital:food", 600 + (i % 60), "routine upkeep");
-        ok(hourlyDebits.journalSize() == 1
-                        && close(hourlyDebits.balance("hourly:debit"), 0)
-                        && close(hourlyDebits.totalDebits("hourly:debit", TreasuryLedger.Kind.CONSUMPTION,
-                                "population-upkeep"), 100),
-                "hourly debit aggregation preserves exact balances and category totals");
-
         TreasuryLedger ledger=new TreasuryLedger();
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);

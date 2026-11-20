@@ -37,12 +37,6 @@ public final class TreasuryLedger {
     private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
     private final Map<String, Double> debitTotals = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
-    /** Sequence-to-position indexes allow replacing an hourly aggregate without scanning large histories. */
-    private final Map<Long, Integer> journalIndexBySequence = new HashMap<>();
-    private final Map<Long, Integer> accountIndexBySequence = new HashMap<>();
-    private final Map<Long, Integer> referenceIndexBySequence = new HashMap<>();
-    /** High-frequency external operating flows are summarized by account/category/reference/hour. */
-    private final Map<String, Long> hourlyExternalAggregates = new HashMap<>();
     private long sequence=1, transactionSequence=1;
     private long mutationVersion;
     private String lastError="";
@@ -347,74 +341,18 @@ public final class TreasuryLedger {
     private void updateBankruptcy(Account a) { a.bankrupt=a.debt>a.creditLimit+1e-9; }
     private boolean fail(String s) { lastError=s; return false; }
     private static String clean(String s) { return s==null?"":s.trim(); }
-    private void indexEntry(Entry entry) {
-        List<Entry> accountEntries = entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>());
-        List<Entry> referenceEntries = entriesByReference.computeIfAbsent(
-                referenceKey(entry.accountId(), entry.kind(), entry.reference()), ignored -> new ArrayList<>());
-        journalIndexBySequence.put(entry.sequence(), journal.size() - 1);
-        accountIndexBySequence.put(entry.sequence(), accountEntries.size());
-        referenceIndexBySequence.put(entry.sequence(), referenceEntries.size());
-        accountEntries.add(entry);
-        referenceEntries.add(entry);
-        accountsWithEntries.add(entry.accountId());
-        if (!entry.credit()) debitTotals.merge(
-                debitTotalKey(entry.accountId(), entry.kind(), entry.category()), entry.amount(), Double::sum);
-    }
-
-    private static String hourlyAggregateKey(String account, String other, String currency, boolean credit,
-                                             Kind kind, String category, String reference, long hour, String memo) {
-        return String.join("\\u0000", account, other, currency, Boolean.toString(credit), kind.name(),
-                category, reference, Long.toString(hour), memo);
-    }
-
-    /**
-     * Routine external cash/resource flows often arrive every simulation tick. Preserve their exact
-     * accumulated value, but store one auditable hourly posting per stable economic key. Strategic
-     * transfers between accounts are never folded and retain their matching double-entry receipts.
-     */
-    private void append(String tx,String account,String other,String currency,double value,boolean credit,
-                        Kind kind,String category,String reference,long minute,double balance,String memo) {
+    private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
         markMutation();
-        boolean hourly = "external".equals(other) && kind != Kind.OPENING;
-        long bucketMinute = hourly ? (minute / 60L) * 60L : minute;
-        if (hourly) {
-            String key = hourlyAggregateKey(account, other, currency, credit, kind, category, reference,
-                    bucketMinute / 60L, memo);
-            Long existingSequence = hourlyExternalAggregates.get(key);
-            if (existingSequence != null) {
-                Integer journalIndex = journalIndexBySequence.get(existingSequence);
-                Integer accountIndex = accountIndexBySequence.get(existingSequence);
-                Integer referenceIndex = referenceIndexBySequence.get(existingSequence);
-                if (journalIndex != null && accountIndex != null && referenceIndex != null) {
-                    Entry previous = journal.get(journalIndex);
-                    Entry combined = new Entry(previous.sequence(), previous.transactionId(), account,
-                            other, currency, previous.amount() + value, credit, kind, category, reference,
-                            bucketMinute, balance, memo);
-                    journal.set(journalIndex, combined);
-                    entriesByAccount.get(account).set(accountIndex, combined);
-                    entriesByReference.get(referenceKey(account, kind, reference)).set(referenceIndex, combined);
-                    if (!credit) {
-                        String totalKey = debitTotalKey(account, kind, category);
-                        debitTotals.merge(totalKey, value, Double::sum);
-                    }
-                    return;
-                }
-                hourlyExternalAggregates.remove(key);
-            }
-        }
-        Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,
-                bucketMinute,balance,memo);
-        int journalIndex = journal.size();
+        Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
         journal.add(entry);
         indexEntry(entry);
-        if (hourly) hourlyExternalAggregates.put(hourlyAggregateKey(account, other, currency, credit,
-                kind, category, reference, bucketMinute / 60L, memo), entry.sequence());
-        String refKey = referenceKey(account, kind, reference);
-        postedReferences.add(refKey);
-        (credit ? postedCredits : postedDebits).add(refKey);
+        String key = referenceKey(account, kind, reference);
+        postedReferences.add(key);
+        (credit ? postedCredits : postedDebits).add(key);
         if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
             armyFieldRationDebitAccounts.add(account);
     }
+
     /**
      * Writes the durable ledger incrementally. The journal is intentionally append-only,
      * so building a second object graph and one giant JSON String for every autosave can
@@ -536,10 +474,6 @@ public final class TreasuryLedger {
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
             ledger.indexEntry(entry);
-            if ("external".equals(other) && worldMinute % 60L == 0 && kind != Kind.OPENING) {
-                ledger.hourlyExternalAggregates.put(hourlyAggregateKey(accountId, other, currency, credit,
-                        kind, category, reference, worldMinute / 60L, memo), seq);
-            }
             String referenceKey = referenceKey(accountId, kind, reference);
             ledger.postedReferences.add(referenceKey);
             (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
