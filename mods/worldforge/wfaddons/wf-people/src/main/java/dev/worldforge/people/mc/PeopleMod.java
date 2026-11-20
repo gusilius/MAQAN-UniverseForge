@@ -363,6 +363,18 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
         }
+        if (server != null) {
+            try {
+                WorldId world = WorldForgeMod.worldId();
+                if (world == null) throw new IllegalStateException("WorldId is unavailable for Character WAL");
+                openCharacterWal(server, reg, "map|" + m.name, world + "|" + m.name);
+            } catch (Exception walFailure) {
+                identityPartitionsReady = false;
+                LOGGER.error("wf_people: map Character WAL recovery failed for '{}'; map is disabled", m.name, walFailure);
+                INVALID_REGS.add(m);
+                return null;
+            }
+        }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
         CharacterRegistry selected = prev != null ? prev : reg;
         if (prev == null) populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
