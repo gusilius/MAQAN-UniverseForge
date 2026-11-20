@@ -380,10 +380,13 @@ public final class TreasuryLedger {
     }
 
     /** Drop the in-memory tail only after its complete sequence has been durably archived and checkpointed. */
-    public synchronized void acknowledgeArchivedThrough(long exclusiveNextSequence) {
+    public synchronized void acknowledgeArchivedThrough(TreasuryJournalArchive archive, long exclusiveNextSequence) {
+        if (archive == null || archive.nextSequence() != exclusiveNextSequence)
+            throw new IllegalArgumentException("Verified treasury archive is required at the acknowledged boundary");
         if (exclusiveNextSequence != sequence || exclusiveNextSequence < archivedThroughSequence + 1
                 || journal.size() != sequence - archivedThroughSequence - 1)
             throw new IllegalStateException("Cannot acknowledge an incomplete treasury archive boundary");
+        historyArchive = archive;
         archivedThroughSequence = exclusiveNextSequence - 1;
         journal.clear();
     }
