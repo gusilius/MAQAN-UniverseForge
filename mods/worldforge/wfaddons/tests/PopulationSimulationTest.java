@@ -571,14 +571,14 @@ public final class PopulationSimulationTest {
         for (Character person : java.util.List.of(firstOwnerPerson, secondOwnerPerson)) {
             java.util.Map<String,Object> result = new java.util.LinkedHashMap<>();
             result.put("id", person.globalId);
-            result.put("needs", java.util.Map.of());
+            result.put("needs", java.util.Map.of("hunger", 50, "rest", 50, "social", 50, "purpose", 50, "leisure", 50));
             result.put("intent", "idle");
             int age = 301 - person.birthYear;
             result.put("age_years", age);
             result.put("life_stage", age < 6 ? "infant" : age < 13 ? "child" : age < 18 ? "adolescent" : age < 60 ? "adult" : "elder");
             result.put("simulated_days", "1");
             result.put("last_simulated_year", 301);
-            result.put("world_day", "0");
+            result.put("world_day", "1");
             multiOwnerPeople.add(result);
         }
         java.util.Map<String,Object> multiOwnerRoot = new java.util.LinkedHashMap<>();
@@ -586,7 +586,7 @@ public final class PopulationSimulationTest {
         multiOwnerRoot.put("world_id", "population-multi-owner-test");
         multiOwnerRoot.put("year", 301);
         multiOwnerRoot.put("elapsed_days", 1);
-        multiOwnerRoot.put("world_day", "0");
+        multiOwnerRoot.put("world_day", "1");
         multiOwnerRoot.put("characters", multiOwnerPeople);
         ok(PopulationComputeBridge.apply(multiOwnerCapture,
                         dev.worldforge.mod.Json.write(multiOwnerRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
