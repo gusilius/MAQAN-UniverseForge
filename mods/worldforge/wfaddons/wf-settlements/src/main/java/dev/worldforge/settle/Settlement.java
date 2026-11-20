@@ -67,6 +67,11 @@ public final class Settlement {
     public final Map<String, Integer> autoSell = new TreeMap<>(), autoBuy = new TreeMap<>();
     public double tradeLeft;
     public double time;
+    /** Periodic operating flows are accrued in memory and posted once per 30 world days. */
+    private static final long ECONOMY_LEDGER_PERIOD_SECONDS = 1800L;
+    private long economyLedgerPeriod;
+    /** Key: period|C/D|resource|category. Debit accruals reserve stock before they reach the ledger. */
+    private final Map<String, Double> pendingEconomyAccruals = new TreeMap<>();
     private int nextBuilding = 1, nextWorker = 1;
     public final Flow flow = new Flow();
     public final ResidentTaskGraph taskGraph = new ResidentTaskGraph();
@@ -345,7 +350,66 @@ public final class Settlement {
             account = resourceAccount(resource);
         }
         stock.put(resource, account.balance);
-        return account.balance;
+        return Math.max(0, account.balance - pendingPeriodicDebits(resource));
+    }
+
+    private long economyPeriod() { return Math.max(0L, (long) Math.floor(time / ECONOMY_LEDGER_PERIOD_SECONDS)); }
+
+    private static String periodicKey(long period, boolean credit, String resource, String category) {
+        return period + "|" + (credit ? "C" : "D") + "|" + resource + "|" + category;
+    }
+
+    private double pendingPeriodicDebits(String resource) {
+        double total = 0;
+        String marker = "|D|" + resource + "|";
+        for (Map.Entry<String, Double> entry : pendingEconomyAccruals.entrySet())
+            if (entry.getKey().contains(marker)) total += entry.getValue();
+        return total;
+    }
+
+    private void accruePeriodic(boolean credit, String resource, double value, String category) {
+        if (!Double.isFinite(value) || value <= 0) return;
+        String key = periodicKey(economyPeriod(), credit, resource, category);
+        pendingEconomyAccruals.merge(key, value, Double::sum);
+    }
+
+    /**
+     * Commit a completed 30-day accounting period. Each settlement/resource/category gets one
+     * idempotent receipt; pending debits already reserve stock through amount(), so no later
+     * command can spend the same goods while the period is being accumulated.
+     */
+    private boolean flushPeriodicEconomy() {
+        long currentPeriod = economyPeriod();
+        TreasuryLedger ledger = TreasuryService.current();
+        while (economyLedgerPeriod < currentPeriod) {
+            long closingPeriod = economyLedgerPeriod;
+            List<String> keys = pendingEconomyAccruals.keySet().stream()
+                    .filter(key -> key.startsWith(closingPeriod + "|")).toList();
+            // Close earned income before expenses so that the period's tax revenue can fund its upkeep.
+            for (boolean credit : new boolean[]{true, false}) {
+                for (String key : keys) {
+                    String[] parts = key.split("\\|", 4);
+                    if (parts.length != 4 || ("C".equals(parts[1])) != credit) continue;
+                    double value = pendingEconomyAccruals.getOrDefault(key, 0.0);
+                    if (value <= 1e-9) { pendingEconomyAccruals.remove(key); continue; }
+                    String resource = parts[2], category = parts[3];
+                    String reference = "settlement-period:" + id + ":" + closingPeriod + ":" + (credit ? "credit:" : "debit:")
+                            + resource + ":" + category;
+                    boolean accepted = credit
+                            ? ledger.depositOnce(accountId(resource), value,
+                                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.PRODUCTION,
+                                    category, reference, worldMinute(), "settlement periodic income")
+                            : ledger.withdrawOnce(accountId(resource), value,
+                                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.UPKEEP : TreasuryLedger.Kind.CONSUMPTION,
+                                    category, reference, worldMinute(), "settlement periodic operating expense");
+                    if (!accepted) return false;
+                    pendingEconomyAccruals.remove(key);
+                }
+            }
+            economyLedgerPeriod++;
+        }
+        syncAllResourceMirrors();
+        return true;
     }
 
     private boolean debitResource(String resource, double value, TreasuryLedger.Kind kind, String category, String reference) {
@@ -1340,14 +1404,15 @@ public final class Settlement {
         int residents = population();
         double need = residents * EAT * dt, have = amount("food");
         if (residents == 0) { starveTimer = 0; return; }
-        if (have >= need) {
-            debitResource("food", need, TreasuryLedger.Kind.CONSUMPTION, "population-food", "daily-rations");
-            flow.record(time, "food", need, false);
+        double consumed = Math.min(have, need);
+        if (consumed > 0) {
+            accruePeriodic(false, "food", consumed, "population-food");
+            flow.record(time, "food", consumed, false);
+        }
+        if (have + 1e-9 >= need) {
             starveTimer = 0;
             return;
         }
-        debitResource("food", have, TreasuryLedger.Kind.CONSUMPTION, "population-food", "starvation-rations");
-        flow.record(time, "food", have, false);
         starveTimer += dt;
         if (starveTimer >= STARVE_EVERY) {
             starveTimer = 0;
@@ -1718,15 +1783,25 @@ public final class Settlement {
     public double upkeepPerMin() { double u = 0; for (Building b : buildings) if (b.state == Building.State.DONE && !b.paused) u += b.def.upkeep; return u; }
 
     private void economy(double dt) {
+        // A failed period close is retried; successful periods do not touch the ledger again
+        // until the next 30-day boundary.
+        if (!flushPeriodicEconomy()) {
+            for (Building building : buildings)
+                if (building.state == Building.State.DONE && building.def.upkeep > 0) building.unpaid = true;
+        }
         double tax = taxPerMin() / 60 * dt;
-        if (tax > 0) { double got = add(Defs.SILVER, tax); flow.record(time, Defs.SILVER, got, true); taxCollected += got; }
+        if (tax > 0) {
+            accruePeriodic(true, Defs.SILVER, tax, "population-tax");
+            flow.record(time, Defs.SILVER, tax, true);
+            taxCollected += tax;
+        }
         for (Building b : buildings) {
             b.unpaid = false;
             if (b.state != Building.State.DONE || b.paused || b.def.upkeep <= 0) continue;
             double c = b.def.upkeep / 60 * dt;
-            if (amount(Defs.SILVER) >= c) {
-                if (debitSilver(c, TreasuryLedger.Kind.UPKEEP, "building-upkeep", b.def.id)) flow.record(time, Defs.SILVER, c, false);
-                else b.unpaid = true;
+            if (amount(Defs.SILVER) + 1e-9 >= c) {
+                accruePeriodic(false, Defs.SILVER, c, "building-upkeep:" + b.uid);
+                flow.record(time, Defs.SILVER, c, false);
             } else b.unpaid = true;
         }
         tradeLeft = Math.min(tradeCap(), tradeLeft + tradePerMin() / 60 * dt);
@@ -1742,9 +1817,10 @@ public final class Settlement {
         for (var e : defs.comfort.entrySet()) {
             double c = Math.min(amount(e.getKey()), e.getValue().rate * n * dt);
             if (c > 0) {
-                debitResource(e.getKey(), c, Defs.SILVER.equals(e.getKey())
-                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, "consumption", "comfort-goods");
-                flow.record(time, e.getKey(), c, false);
+                if (amount(e.getKey()) + 1e-9 >= c) {
+                    accruePeriodic(false, e.getKey(), c, "comfort-goods");
+                    flow.record(time, e.getKey(), c, false);
+                }
             }
         }
     }
@@ -2020,6 +2096,8 @@ public final class Settlement {
         root.put("auto_sell", new LinkedHashMap<String, Object>(autoSell)); root.put("auto_buy", new LinkedHashMap<String, Object>(autoBuy));
         root.put("stock", stock);
         root.put("stock_ledger_entries", stockLedgerEntries);
+        root.put("economy_ledger_period", economyLedgerPeriod);
+        root.put("pending_economy_accruals", new TreeMap<>(pendingEconomyAccruals));
         List<Object> bs = new ArrayList<>();
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -2104,6 +2182,19 @@ public final class Settlement {
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("stock")).entrySet()) s.stock.put(e.getKey(), ((Number) e.getValue()).doubleValue());
         if (root.get("stock_ledger_entries") instanceof Number entries)
             s.stockLedgerEntries = Math.max(0, entries.longValue());
+        if (root.get("economy_ledger_period") instanceof Number period)
+            s.economyLedgerPeriod = Math.max(0, period.longValue());
+        else s.economyLedgerPeriod = Math.max(0L, (long) Math.floor(s.time / ECONOMY_LEDGER_PERIOD_SECONDS));
+        if (root.get("pending_economy_accruals") instanceof Map<?, ?> accruals) {
+            if (accruals.size() > 100_000) throw new IllegalArgumentException("Settlement periodic accrual limit exceeded");
+            for (Map.Entry<?, ?> entry : accruals.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || !key.matches("[0-9]+\\|[CD]\\|[a-z0-9_.:-]{1,64}\\|[a-zA-Z0-9_.:-]{1,96}")
+                        || !(entry.getValue() instanceof Number value) || !Double.isFinite(value.doubleValue())
+                        || value.doubleValue() < 0)
+                    throw new IllegalArgumentException("Malformed settlement periodic accrual");
+                s.pendingEconomyAccruals.put(key, value.doubleValue());
+            }
+        }
         for (Object o : (List<Object>) root.get("buildings")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Defs.Building d = defs.buildings.get((String) m.get("def"));
