@@ -29,7 +29,9 @@ public final class TreasuryArchiveMigration {
         synchronized (ledger) {
             String snapshotJson = TreasuryLedgerSnapshot.capture(ledger);
             TreasuryLedgerSnapshot.State snapshot = TreasuryLedgerSnapshot.decode(snapshotJson);
-            List<TreasuryLedger.Entry> entries = List.copyOf(ledger.journal());
+            // The ledger monitor pins this unmodifiable view for the whole migration; avoid
+            // duplicating millions of Entry references merely to obtain a stable iteration.
+            List<TreasuryLedger.Entry> entries = ledger.journal();
 
             if (entries.size() != snapshot.nextSequence() - 1)
                 throw new IOException("Legacy treasury journal is not a complete sequence from 1");
