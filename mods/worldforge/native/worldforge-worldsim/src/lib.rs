@@ -179,7 +179,14 @@ pub struct GeographicCell {
     /// Image-map cells default to year zero; vanilla chunks persist their discovery year.
     #[serde(default)]
     pub discovered_year: u64,
+    /// Profile-authored wilderness is land but is not an initial settlement site.
+    #[serde(default)]
+    pub wilderness: bool,
 }
+
+fn default_settlement_level() -> u8 { 4 }
+fn default_population_density_pct() -> u8 { 38 }
+fn default_wilderness_share_pct() -> u8 { 0 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeographicMap {
@@ -189,6 +196,13 @@ pub struct GeographicMap {
     pub blocks_per_pixel_milli: u64,
     pub political_layers_present: bool,
     pub sample_stride: u32,
+    /// Seven-level occupancy profile. These fields never cap world/state/province counts.
+    #[serde(default = "default_settlement_level")]
+    pub settlement_level: u8,
+    #[serde(default = "default_population_density_pct")]
+    pub population_density_pct: u8,
+    #[serde(default = "default_wilderness_share_pct")]
+    pub wilderness_share_pct: u8,
     pub cells: Vec<GeographicCell>,
 }
 
@@ -1764,11 +1778,12 @@ mod tests {
             geography: vec![GeographicMap {
                 map_id: "planetos".into(), width_px: 128, height_px: 96,
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0 },
+                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0 },
+                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
                 ],
             }],
         };

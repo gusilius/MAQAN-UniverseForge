@@ -42,7 +42,7 @@ public final class MapGeography {
         int budget = sampleBudget();
         int stride = Math.max(1, (int) Math.ceil(Math.sqrt(area / (double) budget)));
         List<Map<String, Object>> cells = new ArrayList<>();
-        int land = 0, rivers = 0, viable = 0;
+        int land = 0, rivers = 0, viable = 0, wildernessLand = 0, inhabitedLand = 0;
 
         for (int z = 0; z < map.h; z += stride) {
             for (int x = 0; x < map.w; x += stride) {
@@ -52,11 +52,13 @@ public final class MapGeography {
                 int elevation = (int) Math.round(map.minY + rawHeight / 65535.0 * (map.maxY - map.minY));
                 int river = map.riverAtPx(x, z);
                 boolean isLand = elevation >= map.seaLevel + 1 && !isWaterBiome(biome);
+                boolean wilderness = isLand && map.isWildernessPx(x, z);
                 int slope = localRelief(map, x, z, stride);
                 int suitability = suitability(biome, elevation, map.seaLevel, slope, river);
                 if (isLand) land++;
-                if (river > 0) rivers++;
-                if (isLand && suitability >= 55) viable++;
+                if (wilderness) wildernessLand++;
+                if (isLand && !wilderness) inhabitedLand++;
+                if (isLand && !wilderness && suitability >= 55) viable++;
 
                 Map<String, Object> cell = new LinkedHashMap<>();
                 cell.put("x", x);
@@ -65,6 +67,7 @@ public final class MapGeography {
                 cell.put("elevation", elevation);
                 cell.put("river", river);
                 cell.put("land", isLand);
+                cell.put("wilderness", wilderness);
                 cell.put("suitability", suitability);
                 // Keep the legacy schema field empty: sovereignty is generated downstream.
                 cell.put("owner_realm_id", "");
@@ -83,6 +86,12 @@ public final class MapGeography {
         result.put("political_layers_present", map.hasPoliticalLayers());
         result.put("political_layers_ignored", true);
         result.put("political_ownership_included", false);
+        result.put("settlement_level", map.planetProfile == null ? 4 : map.planetProfile.settlementLevel);
+        result.put("settlement_profile", map.planetProfile == null ? "legacy-default" : map.planetProfile.settlementProfile);
+        result.put("population_density_pct", map.planetProfile == null ? 38 : map.planetProfile.populationDensityPct);
+        result.put("wilderness_share_pct", map.planetProfile == null ? 0 : map.planetProfile.wildernessSharePct);
+        result.put("wilderness_samples", wildernessLand);
+        result.put("inhabited_land_samples", inhabitedLand);
         result.put("sample_stride", stride);
         result.put("sample_budget", budget);
         result.put("world_area_pixels", area);

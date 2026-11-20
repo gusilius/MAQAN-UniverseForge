@@ -36,23 +36,28 @@ public final class MapData {
     public final RegionData regions;         // политическая карта (может быть null)
     public final byte[] regionMap;           // 128x128 байт для карты-предмета (может быть null)
     public final TitleData titles;           // иерархия титулов и государства (может быть null)
+    /** Atlas/WorldForge seven-level settlement and planet-scale profile, if supplied. */
+    public final PlanetWorldProfile planetProfile;
     public final Map<String, byte[]> mapItems; // карты-предметы по уровням и "realms"
     /** Named settlement anchors authored by image-worldgen in world-blueprint.json. */
     public record SettlementSeed(String id, String type, String name, String realmId, int provinceId,
                                  int pixelX, int pixelZ, int blockX, int blockZ) {}
     public final List<SettlementSeed> settlementSeeds;
 
-    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json", "world-blueprint.json"};
+    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "wilderness.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json", "world-blueprint.json", "generation-profile.json"};
 
     private final short[] height;
     private final byte[] biome;
+    /** 255 marks land intentionally left wild by the selected occupancy profile. */
+    private final byte[] wilderness;
     private final byte[] river;              // 0 суша, 160 озеро, 255 река (может быть null)
     private final short[] riverLevel;        // уровень воды реки (как height16), 0 если не река
     private final Noise warp = new Noise(0x5EED1234L);
 
     private MapData(String name, String displayName, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
                     String[][] cand, double[] spawn, short[] height, byte[] biome, byte[] river, short[] riverLevel,
-                    RegionData regions, byte[] regionMap, TitleData titles, Map<String, byte[]> mapItems,
+                    RegionData regions, byte[] regionMap, TitleData titles, byte[] wilderness,
+                    PlanetWorldProfile planetProfile, Map<String, byte[]> mapItems,
                     List<SettlementSeed> settlementSeeds) {
         this.name = name;
         this.displayName = displayName == null || displayName.isBlank() ? name : displayName;
@@ -73,6 +78,8 @@ public final class MapData {
         this.regions = regions;
         this.regionMap = regionMap;
         this.titles = titles;
+        this.wilderness = wilderness;
+        this.planetProfile = planetProfile;
         this.mapItems = mapItems;
         this.settlementSeeds = List.copyOf(settlementSeeds);
     }
@@ -190,6 +197,13 @@ public final class MapData {
         Raster br = decode(files.get("biomes.png"), w, h, "biomes.png");
         byte[] biome = new byte[w * h];
         for (int z = 0; z < h; z++) for (int x = 0; x < w; x++) biome[z * w + x] = (byte) br.getSample(x, z, 0);
+        byte[] wilderness = null;
+        if (files.containsKey("wilderness.png")) {
+            Raster wr = decode(files.get("wilderness.png"), w, h, "wilderness.png");
+            wilderness = new byte[w * h];
+            for (int z = 0; z < h; z++) for (int x = 0; x < w; x++)
+                wilderness[z * w + x] = (byte) wr.getSample(x, z, 0);
+        }
         byte[] river = null;
         short[] rl = null;
         if (files.containsKey("rivers.png")) {
@@ -264,7 +278,17 @@ public final class MapData {
                 }
             }
         }
-        return new MapData(name, displayName, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems, settlementSeeds);
+        PlanetWorldProfile planetProfile = PlanetWorldProfile.parse(files.get("generation-profile.json"));
+        if (planetProfile != null) {
+            if (planetProfile.widthPx != w || planetProfile.heightPx != h
+                    || Math.abs(planetProfile.blocksPerPixel - bpp) > 0.0001)
+                throw new IOException("generation-profile.json dimensions/scale do not match meta.json for map '" + name + "'");
+            if (!planetProfile.planetId.isBlank() && !planetProfile.planetId.equals(name))
+                throw new IOException("generation-profile.json planet_id '" + planetProfile.planetId
+                        + "' does not match map id '" + name + "'");
+        }
+        return new MapData(name, displayName, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn,
+                height, biome, river, rl, regions, regionMap, titles, wilderness, planetProfile, mapItems, settlementSeeds);
     }
 
     private static Raster decode(byte[] png, int w, int h, String what) throws IOException {
@@ -310,6 +334,14 @@ public final class MapData {
 
     /** True only when the source package actually supplied rivers.png. */
     public boolean hasRiverLayer() { return river != null; }
+
+    /** Whether this pixel is intentionally wild and excluded from initial civilization materialization. */
+    public boolean isWildernessPx(int x, int z) {
+        if (wilderness == null) return false;
+        return (wilderness[clampZ(z) * w + clampX(x)] & 0xFF) >= 128;
+    }
+
+    public boolean hasWildernessLayer() { return wilderness != null; }
 
     /** True only when the package contains actual sovereignty, not neutral province/region geography. */
     public boolean hasPoliticalLayers() {

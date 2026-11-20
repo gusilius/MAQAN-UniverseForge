@@ -141,7 +141,7 @@ fn observed_map_scale(map: &GeographicMap) -> u64 {
     let mut max_x = 0_u32;
     let mut max_z = 0_u32;
     let mut found = false;
-    for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
+    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48) {
         found = true;
         min_x = min_x.min(cell.x);
         min_z = min_z.min(cell.z);
@@ -161,7 +161,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = observed_map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && c.suitability >= 48)
+        .filter(|c| c.land && !c.wilderness && c.suitability >= 48)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -173,7 +173,8 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
         .map(|band| (band.x, band.z)).collect::<Vec<_>>();
     for cell in candidates {
-        let chance = u64::from(cell.suitability.saturating_sub(42)) * 55;
+        let density_scale = 20 + u64::from(map.population_density_pct.min(100)) * 80 / 100;
+    let chance = u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100;
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
         if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < spacing * spacing) { continue; }
@@ -201,7 +202,7 @@ fn bootstrap_vanilla_initial_civilizations(
 ) {
     if map.cells.is_empty() { return; }
     let mut candidates = map.cells.iter()
-        .filter(|cell| cell.land && cell.suitability >= 36)
+        .filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 36)
         .collect::<Vec<_>>();
     if candidates.is_empty() { return; }
     candidates.sort_by(|a, b| {
@@ -306,7 +307,10 @@ fn bootstrap_initial_civilizations(
         bootstrap_vanilla_initial_civilizations(map, seed, bands, polities, events);
         return;
     }
-    if map.cells.is_empty() || polities.iter().any(|polity| polity.map_id == map.map_id) {
+    // Image-worldgen already produced the canonical political hierarchy for this map.
+    // Occupancy profiles may add settlements and population, never duplicate sovereigns.
+    if map.political_layers_present || map.cells.is_empty()
+        || polities.iter().any(|polity| polity.map_id == map.map_id) {
         return;
     }
 
@@ -315,10 +319,10 @@ fn bootstrap_initial_civilizations(
     // in full. Scale spacing to the currently observed land footprint, not the eventual
     // map dimensions, otherwise a small vanilla observation window can never found four
     // communities and the world remains politically empty forever.
-    let min_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).min();
-    let max_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).max();
-    let min_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).min();
-    let max_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).max();
+    let min_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).min();
+    let max_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).max();
+    let min_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).min();
+    let max_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).max();
     let observed_span = match (min_x, max_x, min_z, max_z) {
         (Some(x0), Some(x1), Some(z0), Some(z1)) =>
             u64::from((x1 - x0).max(z1 - z0).saturating_add(1)),
@@ -332,7 +336,7 @@ fn bootstrap_initial_civilizations(
     let bucket = (separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
-    for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
+    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48) {
         groups.entry((cell.x / bucket, cell.z / bucket)).or_default().push(cell);
     }
 
@@ -478,9 +482,10 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     // collapsed distant communities into a few oversized states on authored maps.
     let spacing = (observed_map_scale(map) * 2).max(u64::from(map.sample_stride.max(1)) * 3);
     const MAX_FOUNDING_COMMUNITIES: usize = 8;
+    if map.political_layers_present { return; }
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
-            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land)
+            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land && !cell.wilderness)
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
 
@@ -672,7 +677,7 @@ mod tests {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
                     elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
-                    owner_realm_id: String::new(), discovered_year: 0 });
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
@@ -690,13 +695,14 @@ mod tests {
             width_px: 60_000_001, height_px: 60_000_001,
             blocks_per_pixel_milli: 1000, political_layers_present: false,
             sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
             cells: vec![
                 GeographicCell { x: 30_000_000, z: 30_000_000, biome: "minecraft:plains".into(),
                     elevation: 70, river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0 },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
                 GeographicCell { x: 30_900_000, z: 30_900_000, biome: "minecraft:forest".into(),
                     elevation: 72, river: 0, land: true, suitability: 88,
-                    owner_realm_id: String::new(), discovered_year: 0 },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
             ],
         };
         assert!(observed_map_scale(&map) <= 256,
@@ -714,7 +720,7 @@ mod tests {
                     cells.push(GeographicCell {
                         x: x + dx, z: z + dz, biome: "minecraft:plains".into(),
                         elevation: 70, river: 0, land: true, suitability: 90,
-                        owner_realm_id: String::new(), discovered_year: 0,
+                        owner_realm_id: String::new(), discovered_year: 0, wilderness: false,
                     });
                 }
             }
@@ -723,7 +729,8 @@ mod tests {
             map_id: "vanilla-world:minecraft:overworld".into(),
             width_px: 60_000_001, height_px: 60_000_001,
             blocks_per_pixel_milli: 1000, political_layers_present: false,
-            sample_stride: 4, cells,
+            sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
         };
         let mut bands = Vec::new();
         let mut polities = Vec::new();
@@ -753,7 +760,7 @@ mod tests {
             land: true,
             suitability: 90,
             owner_realm_id: String::new(),
-            discovered_year: 0,
+            discovered_year: 0, wilderness: false,
         }).collect();
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
@@ -762,6 +769,7 @@ mod tests {
             blocks_per_pixel_milli: 1000,
             political_layers_present: false,
             sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
             cells,
         };
         let mut bands = Vec::new();
@@ -780,14 +788,15 @@ mod tests {
                 cells.push(GeographicCell {
                     x, z, biome: "minecraft:plains".into(), elevation: 70,
                     river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0,
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false,
                 });
             }
         }
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
             width_px: 256, height_px: 256, blocks_per_pixel_milli: 1000,
-            political_layers_present: false, sample_stride: 4, cells,
+            political_layers_present: false, sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
         };
         let mut bands = Vec::new();
         let mut polities = Vec::new();
