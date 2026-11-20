@@ -449,6 +449,24 @@ public final class TreasuryLedgerTest {
                         .firstSequence() == 11,
                 "treasury archive segments may begin after sequence one while remaining internally contiguous");
 
+        boolean nonOneArchivePrefixVerified = false;
+        try {
+            java.nio.file.Path nonOneArchiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-non-one-archive-");
+            TreasuryJournalArchive nonOneArchive = new TreasuryJournalArchive(nonOneArchiveDir, 11);
+            nonOneArchive.append(List.of(laterFirst, laterSecond));
+            nonOneArchivePrefixVerified = nonOneArchive.nextSequence() == 13
+                    && nonOneArchive.archiveDigestThrough(13).matches("[0-9a-f]{64}");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(nonOneArchiveDir)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            nonOneArchivePrefixVerified = false;
+        }
+        ok(nonOneArchivePrefixVerified,
+                "treasury archive checkpoint fingerprints honor a configured non-one starting sequence");
+
         boolean checkpointTamperRejected = false;
         try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }
         catch (IllegalArgumentException expected) { checkpointTamperRejected = expected.getMessage().contains("checksum"); }

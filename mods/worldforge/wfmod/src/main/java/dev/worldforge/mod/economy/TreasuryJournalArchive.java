@@ -54,7 +54,7 @@ public final class TreasuryJournalArchive {
             throw new IOException("Treasury archive does not contain checkpoint prefix ending at " + checkpointNextSequence);
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            long expected = 1;
+            long expected = firstSequence;
             for (Path path : segmentFiles()) {
                 TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
                         Files.readString(path, StandardCharsets.UTF_8));
@@ -115,7 +115,7 @@ public final class TreasuryJournalArchive {
             try {
                 Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException unsupported) {
-                Files.move(temporary, destination);
+                throw new IOException("Atomic treasury segment publication is not supported by this filesystem", unsupported);
             }
             published = true;
             nextSequence = decoded.lastSequence() + 1;
