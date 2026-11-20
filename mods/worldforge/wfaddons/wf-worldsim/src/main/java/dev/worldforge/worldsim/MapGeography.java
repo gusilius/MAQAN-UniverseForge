@@ -1,6 +1,8 @@
 package dev.worldforge.worldsim;
 
 import dev.worldforge.mod.MapData;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -21,6 +23,7 @@ import java.util.concurrent.TimeUnit;
  * proxies because .worldmap has no separate climate or resource raster.
  */
 public final class MapGeography {
+    private static final Gson GSON = new Gson();
     private static final int DEFAULT_SAMPLE_BUDGET = 16_384;
     private static final int MIN_SAMPLE_BUDGET = 4_096;
     private static final int MAX_SAMPLE_BUDGET = 65_536;
@@ -37,7 +40,7 @@ public final class MapGeography {
                 thread.setPriority(Thread.MIN_PRIORITY);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
-    private static final Map<MapData, CompletableFuture<Map<String, Object>>> PENDING =
+    private static final Map<MapData, CompletableFuture<JsonObject>> PENDING =
             new WeakHashMap<>();
 
     private MapGeography() { }
@@ -46,14 +49,15 @@ public final class MapGeography {
      * Schedules expensive image sampling once and returns only completed immutable data.
      * A null result means the simulation frame should wait; it never blocks the server tick.
      */
-    public static Map<String, Object> snapshotIfReady(MapData map) {
+    public static JsonObject snapshotIfReady(MapData map) {
         if (map == null) return null;
-        CompletableFuture<Map<String, Object>> future;
+        CompletableFuture<JsonObject> future;
         synchronized (PENDING) {
             future = PENDING.get(map);
             if (future == null) {
                 try {
-                    future = CompletableFuture.supplyAsync(() -> describe(map), GEOLOGY_WORKER);
+                    future = CompletableFuture.supplyAsync(
+                            () -> GSON.toJsonTree(describe(map)).getAsJsonObject(), GEOLOGY_WORKER);
                     PENDING.put(map, future);
                 } catch (java.util.concurrent.RejectedExecutionException saturated) {
                     return null;
