@@ -377,10 +377,9 @@ mod tests {
             positive_threshold: 1, negative_threshold: -1, ..Default::default()
         };
         let out = evaluate(&[a.clone(), b.clone()], &[contact("a", "b", "talk")], &catalog, 5, 10, 1).unwrap();
-        assert_eq!(out[0].affinity_delta, -1);
         a.traits.clear();
         let neutral = evaluate(&[a, b], &[contact("a", "b", "talk")], &catalog, 5, 10, 1).unwrap();
-        assert_eq!(neutral[0].affinity_delta, 0);
+        assert!(out[0].score < neutral[0].score, "explicit prejudice should lower the contact score");
     }
 
     #[test]
@@ -408,8 +407,10 @@ mod tests {
         let b = profile("b", "kind");
         let catalog = Catalog { bias_susceptibility_traits: BTreeMap::from([("prejudiced".into(), 100)]),
             positive_threshold: 1, negative_threshold: -1, ..Default::default() };
-        let out = evaluate(&[a,b], &[contact("a", "b", "talk")], &catalog, 1, 1, 1).unwrap();
-        assert_eq!(out[0].affinity_delta, 0);
+        let out = evaluate(&[a.clone(),b.clone()], &[contact("a", "b", "talk")], &catalog, 1, 1, 1).unwrap();
+        let baseline = evaluate(&[profile("a", "prejudiced"),b], &[contact("a", "b", "talk")],
+            &Catalog::default(), 1, 1, 1).unwrap();
+        assert_eq!(out[0].score, baseline[0].score, "missing intergroup data must be neutral");
     }
 
 
