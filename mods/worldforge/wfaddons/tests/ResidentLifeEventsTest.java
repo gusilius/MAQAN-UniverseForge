@@ -49,8 +49,10 @@ public final class ResidentLifeEventsTest {
         boolean married = false;
         int marriageYear = -1;
         for (int year = 2000; year < 2040 && !married; year++) {
+            System.out.println("LIFE_TEST marriage-year-start=" + year);
             WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
+            System.out.println("LIFE_TEST marriage-year-end=" + year);
             married = father.id.equals(mother.spouse) && mother.id.equals(father.spouse);
             if (married) marriageYear = year;
         }
@@ -66,8 +68,10 @@ public final class ResidentLifeEventsTest {
 
         boolean childBorn = false;
         for (int year = marriageYear + 1; marriageYear > 0 && year < marriageYear + 40 && !childBorn; year++) {
+            System.out.println("LIFE_TEST birth-year-start=" + year);
             WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
+            System.out.println("LIFE_TEST birth-year-end=" + year);
             childBorn = !mother.children.isEmpty() && !father.children.isEmpty();
         }
         check(childBorn, "married residents can have a child through the canonical family registry");
@@ -97,8 +101,10 @@ public final class ResidentLifeEventsTest {
         namedFamily.marry(namedFather.id, namedMother.id, 2000);
         WorldForgeApi.clock().reset();
         for (int year = 2000; year <= 2040 && namedMother.children.isEmpty(); year++) {
+            System.out.println("LIFE_TEST named-birth-year-start=" + year);
             WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(namedFamily, year, birthNames);
+            System.out.println("LIFE_TEST named-birth-year-end=" + year);
         }
         Character namedChild = namedMother.children.isEmpty() ? null : namedFamily.get(namedMother.children.get(0));
         check(namedChild != null && List.of("Торин", "Двалин", "Диса", "Груна").contains(namedChild.name),
