@@ -70,6 +70,8 @@ public final class Settlement {
     /** Periodic operating flows are accrued in memory and posted once per 30 world days. */
     private static final long ECONOMY_LEDGER_PERIOD_SECONDS = 1800L;
     private long economyLedgerPeriod;
+    /** Autonomous market orders clear at most once per simulated day, not on every two-second step. */
+    private double tradeCheckTimer;
     /** Key: period|C/D|resource|category. Debit accruals reserve stock before they reach the ledger. */
     private final Map<String, Double> pendingEconomyAccruals = new TreeMap<>();
     private int nextBuilding = 1, nextWorker = 1;
@@ -417,6 +419,10 @@ public final class Settlement {
         if (value == 0) return true;
         amount(resource);
         resourceAccount(resource);
+        if ("production-input".equals(category)) {
+            accruePeriodic(false, resource, value, "production-input");
+            return true;
+        }
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 worldMinute(), category);
         syncResourceMirror(resource);
@@ -1805,13 +1811,17 @@ public final class Settlement {
             } else b.unpaid = true;
         }
         tradeLeft = Math.min(tradeCap(), tradeLeft + tradePerMin() / 60 * dt);
-        for (var e : autoSell.entrySet()) {
+        tradeCheckTimer += dt;
+        if (tradeCheckTimer >= 60.0) {
+            tradeCheckTimer %= 60.0;
+            for (var e : autoSell.entrySet()) {
             int spare = (int) Math.min(amount(e.getKey()) - e.getValue(), tradeLeft);
             if (spare >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { sell(e.getKey(), Math.min(spare, 5)); } catch (OrderException ignored) { } }
         }
-        for (var e : autoBuy.entrySet()) {
-            int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
-            if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
+            for (var e : autoBuy.entrySet()) {
+                int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
+                if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
+            }
         }
         int n = population();
         for (var e : defs.comfort.entrySet()) {
@@ -2098,6 +2108,7 @@ public final class Settlement {
         root.put("stock_ledger_entries", stockLedgerEntries);
         root.put("economy_ledger_period", economyLedgerPeriod);
         root.put("pending_economy_accruals", new TreeMap<>(pendingEconomyAccruals));
+        root.put("trade_check_timer", tradeCheckTimer);
         List<Object> bs = new ArrayList<>();
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -2195,6 +2206,8 @@ public final class Settlement {
                 s.pendingEconomyAccruals.put(key, value.doubleValue());
             }
         }
+        if (root.get("trade_check_timer") instanceof Number timer && Double.isFinite(timer.doubleValue()))
+            s.tradeCheckTimer = Math.max(0, Math.min(60, timer.doubleValue()));
         for (Object o : (List<Object>) root.get("buildings")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Defs.Building d = defs.buildings.get((String) m.get("def"));
