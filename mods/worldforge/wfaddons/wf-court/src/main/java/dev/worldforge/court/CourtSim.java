@@ -245,7 +245,7 @@ public final class CourtSim {
             if (c.spouse.isEmpty()) continue;
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
-            if (f == null || !f.alive || age < 18 || age > 42) continue;
+            if (f == null || !f.alive || age < 18 || age > 45) continue;
             FamilyPlanning.tryConceive(c, f, y, day, seed);
         }
     }
