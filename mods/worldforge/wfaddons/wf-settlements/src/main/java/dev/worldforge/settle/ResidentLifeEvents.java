@@ -71,7 +71,12 @@ public final class ResidentLifeEvents {
     public static void yearly(CharacterRegistry registry, int year, NameBank names) {
         if (registry == null || year < 1) return;
         long token = 0;
-        while (!advanceYearly(registry, year, names, Integer.MAX_VALUE, token++)) { }
+        while (true) {
+            trace("sync-call year=" + year + " token=" + token + " size=" + registry.size());
+            boolean complete = advanceYearly(registry, year, names, Integer.MAX_VALUE, token++);
+            trace("sync-return year=" + year + " complete=" + complete + " token=" + (token - 1));
+            if (complete) break;
+        }
     }
 
     /**
@@ -153,6 +158,7 @@ public final class ResidentLifeEvents {
         }
 
         if (session.phase >= 4) {
+            trace("family-pass-complete year=" + session.year + " initial=" + session.initialSize + " current=" + registry.size());
             synchronized (REGISTRY_PASSES) {
                 state.familyYear = session.year;
                 state.stageSize = session.initialSize;
@@ -169,6 +175,7 @@ public final class ResidentLifeEvents {
 
     private static boolean advanceStageRefresh(CharacterRegistry registry, RegistryPassState state,
                                                 int year, int residentBudget, long tickToken) {
+        trace("stage-refresh-enter year=" + year + " stageSize=" + state.stageSize + " registrySize=" + registry.size());
         if (registry.size() <= state.stageSize) return true;
         StageRefresh refresh = state.stageRefresh;
         if (refresh == null || refresh.year != year) {
@@ -179,8 +186,10 @@ public final class ResidentLifeEvents {
         refresh.lastAdvanceToken = tickToken;
         int end = Math.min(refresh.end, refresh.cursor + residentBudget);
         if (end > refresh.cursor) {
+            trace("stage-refresh-before batchStart=" + refresh.cursor + " end=" + end);
             List<Character> batch = new ArrayList<>(refresh.people.subList(refresh.cursor, end));
             registry.refreshLifeStages(batch, year);
+            trace("stage-refresh-after batchStart=" + refresh.cursor + " end=" + end);
             refresh.cursor = end;
         }
         if (refresh.cursor >= refresh.end) {
