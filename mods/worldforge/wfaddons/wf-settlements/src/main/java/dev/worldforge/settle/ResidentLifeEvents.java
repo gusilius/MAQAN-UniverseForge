@@ -70,11 +70,11 @@ public final class ResidentLifeEvents {
         if (registry == null || year < 1) return;
         // Every synchronous invocation needs a globally unique token. Reusing token 0
         // caused same-year calls to return a stale cached result and spin forever.
-        for (int attempt = 0; attempt < 4; attempt++) {
+        for (int attempt = 0; attempt < 6; attempt++) {
             long token = SYNCHRONOUS_TOKENS.incrementAndGet();
             if (advanceYearly(registry, year, names, Integer.MAX_VALUE, token)) return;
         }
-        throw new IllegalStateException("ResidentLifeEvents yearly pass did not complete within 4 synchronous advances (year=" + year + ")");
+        throw new IllegalStateException("ResidentLifeEvents yearly pass did not complete within 6 synchronous advances (year=" + year + ")");
     }
 
     /**
@@ -122,7 +122,7 @@ public final class ResidentLifeEvents {
                 session.cursor = 0;
                 continue;
             }
-            int end = Math.min(workSize, session.cursor + remaining);
+            int end = session.cursor + Math.min(remaining, workSize - session.cursor);
             
             if (session.phase == 0) {
                 List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
@@ -182,7 +182,7 @@ public final class ResidentLifeEvents {
         }
         if (refresh.lastAdvanceToken == tickToken) return false;
         refresh.lastAdvanceToken = tickToken;
-        int end = Math.min(refresh.end, refresh.cursor + residentBudget);
+        int end = refresh.cursor + Math.min(residentBudget, refresh.end - refresh.cursor);
         if (end > refresh.cursor) {
             
             List<Character> batch = new ArrayList<>(refresh.people.subList(refresh.cursor, end));
