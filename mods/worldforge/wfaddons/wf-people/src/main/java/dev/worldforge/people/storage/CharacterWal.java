@@ -11,9 +11,7 @@ import java.util.zip.CRC32C;
 
 /**
  * Append-only sharded journal for canonical Character records.
- *
- * This is a persistence log, not a second source of Character identity. Records contain
- * the canonical global UUID and the versioned payload emitted by CharacterRegistry.
+ * Batch append amortizes durable flushes while preserving per-shard sequence and CRC framing.
  */
 public final class CharacterWal implements AutoCloseable {
     private static final int MAGIC = 0x57465043;
@@ -26,12 +24,19 @@ public final class CharacterWal implements AutoCloseable {
         public Record { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }
     }
+    public record Write(String globalId, byte[] payload) {
+        public Write {
+            Objects.requireNonNull(globalId, "globalId");
+            Objects.requireNonNull(payload, "payload");
+            payload = payload.clone();
+        }
+        @Override public byte[] payload() { return payload.clone(); }
+    }
     private static final class Shard {
         final FileChannel channel;
         long next;
         Shard(FileChannel channel, long next) { this.channel = channel; this.next = next; }
     }
-
     private final Shard[] shards;
     private boolean closed;
 
@@ -62,26 +67,66 @@ public final class CharacterWal implements AutoCloseable {
         return (hash & 0x7fffffff) % shards.length;
     }
 
-    /** A successful return means the complete frame has been forced to stable storage. */
-    public synchronized Record append(String globalId, byte[] payload) throws IOException {
+    /** A successful return means every supplied frame is forced to stable storage. */
+    public synchronized List<Record> appendBatch(List<Write> writes) throws IOException {
         ensureOpen();
-        byte[] id = globalId.getBytes(StandardCharsets.UTF_8);
-        if (id.length == 0 || id.length > MAX_ID) throw new IllegalArgumentException("invalid globalId length");
-        if (payload == null || payload.length > MAX_PAYLOAD) throw new IllegalArgumentException("invalid payload length");
-        int shardId = shardFor(globalId);
-        Shard shard = shards[shardId];
-        long start = shard.channel.size();
-        ByteBuffer frame = encode(shard.next, id, payload);
-        shard.channel.position(start);
+        if (writes == null || writes.isEmpty()) return List.of();
+        Map<Integer, List<Integer>> byShard = new TreeMap<>();
+        List<byte[]> ids = new ArrayList<>(writes.size());
+        List<byte[]> payloads = new ArrayList<>(writes.size());
+        for (int i = 0; i < writes.size(); i++) {
+            Write write = Objects.requireNonNull(writes.get(i), "write");
+            byte[] id = write.globalId().getBytes(StandardCharsets.UTF_8);
+            byte[] payload = write.payload();
+            if (id.length == 0 || id.length > MAX_ID) throw new IllegalArgumentException("invalid globalId length");
+            if (payload.length > MAX_PAYLOAD) throw new IllegalArgumentException("invalid payload length");
+            ids.add(id); payloads.add(payload);
+            byShard.computeIfAbsent(shardFor(write.globalId()), ignored -> new ArrayList<>()).add(i);
+        }
+
+        Map<Integer, Long> startOffsets = new LinkedHashMap<>();
+        Map<Integer, Long> firstSequences = new LinkedHashMap<>();
         try {
-            while (frame.hasRemaining()) shard.channel.write(frame);
-            shard.channel.force(true);
-        } catch (IOException failure) {
-            try { shard.channel.truncate(start); shard.channel.position(start); shard.channel.force(true); }
-            catch (IOException rollback) { failure.addSuppressed(rollback); }
+            for (Map.Entry<Integer, List<Integer>> group : byShard.entrySet()) {
+                int shardId = group.getKey();
+                Shard shard = shards[shardId];
+                long start = shard.channel.size();
+                startOffsets.put(shardId, start);
+                firstSequences.put(shardId, shard.next);
+                shard.channel.position(start);
+                for (int index : group.getValue()) {
+                    ByteBuffer frame = encode(shard.next++, ids.get(index), payloads.get(index));
+                    while (frame.hasRemaining()) shard.channel.write(frame);
+                }
+            }
+            // One durable flush per touched shard, rather than one fsync per character.
+            for (int shardId : byShard.keySet()) shards[shardId].channel.force(true);
+        } catch (IOException | RuntimeException failure) {
+            for (Map.Entry<Integer, Long> start : startOffsets.entrySet()) {
+                Shard shard = shards[start.getKey()];
+                try {
+                    shard.channel.truncate(start.getValue());
+                    shard.channel.position(start.getValue());
+                    shard.channel.force(true);
+                    shard.next = firstSequences.get(start.getKey());
+                } catch (IOException rollback) { failure.addSuppressed(rollback); }
+            }
             throw failure;
         }
-        return new Record(shardId, shard.next++, globalId, payload);
+
+        Map<Integer, Long> offsets = new HashMap<>(firstSequences);
+        List<Record> result = new ArrayList<>(writes.size());
+        for (int i = 0; i < writes.size(); i++) {
+            int shardId = shardFor(writes.get(i).globalId());
+            long sequence = offsets.get(shardId);
+            offsets.put(shardId, sequence + 1);
+            result.add(new Record(shardId, sequence, writes.get(i).globalId(), payloads.get(i)));
+        }
+        return List.copyOf(result);
+    }
+
+    public synchronized Record append(String globalId, byte[] payload) throws IOException {
+        return appendBatch(List.of(new Write(globalId, payload))).get(0);
     }
 
     public synchronized List<Record> replayAll() throws IOException {
@@ -92,10 +137,7 @@ public final class CharacterWal implements AutoCloseable {
         return result;
     }
 
-    /**
-     * Call only after every legacy snapshot was durably committed. If the process crashes
-     * before truncation, replaying the old records is idempotent and safe.
-     */
+    /** Call only after every legacy snapshot was durably committed. */
     public synchronized void checkpoint() throws IOException {
         ensureOpen();
         for (Shard shard : shards) {
@@ -124,7 +166,6 @@ public final class CharacterWal implements AutoCloseable {
             if (magic != MAGIC || version != VERSION || reserved != 0 || sequence != expected
                     || idLength < 1 || idLength > MAX_ID || payloadLength < 0 || payloadLength > MAX_PAYLOAD)
                 throw new IOException("Corrupt Character WAL frame header at byte " + position);
-            
             long length = HEADER + (long) idLength + payloadLength + Integer.BYTES;
             if (length > size - position) break;
             ByteBuffer body = ByteBuffer.allocate(idLength + payloadLength + Integer.BYTES);
@@ -136,8 +177,7 @@ public final class CharacterWal implements AutoCloseable {
             crcData.putShort(version).putShort(reserved).putLong(sequence).putInt(idLength).putInt(payloadLength);
             crcData.put(id).put(payload);
             CRC32C crc = new CRC32C(); crc.update(crcData.array(), 0, crcData.position());
-            if ((int) crc.getValue() != stored)
-                throw new IOException("Character WAL checksum mismatch at byte " + position);
+            if ((int) crc.getValue() != stored) throw new IOException("Character WAL checksum mismatch at byte " + position);
             result.add(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload));
             position += length; expected++;
         }

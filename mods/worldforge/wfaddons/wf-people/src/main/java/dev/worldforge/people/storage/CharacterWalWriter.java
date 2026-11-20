@@ -1,6 +1,8 @@
 package dev.worldforge.people.storage;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -8,13 +10,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Bounded single-writer queue for CharacterWal. submit never waits for disk.
- * A false return means the caller must keep the Character dirty and retry;
- * a completed future means the WAL frame was forced to stable storage.
+ * Bounded single-writer queue. Accepted records are grouped into durable batches,
+ * amortizing fsync while preserving backpressure and per-record completion receipts.
  */
 public final class CharacterWalWriter implements AutoCloseable {
     private record Pending(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) { }
 
+    private static final int MAX_BATCH = 128;
     private final CharacterWal wal;
     private final ArrayBlockingQueue<Pending> queue;
     private final AtomicBoolean accepting = new AtomicBoolean(true);
@@ -30,10 +32,6 @@ public final class CharacterWalWriter implements AutoCloseable {
         worker.start();
     }
 
-    /**
-     * Enqueues a defensive copy without blocking. On false, no record was accepted.
-     * Callers must retain dirty state until the returned future completes successfully.
-     */
     public synchronized boolean submit(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) {
         Objects.requireNonNull(globalId, "globalId");
         Objects.requireNonNull(payload, "payload");
@@ -49,15 +47,21 @@ public final class CharacterWalWriter implements AutoCloseable {
     private void run() {
         try {
             while (accepting.get() || !queue.isEmpty()) {
-                Pending pending = queue.poll(100, TimeUnit.MILLISECONDS);
-                if (pending == null) continue;
+                Pending first = queue.poll(100, TimeUnit.MILLISECONDS);
+                if (first == null) continue;
+                List<Pending> batch = new ArrayList<>(MAX_BATCH);
+                batch.add(first);
+                queue.drainTo(batch, MAX_BATCH - 1);
                 try {
-                    pending.durable.complete(wal.append(pending.globalId, pending.payload));
+                    List<CharacterWal.Write> writes = batch.stream()
+                            .map(item -> new CharacterWal.Write(item.globalId, item.payload)).toList();
+                    List<CharacterWal.Record> receipts = wal.appendBatch(writes);
+                    for (int i = 0; i < batch.size(); i++) batch.get(i).durable.complete(receipts.get(i));
                 } catch (IOException | RuntimeException ex) {
                     IOException io = ex instanceof IOException value
                             ? value : new IOException("Character WAL append failed", ex);
                     failure = io;
-                    pending.durable.completeExceptionally(io);
+                    for (Pending item : batch) item.durable.completeExceptionally(io);
                     accepting.set(false);
                     Pending queued;
                     while ((queued = queue.poll()) != null) queued.durable.completeExceptionally(io);
@@ -73,7 +77,6 @@ public final class CharacterWalWriter implements AutoCloseable {
         }
     }
 
-    /** Stops accepting writes and drains accepted records before returning. */
     @Override public synchronized void close() throws IOException {
         accepting.set(false);
         try { worker.join(); }
