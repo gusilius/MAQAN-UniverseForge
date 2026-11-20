@@ -245,6 +245,17 @@ public final class TreasuryLedger {
     public synchronized int journalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
     public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
+    /** Bounded view of the not-yet-archived tail; consume while holding this ledger monitor. */
+    public synchronized List<Entry> entriesFromSequence(long firstSequence) {
+        if (firstSequence < 1 || firstSequence > sequence)
+            throw new IllegalArgumentException("Treasury archive cursor is outside the journal range");
+        int start = Math.toIntExact(firstSequence - 1);
+        if (start > journal.size()
+                || (start < journal.size() && journal.get(start).sequence() != firstSequence)
+                || journal.size() != sequence - 1)
+            throw new IllegalStateException("Treasury journal is not a complete contiguous sequence from 1");
+        return Collections.unmodifiableList(journal.subList(start, journal.size()));
+    }
     public synchronized Account account(String id) { return accounts.get(id); }
     public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
     public synchronized double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }

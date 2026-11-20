@@ -39,6 +39,14 @@ public final class TreasuryLedgerTest {
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterLimit
                 && versionAfterLimit > versionBeforeLimit && revisionLedger.mutationVersion() == versionAfterLimit,
                 "credit limit publishes once; mutation version advances only for canonical changes");
+        revisionLedger.open("revision:target", "revision:target", "silver", 0);
+        revisionLedger.transfer("revision:account", "revision:target", 10,
+                TreasuryLedger.Kind.GRANT, "revision-test", "revision-tail", 1, "tail view");
+        List<TreasuryLedger.Entry> tailView = revisionLedger.entriesFromSequence(2);
+        ok(tailView.size() == revisionLedger.journalSize() - 1
+                        && tailView.get(0).sequence() == 2
+                        && tailView.get(tailView.size() - 1).sequence() == revisionLedger.nextSequence() - 1,
+                "treasury archive cursor exposes only the contiguous unarchived suffix without copying history");
         StringWriter versionedSnapshot = new StringWriter();
         try {
             long writtenVersion = revisionLedger.writeJsonVersioned(versionedSnapshot);
