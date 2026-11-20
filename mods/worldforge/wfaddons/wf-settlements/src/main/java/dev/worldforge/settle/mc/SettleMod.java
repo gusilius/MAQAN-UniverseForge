@@ -121,6 +121,8 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    /** Last shared-calendar minute simulated by each colony; runtime-only and rebuilt on server start. */
+    private static final Map<String, Long> LAST_SIMULATED_WORLD_MINUTE = new HashMap<>();
     /** Static profession definitions are synchronized once per server lifecycle, not every tick. */
     private static boolean professionsSynced;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
@@ -1315,6 +1317,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
+        LAST_SIMULATED_WORLD_MINUTE.clear();
         professionsSynced = false;
         ColonyInterestIndex.clear();
         IMPORTED_BLUEPRINTS.clear();
@@ -1324,17 +1327,22 @@ public class SettleMod {
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
         load(e.getServer());
+        long initialWorldMinute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        for (Colony colony : COLONIES.values())
+            if (colony != null && colony.s != null) LAST_SIMULATED_WORLD_MINUTE.put(colony.s.id, initialWorldMinute);
     }
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
         if (DEFS != null) save(e.getServer());
         Bodies.LIVE.clear();
+        LAST_SIMULATED_WORLD_MINUTE.clear();
     }
 
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
         COLONIES.clear();
+        LAST_SIMULATED_WORLD_MINUTE.clear();
         ColonyInterestIndex.clear();
         professionsSynced = false;
         IMPORTED_BLUEPRINTS.clear();
@@ -2006,28 +2014,48 @@ public class SettleMod {
         }
         if (ticks % (simulationInterval * 10L) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
-        if (ticks % simulationInterval == 0) {
-            double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
-            for (Colony c : COLONIES.values()) {
-                if (speed <= 0) break;
-                try {
-                    c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
-                            dev.worldforge.mod.api.WorldForgeApi.clock().year());
-                    c.s.tick(speed * simulationInterval / (double) STEP_TICKS); // preserve elapsed world time when interval changes
-                    remitCrownTaxes(c);
-                    syncPeople(c, server);
-                    if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
-                        ensureAutonomousInfrastructure(server, c.s.id);
-                    if (c.s.raidIncoming || (ticks / simulationInterval)
-                            % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
-                        runLifeAI(server, c);
-                    c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (simulationInterval * 10L) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
-                } catch (RuntimeException ex) {
-                    LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
+        {
+            var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
+            long worldMinute = clock.worldMinute();
+            int worldYear = clock.year();
+            double speed = clock.multiplier();
+            if (speed > 0) {
+                for (Colony c : COLONIES.values()) {
+                    if (c == null || c.s == null || !ColonySimulationCadence.due(c.s.id, ticks, simulationInterval)) continue;
+                    try {
+                        // Stable colony phases spread work across the interval. The shared calendar,
+                        // not wall ticks, preserves exact speed changes and prevents pause catch-up.
+                        long previousMinute = LAST_SIMULATED_WORLD_MINUTE.computeIfAbsent(c.s.id, ignored -> worldMinute);
+                        double elapsedSteps = ColonySimulationCadence.elapsedSteps(previousMinute, worldMinute);
+                        if (elapsedSteps <= 0) continue;
+                        c.s.setWorldCalendar(worldMinute, worldYear);
+                        c.s.tick(elapsedSteps);
+                        // Commit the cursor immediately after the authoritative settlement step:
+                        // optional follow-up failures must never replay this economic/life interval.
+                        LAST_SIMULATED_WORLD_MINUTE.put(c.s.id, worldMinute);
+                        remitCrownTaxes(c);
+                        syncPeople(c, server);
+                        if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
+                            ensureAutonomousInfrastructure(server, c.s.id);
+                        long colonyStep = ColonySimulationCadence.stepNumber(c.s.id, ticks, simulationInterval);
+                        if (c.s.raidIncoming || colonyStep
+                                % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
+                            runLifeAI(server, c);
+                        c.map.tick(c.s, speed); // strategic logistics remains independent of loaded chunks
+                        if (colonyStep % 10L == 0L) {
+                            c.s.types = TYPES;
+                            String rid = realmOf(c);
+                            c.s.refreshType(c.s.population(),
+                                    rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid),
+                                    rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid));
+                        }
+                    } catch (RuntimeException ex) {
+                        LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
+                    }
                 }
             }
-            try {
+            // The shared trade network remains a world-level transaction on its existing cadence.
+            if (ticks % simulationInterval == 0) try {
                 Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
                 for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
                 if (speed > 0) {
