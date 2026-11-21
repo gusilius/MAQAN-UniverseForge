@@ -693,6 +693,8 @@ public final class TreasuryLedger {
     private void writeJsonContents(java.io.Writer writer) throws java.io.IOException {
         writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
         writer.write(Long.toString(sequence));
+        writer.write(",\"archivedThrough\":");
+        writer.write(Long.toString(archivedThroughSequence));
         writer.write(",\"transactionSequence\":");
         writer.write(Long.toString(transactionSequence));
         writer.write(",\"accounts\":[");
@@ -769,7 +771,17 @@ public final class TreasuryLedger {
         }
 
         ledger.journal.clear();
-        long previousSequence = 0;
+        long declaredArchivedThrough = 0;
+        Object archivedValue = root.get("archivedThrough");
+        if (archivedValue instanceof Number archivedNumber) {
+            double rawArchived = archivedNumber.doubleValue();
+            if (!Double.isFinite(rawArchived) || rawArchived < 0 || rawArchived != Math.rint(rawArchived)
+                    || rawArchived >= 0x1.0p63)
+                throw new IllegalArgumentException("Invalid treasury archived-through sequence");
+            declaredArchivedThrough = archivedNumber.longValue();
+        }
+        long previousSequence = declaredArchivedThrough;
+        long firstJournalSequence = 0;
         Map<String, List<Entry>> transactions = new HashMap<>();
         for (Object row : journalRows) {
             if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury journal row");
@@ -791,8 +803,18 @@ public final class TreasuryLedger {
             String memo = optionalString(m.get("memo"));
             Account account = ledger.accounts.get(accountId);
             if (account == null || !account.currency.equals(currency)) throw new IllegalArgumentException("Journal references unknown or mismatched account: " + accountId);
-            if (seq <= previousSequence || seq < 1 || worldMinute < 0 || (value <= 0 && !(value == 0 && (kind == Kind.ACCOUNT_CREATED || kind == Kind.CREDIT_LIMIT_CHANGED))) || balanceAfter < 0)
-                throw new IllegalArgumentException("Invalid journal ordering or amount at sequence " + seq);
+            if (firstJournalSequence == 0 && archivedValue == null && seq > 1) {
+                // Older compacted shadow files did not persist the archive cursor.
+                // Infer the retained-tail boundary; the archive store verifies it
+                // against canonical history before accepting the shadow.
+                previousSequence = seq - 1;
+                ledger.archivedThroughSequence = previousSequence;
+            }
+            if (firstJournalSequence == 0) firstJournalSequence = seq;
+            if (seq != previousSequence + 1 || seq < 1 || worldMinute < 0
+                    || (value <= 0 && !(value == 0 && (kind == Kind.ACCOUNT_CREATED || kind == Kind.CREDIT_LIMIT_CHANGED)))
+                    || balanceAfter < 0)
+                throw new IllegalArgumentException("Invalid or discontinuous journal sequence/amount at " + seq);
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
@@ -821,7 +843,11 @@ public final class TreasuryLedger {
         }
         ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
         ledger.transactionSequence = Math.max(1, requiredLong(root.get("transactionSequence"), "transaction next sequence"));
-        if (ledger.sequence <= previousSequence) throw new IllegalArgumentException("Treasury journal sequence is not ahead of the journal");
+        if (firstJournalSequence == 0 && archivedValue == null && ledger.sequence > 1)
+            ledger.archivedThroughSequence = ledger.sequence - 1;
+        if (ledger.sequence <= previousSequence
+                || ledger.sequence - ledger.archivedThroughSequence - 1 != ledger.journal.size())
+            throw new IllegalArgumentException("Treasury journal sequence does not match its retained tail");
         ledger.restoring = false;
         return ledger;
     }
