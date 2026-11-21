@@ -37,6 +37,22 @@ class ProceduralPlanetGenerationTests(unittest.TestCase):
         self.assertTrue(np.any(sizes >= 512))
         self.assertTrue(np.any((sizes >= 8) & (sizes < 512)))
 
+
+    def test_rendered_palette_keeps_rivers_distinct_when_they_reach_ocean(self):
+        from image_map_analysis import classify
+        # A cyan river runs into the dark-blue ocean; the channel must not be
+        # swallowed by the ocean's boundary-connected component.
+        labels = np.full((32, 48), CLASSES.index("grassland"), dtype=np.uint8)
+        labels[:, :8] = CLASSES.index("ocean")
+        labels[15, 8:30] = CLASSES.index("waterway")
+        labels[8:13, 18:23] = CLASSES.index("lake")
+        rgb = np.asarray(__import__("image_map_analysis").render_labels(labels))
+        classified, report = classify(rgb)
+        self.assertEqual(int((classified == CLASSES.index("ocean")).sum()), 32 * 8)
+        self.assertGreater(int((classified == CLASSES.index("waterway")).sum()), 0)
+        self.assertGreater(int((classified == CLASSES.index("lake")).sum()), 0)
+        self.assertEqual(report["classes"]["ocean"], 32 * 8)
+
     def test_rivers_and_lakes_are_terrain_derived_and_nonempty(self):
         image = np.asarray(procedural_planet_image(512, 256, 424242))
         colors = {name: np.asarray(rgb, dtype=np.uint8) for name, rgb in {

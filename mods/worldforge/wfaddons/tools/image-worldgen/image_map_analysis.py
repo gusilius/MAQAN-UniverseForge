@@ -50,23 +50,28 @@ def classify(rgb):
     # Open ocean is blue water connected to the image boundary. Inland water
     # is segmented separately so coastlines and rivers are not mistaken for land.
     blue = (hue >= 165) & (hue <= 235) & (sat >= .38) & (b > g * 1.08) & (b > 55)
+    # The procedural palette deliberately separates dark deep-ocean blue,
+    # medium lake blue and bright cyan river channels. Do not flood-fill every
+    # blue pixel together: a river connected to the coast must remain a river.
+    deep_ocean = blue & (val < .68)
     edge = np.zeros((h, w), bool)
-    edge[0] = blue[0]; edge[-1] = blue[-1]
-    edge[:, 0] = blue[:, 0]; edge[:, -1] = blue[:, -1]
-    ocean = ndimage.binary_propagation(edge, mask=blue,
+    edge[0] = deep_ocean[0]; edge[-1] = deep_ocean[-1]
+    edge[:, 0] = deep_ocean[:, 0]; edge[:, -1] = deep_ocean[:, -1]
+    ocean = ndimage.binary_propagation(edge, mask=deep_ocean,
         structure=np.array([[0,1,0],[1,1,1],[0,1,0]], bool))
     labels[ocean] = idx["ocean"]; assigned |= ocean
 
     inland = blue & ~ocean
     components, count = ndimage.label(inland, structure=np.ones((3,3), bool))
     if count:
-        sizes = np.bincount(components.ravel())
+        sizes = np.bincount(components.ravel(), minlength=count + 1)
         distance = ndimage.distance_transform_edt(inland)
         max_width = ndimage.maximum(distance, labels=components, index=np.arange(1, count + 1)) * 2
         lake_by_component = np.zeros(count + 1, dtype=bool)
         lake_by_component[1:] = (sizes[1:] >= 90) & (max_width >= 7)
         lake_mask = inland & lake_by_component[components]
-        labels[inland] = idx["waterway"]
+        river_mask = inland & ~lake_mask
+        labels[river_mask] = idx["waterway"]
         labels[lake_mask] = idx["lake"]
         assigned |= inland
 
