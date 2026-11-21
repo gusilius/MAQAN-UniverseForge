@@ -208,7 +208,7 @@ public final class ResidentLifeEventsTest {
                         && !CharacterHealth.infect(patient, "seasonal_fever", 40, 100L, "illness:patient:100")
                         && CharacterHealth.illnessSeverity(patient) == 100,
                 "health event IDs make repeated illness delivery idempotent");
-        check(!CharacterHealth.advance(patient, 106L) && CharacterHealth.illnessSeverity(patient) == 40,
+        check(!CharacterHealth.advance(patient, 106L) && CharacterHealth.illnessSeverity(patient) == 100,
                 "health recovery does not run before its scheduled deadline");
         check(CharacterHealth.advance(patient, 107L) && CharacterHealth.illnessSeverity(patient) == 99
                         && CharacterHealth.nextEventDay(patient) == 114L,
