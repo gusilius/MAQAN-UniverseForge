@@ -44,15 +44,15 @@ final class TreasuryReferenceIndex {
     synchronized void rebuild(TreasuryJournalArchive archive) throws IOException {
         clearBuckets();
         List<TreasuryLedger.Entry> batch = new ArrayList<>(4096);
-        archive.forEachEntry(entry -> {
-            batch.add(entry);
-            if (batch.size() == 4096) {
-                try { appendRecords(batch); }
-                catch (IOException failure) { throw new IndexWriteFailure(failure); }
-                batch.clear();
-            }
-        });
         try {
+            archive.forEachEntry(entry -> {
+                batch.add(entry);
+                if (batch.size() == 4096) {
+                    try { appendRecords(batch); }
+                    catch (IOException failure) { throw new IndexWriteFailure(failure); }
+                    batch.clear();
+                }
+            });
             if (!batch.isEmpty()) appendRecords(batch);
             publishCursor(archive.nextSequence());
         } catch (IndexWriteFailure failure) {
@@ -101,12 +101,22 @@ final class TreasuryReferenceIndex {
         List<Long> sequences = new ArrayList<>();
         try (FileChannel channel = FileChannel.open(bucket, StandardOpenOption.READ)) {
             ByteBuffer record = ByteBuffer.allocate(RECORD_BYTES);
-            while (channel.read(record) == RECORD_BYTES) {
+            while (true) {
+                record.clear();
+                int read = 0;
+                while (record.hasRemaining()) {
+                    int count = channel.read(record);
+                    if (count < 0) break;
+                    if (count == 0) continue;
+                    read += count;
+                }
+                if (read == 0) break;
+                if (read != RECORD_BYTES)
+                    throw new IOException("Treasury reference-index bucket ends with a partial record");
                 record.flip();
                 long candidate = record.getLong();
                 long sequence = record.getLong();
                 if (candidate == fingerprint) sequences.add(sequence);
-                record.clear();
             }
         }
         return List.copyOf(sequences);
