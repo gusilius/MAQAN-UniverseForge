@@ -818,6 +818,21 @@ public final class TreasuryLedgerTest {
                     "canonical treasury startup imports a newer legacy suffix after an interrupted shadow save");
             reopenedLedger.open("store:final", "store:final", "silver", 5);
             long committedVersion = reopenedStore.save(reopenedLedger);
+            boolean tailReleased = reopenedLedger.pendingJournalSize() == 0
+                    && reopenedLedger.journalSize() > 0
+                    && reopenedLedger.entriesForAccount("store:final").stream()
+                            .anyMatch(entry -> entry.kind() == TreasuryLedger.Kind.OPENING);
+            ok(tailReleased,
+                    "verified treasury save releases the in-memory tail while archive-backed account history remains readable");
+            reopenedLedger.open("store:later-again", "store:later-again", "silver", 12);
+            boolean newTailOnly = reopenedLedger.pendingJournalSize() == 2
+                    && reopenedLedger.entriesFromSequence(reopenedStore.nextSequence()).size() == 2;
+            ok(newTailOnly,
+                    "post-checkpoint postings form a bounded tail beginning at the archive's exclusive sequence");
+            reopenedStore.save(reopenedLedger);
+            ok(reopenedLedger.pendingJournalSize() == 0
+                            && reopenedLedger.entriesForAccount("store:later-again").size() == 2,
+                    "second checkpoint archives only the new tail and keeps archive queries complete");
             TreasuryLedger finalReload = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
                     .loadOrMigrate(legacyFile);
             ok(committedVersion == finalReload.mutationVersion()

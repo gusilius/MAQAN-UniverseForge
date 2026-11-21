@@ -353,6 +353,8 @@ public final class TreasuryLedger {
 
     public synchronized int accountCount() { return accounts.size(); }
     public synchronized int journalSize() { return (int) Math.min(Integer.MAX_VALUE, sequence - 1); }
+    /** Number of journal rows currently retained in heap (excludes durable archived history). */
+    public synchronized int pendingJournalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
 
     /** Explicit compatibility export. Normal restore and save paths never materialize archived history. */
