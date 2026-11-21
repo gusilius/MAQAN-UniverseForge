@@ -54,6 +54,12 @@ jobs:
           python -m pip install --disable-pip-version-check -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "Image generation dependencies failed" }
 
+      - name: Test deterministic procedural continents and hydrology
+        shell: pwsh
+        run: |
+          python -m unittest discover -s mods/worldforge/wfaddons/tools/image-worldgen -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Image-worldgen geography tests failed" }
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
