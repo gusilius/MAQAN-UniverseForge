@@ -153,13 +153,16 @@ public final class TreasuryJournalArchive {
         long expected = requestedFirstSequence;
         if (requestedFirstSequence == nextSequence) return;
         for (Path path : segmentFiles()) {
+            // Segment filenames carry fixed-width sequence bounds. Skip older immutable
+            // segments before opening or decoding them; otherwise every paged read
+            // repeatedly parses the entire archive prefix.
+            if (segmentLastSequence(path) < requestedFirstSequence) continue;
             TreasuryJournalSegment.Decoded decoded;
             try {
                 decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
             } catch (RuntimeException invalid) {
                 throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
             }
-            if (decoded.lastSequence() < requestedFirstSequence) continue;
             if (decoded.firstSequence() > expected)
                 throw new IOException("Treasury archive suffix has a sequence gap at " + expected);
             for (TreasuryLedger.Entry entry : decoded.entries()) {
@@ -221,13 +224,15 @@ public final class TreasuryJournalArchive {
         boolean[] full = {false};
         if (firstSequence < nextSequence) {
             for (Path path : segmentFiles()) {
+                // Resume directly at the first segment whose filename range can contain
+                // the requested cursor; do not deserialize every earlier segment per page.
+                if (segmentLastSequence(path) < cursor[0]) continue;
                 TreasuryJournalSegment.Decoded decoded;
                 try {
                     decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
                 } catch (RuntimeException invalid) {
                     throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
                 }
-                if (decoded.lastSequence() < cursor[0]) continue;
                 if (decoded.firstSequence() > cursor[0])
                     throw new IOException("Treasury archive account page has a sequence gap at " + cursor[0]);
                 for (TreasuryLedger.Entry entry : decoded.entries()) {
@@ -345,6 +350,14 @@ public final class TreasuryJournalArchive {
     private Path segmentPath(long first, long last) {
         return directory.resolve(String.format(java.util.Locale.ROOT,
                 "segment-%020d-%020d.json", first, last));
+    }
+
+    private static long segmentLastSequence(Path path) throws IOException {
+        String name = path.getFileName().toString();
+        int separator = name.indexOf('-', "segment-".length());
+        if (!name.startsWith("segment-") || separator < 0 || !name.endsWith(".json"))
+            throw new IOException("Invalid treasury segment filename: " + name);
+        return parseSequence(name.substring(separator + 1, name.length() - ".json".length()));
     }
 
     private static long parseSequence(String value) throws IOException {
