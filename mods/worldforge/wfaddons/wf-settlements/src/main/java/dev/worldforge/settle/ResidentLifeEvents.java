@@ -33,7 +33,9 @@ public final class ResidentLifeEvents {
         YearSession(CharacterRegistry registry, int year) {
             this.year = year;
             this.worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
-            this.people = new ArrayList<>(registry.all());
+            // CharacterRegistry.all() is a stable append-only view; capture only the size,
+            // not a second O(population) reference array for every annual session.
+            this.people = registry.all();
             this.initialSize = registry.size();
         }
     }
@@ -45,7 +47,8 @@ public final class ResidentLifeEvents {
         long lastAdvanceToken = Long.MIN_VALUE;
         StageRefresh(CharacterRegistry registry, int year, int start, int end) {
             this.year = year;
-            this.people = new ArrayList<>(registry.all());
+            // Retain the registry's append-only view instead of copying every resident.
+            this.people = registry.all();
             this.cursor = start;
             this.end = end;
         }

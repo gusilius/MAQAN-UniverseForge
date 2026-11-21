@@ -21,6 +21,17 @@ public final class ResidentLifeSchedulerTest {
         check(liveView.size() == 12, "registry exposes a stable append-only view without copying the population");
         int calls = 0;
         boolean complete = false;
+        ResidentLifeEvents.advanceYearly(registry, 2000, null, 3, 9001L);
+        Object session = registryPassField(registry, "session");
+        check(session != null, "bounded annual pass creates a resumable session");
+        try {
+            java.lang.reflect.Field peopleField = session.getClass().getDeclaredField("people");
+            peopleField.setAccessible(true);
+            check(peopleField.get(session) == registry.all(),
+                    "annual life session retains the canonical append-only registry view without copying it");
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("cannot inspect annual session population view", failure);
+        }
         while (!complete && calls < 100) {
             long tick = calls;
             complete = ResidentLifeEvents.advanceYearly(registry, 2000, null, 3, tick);
