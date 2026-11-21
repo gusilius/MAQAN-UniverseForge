@@ -45,7 +45,7 @@ class ProceduralPlanetGenerationTests(unittest.TestCase):
         labels = np.full((32, 48), CLASSES.index("grassland"), dtype=np.uint8)
         labels[:, :8] = CLASSES.index("ocean")
         labels[15, 8:30] = CLASSES.index("waterway")
-        labels[8:13, 18:23] = CLASSES.index("lake")
+        labels[8:20, 30:42] = CLASSES.index("lake")
         rgb = np.asarray(__import__("image_map_analysis").render_labels(labels))
         classified, report = classify(rgb)
         self.assertEqual(int((classified == CLASSES.index("ocean")).sum()), 32 * 8)
