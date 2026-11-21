@@ -19,14 +19,15 @@ import java.util.Set;
  * must be retained/replayed separately before a compacted ledger can become authoritative.
  */
 public final class TreasuryLedgerSnapshot {
-    public static final String FORMAT = "wf-treasury-snapshot/1";
+    public static final String FORMAT = "wf-treasury-snapshot/2";
+    private static final String LEGACY_FORMAT = "wf-treasury-snapshot/1";
 
     public record AccountState(String id, String ownerId, String currency, double balance,
                                double creditLimit, double debt, boolean bankrupt) { }
     public record State(long nextSequence, long nextTransactionSequence, long mutationVersion,
                         List<AccountState> accounts, Set<String> postedReferences,
                         Set<String> postedDebits, Set<String> postedCredits,
-                        Set<String> armyFieldRationDebitAccounts) {
+                        Set<String> armyFieldRationDebitAccounts, boolean legacyIdempotencyIndexes) {
         public State {
             accounts = List.copyOf(accounts);
             postedReferences = Set.copyOf(postedReferences);
@@ -54,17 +55,24 @@ public final class TreasuryLedgerSnapshot {
 
     public static State decode(String json) {
         Object parsed = Json.parse(json);
-        if (!(parsed instanceof Map<?, ?> root) || !FORMAT.equals(root.get("format")))
+        if (!(parsed instanceof Map<?, ?> root)
+                || !(FORMAT.equals(root.get("format")) || LEGACY_FORMAT.equals(root.get("format"))))
             throw new IllegalArgumentException("Unsupported treasury snapshot format");
+        boolean legacyIdempotencyIndexes = LEGACY_FORMAT.equals(root.get("format"));
         long nextSequence = requiredLong(root.get("nextSequence"), "next sequence");
         long nextTransactionSequence = requiredLong(root.get("nextTransactionSequence"), "next transaction sequence");
         long mutationVersion = requiredLong(root.get("mutationVersion"), "mutation version");
         if (!(root.get("accounts") instanceof List<?> accountRows)
-                || !(root.get("postedReferences") instanceof List<?> references)
-                || !(root.get("postedDebits") instanceof List<?> debits)
-                || !(root.get("postedCredits") instanceof List<?> credits)
                 || !(root.get("armyFieldRationDebitAccounts") instanceof List<?> rationAccounts))
             throw new IllegalArgumentException("Treasury snapshot is missing required state arrays");
+        List<?> references = root.get("postedReferences") instanceof List<?> rows ? rows : List.of();
+        List<?> debits = root.get("postedDebits") instanceof List<?> rows ? rows : List.of();
+        List<?> credits = root.get("postedCredits") instanceof List<?> rows ? rows : List.of();
+        if (legacyIdempotencyIndexes
+                && (!(root.get("postedReferences") instanceof List<?>)
+                || !(root.get("postedDebits") instanceof List<?>)
+                || !(root.get("postedCredits") instanceof List<?>)))
+            throw new IllegalArgumentException("Legacy treasury snapshot is missing idempotency arrays");
 
         List<AccountState> accounts = new ArrayList<>(accountRows.size());
         for (Object row : accountRows) {
@@ -79,7 +87,7 @@ public final class TreasuryLedgerSnapshot {
         }
         State state = new State(nextSequence, nextTransactionSequence, mutationVersion, accounts,
                 stringSet(references, "posted reference"), stringSet(debits, "posted debit"),
-                stringSet(credits, "posted credit"), stringSet(rationAccounts, "ration account"));
+                stringSet(credits, "posted credit"), stringSet(rationAccounts, "ration account"), legacyIdempotencyIndexes);
         validate(state);
         String expected = requiredString(root.get("sha256"), "snapshot checksum");
         String actual = sha256(Json.write(payload(state)));
@@ -104,9 +112,11 @@ public final class TreasuryLedgerSnapshot {
             accounts.add(row);
         });
         root.put("accounts", accounts);
-        root.put("postedReferences", sorted(state.postedReferences()));
-        root.put("postedDebits", sorted(state.postedDebits()));
-        root.put("postedCredits", sorted(state.postedCredits()));
+        if (state.legacyIdempotencyIndexes()) {
+            root.put("postedReferences", sorted(state.postedReferences()));
+            root.put("postedDebits", sorted(state.postedDebits()));
+            root.put("postedCredits", sorted(state.postedCredits()));
+        }
         root.put("armyFieldRationDebitAccounts", sorted(state.armyFieldRationDebitAccounts()));
         return root;
     }

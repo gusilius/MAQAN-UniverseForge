@@ -32,9 +32,6 @@ public final class TreasuryLedger {
     /** Durable history is queried from its archive; only entries after this cursor remain in journal. */
     private TreasuryJournalArchive historyArchive;
     private long archivedThroughSequence;
-    private final Set<String> postedReferences = new HashSet<>();
-    private final Set<String> postedDebits = new HashSet<>();
-    private final Set<String> postedCredits = new HashSet<>();
     /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
     private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
     private final Map<String, Double> debitTotals = new HashMap<>();
@@ -120,8 +117,7 @@ public final class TreasuryLedger {
                 .map(a -> new TreasuryLedgerSnapshot.AccountState(a.id, a.ownerId, a.currency,
                         a.balance, a.creditLimit, a.debt, a.bankrupt)).toList();
         return new TreasuryLedgerSnapshot.State(sequence, transactionSequence, mutationVersion,
-                accountStates, Set.copyOf(postedReferences), Set.copyOf(postedDebits),
-                Set.copyOf(postedCredits), Set.copyOf(armyFieldRationDebitAccounts));
+                accountStates, Set.of(), Set.of(), Set.of(), Set.copyOf(armyFieldRationDebitAccounts), false);
     }
 
     private static void validateArchivedTransaction(List<Entry> postings, Map<String, Account> accounts) {
@@ -171,9 +167,9 @@ public final class TreasuryLedger {
                 throw new java.io.IOException("Duplicate account in treasury checkpoint: " + account.id);
         }
 
-        Set<String> prefixReferences = new HashSet<>();
-        Set<String> prefixDebits = new HashSet<>();
-        Set<String> prefixCredits = new HashSet<>();
+        Set<String> prefixReferences = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
+        Set<String> prefixDebits = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
+        Set<String> prefixCredits = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
         Set<String> prefixRationAccounts = new HashSet<>();
         Map<String, Double> prefixBalances = new HashMap<>();
         List<Entry> transaction = new ArrayList<>(2);
@@ -197,8 +193,10 @@ public final class TreasuryLedger {
                 if (transaction.size() > 2)
                     throw new IllegalStateException("Invalid treasury transaction cardinality: " + entry.transactionId());
                 String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
-                prefixReferences.add(key);
-                (entry.credit() ? prefixCredits : prefixDebits).add(key);
+                if (state.legacyIdempotencyIndexes()) {
+                    prefixReferences.add(key);
+                    (entry.credit() ? prefixCredits : prefixDebits).add(key);
+                }
                 if (!entry.credit() && entry.kind() == Kind.LOGISTICS
                         && "army-field-rations".equals(entry.category()))
                     prefixRationAccounts.add(entry.accountId());
@@ -213,8 +211,9 @@ public final class TreasuryLedger {
         }
         if (expected[0] != state.nextSequence())
             throw new java.io.IOException("Treasury archive does not contain the complete checkpoint prefix");
-        if (!prefixReferences.equals(state.postedReferences()) || !prefixDebits.equals(state.postedDebits())
-                || !prefixCredits.equals(state.postedCredits())
+        if ((state.legacyIdempotencyIndexes()
+                && (!prefixReferences.equals(state.postedReferences()) || !prefixDebits.equals(state.postedDebits())
+                || !prefixCredits.equals(state.postedCredits())))
                 || !prefixRationAccounts.equals(state.armyFieldRationDebitAccounts()))
             throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive prefix");
         for (Account account : restored.accounts.values()) {
@@ -222,9 +221,6 @@ public final class TreasuryLedger {
             if (Math.abs(journalBalance - account.balance) > 1e-8)
                 throw new java.io.IOException("Treasury checkpoint cash balance does not match its prefix journal: " + account.id);
         }
-        restored.postedReferences.addAll(prefixReferences);
-        restored.postedDebits.addAll(prefixDebits);
-        restored.postedCredits.addAll(prefixCredits);
         restored.armyFieldRationDebitAccounts.addAll(prefixRationAccounts);
 
         List<Entry> suffixTransaction = new ArrayList<>(2);
@@ -307,9 +303,6 @@ public final class TreasuryLedger {
                     }
                 }
 
-                String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
-                restored.postedReferences.add(key);
-                (entry.credit() ? restored.postedCredits : restored.postedDebits).add(key);
                 if (!entry.credit() && entry.kind() == Kind.LOGISTICS
                         && "army-field-rations".equals(entry.category()))
                     restored.armyFieldRationDebitAccounts.add(entry.accountId());
@@ -489,13 +482,13 @@ public final class TreasuryLedger {
 
     /** True when this account already posted the same economic event; used for crash-safe retries. */
     public synchronized boolean hasTransaction(String accountId, Kind kind, String reference) {
-        return postedReferences.contains(referenceKey(accountId, kind, reference));
+        return !entriesForReference(accountId, kind, reference).isEmpty();
     }
     public synchronized boolean hasDebit(String accountId, Kind kind, String reference) {
-        return postedDebits.contains(referenceKey(accountId, kind, reference));
+        return entriesForReference(accountId, kind, reference).stream().anyMatch(entry -> !entry.credit());
     }
     public synchronized boolean hasCredit(String accountId, Kind kind, String reference) {
-        return postedCredits.contains(referenceKey(accountId, kind, reference));
+        return entriesForReference(accountId, kind, reference).stream().anyMatch(Entry::credit);
     }
     /** O(1) query for the legacy stock-reconciliation guard used by settlement resource reads. */
     public synchronized boolean hasArmyFieldRationDebit(String accountId) {
@@ -679,9 +672,6 @@ public final class TreasuryLedger {
         Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
         journal.add(entry);
         indexEntry(entry);
-        String key = referenceKey(account, kind, reference);
-        postedReferences.add(key);
-        (credit ? postedCredits : postedDebits).add(key);
         if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
             armyFieldRationDebitAccounts.add(account);
     }
@@ -807,9 +797,6 @@ public final class TreasuryLedger {
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
             ledger.indexEntry(entry);
-            String referenceKey = referenceKey(accountId, kind, reference);
-            ledger.postedReferences.add(referenceKey);
-            (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
             if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
                 ledger.armyFieldRationDebitAccounts.add(accountId);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
