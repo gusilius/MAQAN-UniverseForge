@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterHealth;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
@@ -197,6 +198,45 @@ public final class ResidentLifeEventsTest {
                         && restoredFather.children.size() == 1
                         && !FamilyPlanning.isPregnant(restoredMother),
                 "due-date queue delivers on the persisted day after reload, independent of the annual family pass marker");
+
+        CharacterRegistry healthRegistry = new CharacterRegistry();
+        Character patient = healthRegistry.create("Пациент", "", "north", "f", 1985);
+        check(CharacterHealth.health(patient) == 100 && CharacterHealth.nextEventDay(patient) == -1
+                        && !patient.props.containsKey("life.health.value"),
+                "healthy residents use implicit defaults without per-Character health payload");
+        check(CharacterHealth.infect(patient, "seasonal_fever", 100, 100L, "illness:patient:100")
+                        && !CharacterHealth.infect(patient, "seasonal_fever", 40, 100L, "illness:patient:100")
+                        && CharacterHealth.illnessSeverity(patient) == 100,
+                "health event IDs make repeated illness delivery idempotent");
+        check(!CharacterHealth.advance(patient, 106L) && CharacterHealth.illnessSeverity(patient) == 40,
+                "health recovery does not run before its scheduled deadline");
+        check(CharacterHealth.advance(patient, 107L) && CharacterHealth.illnessSeverity(patient) == 99
+                        && CharacterHealth.nextEventDay(patient) == 114L,
+                "illness recovery advances in scheduled world-day intervals");
+        String healthSave = healthRegistry.toJson();
+        CharacterRegistry healthReload = new CharacterRegistry();
+        healthReload.fromJson(healthSave);
+        Character restoredPatient = healthReload.get(patient.id);
+        check(restoredPatient != null && CharacterHealth.illnessSeverity(restoredPatient) == 99
+                        && CharacterHealth.nextEventDay(restoredPatient) == 114L,
+                "illness and recovery deadlines persist through world save/load");
+        check(CharacterHealth.treat(restoredPatient, 100, 107L, "treatment:patient:1")
+                        && CharacterHealth.illnessSeverity(restoredPatient) == 0
+                        && CharacterHealth.health(restoredPatient) < 100
+                        && CharacterHealth.nextEventDay(restoredPatient) == 114L,
+                "treatment clears illness but keeps a deadline for natural health recovery");
+        check(CharacterHealth.advance(restoredPatient, 117L)
+                        && CharacterHealth.health(restoredPatient) == 99,
+                "natural health recovery continues after the illness itself is cleared");
+
+        CharacterRegistry scheduledHealthRegistry = new CharacterRegistry();
+        Character scheduledPatient = scheduledHealthRegistry.create("Scheduled Patient", "", "north", "m", 1980);
+        CharacterHealth.injure(scheduledPatient, "sprain", 60, 200L, "injury:scheduled:200");
+        int healthWork = ResidentLifeEvents.advanceHealthBatch(scheduledHealthRegistry, 207L, 16);
+        check(healthWork >= 2 && CharacterHealth.injurySeverity(scheduledPatient) == 60
+                        && CharacterHealth.health(scheduledPatient) == 78
+                        && CharacterHealth.nextEventDay(scheduledPatient) == 214L,
+                "registry health scheduler discovers and advances only a resident whose persisted deadline is due");
 
         CharacterRegistry sameYearRegistry = new CharacterRegistry();
         sameYearRegistry.create("Первый", "", "north", "m", 1990);

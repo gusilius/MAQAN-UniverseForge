@@ -2,6 +2,7 @@ package dev.worldforge.settle;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.CharacterHealth;
 import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
@@ -19,7 +20,16 @@ public final class ResidentLifeEvents {
     private static final int MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR = 32;
     private static final Map<CharacterRegistry, RegistryPassState> REGISTRY_PASSES = new WeakHashMap<>();
     private static final Map<CharacterRegistry, PregnancySchedule> PREGNANCY_SCHEDULES = new WeakHashMap<>();
+    private static final Map<CharacterRegistry, HealthSchedule> HEALTH_SCHEDULES = new WeakHashMap<>();
     private static final AtomicLong SYNCHRONOUS_TOKENS = new AtomicLong();
+
+    private record DueHealth(long dueDay, String characterGlobalId) {}
+    private static final class HealthSchedule {
+        final PriorityQueue<DueHealth> due = new PriorityQueue<>(Comparator
+                .comparingLong(DueHealth::dueDay).thenComparing(DueHealth::characterGlobalId));
+        final Map<String, Long> queued = new HashMap<>();
+        int scanCursor;
+    }
 
     private record DuePregnancy(long dueDay, String motherGlobalId) {}
     private static final class PregnancySchedule {
@@ -259,6 +269,54 @@ public final class ResidentLifeEvents {
             }
         }
         return processed;
+    }
+
+    /** Advances only residents with a persisted health recovery deadline, under a strict scan budget. */
+    public static int advanceHealthBatch(CharacterRegistry registry, long worldDay, int budget) {
+        if (registry == null || budget <= 0 || worldDay < 0) return 0;
+        HealthSchedule schedule;
+        synchronized (HEALTH_SCHEDULES) {
+            schedule = HEALTH_SCHEDULES.computeIfAbsent(registry, ignored -> new HealthSchedule());
+        }
+        List<Character> people = registry.all();
+        int size = Math.min(registry.size(), people.size());
+        if (size == 0) return 0;
+        int scanBudget = schedule.due.isEmpty() ? budget : Math.max(1, budget / 2);
+        int start = Math.floorMod(schedule.scanCursor, size);
+        int scanned = Math.min(scanBudget, size);
+        for (int i = 0; i < scanned; i++) {
+            Character person = people.get((start + i) % size);
+            long dueDay = CharacterHealth.nextEventDay(person);
+            if (dueDay >= 0) enqueueHealth(registry, person, dueDay);
+        }
+        schedule.scanCursor = (start + scanned) % size;
+        int processed = scanned;
+        while (processed < budget && !schedule.due.isEmpty() && schedule.due.peek().dueDay() <= worldDay) {
+            DueHealth due = schedule.due.poll();
+            processed++;
+            Long active = schedule.queued.get(due.characterGlobalId());
+            if (active == null || active.longValue() != due.dueDay()) continue;
+            schedule.queued.remove(due.characterGlobalId());
+            Character person = registry.getByGlobalId(due.characterGlobalId());
+            if (person == null || !person.alive || CharacterHealth.nextEventDay(person) != due.dueDay()) continue;
+            CharacterHealth.advance(person, worldDay);
+            long next = CharacterHealth.nextEventDay(person);
+            if (next >= 0) enqueueHealth(registry, person, next);
+        }
+        return processed;
+    }
+
+    private static void enqueueHealth(CharacterRegistry registry, Character person, long dueDay) {
+        if (person == null || dueDay < 0) return;
+        HealthSchedule schedule;
+        synchronized (HEALTH_SCHEDULES) {
+            schedule = HEALTH_SCHEDULES.computeIfAbsent(registry, ignored -> new HealthSchedule());
+        }
+        Long existing = schedule.queued.get(person.globalId);
+        if (existing == null || existing.longValue() != dueDay) {
+            schedule.queued.put(person.globalId, dueDay);
+            schedule.due.add(new DueHealth(dueDay, person.globalId));
+        }
     }
 
     private static void enqueuePregnancy(CharacterRegistry registry, Character mother) {

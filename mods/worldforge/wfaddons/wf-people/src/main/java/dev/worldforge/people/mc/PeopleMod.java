@@ -114,6 +114,7 @@ public class PeopleMod {
     private static volatile long populationBaselineDay = Long.MIN_VALUE;
     private static volatile long populationRegistryGeneration;
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
+    private static int lifeRegistryCursor;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -893,40 +894,23 @@ public class PeopleMod {
         try {
             long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
-            // Life-event consequences are resumed in a fixed budget, independently of population size.
-            int lifeEventBudget = 128;
-            for (CharacterRegistry registry : REGS.values()) {
-                if (lifeEventBudget <= 0) break;
-                lifeEventBudget -= Math.min(lifeEventBudget,
-                        registry.processPendingBereavementBatch(lifeEventBudget));
+            // Fair, rotating per-registry budgets prevent one large map from starving other partitions.
+            List<CharacterRegistry> lifeRegistries = new ArrayList<>(REGS.values());
+            lifeRegistries.addAll(DIMENSION_REGISTRIES.values());
+            lifeRegistries.add(WORLD_REGISTRY);
+            lifeRegistries.add(PLAYER_REGISTRY);
+            if (!lifeRegistries.isEmpty()) {
+                int startRegistry = Math.floorMod(lifeRegistryCursor++, lifeRegistries.size());
+                int count = lifeRegistries.size();
+                for (int i = 0; i < count; i++) {
+                    CharacterRegistry registry = lifeRegistries.get((startRegistry + i) % count);
+                    int share = 128 / count + (i < 128 % count ? 1 : 0);
+                    if (share <= 0) continue;
+                    registry.processPendingBereavementBatch(share);
+                    ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, share);
+                    ResidentLifeEvents.advanceHealthBatch(registry, currentWorldDay, share);
+                }
             }
-            for (CharacterRegistry registry : DIMENSION_REGISTRIES.values()) {
-                if (lifeEventBudget <= 0) break;
-                lifeEventBudget -= Math.min(lifeEventBudget,
-                        registry.processPendingBereavementBatch(lifeEventBudget));
-            }
-            if (lifeEventBudget > 0)
-                lifeEventBudget -= Math.min(lifeEventBudget, WORLD_REGISTRY.processPendingBereavementBatch(lifeEventBudget));
-            if (lifeEventBudget > 0)
-                PLAYER_REGISTRY.processPendingBereavementBatch(lifeEventBudget);
-
-            // Pregnancy due dates are processed independently of the annual family pass.
-            int birthBudget = 128;
-            for (CharacterRegistry registry : REGS.values()) {
-                if (birthBudget <= 0) break;
-                birthBudget -= Math.min(birthBudget,
-                        ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, birthBudget));
-            }
-            for (CharacterRegistry registry : DIMENSION_REGISTRIES.values()) {
-                if (birthBudget <= 0) break;
-                birthBudget -= Math.min(birthBudget,
-                        ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, birthBudget));
-            }
-            if (birthBudget > 0)
-                birthBudget -= Math.min(birthBudget, ResidentLifeEvents.advanceDuePregnanciesBatch(
-                        WORLD_REGISTRY, YEAR, currentWorldDay, NAMES, birthBudget));
-            if (birthBudget > 0)
-                ResidentLifeEvents.advanceDuePregnanciesBatch(PLAYER_REGISTRY, YEAR, currentWorldDay, NAMES, birthBudget);
 
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
             long registryGeneration = populationRegistryGeneration;
