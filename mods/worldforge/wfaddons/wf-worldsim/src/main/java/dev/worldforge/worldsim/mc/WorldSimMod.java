@@ -1025,8 +1025,8 @@ public final class WorldSimMod {
         // Build the realm-to-war projection once. Scanning the complete war list inside
         // every realm iteration made snapshot cost O(realms × wars).
         for (var war : RealmsMod.POLITICS.wars()) {
-            lastWarDayByRealm.merge(war.attackerRealm, war.startDay, Math::max);
-            lastWarDayByRealm.merge(war.defenderRealm, war.startDay, Math::max);
+            lastWarDayByRealm.merge(war.attackerRealm, (long) war.startDay, Math::max);
+            lastWarDayByRealm.merge(war.defenderRealm, (long) war.startDay, Math::max);
             if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
                 threatenedRealms.add(war.attackerRealm);
                 threatenedRealms.add(war.defenderRealm);
