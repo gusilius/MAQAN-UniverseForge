@@ -834,7 +834,9 @@ public final class WorldSimMod {
                         GSON.toJson(governmentTypes), duplicateSettlementCenters, nearbySettlementConflicts,
                         vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
             }
-            if (source.map == null) {
+            // The geography projection may be rebuilding after sovereignty changed.
+            // Diagnostics are observational and must never stall or fail authoritative frame commit.
+            if (source.map == null && vanillaGeography != null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
                 for (var geographyElement : vanillaGeography) {
