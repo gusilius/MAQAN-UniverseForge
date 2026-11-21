@@ -82,6 +82,10 @@ public class MapBiomeSource extends BiomeSource {
     public Holder<Biome> getNoiseBiome(int qx, int qy, int qz, Climate.Sampler sampler) {
         // A biome query is a real terrain-generation request; map data is loaded lazily here,
         // not during dimension registration or global biome enumeration.
+        // Registered but unvisited planetary surfaces must not load their map package
+        // just because Minecraft probes a biome during dimension startup.
+        // The real raster is read only after durable first-visit activation.
+        if (!WorldForgeMod.isMapActive(mapName)) return fallbackBiome();
         MapData m = WorldForgeMod.map(mapName);
         int idx = m.biomeIndexAt(QuartPos.toBlock(qx) + 2, QuartPos.toBlock(qz) + 2);
         return resolve().get(idx);
