@@ -537,14 +537,16 @@ public final class PopulationSimulation {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0);
             }
             List<Character> members = registry.all();
-            int start = Math.min(cursor.nextIndex(), members.size());
-            if (start >= members.size()) {
+            // Capture membership once; a batch never expands during this server tick.
+            int memberCount = members.size();
+            int start = Math.min(cursor.nextIndex(), memberCount);
+            if (start >= memberCount) {
                 WORLD_DAY_CURSORS.put(registry, cursor);
                 return true;
             }
-            int end = Math.min(members.size(), start + maxCharacters);
+            int end = (int) Math.min((long) memberCount, (long) start + maxCharacters);
             if (start < end) {
-                List<Character> batch = new ArrayList<>(members.subList(start, end));
+                List<Character> batch = members.subList(start, end);
                 try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                     registry.refreshLifeStages(batch, year);
                     for (Character character : batch) {
@@ -558,7 +560,7 @@ public final class PopulationSimulation {
             }
             WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
                     year, generation, end));
-            return end >= registry.size();
+            return end >= memberCount;
         }
     }
 

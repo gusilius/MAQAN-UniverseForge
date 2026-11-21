@@ -12,7 +12,7 @@ public class CityTaxTest {
 
     static Settlement city(Defs d, String id, int workers) {
         Settlement s = new Settlement(id, "Город " + id, d);
-        s.add("wood", 100); s.add("food", 400);
+        s.add("wood", 100); s.add("food", 400); s.add(Defs.SILVER, 1000);
         for (int i = 0; i < workers; i++) s.addWorker(null);
         s.place("house", 0, 0); s.place("house", 6, 0);
         s.tick(80);

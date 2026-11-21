@@ -47,11 +47,11 @@ public final class TreasuryCheckpointStore {
         } catch (RuntimeException ex) {
             throw new IOException("Treasury checkpoint snapshot failed validation", ex);
         }
-        String archiveDigest = archive.archiveDigestThrough(state.nextSequence());
         long archiveNext = archive.nextSequence();
         if (archiveNext < state.nextSequence())
             throw new IOException("Treasury archive is at next sequence " + archiveNext
                     + " but snapshot requires " + state.nextSequence());
+        String archiveDigest = archive.archiveDigestThrough(state.nextSequence());
 
         String checksum = sha256(snapshotJson);
         String filename = String.format(java.util.Locale.ROOT, "snapshot-%020d-%s.json",

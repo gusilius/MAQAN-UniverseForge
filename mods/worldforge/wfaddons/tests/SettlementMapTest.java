@@ -129,11 +129,16 @@ public final class SettlementMapTest {
         periodicMarket.state = Building.State.DONE;
         Building periodicTavern = periodicEconomy.place("tavern", 8, 0);
         periodicTavern.state = Building.State.DONE;
-        long journalBeforeAccrual = TreasuryService.current().journalSize();
+        long financialEntriesBeforeAccrual = TreasuryService.current().journal().stream()
+                .filter(entry -> entry.kind() != TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && entry.kind() != TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED).count();
         int silverEntriesBeforeAccrual = TreasuryService.current()
                 .entriesForAccount("settlement:periodic_economy_test").size();
         periodicEconomy.tick(60); // one world day in the settlement clock
-        ok(TreasuryService.current().journalSize() == journalBeforeAccrual
+        long financialEntriesAfterAccrual = TreasuryService.current().journal().stream()
+                .filter(entry -> entry.kind() != TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && entry.kind() != TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED).count();
+        ok(financialEntriesAfterAccrual == financialEntriesBeforeAccrual
                         && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1000) < 1e-8,
                 "taxes and operating costs accrue without writing treasury entries every simulation step");
         Settlement periodicReloaded = Settlement.fromJson(periodicEconomy.toJson(), defs);

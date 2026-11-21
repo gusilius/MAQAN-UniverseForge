@@ -616,7 +616,10 @@ public final class PopulationSimulationTest {
                 .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
         ok(!firstBatchComplete && firstBatchApplied == 256
                         && !batchedPeople.get(256).props.containsKey("population.last_simulated_world_day"),
-                "world-day fallback advances a bounded 256-Character batch without scanning the remaining population");
+                "world-day fallback advances a bounded 256-Character batch without scanning the remaining population"
+                        + " (complete=" + firstBatchComplete + ", applied=" + firstBatchApplied
+                        + ", nextReceipt=" + batchedPeople.get(256).props.get("population.last_simulated_world_day")
+                        + ", registrySize=" + incrementalRegistry.size() + ")");
         boolean secondBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
                 incrementalRegistry, 1, 0, 301, 256);
         boolean thirdBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
