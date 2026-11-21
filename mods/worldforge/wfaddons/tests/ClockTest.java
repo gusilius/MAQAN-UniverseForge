@@ -24,6 +24,18 @@ public class ClockTest {
                 "unprocessed elapsed days remain queued");
         ok(budgeted.pullLimited("social", 20) == 9 && budgeted.pullLimited("social", 1) == 0,
                 "calendar backlog drains exactly once without loss");
+        GameClock resumed = new GameClock();
+        resumed.load(budgeted.toJson());
+        ok(resumed.pullLimited("social", 1) == 0 && resumed.consumedDay("social") == 12,
+                "fully consumed cursor persists across restart");
+        GameClock pending = new GameClock();
+        pending.pull("social");
+        pending.advance(GameClock.TICKS_PER_DAY * 12);
+        pending.pullLimited("social", 3);
+        GameClock restoredPending = new GameClock();
+        restoredPending.load(pending.toJson());
+        ok(restoredPending.pullLimited("social", 2) == 2 && restoredPending.consumedDay("social") == 5,
+                "unprocessed calendar backlog survives restart");
         boolean invalidBudget = false;
         try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
         ok(invalidBudget, "zero processing budget is rejected");
@@ -64,7 +76,8 @@ public class ClockTest {
         // сохранение
         GameClock r = new GameClock();
         r.load(d.toJson());
-        ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0, "часы сохраняются, потребители начинают заново");
+        ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0,
+                "calendar, speed and consumer cursors survive save/load");
         GameClock strict = new GameClock();
         strict.advance(GameClock.TICKS_PER_DAY * 12);
         String validBeforeBadLoad = strict.toJson();

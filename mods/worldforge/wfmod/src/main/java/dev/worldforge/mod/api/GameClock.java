@@ -165,7 +165,8 @@ public final class GameClock {
 
     public String toJson() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("format", "wf-clock/1"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
+        m.put("format", "wf-clock/2"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
+        m.put("consumers", new TreeMap<>(pulled));
         return Json.write(m);
     }
 
@@ -174,7 +175,9 @@ public final class GameClock {
         Object parsed = Json.parse(json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Clock save must be a JSON object");
         Map<String, Object> m = (Map<String, Object>) raw;
-        if (!"wf-clock/1".equals(m.get("format"))) throw new IllegalArgumentException("Неверный формат часов");
+        Object format = m.get("format");
+        boolean legacyFormat = "wf-clock/1".equals(format);
+        if (!legacyFormat && !"wf-clock/2".equals(format)) throw new IllegalArgumentException("Неверный формат часов");
         if (!(m.get("elapsed") instanceof Number elapsedValue)
                 || !(m.get("speed") instanceof Number speedValue)
                 || !(m.get("last") instanceof Number lastValue)
@@ -194,11 +197,30 @@ public final class GameClock {
             throw new IllegalArgumentException("Clock resume speed is outside the supported range");
         if (nextStart < 1) throw new IllegalArgumentException("Clock start year must be positive");
 
+        Map<String, Long> nextPulled = new HashMap<>();
+        if (!legacyFormat) {
+            Object rawConsumers = m.get("consumers");
+            if (!(rawConsumers instanceof Map<?, ?> consumerMap))
+                throw new IllegalArgumentException("Clock save is missing consumer cursors");
+            long maxDay = (long) Math.floor(nextElapsed);
+            for (Map.Entry<?, ?> entry : consumerMap.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || key.isBlank()
+                        || !(entry.getValue() instanceof Number value))
+                    throw new IllegalArgumentException("Clock consumer cursor is malformed");
+                double numeric = value.doubleValue();
+                long cursor = value.longValue();
+                if (!Double.isFinite(numeric) || numeric != cursor || cursor < 0 || cursor > maxDay)
+                    throw new IllegalArgumentException("Clock consumer cursor is outside the elapsed calendar");
+                nextPulled.put(key, cursor);
+            }
+        }
+
         // Commit only after every field has passed validation: malformed saves never partially mutate time.
         elapsed = nextElapsed;
         speed = nextSpeed;
         lastSpeed = nextLast;
         startYear = nextStart;
         pulled.clear();
+        pulled.putAll(nextPulled);
     }
 }

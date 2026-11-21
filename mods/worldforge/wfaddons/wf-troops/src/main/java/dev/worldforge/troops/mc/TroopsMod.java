@@ -1509,9 +1509,9 @@ public class TroopsMod {
 
     /** Daily payroll is funded through the same realm and army accounts used by Statecraft. */
     private static void payroll() {
-        int days = WorldForgeApi.clock().pull("wf_troops");
+        int days = WorldForgeApi.clock().pullLimited("wf_troops", 1);
         if (days <= 0) return;
-        long day = Math.max(0, WorldForgeApi.clock().dayNumber());
+        long day = Math.max(0, WorldForgeApi.clock().consumedDay("wf_troops"));
         long worldMinute = day * 1440L;
         TreasuryLedger ledger = WorldForgeMod.treasury();
         Map<PayrollKey, List<TroopEntity>> groups = new LinkedHashMap<>();
