@@ -64,8 +64,8 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeDecide(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
-    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => error_json("invalid_input", "JNI input unavailable or too large"),
+    let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
+        None => error_json("invalid_input", "decision input unavailable or exceeds 64 MiB"),
         Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected snapshot schema_version=1"),
         Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
             Ok(snapshot) => match decide(&snapshot) {
