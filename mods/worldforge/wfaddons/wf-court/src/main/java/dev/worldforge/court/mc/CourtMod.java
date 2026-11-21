@@ -285,7 +285,7 @@ public class CourtMod {
         ticks++;
         try {
             if (ticks % COURT_STEP == 0) {
-                int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_court");
+                int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_court", 1);
                 if (days > 0) {
                     for (MapData m : WorldForgeMod.loadedMaps().values()) {
                         CourtSim cs = m.titles == null ? null : court(m);
