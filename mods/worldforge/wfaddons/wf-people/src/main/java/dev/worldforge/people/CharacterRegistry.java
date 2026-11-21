@@ -44,6 +44,8 @@ public final class CharacterRegistry {
         if (authority == value) authority = null;
     }
     private long revision;
+    /** Changes only when the ordered membership is replaced wholesale (e.g. save restore). */
+    private long membershipGeneration;
 
     private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
 
@@ -93,6 +95,9 @@ public final class CharacterRegistry {
 
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
+
+    /** Stable across appends; changes only when the registry's ordered population is replaced. */
+    public long membershipGeneration() { return membershipGeneration; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -874,6 +879,7 @@ public final class CharacterRegistry {
         entityOwnerByUuid.putAll(entityOwners);
         ordered.clear();
         ordered.addAll(loaded.values());
+        membershipGeneration++;
         next = safeNext;
         markMembershipMutation();
         recordDomainMutation();

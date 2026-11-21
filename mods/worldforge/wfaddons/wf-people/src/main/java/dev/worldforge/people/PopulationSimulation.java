@@ -12,7 +12,7 @@ import java.util.*;
 public final class PopulationSimulation {
     private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
     private record WorldDayCursor(long targetDay, long fallbackDay, int year,
-                                   long registryRevision, int nextIndex, boolean complete) { }
+                                   long membershipGeneration, int nextIndex) { }
     private static final Map<CharacterRegistry, WorldDayCursor> WORLD_DAY_CURSORS = new WeakHashMap<>();
     public static final int MAX_NEED = 100;
     public static final int SKILL_XP_PER_RANK = 100;
@@ -529,16 +529,19 @@ public final class PopulationSimulation {
             throw new IllegalArgumentException("invalid world-day range");
         if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
         synchronized (WORLD_DAY_CURSORS) {
-            long revision = registry.revision();
+            long generation = registry.membershipGeneration();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
             if (cursor == null || cursor.targetDay() != targetWorldDay
                     || cursor.fallbackDay() != fallbackStartDay || cursor.year() != year
-                    || cursor.registryRevision() != revision) {
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, revision, 0, false);
+                    || cursor.membershipGeneration() != generation) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0);
             }
-            if (cursor.complete()) return true;
             List<Character> members = registry.all();
             int start = Math.min(cursor.nextIndex(), members.size());
+            if (start >= members.size()) {
+                WORLD_DAY_CURSORS.put(registry, cursor);
+                return true;
+            }
             int end = Math.min(members.size(), start + maxCharacters);
             if (start < end) {
                 List<Character> batch = new ArrayList<>(members.subList(start, end));
@@ -553,9 +556,8 @@ public final class PopulationSimulation {
                     }
                 }
             }
-            boolean complete = end >= registry.size();
             WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
-                    year, revision, end, complete));
+                    year, generation, end));
             return complete;
         }
     }

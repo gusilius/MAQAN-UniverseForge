@@ -632,14 +632,22 @@ public final class PopulationSimulationTest {
                 "completed world-day cursor does not replay already acknowledged population state");
         Character appendedDuringBatch = batchedRegistry.create("Late Arrival", "", "north", "n", 270);
         PopulationSimulation.setNeed(appendedDuringBatch, Need.HUNGER, 5);
-        boolean membershipRestarted = PopulationSimulation.advanceToWorldDayBatch(
+        boolean appendedTailComplete = PopulationSimulation.advanceToWorldDayBatch(
                 batchedRegistry, 1, 0, 301, 256);
-        PopulationSimulation.advanceToWorldDayBatch(batchedRegistry, 1, 0, 301, 256);
-        boolean membershipCaughtUp = PopulationSimulation.advanceToWorldDayBatch(
-                batchedRegistry, 1, 0, 301, 256);
-        ok(!membershipRestarted && membershipCaughtUp
-                        && PopulationSimulation.need(appendedDuringBatch, Need.HUNGER) == 15,
-                "new registry membership invalidates the cursor and safely catches up the appended Character");
+        ok(appendedTailComplete && PopulationSimulation.need(appendedDuringBatch, Need.HUNGER) == 15
+                        && PopulationSimulation.need(batchedPeople.get(0), Need.HUNGER) == 15,
+                "new Characters append to the completed cursor without replaying the existing population");
+        CharacterRegistry replacedRegistry = new CharacterRegistry();
+        Character replaced = replacedRegistry.create("Before Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(replaced, Need.HUNGER, 5);
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        CharacterRegistry replacementSource = new CharacterRegistry();
+        Character restoredPerson = replacementSource.create("After Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(restoredPerson, Need.HUNGER, 5);
+        replacedRegistry.fromJson(replacementSource.toJson(), "test-generation-reset");
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        ok(PopulationSimulation.need(replacedRegistry.all().get(0), Need.HUNGER) == 15,
+                "wholesale registry replacement resets the cursor and catches up restored Characters");
 
         CharacterRegistry resumableRegistry = new CharacterRegistry();
         Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
