@@ -2,7 +2,9 @@ package dev.worldforge.settle;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Shared spatial invariant and deterministic fallback placement for canonical settlements.
@@ -28,7 +30,7 @@ public final class SettlementSpacing {
 
     /**
      * Finds the nearest deterministic 128-block grid candidate that does not overlap
-     * any occupied active settlement center. Returns null if the bounded search is full.
+     * any reserved canonical settlement center. Returns null if the bounded search is full.
      */
     public static int[] findAvailablePosition(int originX, int originZ, List<long[]> occupied, int searchRadius) {
         if (searchRadius < 0) return null;
@@ -51,18 +53,36 @@ public final class SettlementSpacing {
                 })
                 .thenComparingInt(p -> p[0])
                 .thenComparingInt(p -> p[1]));
-        List<long[]> centers = occupied == null ? List.of() : occupied;
+        // Index every reserved center once. A candidate can conflict only with centers in
+        // its own or one of the eight neighboring 128-block buckets; do not rescan the
+        // entire settlement registry for every candidate.
+        Map<Long, List<long[]>> buckets = new HashMap<>();
+        if (occupied != null) for (long[] center : occupied) {
+            if (center == null || center.length < 2) continue;
+            int bucketX = Math.floorDiv((int) center[0], MINIMUM_CENTER_DISTANCE_BLOCKS);
+            int bucketZ = Math.floorDiv((int) center[1], MINIMUM_CENTER_DISTANCE_BLOCKS);
+            buckets.computeIfAbsent(bucketKey(bucketX, bucketZ), ignored -> new ArrayList<>()).add(center);
+        }
         for (int[] candidate : candidates) {
+            int bucketX = Math.floorDiv(candidate[0], MINIMUM_CENTER_DISTANCE_BLOCKS);
+            int bucketZ = Math.floorDiv(candidate[1], MINIMUM_CENTER_DISTANCE_BLOCKS);
             boolean available = true;
-            for (long[] center : centers) {
-                if (center == null || center.length < 2) continue;
-                if (conflicts((long) center[0] - candidate[0], (long) center[1] - candidate[1])) {
-                    available = false;
-                    break;
+            for (int dx = -1; dx <= 1 && available; dx++) {
+                for (int dz = -1; dz <= 1 && available; dz++) {
+                    for (long[] center : buckets.getOrDefault(bucketKey(bucketX + dx, bucketZ + dz), List.of())) {
+                        if (conflicts((long) center[0] - candidate[0], (long) center[1] - candidate[1])) {
+                            available = false;
+                            break;
+                        }
+                    }
                 }
             }
             if (available) return candidate;
         }
         return null;
+    }
+
+    private static long bucketKey(int x, int z) {
+        return ((long) x << 32) | (z & 0xffff_ffffL);
     }
 }
