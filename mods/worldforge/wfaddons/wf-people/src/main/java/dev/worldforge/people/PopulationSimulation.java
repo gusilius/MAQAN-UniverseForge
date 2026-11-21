@@ -548,9 +548,11 @@ public final class PopulationSimulation {
             if (start < end) {
                 List<Character> batch = members.subList(start, end);
                 try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-                    registry.refreshLifeStages(batch, year);
                     for (Character character : batch) {
                         if (!character.alive) continue;
+                        int currentAge = age(character, year);
+                        registry.applyLifeStageResult(character, currentAge,
+                                lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
                         Object raw = character.props.get("population.last_simulated_world_day");
                         long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
                         if (previous >= targetWorldDay) continue;
