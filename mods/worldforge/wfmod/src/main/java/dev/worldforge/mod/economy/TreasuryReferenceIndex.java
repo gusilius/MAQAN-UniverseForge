@@ -21,6 +21,9 @@ final class TreasuryReferenceIndex {
     private static final int RECORD_BYTES = 16;
     private final Path directory;
     private final Path cursorFile;
+    // Bucket completeness is validated once per archive generation, not on every lookup.
+    // All mutations go through this synchronized instance and publish a new cursor last.
+    private long validatedArchiveNext = Long.MIN_VALUE;
 
     TreasuryReferenceIndex(Path directory) throws IOException {
         this.directory = directory;
@@ -29,6 +32,7 @@ final class TreasuryReferenceIndex {
     }
 
     synchronized boolean isCurrent(long archiveNext) throws IOException {
+        if (validatedArchiveNext == archiveNext) return true;
         if (!Files.isRegularFile(cursorFile)) return false;
         try {
             long indexedNext = Long.parseLong(Files.readString(cursorFile, StandardCharsets.US_ASCII).trim());
@@ -44,7 +48,9 @@ final class TreasuryReferenceIndex {
             // One index record must exist for every canonical journal entry. A valid-looking
             // cursor alone is insufficient: a deleted whole bucket would otherwise cause
             // false negatives while all remaining buckets still look structurally sound.
-            return indexedRecords == archiveNext - 1;
+            boolean complete = indexedRecords == archiveNext - 1;
+            if (complete) validatedArchiveNext = archiveNext;
+            return complete;
         } catch (RuntimeException invalid) { return false; }
     }
 
@@ -149,10 +155,12 @@ final class TreasuryReferenceIndex {
             catch (AtomicMoveNotSupportedException unsupported) {
                 throw new IOException("Atomic treasury index cursor publication is unavailable", unsupported);
             }
+            validatedArchiveNext = exclusiveNextSequence;
         } finally { Files.deleteIfExists(temp); }
     }
 
     private void clearBuckets() throws IOException {
+        validatedArchiveNext = Long.MIN_VALUE;
         for (int bucket = 0; bucket < BUCKETS; bucket++) Files.deleteIfExists(bucketPath(bucket));
         Files.deleteIfExists(cursorFile);
     }
