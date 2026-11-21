@@ -252,6 +252,70 @@ public final class CharacterAuthority {
     }
 
     /**
+     * Refreshes family edges once before a yearly lifecycle pass. Family links can be updated
+     * directly by legacy-compatible systems, so membership revisions alone are not sufficient
+     * to keep this projection current. Never call this from an individual death/estate lookup.
+     */
+    public synchronized void rebuildFamilyIndex() {
+        refreshIndex();
+        Map<String, Set<CharacterIdentity>> parentGlobal = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> parentLegacy = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> childGlobal = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> childLegacy = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> spouseGlobal = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> spouseLegacy = new HashMap<>();
+
+        for (Map.Entry<CharacterIdentity, Character> entry : byIdentity.entrySet()) {
+            CharacterIdentity identity = entry.getKey();
+            Character person = entry.getValue();
+            String fatherGlobal = familyId(person, "family.father_global_id");
+            String motherGlobal = familyId(person, "family.mother_global_id");
+            addFamilyIndex(parentLegacy, person.father, identity);
+            addFamilyIndex(parentLegacy, person.mother, identity);
+            addFamilyIndex(parentGlobal, fatherGlobal, identity);
+            addFamilyIndex(parentGlobal, motherGlobal, identity);
+            addFamilyIndex(spouseLegacy, person.spouse, identity);
+            addFamilyIndex(spouseGlobal, familyId(person, "family.spouse_global_id"), identity);
+
+            // Parent-side pointers are authoritative even in older saves that lack child lists.
+            Set<CharacterIdentity> fathers = byLegacyId.get(person.father);
+            if (fathers != null) childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()).addAll(fathers);
+            Set<CharacterIdentity> mothers = byLegacyId.get(person.mother);
+            if (mothers != null) childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()).addAll(mothers);
+            CharacterIdentity fatherIdentity = byGlobalId.get(fatherGlobal);
+            if (fatherIdentity != null) addFamilyIndex(childGlobal, person.globalId, fatherIdentity);
+            CharacterIdentity motherIdentity = byGlobalId.get(motherGlobal);
+            if (motherIdentity != null) addFamilyIndex(childGlobal, person.globalId, motherIdentity);
+
+            for (String childId : person.children) {
+                Set<CharacterIdentity> children = byLegacyId.get(childId);
+                if (children != null) for (CharacterIdentity child : children) {
+                    addFamilyIndex(parentLegacy, person.id, child);
+                    addFamilyIndex(parentGlobal, person.globalId, child);
+                    addFamilyIndex(childLegacy, childId, identity);
+                    addFamilyIndex(childGlobal, child.globalCharacterId(), identity);
+                }
+            }
+            Object globalChildren = person.props.get("family.children_global_ids");
+            if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
+                if (!(rawId instanceof String childId) || childId.isBlank()) continue;
+                CharacterIdentity child = byGlobalId.get(childId);
+                if (child == null) continue;
+                addFamilyIndex(parentLegacy, person.id, child);
+                addFamilyIndex(parentGlobal, person.globalId, child);
+                addFamilyIndex(childLegacy, byIdentity.get(child).id, identity);
+                addFamilyIndex(childGlobal, childId, identity);
+            }
+        }
+        familyByParentGlobal = parentGlobal;
+        familyByParentLegacy = parentLegacy;
+        familyByChildGlobal = childGlobal;
+        familyByChildLegacy = childLegacy;
+        familyBySpouseGlobal = spouseGlobal;
+        familyBySpouseLegacy = spouseLegacy;
+    }
+
+    /**
      * Returns only possible relatives of a Character, preserving local-registry priority.
      * The index is rebuilt transactionally with registry membership changes, not per death.
      */
