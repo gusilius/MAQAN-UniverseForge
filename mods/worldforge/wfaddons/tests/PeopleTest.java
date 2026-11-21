@@ -415,6 +415,29 @@ public class PeopleTest {
                         .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
                 "canonical personal inventories and item data survive CharacterRegistry save/load");
 
+        CharacterRegistry bereavementRegistry = new CharacterRegistry();
+        Character sharedParent = bereavementRegistry.create("Общий родитель", "", "", "m", -40);
+        Character deceasedResident = bereavementRegistry.create("Умерший родственник", "", "", "m", 0);
+        Character siblingResident = bereavementRegistry.create("Живой брат", "", "", "m", 2);
+        deceasedResident.father = sharedParent.id;
+        sharedParent.children.add(deceasedResident.id);
+        siblingResident.father = sharedParent.id;
+        sharedParent.children.add(siblingResident.id);
+        Character trustedFriend = bereavementRegistry.create("Друг", "", "", "m", 1);
+        Character stranger = bereavementRegistry.create("Незнакомец", "", "", "m", 1);
+        deceasedResident.props.put("social.relationships", new LinkedHashMap<>(Map.of(trustedFriend.globalId, 85)));
+        trustedFriend.props.put("social.relationships", new LinkedHashMap<>(Map.of(deceasedResident.globalId, 85)));
+        PopulationSimulation.die(bereavementRegistry, deceasedResident.id, 40, "natural");
+        ok(CharacterDevelopment.memories(siblingResident, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(trustedFriend, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(stranger, 32).stream()
+                        .noneMatch(memory -> "bereavement".equals(memory.get("kind"))),
+                "death bereavement reaches indexed siblings and reciprocal friends without notifying unrelated residents");
+        ok(bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
+                "canonical global Character lookup resolves social event recipients directly");
+
         Character heir = journal.create("Наследник", "", "", "m", 20);
         Character parent = journal.create("Умерший житель", "", "", "m", 0);
         parent.props.put("population.location","settlement:oak");

@@ -25,6 +25,8 @@ public final class CharacterRegistry {
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
+    /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
+    private final Map<String, Character> byGlobalId = new HashMap<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     private final List<Character> ordered = new ArrayList<>();
@@ -103,6 +105,11 @@ public final class CharacterRegistry {
 
     public Character get(String id) { return byId.get(id); }
 
+    /** Resolves a canonical global UUID without scanning the local registry. */
+    public Character getByGlobalId(String globalId) {
+        return globalId == null || globalId.isBlank() ? null : byGlobalId.get(globalId);
+    }
+
     /**
      * Read-only append-only insertion-order view. Existing entries never move or disappear;
      * callers may retain this view and process a captured size in bounded batches.
@@ -131,6 +138,7 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
+        byGlobalId.put(c.globalId, c);
         ordered.add(c);
         markMembershipMutation();
         for (Listener l : listeners) l.born(c);
@@ -503,35 +511,72 @@ public final class CharacterRegistry {
         return vacated;
     }
 
-    /** Family and trusted friends remember a death on their own canonical Character records. */
-    private void recordBereavement(Character deceased,int deathYear) {
-        if(Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
-        long minute=Math.max(0L,(long)deathYear*525600L);
-        for(Character survivor:byId.values()) {
-            if(survivor==deceased||!survivor.alive) continue;
-            int intensity=0;
-            if(deceased.spouse.equals(survivor.id)||survivor.spouse.equals(deceased.id)
-                    ||deceased.father.equals(survivor.id)||deceased.mother.equals(survivor.id)
-                    ||survivor.father.equals(deceased.id)||survivor.mother.equals(deceased.id)
-                    ||deceased.children.contains(survivor.id)||survivor.children.contains(deceased.id)) intensity=4;
+    /**
+     * Family and trusted friends remember a death through the deceased's bounded
+     * relationship neighbourhood. A death must never scan the entire population.
+     * ResidentSocial writes reciprocal Character-to-Character links, so the deceased's
+     * relationship map is the fan-out index; family links provide a legacy-safe fallback.
+     */
+    private void recordBereavement(Character deceased, int deathYear) {
+        if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
+        long minute = Math.max(0L, (long) deathYear * 525600L);
+        LinkedHashSet<Character> candidates = new LinkedHashSet<>();
+
+        addLivingCandidate(candidates, deceased.spouse);
+        addLivingCandidate(candidates, deceased.father);
+        addLivingCandidate(candidates, deceased.mother);
+        for (String childId : deceased.children) addLivingCandidate(candidates, childId);
+
+        // Siblings are resolved through the two parent records, not by scanning byId.
+        Character father = deceased.father.isBlank() ? null : byId.get(deceased.father);
+        Character mother = deceased.mother.isBlank() ? null : byId.get(deceased.mother);
+        if (father != null) for (String siblingId : father.children) addLivingCandidate(candidates, siblingId);
+        if (mother != null) for (String siblingId : mother.children) addLivingCandidate(candidates, siblingId);
+
+        Object rawRelationships = deceased.props.get("social.relationships");
+        if (rawRelationships instanceof Map<?, ?> relationships) {
+            for (Map.Entry<?, ?> entry : relationships.entrySet()) {
+                if (!(entry.getKey() instanceof String globalId)
+                        || !(entry.getValue() instanceof Number score)
+                        || score.intValue() < 35) continue;
+                Character friend = byGlobalId.get(globalId);
+                if (friend != null && friend.alive && friend != deceased
+                        && relationshipScore(friend, deceased.globalId) >= 35)
+                    candidates.add(friend);
+            }
+        }
+
+        for (Character survivor : candidates) {
+            int intensity = 0;
+            boolean directFamily = deceased.spouse.equals(survivor.id)
+                    || deceased.father.equals(survivor.id) || deceased.mother.equals(survivor.id)
+                    || survivor.father.equals(deceased.id) || survivor.mother.equals(deceased.id)
+                    || deceased.children.contains(survivor.id) || survivor.children.contains(deceased.id);
+            if (directFamily) intensity = 4;
             else {
-                boolean sibling=(!deceased.father.isBlank()&&deceased.father.equals(survivor.father))
-                        ||(!deceased.mother.isBlank()&&deceased.mother.equals(survivor.mother));
-                if(sibling) intensity=3;
+                boolean sibling = (!deceased.father.isBlank() && deceased.father.equals(survivor.father))
+                        || (!deceased.mother.isBlank() && deceased.mother.equals(survivor.mother));
+                if (sibling) intensity = 3;
                 else {
-                    int relationship=relationshipScore(survivor,deceased.globalId);
-                    if(relationship>=70) intensity=3;
-                    else if(relationship>=35) intensity=2;
+                    int relationship = relationshipScore(survivor, deceased.globalId);
+                    if (relationship >= 70) intensity = 3;
+                    else if (relationship >= 35) intensity = 2;
                 }
             }
-            if(intensity==0) continue;
-            String eventId="death:bereavement:"+deceased.globalId+":"+survivor.globalId;
-            CharacterDevelopment.recordExperience(survivor,CharacterDevelopment.Experience.BEREAVEMENT,
-                    eventId,"lost "+deceased.name,minute,intensity);
-            CharacterDevelopment.remember(survivor,eventId+":memory","bereavement",deceased.globalId,
-                    "death of "+deceased.name,-intensity*15,minute);
+            if (intensity == 0) continue;
+            String eventId = "death:bereavement:" + deceased.globalId + ":" + survivor.globalId;
+            CharacterDevelopment.recordExperience(survivor, CharacterDevelopment.Experience.BEREAVEMENT,
+                    eventId, "lost " + deceased.name, minute, intensity);
+            CharacterDevelopment.remember(survivor, eventId + ":memory", "bereavement", deceased.globalId,
+                    "death of " + deceased.name, -intensity * 15, minute);
         }
-        deceased.props.put("death.bereavement.completed",true);
+        deceased.props.put("death.bereavement.completed", true);
+    }
+
+    private void addLivingCandidate(Set<Character> candidates, String localId) {
+        if (localId == null || localId.isBlank()) return;
+        Character candidate = byId.get(localId);
+        if (candidate != null && candidate.alive) candidates.add(candidate);
     }
 
     private static int relationshipScore(Character observer,String subjectGlobalId) {
@@ -875,6 +920,8 @@ public final class CharacterRegistry {
         }
         byId.clear();
         byId.putAll(loaded);
+        byGlobalId.clear();
+        for (Character character : loaded.values()) byGlobalId.put(character.globalId, character);
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
         ordered.clear();
