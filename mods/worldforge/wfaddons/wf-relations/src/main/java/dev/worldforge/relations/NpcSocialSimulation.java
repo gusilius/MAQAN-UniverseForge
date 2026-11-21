@@ -356,7 +356,7 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, 1, day, "friendship", witnesses);
             reputation(b, polity, 1, day, "friendship", witnesses);
-            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=friendship a={} b={} day={",
+            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=friendship a={} b={} day={}",
                     a.globalId, b.globalId, day);
         } else if (oldAffinity > -30 && ab.affinity <= -30) {
             String polity = polityOf(a);
