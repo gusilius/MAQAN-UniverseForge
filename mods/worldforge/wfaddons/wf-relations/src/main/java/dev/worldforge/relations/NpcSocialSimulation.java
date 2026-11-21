@@ -32,15 +32,22 @@ public final class NpcSocialSimulation {
     // simulated day. Build the expensive polity membership index once per day;
     // relationship strengths are still read live from the Bond store below.
     private static volatile long contactIndexDay = Long.MIN_VALUE;
+    private static volatile String contactIndexWorld = "";
     private static volatile Map<String, List<Character>> contactsByPolity = Map.of();
 
     private static synchronized Map<String, List<Character>> contactsByPolity(long day) {
-        if (contactIndexDay == day) return contactsByPolity;
+        String world = String.valueOf(WorldForgeMod.worldId());
+        if (contactIndexDay == day && contactIndexWorld.equals(world)) return contactsByPolity;
         Map<String, List<Character>> building = new TreeMap<>();
         if (PeopleMod.identityPartitionsReady()) {
+            // identities() contains one entry per Character, not one per partition.
+            // Deduplicate map IDs before reading registries or this becomes O(N^2).
+            Set<String> mapIds = new TreeSet<>();
             for (CharacterIdentity identity : PeopleMod.authority().identities()) {
-                if ("__players__".equals(identity.mapId())) continue;
-                CharacterRegistry registry = PeopleMod.authority().registry(identity.mapId());
+                if (!"__players__".equals(identity.mapId())) mapIds.add(identity.mapId());
+            }
+            for (String mapId : mapIds) {
+                CharacterRegistry registry = PeopleMod.authority().registry(mapId);
                 if (registry == null) continue;
                 for (Character person : registry.all()) {
                     if (!person.alive) continue;
@@ -55,6 +62,7 @@ public final class NpcSocialSimulation {
             immutable.put(polity, List.copyOf(members));
         });
         contactsByPolity = Collections.unmodifiableMap(immutable);
+        contactIndexWorld = world;
         contactIndexDay = day;
         return contactsByPolity;
     }
