@@ -22,6 +22,7 @@ public final class GameClock {
     private int simulationTickMultiplier = 1;
     public int startYear = 300;
     private final Map<String, Long> pulled = new HashMap<>();
+    private final Set<String> durableConsumers = new HashSet<>();
 
     public double elapsedDays() { return elapsed; }
 
@@ -33,6 +34,7 @@ public final class GameClock {
         simulationTickMultiplier = 1;
         startYear = 300;
         pulled.clear();
+        durableConsumers.clear();
     }
     public int speedIndex() { return speed; }
     public boolean paused() { return speed == 0; }
@@ -90,6 +92,7 @@ public final class GameClock {
         if (last == null) { pulled.put(consumer, now); return 0; }
         long pending = Math.max(0L, now - last);
         int delivered = (int) Math.min((long) maxDays, pending);
+        durableConsumers.add(consumer);
         if (delivered > 0) pulled.put(consumer, last + delivered);
         return delivered;
     }
@@ -167,6 +170,12 @@ public final class GameClock {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("format", "wf-clock/2"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
         m.put("consumers", new TreeMap<>(pulled));
+        Map<String, Long> durableCursors = new TreeMap<>();
+        for (String consumer : durableConsumers) {
+            Long cursor = pulled.get(consumer);
+            if (cursor != null) durableCursors.put(consumer, cursor);
+        }
+        m.put("consumers", durableCursors);
         return Json.write(m);
     }
 
@@ -222,5 +231,7 @@ public final class GameClock {
         startYear = nextStart;
         pulled.clear();
         pulled.putAll(nextPulled);
+        durableConsumers.clear();
+        durableConsumers.addAll(nextPulled.keySet());
     }
 }

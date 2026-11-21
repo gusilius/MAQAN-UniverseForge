@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -44,22 +45,27 @@ public final class ClockService {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onStop(ServerStoppingEvent e) { save(e.getServer()); }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.START) return;
-        WorldForgeApi.clock().advanceServerTick();
-        ticks++;
-        if (ticks % 40 == 0) {
-            GameClock c = WorldForgeApi.clock();
-            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-            m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("paused", c.paused());
-            String json = Json.write(m);
-            for (net.minecraft.server.level.ServerPlayer sp : e.getServer().getPlayerList().getPlayers()) WFNet.sendView(sp, "wf:clock", json);
+        if (e.phase == TickEvent.Phase.START) {
+            WorldForgeApi.clock().advanceServerTick();
+            ticks++;
+            if (ticks % 40 == 0) {
+                GameClock c = WorldForgeApi.clock();
+                java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("paused", c.paused());
+                String json = Json.write(m);
+                for (net.minecraft.server.level.ServerPlayer sp : e.getServer().getPlayerList().getPlayers())
+                    WFNet.sendView(sp, "wf:clock", json);
+            }
+        } else if (ticks > 0 && ticks % SAVE_EVERY == 0) {
+            // Persist the calendar cursor after END-phase addon consumers have
+            // advanced and checkpointed their own state for this server tick.
+            save(e.getServer());
         }
-        if (ticks % SAVE_EVERY == 0) save(e.getServer());
     }
 
     private static Path ledgerFile(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("wf_treasury.json"); }

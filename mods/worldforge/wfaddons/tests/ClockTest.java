@@ -39,6 +39,17 @@ public class ClockTest {
         boolean invalidBudget = false;
         try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
         ok(invalidBudget, "zero processing budget is rejected");
+        GameClock legacy = new GameClock();
+        legacy.load("{\"format\":\"wf-clock/1\",\"elapsed\":5,\"speed\":1,\"last\":1,\"start\":300}");
+        ok(legacy.dayNumber() == 5 && legacy.pull("legacy") == 0,
+                "legacy clock saves migrate without inventing consumer backlog");
+        GameClock transientCursor = new GameClock();
+        transientCursor.pull("legacy");
+        transientCursor.advance(GameClock.TICKS_PER_DAY * 2);
+        GameClock transientRestored = new GameClock();
+        transientRestored.load(transientCursor.toJson());
+        ok(transientRestored.pull("legacy") == 0,
+                "legacy pull consumers retain their previous restart semantics");
 
         // пауза и скорость
         c.pause();
