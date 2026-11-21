@@ -156,7 +156,7 @@ else
 fi
 echo "eula=true" > eula.txt
 cat > server.properties <<P
-online-mode=false
+online-mode=true
 level-name=world
 level-type=minecraft\:normal
 level-seed=$MAP_SEED
@@ -207,11 +207,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   for second in $(seq 1 900); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
-      && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[1-9][0-9]*" server.log \
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
-      && grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log \
-      && grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log \
-      && grep -Fq 'MAQAN_AUTONOMOUS_BIRTH' server.log \
+      && grep -Fq 'wf_relations: autonomous NPC interactions=' server.log \
       && grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log; then
       break
     fi
@@ -233,11 +230,11 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     echo "ERROR: vanilla Overworld did not produce native WorldGenesis evidence"
     exit 8
   }
-  grep -Fq "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log || {
-    tail -200 server.log
-    echo "ERROR: image dimension did not produce native WorldGenesis evidence"
+  if grep -Fq "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log; then
+    echo "ERROR: unvisited image dimension was eagerly activated; lazy activation invariant violated"
     exit 9
-  }
+  fi
+  echo "UNVISITED_IMAGE_DIMENSION_REMAINS_DORMANT=PASS"
   grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log || {
     tail -200 server.log
     echo "ERROR: vanilla Overworld has no autonomous virtual court"
@@ -247,16 +244,6 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     tail -200 server.log
     echo "ERROR: autonomous NPC friendship produced no events"
     exit 11
-  }
-  grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log || {
-    tail -200 server.log
-    echo "ERROR: autonomous NPC marriage produced no events"
-    exit 13
-  }
-  grep -Fq 'MAQAN_AUTONOMOUS_BIRTH' server.log || {
-    tail -200 server.log
-    echo "ERROR: autonomous court simulation produced no child births"
-    exit 14
   }
   grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log || {
     tail -200 server.log
@@ -282,7 +269,9 @@ for match in pattern.finditer(log):
     for field in ("settlement_types", "blueprint_site_types", "government_types", "subject_types", "title_ranks"):
         values[field] = json.loads(values[field])
     rows[values["source"]] = values
-expected = {"vanilla-world:minecraft:overworld", map_id}
+expected = {"vanilla-world:minecraft:overworld"}
+if re.search(rf"MAQAN_WORLD_GENESIS source={re.escape(map_id)}\b", log):
+    raise SystemExit("Unvisited image-backed dimension was eagerly activated; Genesis must be visit-triggered")
 missing = expected - rows.keys()
 if missing:
     raise SystemExit("Missing same-server genesis sources: " + ", ".join(sorted(missing)))

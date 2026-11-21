@@ -4171,7 +4171,7 @@ public final class WorldSimMod {
             if (family.father != null && family.father.spouse.isBlank() && mother.spouse.isBlank()) {
                 try { registry.marry(family.father.id, mother.id, year); }
                 catch (RuntimeException error) {
-                    LOGGER.warn("wf_worldsim: founding household marriage deferred for {}", householdId, error);
+                    LOGGER.warn("wf_worldsim: founding household marriage deferred for {} ({})", householdId, error.getMessage());
                 }
             }
             tagEmergentResident(mother, bandId, source, householdId, familyIndex);
@@ -4194,7 +4194,7 @@ public final class WorldSimMod {
                     && family.father.spouse.isBlank() && family.mother.spouse.isBlank()) {
                 try { registry.marry(family.father.id, family.mother.id, year); }
                 catch (RuntimeException error) {
-                    LOGGER.warn("wf_worldsim: repaired household marriage deferred for {}", householdId, error);
+                    LOGGER.warn("wf_worldsim: repaired household marriage deferred for {} ({})", householdId, error.getMessage());
                 }
             }
             tagEmergentResident(partner, bandId, source, householdId, familyIndex);

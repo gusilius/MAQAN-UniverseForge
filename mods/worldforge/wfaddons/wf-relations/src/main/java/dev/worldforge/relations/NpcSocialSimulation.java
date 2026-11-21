@@ -79,6 +79,8 @@ public final class NpcSocialSimulation {
         }
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
         int interactions = 0, groupsVisited = 0;
+        // Family trees are stable during this daily pass; cache ancestry to avoid repeated traversal.
+        Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
         for (Map.Entry<String, CharacterRegistry> partition : registries.entrySet()) {
             CharacterRegistry registry = partition.getValue();
             Map<String, List<Character>> groups = new TreeMap<>();
@@ -119,7 +121,7 @@ public final class NpcSocialSimulation {
                         }
                     }
                     if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
-                    interact(relations, registry, a, b, group.getKey(), members, day, year);
+                    interact(relations, registry, a, b, group.getKey(), members, day, year, ancestryCache);
                     interactions++;
                 }
             }
@@ -150,7 +152,7 @@ public final class NpcSocialSimulation {
                     Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
                     if (candidate == traveler) continue;
                     interact(relations, registry, traveler, candidate,
-                            "travel:" + homeBand + ":" + targetBand, adults, day, year);
+                            "travel:" + homeBand + ":" + targetBand, adults, day, year, ancestryCache);
                     interactions++;
                 }
             }
@@ -197,9 +199,11 @@ public final class NpcSocialSimulation {
         return traits.contains("trader") || traits.contains("diplomat") || traits.contains("merchant");
     }
 
-    private static int kinshipDistance(Character a, Character b, CharacterRegistry registry) {
+    private static int kinshipDistance(Character a, Character b, CharacterRegistry registry,
+                                      Map<String, Map<String, Integer>> ancestryCache) {
         if (a.globalId.equals(b.globalId)) return 0;
-        Map<String, Integer> aa = ancestors(a, registry), bb = ancestors(b, registry);
+        Map<String, Integer> aa = ancestryCache.computeIfAbsent(a.globalId, ignored -> ancestors(a, registry));
+        Map<String, Integer> bb = ancestryCache.computeIfAbsent(b.globalId, ignored -> ancestors(b, registry));
         int best = Integer.MAX_VALUE;
         for (Map.Entry<String, Integer> entry : aa.entrySet()) {
             Integer other = bb.get(entry.getKey());
@@ -250,7 +254,8 @@ public final class NpcSocialSimulation {
     }
 
     private static void interact(Relations relations, CharacterRegistry registry, Character a, Character b,
-                                 String groupId, List<Character> witnesses, int day, int year) {
+                                 String groupId, List<Character> witnesses, int day, int year,
+                                 Map<String, Map<String, Integer>> ancestryCache) {
         String aKey = "npc:" + a.globalId, bKey = "npc:" + b.globalId;
         Relations.Bond ab = relations.bond(aKey, bKey);
         Relations.Bond ba = relations.bond(bKey, aKey);
@@ -305,7 +310,7 @@ public final class NpcSocialSimulation {
             ab.dating = ba.dating = false;
         }
 
-        int kinship = kinshipDistance(a, b, registry);
+        int kinship = kinshipDistance(a, b, registry, ancestryCache);
         // Parents, children and siblings are excluded from romance; distant kin are not
         // categorically blocked, but courtship develops more cautiously.
         boolean eligibleRomance = kinship > 2 && !a.gender.equals(b.gender)
@@ -351,7 +356,7 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, 1, day, "friendship", witnesses);
             reputation(b, polity, 1, day, "friendship", witnesses);
-            RelationsMod.LOGGER.info("wf_relations: autonomous social event kind=friendship a={} b={} day={}",
+            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=friendship a={} b={} day={",
                     a.globalId, b.globalId, day);
         } else if (oldAffinity > -30 && ab.affinity <= -30) {
             String polity = polityOf(a);
@@ -362,7 +367,7 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, -2, day, "rivalry", witnesses);
             reputation(b, polity, -2, day, "rivalry", witnesses);
-            RelationsMod.LOGGER.info("wf_relations: autonomous social event kind=rivalry a={} b={} day={}",
+            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=rivalry a={} b={} day={",
                     a.globalId, b.globalId, day);
         }
     }
