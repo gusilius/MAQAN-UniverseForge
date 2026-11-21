@@ -7,6 +7,7 @@ import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryCheckpointStore;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryArchiveStore;
+import dev.worldforge.mod.economy.TreasuryArchiveMigration;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
 import java.util.*;
