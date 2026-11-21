@@ -476,12 +476,23 @@ public final class WorldSimMod {
                 return;
             }
             PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 0);
-            byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
-            JsonObject emergenceRequest = new JsonObject();
-            emergenceRequest.addProperty("schema_version", NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION);
-            emergenceRequest.add("snapshot", snapshot);
-            if (emergenceState != null) emergenceRequest.add("state", emergenceState.deepCopy());
-            byte[] emergenceInput = GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8);
+            // Serialize the large immutable world snapshot only once. The native decision
+            // endpoint consumes the bare snapshot; emergence consumes the same JSON document
+            // embedded in a small envelope with its evolving state. Serializing the JsonObject
+            // twice walked every geography cell, character and catalog payload twice per cycle.
+            String snapshotJson = GSON.toJson(snapshot);
+            byte[] input = snapshotJson.getBytes(StandardCharsets.UTF_8);
+            StringBuilder emergenceJson = new StringBuilder(snapshotJson.length()
+                    + (emergenceState == null ? 64 : 256));
+            emergenceJson.append("{\\"schema_version\\":")
+                    .append(NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION)
+                    .append(",\\"snapshot\\":")
+                    .append(snapshotJson);
+            if (emergenceState != null) {
+                emergenceJson.append(",\\"state\\":").append(GSON.toJson(emergenceState));
+            }
+            emergenceJson.append('}');
+            byte[] emergenceInput = emergenceJson.toString().getBytes(StandardCharsets.UTF_8);
             PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
             logSnapshotFootprint(snapshot, input.length, emergenceInput.length);
 
