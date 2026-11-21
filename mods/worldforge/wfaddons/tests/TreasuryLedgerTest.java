@@ -75,9 +75,6 @@ public final class TreasuryLedgerTest {
                 "version-2 treasury checkpoints omit unbounded idempotency key arrays");
         boolean legacySnapshotRoundTrips = false;
         try {
-            String legacySnapshot = compactSnapshot.replace("wf-treasury-snapshot/2", "wf-treasury-snapshot/1");
-            legacySnapshot = legacySnapshot.substring(0, legacySnapshot.lastIndexOf('"sha256"'));
-            // Legacy checksum fixture is generated from the exact v1 payload shape below.
             Map<String, Object> legacyPayload = new java.util.LinkedHashMap<>();
             legacyPayload.put("format", "wf-treasury-snapshot/1");
             legacyPayload.put("nextSequence", 1L);
@@ -88,13 +85,14 @@ public final class TreasuryLedgerTest {
             legacyPayload.put("postedDebits", List.of());
             legacyPayload.put("postedCredits", List.of());
             legacyPayload.put("armyFieldRationDebitAccounts", List.of());
-            String checksum = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(Json.write(legacyPayload).getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                    .length == 32 ? "fixture" : "invalid";
-            legacySnapshot = Json.write(legacyPayload);
-            legacyPayload.put("sha256", checksum);
-            legacySnapshot = Json.write(legacyPayload);
-            legacySnapshotRoundTrips = TreasuryLedgerSnapshot.decode(legacySnapshot).legacyIdempotencyIndexes();
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(Json.write(legacyPayload).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder checksum = new StringBuilder();
+            for (byte value : digest) checksum.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+            legacyPayload.put("sha256", checksum.toString());
+            TreasuryLedgerSnapshot.State legacyState = TreasuryLedgerSnapshot.decode(Json.write(legacyPayload));
+            legacySnapshotRoundTrips = legacyState.legacyIdempotencyIndexes()
+                    && legacyState.postedReferences().isEmpty();
         } catch (Exception ignored) { }
         ok(legacySnapshotRoundTrips, "version-1 treasury checkpoints remain readable during migration");
 
