@@ -28,13 +28,54 @@ public final class NpcSocialSimulation {
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
 
+    private static volatile long contactIndexDay = Long.MIN_VALUE;
+    private static volatile String contactIndexWorld = "";
+    private static volatile Map<CharacterRegistry, Map<String, List<Character>>> contactsByRegistry = Map.of();
+
+    private static synchronized Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day) {
+        String world = String.valueOf(WorldForgeMod.worldId());
+        if (contactIndexDay == day && contactIndexWorld.equals(world)) return contactsByRegistry;
+        Map<CharacterRegistry, Map<String, List<Character>>> building = new IdentityHashMap<>();
+        if (PeopleMod.identityPartitionsReady()) {
+            Set<String> ids = new TreeSet<>();
+            for (CharacterIdentity identity : PeopleMod.authority().identities())
+                if (!"__players__".equals(identity.mapId())) ids.add(identity.mapId());
+            for (String id : ids) {
+                CharacterRegistry registry = PeopleMod.authority().registry(id);
+                if (registry == null) continue;
+                Map<String, List<Character>> byPolity = building.computeIfAbsent(registry, ignored -> new TreeMap<>());
+                for (Character person : registry.all()) {
+                    if (!person.alive) continue;
+                    String polity = polityOf(person);
+                    if (!polity.isBlank()) byPolity.computeIfAbsent(polity, ignored -> new ArrayList<>()).add(person);
+                }
+            }
+        }
+        Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
+        building.forEach((registry, byPolity) -> {
+            Map<String, List<Character>> groups = new TreeMap<>();
+            byPolity.forEach((polity, members) -> {
+                members.sort(Comparator.comparing(person -> person.globalId));
+                groups.put(polity, List.copyOf(members));
+            });
+            frozen.put(registry, Collections.unmodifiableMap(groups));
+        });
+        contactsByRegistry = Collections.unmodifiableMap(frozen);
+        contactIndexWorld = world;
+        contactIndexDay = day;
+        return contactsByRegistry;
+    }
+
     public static int advance(Relations relations, int day, int year) {
         if (relations == null || !PeopleMod.identityPartitionsReady()) return 0;
         Map<String, CharacterRegistry> registries = new TreeMap<>();
+        Set<String> mapIds = new TreeSet<>();
         for (CharacterIdentity identity : PeopleMod.authority().identities()) {
-            if ("__players__".equals(identity.mapId())) continue;
-            CharacterRegistry registry = PeopleMod.authority().registry(identity.mapId());
-            if (registry != null) registries.put(identity.mapId(), registry);
+            if (!"__players__".equals(identity.mapId())) mapIds.add(identity.mapId());
+        }
+        for (String mapId : mapIds) {
+            CharacterRegistry registry = PeopleMod.authority().registry(mapId);
+            if (registry != null) registries.put(mapId, registry);
         }
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
         int interactions = 0, groupsVisited = 0;
@@ -89,22 +130,28 @@ public final class NpcSocialSimulation {
                     .filter(person -> person.alive && year - person.birthYear >= 18
                             && person.props.containsKey("emergence.polity_id"))
                     .sorted(Comparator.comparing(person -> person.globalId)).toList();
-            for (Character traveler : adults) {
-                if (!hasTravelRole(traveler) || adults.size() < 2) continue;
+            Map<String, List<Character>> adultsByBand = new TreeMap<>();
+            for (Character adult : adults) {
+                String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
+                adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
+            }
+            List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
+            if (travelBands.size() > 1) {
                 long travelEpoch = Math.floorDiv(day, 30);
-                int start = Math.floorMod((int) mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch), adults.size());
-                for (int offset = 0; offset < adults.size(); offset++) {
-                    Character candidate = adults.get((start + offset) % adults.size());
-                    if (candidate == traveler) continue;
+                for (Character traveler : adults) {
+                    if (!hasTravelRole(traveler)) continue;
                     String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
-                    String otherBand = String.valueOf(candidate.props.getOrDefault("emergence.band_id", ""));
-                    if (homeBand.equals(otherBand)) continue;
-                    // Trade routes and diplomatic missions both cross political borders;
-                    // ordinary residents never enter this inter-settlement contact path.
+                    long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
+                    int startBand = Math.floorMod((int) travelHash, travelBands.size());
+                    String targetBand = travelBands.get(startBand);
+                    if (targetBand.equals(homeBand)) targetBand = travelBands.get((startBand + 1) % travelBands.size());
+                    List<Character> candidates = adultsByBand.get(targetBand);
+                    if (candidates == null || candidates.isEmpty()) continue;
+                    Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
+                    if (candidate == traveler) continue;
                     interact(relations, registry, traveler, candidate,
-                            "travel:" + homeBand + ":" + otherBand, adults, day, year);
+                            "travel:" + homeBand + ":" + targetBand, adults, day, year);
                     interactions++;
-                    break;
                 }
             }
         }
@@ -344,14 +391,16 @@ public final class NpcSocialSimulation {
         if (registry == null) return List.of();
         String witnessPolity = polityOf(witness);
         if (!Objects.equals(witnessPolity, polityId)) return List.of();
+        List<Character> members = contactIndex(RelationsMc.dayNumber())
+                .getOrDefault(registry, Map.of()).getOrDefault(polityId, List.of());
+        if (members.isEmpty()) return List.of();
         List<Contact> result = new ArrayList<>();
-        for (Character candidate : registry.all()) {
-            if (!candidate.alive || candidate == witness || !Objects.equals(polityOf(candidate), polityId)) continue;
+        for (Character candidate : members) {
+            if (candidate == witness || !candidate.alive) continue;
             Relations.Bond bond = RelationsMc.REL.peek("npc:" + witness.globalId, "npc:" + candidate.globalId);
             if (bond == null) continue;
             result.add(new Contact(candidate.globalId, bond.affinity, polityId, true, true));
         }
-        result.sort(Comparator.comparing(Contact::characterId));
         return result;
     }
 
