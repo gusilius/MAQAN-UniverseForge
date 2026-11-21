@@ -207,7 +207,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   for second in $(seq 1 900); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
-      && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[1-9][0-9]*" server.log \
+      && grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log \
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
       && grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log \
       && grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log \
@@ -233,9 +233,15 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     echo "ERROR: vanilla Overworld did not produce native WorldGenesis evidence"
     exit 8
   }
-  grep -Fq "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log || {
+  # Chunk forcing is intentionally not a visit: image-map WorldSim must remain dormant.
+  if grep -Fq "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log; then
     tail -200 server.log
-    echo "ERROR: image dimension did not produce native WorldGenesis evidence"
+    echo "ERROR: dormant image dimension ran WorldSim without an actual player visit"
+    exit 9
+  fi
+  grep -Fq 'restored visited planetary surfaces=0' server.log || {
+    tail -200 server.log
+    echo "ERROR: lazy planet activation ledger did not start empty"
     exit 9
   }
   grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log || {
@@ -282,7 +288,7 @@ for match in pattern.finditer(log):
     for field in ("settlement_types", "blueprint_site_types", "government_types", "subject_types", "title_ranks"):
         values[field] = json.loads(values[field])
     rows[values["source"]] = values
-expected = {"vanilla-world:minecraft:overworld", map_id}
+expected = {"vanilla-world:minecraft:overworld"}
 missing = expected - rows.keys()
 if missing:
     raise SystemExit("Missing same-server genesis sources: " + ", ".join(sorted(missing)))
@@ -318,7 +324,7 @@ for key in sorted(expected):
     if key == map_id and int(row["map_anchors"]) <= 0:
         raise SystemExit(f"{key}: image-map settlements were not reused/materialized as canonical anchors")
 (out / "same-server-world-genesis.json").write_text(json.dumps({key: rows[key] for key in sorted(expected)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-print("SAME_SERVER_DUAL_WORLD_GENESIS=PASS")
+print("SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS")\nprint("IMAGE_DIMENSION_CHUNK_GENERATED=PASS")\nprint("IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS")
 for key in sorted(expected): print("WORLD_GENESIS=" + json.dumps(rows[key], ensure_ascii=False, sort_keys=True))
 PY
   printf '%s\n' "stop" >> in.txt
@@ -328,7 +334,7 @@ PY
   SERVER_PID=""
   cp server.log "$OUTPUT/server.log"
   echo "SMOKE_SERVER_SHUTDOWN_CODE=$SERVER_EXIT_CODE"
-  echo "SAME_SERVER_DUAL_WORLD_GENESIS=PASS"
+  echo "SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS"\n  echo "IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS"
   echo "NO_CAMPAIGN_OR_SCENARIO=1"
   CURRENT_STAGE="dual_world_genesis_complete"
   exit 0
