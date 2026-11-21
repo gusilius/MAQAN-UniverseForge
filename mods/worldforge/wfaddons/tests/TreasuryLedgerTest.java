@@ -262,15 +262,17 @@ public final class TreasuryLedgerTest {
             System.out.println("TREASURY_STREAM_BENCHMARK entries=100000 chars=" + streamedChars[0] + " elapsedMs=" + elapsedMillis);
         } catch (java.io.IOException ex) { ok(false, "100k-entry treasury streaming stress completes"); }
 
-        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 2
-                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
-                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
+        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 3
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(1).kind() == TreasuryLedger.Kind.OPENING
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(2).reference().equals("ration:one")
                         && rationIndex.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
                         && rationIndex.hasEntries("stock:settlement:one:food"),
                 "account and reference journal indexes are populated on append");
-        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 2
-                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
-                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
+        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 3
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(1).kind() == TreasuryLedger.Kind.OPENING
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(2).reference().equals("ration:one")
                         && rationRestored.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
                         && rationRestored.accountIdsWithPrefix("stock:").contains("stock:settlement:one:food"),
                 "account/reference indexes and account enumeration are rebuilt on restore");
@@ -416,11 +418,14 @@ public final class TreasuryLedgerTest {
                 "realm-tax", "checkpoint-tax:year-4", 5760, "annual tax");
         String checkpointJson = TreasuryLedgerSnapshot.capture(checkpointLedger);
         TreasuryLedgerSnapshot.State checkpoint = TreasuryLedgerSnapshot.decode(checkpointJson);
-        ok(checkpoint.nextSequence() == 3 && checkpoint.accounts().size() == 1
+        ok(checkpoint.nextSequence() == checkpointLedger.nextSequence() && checkpoint.nextSequence() == 5
+                        && checkpoint.accounts().size() == 1
                         && close(checkpoint.accounts().get(0).balance(), 275)
                         && close(checkpoint.accounts().get(0).creditLimit(), 80)
-                        && checkpoint.postedReferences().containsAll(checkpoint.postedCredits())
-                        && checkpoint.postedReferences().containsAll(checkpoint.postedDebits()),
+                        && !checkpoint.legacyIdempotencyIndexes()
+                        && checkpoint.postedReferences().isEmpty()
+                        && checkpoint.postedDebits().isEmpty()
+                        && checkpoint.postedCredits().isEmpty(),
                 "treasury checkpoint captures balances, limits, sequence and idempotency indexes");
         try {
             java.nio.file.Path checkpointDir = java.nio.file.Files.createTempDirectory("maqan-treasury-checkpoint-");
@@ -429,7 +434,7 @@ public final class TreasuryLedgerTest {
             checkpointArchive.append(checkpointLedger.journal());
             TreasuryCheckpointStore checkpointStore = new TreasuryCheckpointStore(checkpointDir);
             TreasuryCheckpointStore.Checkpoint published = checkpointStore.publish(checkpointJson, checkpointArchive);
-            TreasuryLedger.Entry postCheckpointEntry = new TreasuryLedger.Entry(3, "tx:post-checkpoint",
+            TreasuryLedger.Entry postCheckpointEntry = new TreasuryLedger.Entry(checkpointLedger.nextSequence(), "tx:post-checkpoint",
                     "checkpoint:realm", "external", "silver", 2, false, TreasuryLedger.Kind.UPKEEP,
                     "test", "post-checkpoint", 5761, 273, "after checkpoint");
             checkpointArchive.append(List.of(postCheckpointEntry));
@@ -529,7 +534,10 @@ public final class TreasuryLedgerTest {
                 "treasury archive rejects checkpoint boundaries before the retained history starts");
 
         boolean checkpointTamperRejected = false;
-        try { TreasuryLedgerSnapshot.decode(checkpointJson.replace("annual tax", "tampered tax")); }
+        String changedChecksum = checkpointJson.substring(0, checkpointJson.length() - 3)
+                + (checkpointJson.charAt(checkpointJson.length() - 3) == '0' ? '1' : '0')
+                + checkpointJson.substring(checkpointJson.length() - 2);
+        try { TreasuryLedgerSnapshot.decode(changedChecksum); }
         catch (IllegalArgumentException expected) { checkpointTamperRejected = expected.getMessage().contains("checksum"); }
         ok(checkpointTamperRejected, "treasury checkpoint rejects altered payloads");
         boolean inconsistentBankruptcyRejected = false;
@@ -564,20 +572,21 @@ public final class TreasuryLedgerTest {
         ok(emptySegmentRejected, "treasury segment rejects empty archive ranges");
         boolean sequenceGapRejected = false;
         try {
-            TreasuryJournalSegment.decode(segmentJson.replace((char) 34 + "lastSequence" + (char) 34 + ":3", (char) 34 + "lastSequence" + (char) 34 + ":4"));
+            TreasuryJournalSegment.decode(segmentJson.replace((char) 34 + "lastSequence" + (char) 34 + ":" + decodedSegment.lastSequence(),
+                    (char) 34 + "lastSequence" + (char) 34 + ":" + (decodedSegment.lastSequence() + 1)));
         } catch (IllegalArgumentException expected) { sequenceGapRejected = true; }
         ok(sequenceGapRejected, "treasury segment rejects altered sequence bounds");
 
         try {
             java.nio.file.Path archiveDir = java.nio.file.Files.createTempDirectory("maqan-treasury-archive-");
             TreasuryJournalArchive archive = new TreasuryJournalArchive(archiveDir, 1);
-            ok(archive.append(segmentSource.journal()) && archive.nextSequence() == 4,
+            ok(archive.append(segmentSource.journal()) && archive.nextSequence() == segmentSource.nextSequence(),
                     "treasury archive durably publishes a contiguous segment and advances its checkpoint");
             ok(archive.append(segmentSource.journal()) && archive.readAll().size() == segmentSource.journalSize(),
                     "treasury archive accepts an identical retry without duplicating history");
             java.nio.file.Files.writeString(archiveDir.resolve(".treasury-segment-crash.tmp"), "{\"format\":");
             TreasuryJournalArchive reopenedArchive = new TreasuryJournalArchive(archiveDir, 1);
-            ok(reopenedArchive.nextSequence() == 4
+            ok(reopenedArchive.nextSequence() == segmentSource.nextSequence()
                             && reopenedArchive.readAll().equals(segmentSource.journal()),
                     "treasury archive restart ignores an unpublished temporary segment left by a crash");
             java.util.List<TreasuryLedger.Entry> suffixEntries = new java.util.ArrayList<>();
@@ -586,9 +595,11 @@ public final class TreasuryLedgerTest {
                     "treasury archive streams an exact suffix from a checkpoint without materializing its prefix");
             java.util.List<TreasuryLedger.Entry> firstPage = reopenedArchive.readPage(1, 2);
             java.util.List<TreasuryLedger.Entry> secondPage = reopenedArchive.readPage(firstPage.get(1).sequence() + 1, 2);
-            ok(firstPage.size() == 2 && secondPage.size() == 1
+            java.util.List<TreasuryLedger.Entry> thirdPage = reopenedArchive.readPage(secondPage.get(1).sequence() + 1, 2);
+            ok(firstPage.size() == 2 && secondPage.size() == 2 && thirdPage.size() == 1
                             && firstPage.get(0).sequence() == 1 && firstPage.get(1).sequence() == 2
-                            && secondPage.get(0).sequence() == 3,
+                            && secondPage.get(0).sequence() == 3 && secondPage.get(1).sequence() == 4
+                            && thirdPage.get(0).sequence() == 5,
                     "treasury archive exposes bounded sequence pages without loading the full journal");
             TreasuryJournalArchive.AccountPage accountPage = reopenedArchive.readAccountPage(
                     "segment:source", 1, 1);
@@ -604,7 +615,7 @@ public final class TreasuryLedgerTest {
             reopenedArchive.forEachEntryFrom(reopenedArchive.nextSequence(), emptySuffix::add);
             ok(emptySuffix.isEmpty(), "treasury archive accepts a suffix starting immediately after its last entry");
             boolean gapRejected = false;
-            try { reopenedArchive.append(List.of(new TreasuryLedger.Entry(5, "tx:gap", "x", "y",
+            try { reopenedArchive.append(List.of(new TreasuryLedger.Entry(reopenedArchive.nextSequence() + 1, "tx:gap", "x", "y",
                     "silver", 1, false, TreasuryLedger.Kind.TRADE, "test", "gap", 1, 0, ""))); }
             catch (java.io.IOException expected) { gapRejected = expected.getMessage().contains("expected sequence"); }
             ok(gapRejected, "treasury archive refuses to publish a sequence gap");
@@ -802,8 +813,8 @@ public final class TreasuryLedgerTest {
             boolean replayDebtMatches = close(replayedDebtor.creditLimit, sourceDebtor.creditLimit)
                     && close(replayedDebtor.debt, sourceDebtor.debt)
                     && replayedDebtor.bankrupt == sourceDebtor.bankrupt
-                    && close(replayedDebtor.debt, 68)
-                    && close(replayedDebtor.balance, 160);
+                    && close(replayedDebtor.debt, 0)
+                    && close(replayedDebtor.balance, 92);
             ok(replayAccountsMatch && replayDebtMatches
                             && replayed.nextSequence() == replaySource.nextSequence()
                             && replayed.journalSize() == replaySource.journalSize()

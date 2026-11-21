@@ -70,6 +70,8 @@ public final class Settlement {
     /** Periodic operating flows are accrued in memory and posted once per 30 world days. */
     private static final long ECONOMY_LEDGER_PERIOD_SECONDS = 1800L;
     private long economyLedgerPeriod;
+    /** Period captured before advancing the current simulation interval. */
+    private long accrualPeriodOverride = -1;
     /** Autonomous market orders clear at most once per simulated day, not on every two-second step. */
     private double tradeCheckTimer;
     /** Key: period|C/D|resource|category. Debit accruals reserve stock before they reach the ledger. */
@@ -371,7 +373,8 @@ public final class Settlement {
 
     private void accruePeriodic(boolean credit, String resource, double value, String category) {
         if (!Double.isFinite(value) || value <= 0) return;
-        String key = periodicKey(economyPeriod(), credit, resource, category);
+        long period = accrualPeriodOverride >= 0 ? accrualPeriodOverride : economyPeriod();
+        String key = periodicKey(period, credit, resource, category);
         pendingEconomyAccruals.merge(key, value, Double::sum);
     }
 
@@ -1392,18 +1395,23 @@ public final class Settlement {
     }
 
     private void step(double dt) {
-        time += dt;
-        decayDemand(dt);
-        eat(dt);
-        economy(dt);
-        grow(dt);
-        startConstruction();
-        if (auto) { autoAssign(); draftBuilders(); }
-        build(dt);
-        produce(dt);
-        haul(dt);
-        raidStep(dt);
-        move(dt);
+        accrualPeriodOverride = economyPeriod();
+        try {
+            time += dt;
+            decayDemand(dt);
+            eat(dt);
+            economy(dt);
+            grow(dt);
+            startConstruction();
+            if (auto) { autoAssign(); draftBuilders(); }
+            build(dt);
+            produce(dt);
+            haul(dt);
+            raidStep(dt);
+            move(dt);
+        } finally {
+            accrualPeriodOverride = -1;
+        }
     }
 
     private void eat(double dt) {
@@ -1789,12 +1797,8 @@ public final class Settlement {
     public double upkeepPerMin() { double u = 0; for (Building b : buildings) if (b.state == Building.State.DONE && !b.paused) u += b.def.upkeep; return u; }
 
     private void economy(double dt) {
-        // A failed period close is retried; successful periods do not touch the ledger again
-        // until the next 30-day boundary.
-        if (!flushPeriodicEconomy()) {
-            for (Building building : buildings)
-                if (building.state == Building.State.DONE && building.def.upkeep > 0) building.unpaid = true;
-        }
+        // Accrue the complete interval before closing the period. The step-start
+        // period key prevents a boundary-ending interval from drifting forward.
         double tax = taxPerMin() / 60 * dt;
         if (tax > 0) {
             accruePeriodic(true, Defs.SILVER, tax, "population-tax");
@@ -1833,6 +1837,11 @@ public final class Settlement {
                     flow.record(time, e.getKey(), c, false);
                 }
             }
+        }
+        // Close only after all income and costs for this step have been accrued.
+        if (!flushPeriodicEconomy()) {
+            for (Building building : buildings)
+                if (building.state == Building.State.DONE && building.def.upkeep > 0) building.unpaid = true;
         }
     }
 

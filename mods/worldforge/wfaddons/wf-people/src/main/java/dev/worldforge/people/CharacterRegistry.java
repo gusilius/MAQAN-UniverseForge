@@ -32,6 +32,7 @@ public final class CharacterRegistry {
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     private final List<Character> ordered = new ArrayList<>();
+    private final List<Character> orderedView = Collections.unmodifiableList(ordered);
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -116,7 +117,7 @@ public final class CharacterRegistry {
      * Read-only append-only insertion-order view. Existing entries never move or disappear;
      * callers may retain this view and process a captured size in bounded batches.
      */
-    public List<Character> all() { return Collections.unmodifiableList(ordered); }
+    public List<Character> all() { return orderedView; }
 
     public int size() { return ordered.size(); }
 

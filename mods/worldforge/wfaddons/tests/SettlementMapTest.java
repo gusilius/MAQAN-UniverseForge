@@ -129,7 +129,8 @@ public final class SettlementMapTest {
         periodicMarket.state = Building.State.DONE;
         Building periodicTavern = periodicEconomy.place("tavern", 8, 0);
         periodicTavern.state = Building.State.DONE;
-        long journalBeforeAccrual = TreasuryService.current()
+        long journalBeforeAccrual = TreasuryService.current().journalSize();
+        int silverEntriesBeforeAccrual = TreasuryService.current()
                 .entriesForAccount("settlement:periodic_economy_test").size();
         periodicEconomy.tick(60); // one world day in the settlement clock
         ok(TreasuryService.current().journalSize() == journalBeforeAccrual
@@ -139,7 +140,7 @@ public final class SettlementMapTest {
         periodicReloaded.tick(1742); // close the first 30-day accounting period
         List<TreasuryLedger.Entry> periodicEntries = TreasuryService.current().entriesForAccount(
                 "settlement:periodic_economy_test");
-        ok(periodicEntries.size() == journalBeforeAccrual + 2
+        ok(periodicEntries.size() == silverEntriesBeforeAccrual + 2
                         && periodicEntries.stream().filter(entry -> entry.category().equals("population-tax")).count() == 1
                         && periodicEntries.stream().filter(entry -> entry.category().equals("building-upkeep")).count() == 1,
                 "one period produces one tax receipt and one aggregate upkeep receipt per settlement category");

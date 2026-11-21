@@ -65,19 +65,36 @@ public final class TreasuryArchiveStore {
     }
 
     private static void verifyLegacyPrefix(TreasuryLedger legacy, TreasuryJournalArchive archive) throws IOException {
-        java.util.Iterator<TreasuryLedger.Entry> expected = legacy.journal().iterator();
+        // A legacy shadow may already be compacted: it can contain only the unarchived
+        // suffix, while the canonical archive owns the immutable earlier prefix.
+        List<TreasuryLedger.Entry> legacyEntries = legacy.journal();
+        long legacyNext = legacy.nextSequence();
+        long legacyFirst = legacyEntries.isEmpty() ? legacyNext : legacyEntries.get(0).sequence();
+        long expected = legacyFirst;
+        for (TreasuryLedger.Entry entry : legacyEntries) {
+            if (entry.sequence() != expected++)
+                throw new IOException("Legacy treasury suffix has a sequence gap at " + (expected - 1));
+        }
+        if (expected != legacyNext)
+            throw new IOException("Legacy treasury suffix does not reach its declared sequence");
+        long archiveNext = archive.nextSequence();
+        if (legacyFirst > archiveNext)
+            throw new IOException("Legacy treasury suffix starts after the canonical archive cursor");
+        if (legacyFirst == archiveNext) return;
+
+        java.util.Iterator<TreasuryLedger.Entry> expectedEntries = legacyEntries.iterator();
         long[] compared = {0};
         try {
-            archive.forEachEntryFrom(1, entry -> {
-                if (!expected.hasNext() || !expected.next().equals(entry))
+            archive.forEachEntryFrom(legacyFirst, entry -> {
+                if (!expectedEntries.hasNext() || !expectedEntries.next().equals(entry))
                     throw new IllegalStateException("Legacy treasury history conflicts with the committed archive prefix");
                 compared[0]++;
             });
         } catch (RuntimeException conflict) {
             throw new IOException("Legacy treasury history does not match the committed archive prefix", conflict);
         }
-        if (compared[0] != archive.nextSequence() - 1)
-            throw new IOException("Legacy treasury does not contain the complete committed archive prefix");
+        if (compared[0] != archiveNext - legacyFirst)
+            throw new IOException("Legacy treasury does not contain the complete overlapping archive range");
     }
 
     /** Appends only the not-yet-archived suffix and publishes CURRENT last. */
