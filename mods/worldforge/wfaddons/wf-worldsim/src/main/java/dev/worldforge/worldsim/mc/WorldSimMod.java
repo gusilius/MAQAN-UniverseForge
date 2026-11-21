@@ -484,12 +484,12 @@ public final class WorldSimMod {
             byte[] input = snapshotJson.getBytes(StandardCharsets.UTF_8);
             StringBuilder emergenceJson = new StringBuilder(snapshotJson.length()
                     + (emergenceState == null ? 64 : 256));
-            emergenceJson.append("{\\"schema_version\\":")
+            emergenceJson.append("{\"schema_version\":")
                     .append(NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION)
-                    .append(",\\"snapshot\\":")
+                    .append(",\"snapshot\":")
                     .append(snapshotJson);
             if (emergenceState != null) {
-                emergenceJson.append(",\\"state\\":").append(GSON.toJson(emergenceState));
+                emergenceJson.append(",\"state\":").append(GSON.toJson(emergenceState));
             }
             emergenceJson.append('}');
             byte[] emergenceInput = emergenceJson.toString().getBytes(StandardCharsets.UTF_8);
