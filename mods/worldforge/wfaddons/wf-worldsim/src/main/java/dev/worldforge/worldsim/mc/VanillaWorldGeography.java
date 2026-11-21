@@ -513,9 +513,12 @@ public final class VanillaWorldGeography {
         return true;
     }
 
-    /** Returns the completed projection, or null while its bounded build is still in progress. */
+    /**
+     * Returns only a fully completed projection. Reading the cache never advances a build:
+     * diagnostics and other observers must not perform hidden work or block authoritative apply.
+     */
     public static synchronized JsonArray snapshot() {
-        return prepareSnapshotBatch() ? cachedSnapshot : null;
+        return cachedSnapshot;
     }
 
 
