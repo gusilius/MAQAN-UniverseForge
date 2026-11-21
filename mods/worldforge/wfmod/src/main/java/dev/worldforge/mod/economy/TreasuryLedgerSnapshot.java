@@ -35,6 +35,14 @@ public final class TreasuryLedgerSnapshot {
             postedCredits = Set.copyOf(postedCredits);
             armyFieldRationDebitAccounts = Set.copyOf(armyFieldRationDebitAccounts);
         }
+        /** Source-compatible constructor for version-1 snapshot fixtures and migrations. */
+        public State(long nextSequence, long nextTransactionSequence, long mutationVersion,
+                     List<AccountState> accounts, Set<String> postedReferences,
+                     Set<String> postedDebits, Set<String> postedCredits,
+                     Set<String> armyFieldRationDebitAccounts) {
+            this(nextSequence, nextTransactionSequence, mutationVersion, accounts, postedReferences,
+                    postedDebits, postedCredits, armyFieldRationDebitAccounts, true);
+        }
     }
 
     private TreasuryLedgerSnapshot() { }
@@ -46,7 +54,7 @@ public final class TreasuryLedgerSnapshot {
 
     public static String encode(State state) {
         validate(state);
-        Map<String, Object> payload = payload(state);
+        Map<String, Object> payload = payload(state, FORMAT);
         String checksum = sha256(Json.write(payload));
         Map<String, Object> envelope = new LinkedHashMap<>(payload);
         envelope.put("sha256", checksum);
@@ -90,16 +98,16 @@ public final class TreasuryLedgerSnapshot {
                 stringSet(credits, "posted credit"), stringSet(rationAccounts, "ration account"), legacyIdempotencyIndexes);
         validate(state);
         String expected = requiredString(root.get("sha256"), "snapshot checksum");
-        String actual = sha256(Json.write(payload(state)));
+        String actual = sha256(Json.write(payload(state, legacyIdempotencyIndexes ? LEGACY_FORMAT : FORMAT)));
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
                 actual.getBytes(StandardCharsets.US_ASCII)))
             throw new IllegalArgumentException("Treasury snapshot checksum mismatch");
         return state;
     }
 
-    private static Map<String, Object> payload(State state) {
+    private static Map<String, Object> payload(State state, String format) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", FORMAT);
+        root.put("format", format);
         root.put("nextSequence", state.nextSequence());
         root.put("nextTransactionSequence", state.nextTransactionSequence());
         root.put("mutationVersion", state.mutationVersion());

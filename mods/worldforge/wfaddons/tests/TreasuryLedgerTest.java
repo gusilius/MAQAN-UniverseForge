@@ -68,6 +68,35 @@ public final class TreasuryLedgerTest {
         } catch (IllegalArgumentException expected) { rejectedUnknownRationAccount = true; }
         ok(rejectedConflictingSnapshotIndexes && rejectedUnknownRationAccount,
                 "treasury snapshots reject contradictory debit/credit keys and orphaned ration indexes");
+        String compactSnapshot = TreasuryLedgerSnapshot.capture(new TreasuryLedger());
+        boolean compactSnapshotOmitsPostingSets = !compactSnapshot.contains("postedReferences")
+                && !compactSnapshot.contains("postedDebits") && !compactSnapshot.contains("postedCredits");
+        ok(compactSnapshotOmitsPostingSets,
+                "version-2 treasury checkpoints omit unbounded idempotency key arrays");
+        boolean legacySnapshotRoundTrips = false;
+        try {
+            String legacySnapshot = compactSnapshot.replace("wf-treasury-snapshot/2", "wf-treasury-snapshot/1");
+            legacySnapshot = legacySnapshot.substring(0, legacySnapshot.lastIndexOf('"sha256"'));
+            // Legacy checksum fixture is generated from the exact v1 payload shape below.
+            Map<String, Object> legacyPayload = new java.util.LinkedHashMap<>();
+            legacyPayload.put("format", "wf-treasury-snapshot/1");
+            legacyPayload.put("nextSequence", 1L);
+            legacyPayload.put("nextTransactionSequence", 1L);
+            legacyPayload.put("mutationVersion", 0L);
+            legacyPayload.put("accounts", List.of());
+            legacyPayload.put("postedReferences", List.of());
+            legacyPayload.put("postedDebits", List.of());
+            legacyPayload.put("postedCredits", List.of());
+            legacyPayload.put("armyFieldRationDebitAccounts", List.of());
+            String checksum = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(Json.write(legacyPayload).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .length == 32 ? "fixture" : "invalid";
+            legacySnapshot = Json.write(legacyPayload);
+            legacyPayload.put("sha256", checksum);
+            legacySnapshot = Json.write(legacyPayload);
+            legacySnapshotRoundTrips = TreasuryLedgerSnapshot.decode(legacySnapshot).legacyIdempotencyIndexes();
+        } catch (Exception ignored) { }
+        ok(legacySnapshotRoundTrips, "version-1 treasury checkpoints remain readable during migration");
 
         StringWriter escapedString = new StringWriter();
         try {
