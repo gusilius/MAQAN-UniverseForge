@@ -58,6 +58,7 @@ public final class CharacterStats {
         t(new Trait("gluttonous", "Обжора", "Поддаётся излишествам и плохо знает меру.", BAD, "stewardship", -1));
         t(new Trait("chaste", "Целомудренный", "Сдержан в романтических привязанностях.", NEUT, "learning", 1));
         t(new Trait("lustful", "Похотливый", "Часто ставит желания выше долга.", BAD, "diplomacy", 1, "intrigue", 1));
+        t(new Trait("fecund", "Плодовитый", "Редкая врождённая особенность: повышенная вероятность зачатия и большая склонность к созданию семьи.", GOLD));
         t(new Trait("humble", "Скромный", "Не стремится выставлять заслуги напоказ.", GOOD, "diplomacy", 1));
         t(new Trait("arrogant", "Высокомерный", "Считает себя выше окружающих и плохо переносит возражения.", BAD, "diplomacy", -2));
         t(new Trait("forgiving", "Прощающий", "Способен оставить старые обиды в прошлом.", GOOD, "diplomacy", 2));
@@ -267,6 +268,7 @@ public final class CharacterStats {
         }
         List<String> candidates = new ArrayList<>(TRAITS.keySet());
         candidates.remove("usurper");
+        candidates.remove("fecund"); // rare inherited/life trait; never part of the ordinary trait lottery
         candidates.sort(Comparator.comparingLong(id -> hash(c.id + "|trait|" + id)));
         List<String> out = new ArrayList<>();
         Set<String> groups = new HashSet<>();
@@ -281,6 +283,10 @@ public final class CharacterStats {
             groups.add(group);
             if (out.size() >= target) break;
         }
+        // Rare trait (about 1 in 160 generated identities), assigned deterministically.
+        // It is not rolled on every access and remains stable for the character's lifetime.
+        if (out.size() < 5 && Math.floorMod(hash(c.id + "|rare-trait|fecund"), 160L) == 0L)
+            out.add("fecund");
         Collections.sort(out);
         List<String> stable = List.copyOf(out);
         // Traits are deterministic for a Character identity and the catalog is static.

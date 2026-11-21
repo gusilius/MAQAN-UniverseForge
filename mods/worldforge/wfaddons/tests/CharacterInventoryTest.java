@@ -252,11 +252,16 @@ public final class CharacterInventoryTest {
         CharacterRegistry playerPeople = new CharacterRegistry();
         Character crossMapDeceased = settlementPeople.create("Lord Edric", "", "north", "m", 220);
         Character playerHeir = playerPeople.create("Player Heir", "", "north", "f", 245);
+        Character unrelated = playerPeople.create("Unrelated", "", "south", "f", 260);
         crossMapDeceased.props.put("family.spouse_global_id", playerHeir.globalId);
         playerHeir.props.put("family.spouse_global_id", crossMapDeceased.globalId);
         CharacterInventory.add(crossMapDeceased, "minecraft:diamond", 14);
         worldAuthority.registerMap("settlement:north", settlementPeople);
         worldAuthority.registerMap("__players__", playerPeople);
+        settlementPeople.prepareKinIndex(365L);
+        ok(settlementPeople.kinCandidates(crossMapDeceased).contains(playerHeir)
+                        && !settlementPeople.kinCandidates(crossMapDeceased).contains(unrelated),
+                "prepared family index returns cross-registry spouse candidates without scanning unrelated population");
         settlementPeople.kill(crossMapDeceased.id);
         ok(CharacterInventory.count(playerHeir, "minecraft:diamond") == 14
                         && CharacterInventory.count(crossMapDeceased, "minecraft:diamond") == 0

@@ -2,7 +2,7 @@
 //! No political or population entities are read from the map package. The only
 //! initial conditions are geography, world seed and elapsed simulation time.
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::{stable_hash, GeographicCell, GeographicMap, WorldSnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +126,37 @@ fn distance_sq(a: (u32,u32), b: (u32,u32)) -> u64 {
     (dx * dx + dz * dz) as u64
 }
 
+
+/// Spatial occupancy index for deterministic settlement placement. A grid cell is
+/// at least as wide as the exclusion radius, so only the surrounding 3x3 buckets
+/// need exact distance checks. This avoids comparing every candidate with every
+/// previously accepted settlement on large discovered maps.
+type SpatialBuckets = HashMap<(u32, u32), Vec<(u32, u32)>>;
+
+fn spatial_bucket(point: (u32, u32), span: u32) -> (u32, u32) {
+    let width = span.max(1);
+    (point.0 / width, point.1 / width)
+}
+
+fn spatial_insert(index: &mut SpatialBuckets, point: (u32, u32), span: u32) {
+    index.entry(spatial_bucket(point, span)).or_default().push(point);
+}
+
+fn spatial_has_nearby(index: &SpatialBuckets, point: (u32, u32), span: u32, radius_sq: u64) -> bool {
+    let (bx, bz) = spatial_bucket(point, span);
+    for dz in -1_i64..=1 {
+        for dx in -1_i64..=1 {
+            let x = i64::from(bx) + dx;
+            let z = i64::from(bz) + dz;
+            if x < 0 || z < 0 || x > i64::from(u32::MAX) || z > i64::from(u32::MAX) { continue; }
+            if let Some(points) = index.get(&(x as u32, z as u32)) {
+                if points.iter().any(|other| distance_sq(*other, point) < radius_sq) { return true; }
+            }
+        }
+    }
+    false
+}
+
 fn map_scale(map: &GeographicMap) -> u64 {
     (u64::from(map.width_px.min(map.height_px)) / 12).max(u64::from(map.sample_stride) * 3).max(1)
 }
@@ -141,7 +172,7 @@ fn observed_map_scale(map: &GeographicMap) -> u64 {
     let mut max_x = 0_u32;
     let mut max_z = 0_u32;
     let mut found = false;
-    for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
+    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48) {
         found = true;
         min_x = min_x.min(cell.x);
         min_z = min_z.min(cell.z);
@@ -151,9 +182,13 @@ fn observed_map_scale(map: &GeographicMap) -> u64 {
     if !found { return map_scale(map); }
     let observed_span = u64::from(max_x.saturating_sub(min_x).max(max_z.saturating_sub(min_z)).saturating_add(1));
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
+    let occupancy_spacing_pct = 100_u64
+        .saturating_sub(u64::from(map.population_density_pct.min(100)) * 45 / 100);
     map_scale(map)
         .min((observed_span / 12).max(minimum_spacing))
         .min(256_u64.max(minimum_spacing))
+        .saturating_mul(occupancy_spacing_pct)
+        .checked_div(100).unwrap_or(minimum_spacing)
         .max(minimum_spacing).max(1)
 }
 
@@ -161,7 +196,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = observed_map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && c.suitability >= 48)
+        .filter(|c| c.land && !c.wilderness && c.suitability >= 48)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -170,20 +205,34 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     // Existing communities reserve their geographic catchment. Re-running bootstrap
     // against a growing chunk cache can therefore add newly discovered frontier sites
     // without duplicating settlements that were already founded in earlier snapshots.
-    let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
-        .map(|band| (band.x, band.z)).collect::<Vec<_>>();
+    let bucket_span = spacing.min(u64::from(u32::MAX)).max(1) as u32;
+    let mut occupied = SpatialBuckets::new();
+    for band in bands.iter().filter(|band| band.map_id == map.map_id) {
+        spatial_insert(&mut occupied, (band.x, band.z), bucket_span);
+    }
+    let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
     for cell in candidates {
-        let chance = u64::from(cell.suitability.saturating_sub(42)) * 55;
+        let density_scale = 20 + u64::from(map.population_density_pct.min(100)) * 80 / 100;
+        let chance = if cell.founding_site { 10_000 }
+            else { u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100 };
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
-        if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < spacing * spacing) { continue; }
+        let minimum_spacing_sq = if cell.founding_site { 1 } else { spacing * spacing };
+        if spatial_has_nearby(&occupied, (cell.x, cell.z), bucket_span, minimum_spacing_sq) { continue; }
         let id = format!("band_{:016x}", roll(seed, "band-id", &key, "", 0));
-        if bands.iter().any(|band| band.id == id) { continue; }
-        let population = 2 + roll(seed, "founder-size", &key, "", 0) % 5;
+        if !known_band_ids.insert(id.clone()) { continue; }
+        let density_bonus = u64::from(map.population_density_pct.min(100)) * 40 / 100;
+        let population = if cell.founding_site {
+            8 + density_bonus + roll(seed, "founder-size", &key, "", 0) % 9
+        } else {
+            2 + roll(seed, "founder-size", &key, "", 0) % 5
+        };
         bands.push(EmergentBand { id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
-            population, food_reserve: i64::from(cell.suitability) / 8, settled: false,
+            population, food_reserve: if cell.founding_site {
+                18 + i64::from(cell.suitability) / 3
+            } else { i64::from(cell.suitability) / 8 }, settled: cell.founding_site,
             founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year });
-        occupied.push((cell.x,cell.z));
+        spatial_insert(&mut occupied, (cell.x, cell.z), bucket_span);
         events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id,
             text: format!("A small kin group emerges near {} terrain", cell.biome) });
     }
@@ -201,7 +250,7 @@ fn bootstrap_vanilla_initial_civilizations(
 ) {
     if map.cells.is_empty() { return; }
     let mut candidates = map.cells.iter()
-        .filter(|cell| cell.land && cell.suitability >= 36)
+        .filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 36)
         .collect::<Vec<_>>();
     if candidates.is_empty() { return; }
     candidates.sort_by(|a, b| {
@@ -226,8 +275,12 @@ fn bootstrap_vanilla_initial_civilizations(
     for cell in &candidates {
         groups.entry((cell.x / bucket_span, cell.z / bucket_span)).or_default().push(*cell);
     }
-    let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
-        .map(|band| (band.x, band.z)).collect::<Vec<_>>();
+    let bucket_span = separation.min(u64::from(u32::MAX)).max(1) as u32;
+    let mut occupied = SpatialBuckets::new();
+    for band in bands.iter().filter(|band| band.map_id == map.map_id) {
+        spatial_insert(&mut occupied, (band.x, band.z), bucket_span);
+    }
+    let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
     let separation_sq = separation.saturating_mul(separation);
 
     // Several bounded regional cohorts can found independent states in one world.
@@ -239,11 +292,9 @@ fn bootstrap_vanilla_initial_civilizations(
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in regional_candidates {
             let point = (cell.x, cell.z);
-            if occupied.iter().any(|other| distance_sq(*other, point) < separation_sq)
-                || selected.iter().any(|other| distance_sq((other.x, other.z), point) < separation_sq) {
-                continue;
-            }
+            if spatial_has_nearby(&occupied, point, bucket_span, separation_sq) { continue; }
             selected.push(cell);
+            spatial_insert(&mut occupied, point, bucket_span);
             if selected.len() == target_communities { break; }
         }
 
@@ -252,14 +303,13 @@ fn bootstrap_vanilla_initial_civilizations(
         for cell in selected {
             let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
             let id = format!("band_{:016x}", roll(seed, "vanilla-initial-band-id", &key, "", 0));
-            if bands.iter().any(|band| band.id == id) { continue; }
+            if !known_band_ids.insert(id.clone()) { continue; }
             let residents = 32 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
             bands.push(EmergentBand {
                 id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
                 population: residents, food_reserve: 18 + i64::from(cell.suitability) / 3,
                 settled: true, founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year,
             });
-            occupied.push((cell.x, cell.z));
             population += residents;
             settlement_ids.push(id.clone());
             events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id.clone(),
@@ -306,6 +356,8 @@ fn bootstrap_initial_civilizations(
         bootstrap_vanilla_initial_civilizations(map, seed, bands, polities, events);
         return;
     }
+    // Image-worldgen already produced the canonical political hierarchy for this map.
+    // Occupancy profiles may add settlements and population, never duplicate sovereigns.
     if map.cells.is_empty() || polities.iter().any(|polity| polity.map_id == map.map_id) {
         return;
     }
@@ -315,10 +367,10 @@ fn bootstrap_initial_civilizations(
     // in full. Scale spacing to the currently observed land footprint, not the eventual
     // map dimensions, otherwise a small vanilla observation window can never found four
     // communities and the world remains politically empty forever.
-    let min_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).min();
-    let max_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).max();
-    let min_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).min();
-    let max_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).max();
+    let min_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).min();
+    let max_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).max();
+    let min_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).min();
+    let max_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).max();
     let observed_span = match (min_x, max_x, min_z, max_z) {
         (Some(x0), Some(x1), Some(z0), Some(z1)) =>
             u64::from((x1 - x0).max(z1 - z0).saturating_add(1)),
@@ -332,19 +384,23 @@ fn bootstrap_initial_civilizations(
     let bucket = (separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
-    for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
+    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48) {
         groups.entry((cell.x / bucket, cell.z / bucket)).or_default().push(cell);
     }
 
-    let mut occupied: Vec<(u32, u32)> = bands.iter()
-        .filter(|band| band.map_id == map.map_id)
-        .map(|band| (band.x, band.z)).collect();
+    let bucket_span = separation.min(u64::from(u32::MAX)).max(1) as u32;
+    let mut occupied = SpatialBuckets::new();
+    for band in bands.iter().filter(|band| band.map_id == map.map_id) {
+        spatial_insert(&mut occupied, (band.x, band.z), bucket_span);
+    }
+    let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
 
     for (group_x, group_z, mut candidates) in groups.into_iter()
         .map(|((x, z), cells)| (x, z, cells))
     {
         candidates.sort_by(|a, b| {
-            b.suitability.cmp(&a.suitability)
+            b.founding_site.cmp(&a.founding_site)
+                .then_with(|| b.suitability.cmp(&a.suitability))
                 .then_with(|| roll(seed, "initial-site-order", &map.map_id,
                     &format!("{}:{}", a.x, a.z), 0)
                     .cmp(&roll(seed, "initial-site-order", &map.map_id,
@@ -353,16 +409,18 @@ fn bootstrap_initial_civilizations(
                 .then_with(|| a.x.cmp(&b.x))
         });
 
-        let target_communities = 4 + (roll(seed, "authored-polity-size", &map.map_id,
+        let density_bonus = u64::from(map.population_density_pct.min(100)) * 4 / 100;
+        let target_communities = 3 + density_bonus as usize
+            + (roll(seed, "authored-polity-size", &map.map_id,
             &format!("{group_x}:{group_z}"), 0) % 5) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
+        let mut selected_index = SpatialBuckets::new();
         for cell in candidates {
-            if occupied.iter().any(|point| distance_sq(*point, (cell.x, cell.z)) < separation_sq)
-                || selected.iter().any(|other| distance_sq((other.x, other.z), (cell.x, cell.z)) < separation_sq)
-            {
-                continue;
-            }
+            let point = (cell.x, cell.z);
+            if spatial_has_nearby(&occupied, point, bucket_span, separation_sq)
+                || spatial_has_nearby(&selected_index, point, bucket_span, separation_sq) { continue; }
             selected.push(cell);
+            spatial_insert(&mut selected_index, point, bucket_span);
             if selected.len() == target_communities { break; }
         }
         // A sovereign polity needs a real regional population base, not a single village.
@@ -374,8 +432,10 @@ fn bootstrap_initial_civilizations(
         for (ordinal, cell) in selected.into_iter().enumerate() {
             let location_key = format!("{}:{}:{}", group_key, cell.x, cell.z);
             let id = format!("band_{:016x}", roll(seed, "initial-band-id", &location_key, "", 0));
-            if bands.iter().any(|band| band.id == id) { continue; }
-            let residents = 32 + roll(seed, "initial-community-size", &location_key, "", 0) % 9;
+            if !known_band_ids.insert(id.clone()) { continue; }
+            let density_bonus = u64::from(map.population_density_pct.min(100)) * 48 / 100;
+            let residents = 8 + density_bonus
+                + roll(seed, "initial-community-size", &location_key, "", 0) % 9;
             bands.push(EmergentBand {
                 id: id.clone(),
                 map_id: map.map_id.clone(),
@@ -388,7 +448,6 @@ fn bootstrap_initial_civilizations(
                 hardship_years: 0,
                 origin_year: cell.discovered_year,
             });
-            occupied.push((cell.x, cell.z));
             settlement_ids.push(id.clone());
             population = population.saturating_add(residents);
             events.push(EmergenceEvent {
@@ -480,7 +539,7 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     const MAX_FOUNDING_COMMUNITIES: usize = 8;
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
-            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land)
+            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land && !cell.wilderness)
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
 
@@ -672,15 +731,37 @@ mod tests {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
                     elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
-                    owner_realm_id: String::new(), discovered_year: 0 });
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
-            blocks_per_pixel_milli:16000, political_layers_present:false, sample_stride:1, cells }
+            blocks_per_pixel_milli:16000, political_layers_present:false, sample_stride:1,
+            settlement_level:4, population_density_pct:38, wilderness_share_pct:0, cells }
     }
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
             realms:vec![],titles:vec![],government_definitions:vec![],realm_governments:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],capabilities:vec![],catalog_entries:vec![],diplomatic_relations:vec![],vassal_contracts:vec![],wars:vec![],armies:vec![],social_relations:vec![],named_entities:vec![],geography:vec![map()] }, state }
+    }
+
+    #[test]
+    fn higher_occupancy_profile_increases_settlement_density_without_changing_world_extent() {
+        let base = map();
+        let low = GeographicMap { population_density_pct: 0, ..base.clone() };
+        let high = GeographicMap { population_density_pct: 100, ..base };
+        assert!(observed_map_scale(&high) < observed_map_scale(&low));
+    }
+
+    #[test]
+    fn profile_wilderness_is_never_bootstrapped_as_a_settlement() {
+        let mut wild = map();
+        for cell in &mut wild.cells { cell.wilderness = true; }
+        let mut bands = Vec::new();
+        let mut polities = Vec::new();
+        let mut events = Vec::new();
+        bootstrap_initial_civilizations(&wild, 424242, &mut bands, &mut polities, &mut events);
+        bootstrap(&wild, 424242, &mut bands, &mut events);
+        assert!(bands.is_empty(), "wilderness cells must remain free of initial settlement bands");
+        assert!(polities.is_empty(), "wilderness-only regions must not form states");
     }
 
     #[test]
@@ -690,13 +771,14 @@ mod tests {
             width_px: 60_000_001, height_px: 60_000_001,
             blocks_per_pixel_milli: 1000, political_layers_present: false,
             sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
             cells: vec![
                 GeographicCell { x: 30_000_000, z: 30_000_000, biome: "minecraft:plains".into(),
                     elevation: 70, river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0 },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                 GeographicCell { x: 30_900_000, z: 30_900_000, biome: "minecraft:forest".into(),
                     elevation: 72, river: 0, land: true, suitability: 88,
-                    owner_realm_id: String::new(), discovered_year: 0 },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
             ],
         };
         assert!(observed_map_scale(&map) <= 256,
@@ -714,7 +796,7 @@ mod tests {
                     cells.push(GeographicCell {
                         x: x + dx, z: z + dz, biome: "minecraft:plains".into(),
                         elevation: 70, river: 0, land: true, suitability: 90,
-                        owner_realm_id: String::new(), discovered_year: 0,
+                        owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
                     });
                 }
             }
@@ -723,7 +805,8 @@ mod tests {
             map_id: "vanilla-world:minecraft:overworld".into(),
             width_px: 60_000_001, height_px: 60_000_001,
             blocks_per_pixel_milli: 1000, political_layers_present: false,
-            sample_stride: 4, cells,
+            sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
         };
         let mut bands = Vec::new();
         let mut polities = Vec::new();
@@ -753,7 +836,7 @@ mod tests {
             land: true,
             suitability: 90,
             owner_realm_id: String::new(),
-            discovered_year: 0,
+            discovered_year: 0, wilderness: false, founding_site: false,
         }).collect();
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
@@ -762,6 +845,7 @@ mod tests {
             blocks_per_pixel_milli: 1000,
             political_layers_present: false,
             sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
             cells,
         };
         let mut bands = Vec::new();
@@ -780,14 +864,15 @@ mod tests {
                 cells.push(GeographicCell {
                     x, z, biome: "minecraft:plains".into(), elevation: 70,
                     river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0,
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
                 });
             }
         }
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
             width_px: 256, height_px: 256, blocks_per_pixel_milli: 1000,
-            political_layers_present: false, sample_stride: 4, cells,
+            political_layers_present: false, sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
         };
         let mut bands = Vec::new();
         let mut polities = Vec::new();

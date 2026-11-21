@@ -4,6 +4,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.Role;
@@ -88,9 +89,32 @@ public final class CourtSim {
     public final int startYear;
     private int nextId = 1;
 
+    private boolean populationLifecycleInitialized;
+
     public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int startYear) {
-        this.d = d; this.ed = ed; this.reg = reg; this.defs = defs; this.names = names; this.seed = seed; this.startYear = startYear;
+        this(d, ed, reg, defs, names, seed, startYear, 0L, reg != null && reg.size() > 0);
     }
+
+    /** Creates a new court aligned to the world's existing clock, with one catch-up pass when people arrive. */
+    public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names,
+                    long seed, int startYear, long initialDay) {
+        this(d, ed, reg, defs, names, seed, startYear, initialDay, false);
+    }
+
+    private CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names,
+                     long seed, int startYear, long initialDay, boolean lifecycleInitialized) {
+        this.d = d;
+        this.ed = ed;
+        this.reg = Objects.requireNonNull(reg, "character registry");
+        this.defs = defs;
+        this.names = names;
+        this.seed = seed;
+        this.startYear = startYear;
+        this.day = Math.max(0L, initialDay);
+        this.populationLifecycleInitialized = lifecycleInitialized;
+    }
+
+    public boolean populationLifecycleInitialized() { return populationLifecycleInitialized; }
 
     public int year() { return startYear + (int) (day / 365); }
 
@@ -188,7 +212,14 @@ public final class CourtSim {
     // ------------------------------------------------------------------ ход
 
     public void tick(double days) {
-        long target = day + (long) Math.floor(days);
+        long elapsed = (long) Math.floor(days);
+        long target = day + elapsed;
+        // A virtual court can be attached before WorldSim has materialized its population.
+        // If the population appears after an annual boundary, catch it up immediately.
+        // If this tick itself crosses the boundary, let the normal yearly pass do the work
+        // exactly once rather than running a catch-up and a calendar pass back-to-back.
+        if (!populationLifecycleInitialized && reg.size() > 0 && elapsed > 0
+                && Math.floorDiv(target, 365L) == Math.floorDiv(day, 365L)) yearly();
         while (day < target) {
             day++;
             stepSchemes();
@@ -206,8 +237,11 @@ public final class CourtSim {
     }
 
     private void yearly() {
-        lifeCycle();
-        Marriages.aiYear(this);
+        if (reg.size() > 0) {
+            lifeCycle();
+            Marriages.aiYear(this);
+            populationLifecycleInitialized = true;
+        }
         if (ed != null) Courts.ensure(d, ed, reg, defs, names, seed + day, year());
     }
 
@@ -215,6 +249,9 @@ public final class CourtSim {
 
     private void lifeCycle() {
         int y = year();
+        // Prepare the world-wide family index once per annual pass, not once per death.
+        // This keeps estate succession exact while avoiding population-wide scans for each heir.
+        reg.prepareKinIndex(day);
         List<Character> all = new ArrayList<>(reg.all());
         for (Character c : all) {
             if (!c.alive) continue;
@@ -227,17 +264,25 @@ public final class CourtSim {
             if (rnd("death", c.id.hashCode() + day).nextDouble() < p) die(c, "умер от старости или болезни");
         }
         for (Character c : all) {
-            if (!c.alive || !c.gender.equals("f") || c.spouse.isEmpty()) continue;
+            if (!c.alive || !c.gender.equals("f")) continue;
+            Object dueValue = c.props.get("family.pregnancy.due_day");
+            long dueDay = dueValue instanceof Number n ? n.longValue() : -1L;
+            if (dueDay >= 0L) {
+                if (day < dueDay) continue;
+                String fatherId = FamilyPlanning.dueFatherId(c, day);
+                Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
+                if (biologicalFather == null) {
+                    FamilyPlanning.cancel(c, biologicalFather, "father-unavailable", y);
+                } else {
+                    bear(biologicalFather, c);
+                }
+                continue;
+            }
+            if (c.spouse.isEmpty()) continue;
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
-            if (f == null || !f.alive || age < 18 || age > 40 || c.children.size() >= 6) continue;
-            // ResidentLifeEvents also advances local families on the shared CharacterRegistry.
-            // Both owners consult the same persisted marker so one calendar year cannot create
-            // two births for the same mother when settlement and court ticks run in either order.
-            Object lastBirthValue = c.props.get("family.last_birth_year");
-            int lastBirthYear = lastBirthValue instanceof Number n ? n.intValue() : 0;
-            if (lastBirthYear > 0 && y - lastBirthYear < 2) continue;
-            if (rnd("birth", c.id.hashCode() + day).nextDouble() < 0.24) bear(f, c);
+            if (f == null || !f.alive || age < 18 || age > 45) continue;
+            FamilyPlanning.tryConceive(c, f, y, day, seed);
         }
     }
 
@@ -245,13 +290,13 @@ public final class CourtSim {
         Random r = rnd("child", father.id.hashCode() + mother.id.hashCode() + day);
         NameBank.Pool pool = names.pool(names.culture(father.culture));
         boolean m = r.nextBoolean();
-        List<String> l = m ? pool.male : pool.female;
-        if (l.isEmpty()) return;
-        Character kid = reg.addChild(father, mother, l.get(r.nextInt(l.size())), m ? "m" : "f", year());
+        List<String> l = pool == null ? List.of() : (m ? pool.male : pool.female);
+        String childName = l.isEmpty() ? "Child of " + mother.name + " and " + father.name
+                : l.get(r.nextInt(l.size()));
+        Character kid = reg.addChild(father, mother, childName, m ? "m" : "f", year());
         // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
         // Character lifecycle event, regardless of which domain clock reaches the year first.
-        mother.props.put("family.last_birth_year", year());
-        father.props.put("family.last_birth_year", year());
+        FamilyPlanning.complete(mother, father, year(), kid.id);
         String realm = realmOf(father);
         hooks.news("MAQAN_AUTONOMOUS_BIRTH realm=" + realm + " father=" + father.globalId
                 + " mother=" + mother.globalId + " child=" + kid.globalId);
@@ -913,6 +958,7 @@ public final class CourtSim {
         }
         CourtSim v = new CourtSim(d, null, reg, defs, names, seed, startYear);
         v.day = day;
+        v.populationLifecycleInitialized = populationLifecycleInitialized;
         v.humans.addAll(humans);
         v.me = mine;
         for (Opinions.Modifier m : opinions.mods) if (ids.contains(m.from) && ids.contains(m.to)) v.opinions.mods.add(m);
@@ -936,7 +982,9 @@ public final class CourtSim {
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-court/1");
-        root.put("day", day); root.put("next", nextId);
+        root.put("day", day);
+        root.put("population_lifecycle_initialized", populationLifecycleInitialized);
+        root.put("next", nextId);
         root.put("humans", new ArrayList<Object>(humans)); root.put("players", new LinkedHashMap<String, Object>(players)); root.put("me", me);
         root.put("cooldown", new LinkedHashMap<String, Object>(cooldown));
         List<Object> mods = new ArrayList<>();
@@ -968,7 +1016,11 @@ public final class CourtSim {
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         if (!"wf-court/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат двора");
-        day = ((Number) root.get("day")).longValue(); nextId = ((Number) root.get("next")).intValue();
+        day = ((Number) root.get("day")).longValue();
+        Object lifecycleFlag = root.get("population_lifecycle_initialized");
+        populationLifecycleInitialized = lifecycleFlag instanceof Boolean value
+                ? value : day > 0L && reg.size() > 0;
+        nextId = ((Number) root.get("next")).intValue();
         humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); regencies.clear(); schemes.clear(); pending.clear(); news.clear();
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
         players.clear();

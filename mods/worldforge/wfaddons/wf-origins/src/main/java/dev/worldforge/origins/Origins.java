@@ -69,6 +69,7 @@ public final class Origins {
     public synchronized void publish() {
         StatApi.register("origins", this::mods);
         DemoApi.registerRaces("origins", this::races);
+        DemoApi.registerRaceBatch("origins", this::races);
         StatApi.registerTags("origins", o -> {
             Build b = peek(o);
             Map<String, String> t = new LinkedHashMap<>();
@@ -87,22 +88,52 @@ public final class Origins {
      * государством. Каждая подраса засчитывается и своей расе, и всем предкам, поэтому доля «human» включает имперцев и знатных.
      */
     public synchronized Map<String, Double> races(String realm) {
-        Map<String, Double> declared = DemoApi.shares(DemoApi.parse(hooks.realmProp(realm, "races")));
-        if (!declared.isEmpty()) {
-            Map<String, Double> out = new LinkedHashMap<>(declared);
-            for (var e : declared.entrySet()) for (OriginDefs.Race r : activeDefs.raceChain(e.getKey())) if (!r.id().equals(e.getKey())) out.merge(r.id(), e.getValue(), Double::sum);
-            return out;
+        return races(List.of(realm)).getOrDefault(realm, Map.of());
+    }
+
+    /**
+     * One-pass realm census for trade, government and other demographic consumers.
+     * Explicit realm race declarations override the Character census exactly as before.
+     */
+    public synchronized Map<String, Map<String, Double>> races(Collection<String> realms) {
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        if (realms != null) for (String realm : realms) if (realm != null && !realm.isBlank()) requested.add(realm);
+        Map<String, Map<String, Double>> counts = new LinkedHashMap<>();
+        Map<String, Integer> population = new HashMap<>();
+        for (String realm : requested) {
+            Map<String, Double> declared = DemoApi.shares(DemoApi.parse(hooks.realmProp(realm, "races")));
+            if (!declared.isEmpty()) {
+                Map<String, Double> expanded = new LinkedHashMap<>(declared);
+                for (var entry : declared.entrySet())
+                    for (OriginDefs.Race race : activeDefs.raceChain(entry.getKey()))
+                        if (!race.id().equals(entry.getKey())) expanded.merge(race.id(), entry.getValue(), Double::sum);
+                counts.put(realm, expanded);
+            }
         }
-        Map<String, Double> out = new LinkedHashMap<>();
-        int n = 0;
-        for (var e : builds.entrySet()) {
-            if (e.getValue().race.isEmpty() || !realm.equals(hooks.realmOf(e.getKey()))) continue;
-            n++;
-            for (OriginDefs.Race r : activeDefs.raceChain(e.getValue().race)) out.merge(r.id(), 1.0, Double::sum);
+        // Only realms without an explicit demographic declaration need a population scan.
+        Set<String> censusRealms = new HashSet<>(requested);
+        censusRealms.removeAll(counts.keySet());
+        if (!censusRealms.isEmpty()) {
+            for (var entry : builds.entrySet()) {
+                Build build = entry.getValue();
+                if (build.race.isEmpty()) continue;
+                String realm = hooks.realmOf(entry.getKey());
+                if (realm == null || !censusRealms.contains(realm)) continue;
+                population.merge(realm, 1, Integer::sum);
+                Map<String, Double> realmCounts = counts.computeIfAbsent(realm, ignored -> new LinkedHashMap<>());
+                for (OriginDefs.Race race : activeDefs.raceChain(build.race))
+                    realmCounts.merge(race.id(), 1.0, Double::sum);
+            }
         }
-        if (n == 0) return Map.of();
-        for (var e : out.entrySet()) e.setValue(e.getValue() / n);
-        return out;
+        Map<String, Map<String, Double>> result = new LinkedHashMap<>();
+        for (String realm : requested) {
+            Map<String, Double> values = counts.get(realm);
+            if (values == null || values.isEmpty()) continue;
+            int n = population.getOrDefault(realm, 0);
+            if (n > 0) values.replaceAll((id, value) -> value / n);
+            result.put(realm, Collections.unmodifiableMap(new LinkedHashMap<>(values)));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     /** Раса нового жителя государства: по долям состава (подрасы выбираются по весам внутри родителя). Нет состава - обычные веса рас. */

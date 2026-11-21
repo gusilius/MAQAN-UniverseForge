@@ -58,7 +58,6 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         private final WorldForgeComputeRuntime.Result shared;
         private Result(WorldForgeComputeRuntime.Result shared) { this.shared = shared; }
         public Ticket ticket() { return new Ticket(shared.ticket()); }
-        public byte[] snapshot() { return shared.snapshot(); }
         public byte[] emergenceFrame() { return shared.first(); }
         public byte[] decisionFrame() { return shared.second(); }
         public long queueWaitNanos() { return shared.queueWaitNanos(); }

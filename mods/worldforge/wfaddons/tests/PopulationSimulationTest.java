@@ -558,6 +558,43 @@ public final class PopulationSimulationTest {
                         && bridgeEvents.stream().anyMatch(event -> event.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
                                 && event.from().equals("infant") && event.to().equals("child")),
                 "validated population frame applies one Character batch and preserves lifecycle events");
+        // The sorted population index must retain the correct owning registry for every result.
+        CharacterRegistry firstOwnerRegistry = new CharacterRegistry();
+        Character firstOwnerPerson = firstOwnerRegistry.create("First Owner", "", "north", "m", 280);
+        CharacterRegistry secondOwnerRegistry = new CharacterRegistry();
+        Character secondOwnerPerson = secondOwnerRegistry.create("Second Owner", "", "south", "f", 285);
+        java.util.List<CharacterRegistry> multiOwnerRegistries =
+                java.util.List.of(firstOwnerRegistry, secondOwnerRegistry);
+        PopulationComputeBridge.Captured multiOwnerCapture = PopulationComputeBridge.capture(
+                "population-multi-owner-test", 301, 1, multiOwnerRegistries);
+        java.util.List<Object> multiOwnerPeople = new java.util.ArrayList<>();
+        for (Character person : java.util.List.of(firstOwnerPerson, secondOwnerPerson)) {
+            java.util.Map<String,Object> result = new java.util.LinkedHashMap<>();
+            result.put("id", person.globalId);
+            result.put("needs", java.util.Map.of("hunger", 50, "rest", 50, "social", 50, "purpose", 50, "leisure", 50));
+            result.put("intent", "idle");
+            int age = 301 - person.birthYear;
+            result.put("age_years", age);
+            result.put("life_stage", age < 6 ? "infant" : age < 13 ? "child" : age < 18 ? "adolescent" : age < 60 ? "adult" : "elder");
+            result.put("simulated_days", "1");
+            result.put("last_simulated_year", 301);
+            result.put("world_day", "1");
+            multiOwnerPeople.add(result);
+        }
+        java.util.Map<String,Object> multiOwnerRoot = new java.util.LinkedHashMap<>();
+        multiOwnerRoot.put("schema_version", 1);
+        multiOwnerRoot.put("world_id", "population-multi-owner-test");
+        multiOwnerRoot.put("year", 301);
+        multiOwnerRoot.put("elapsed_days", 1);
+        multiOwnerRoot.put("world_day", "1");
+        multiOwnerRoot.put("characters", multiOwnerPeople);
+        ok(PopulationComputeBridge.apply(multiOwnerCapture,
+                        dev.worldforge.mod.Json.write(multiOwnerRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        multiOwnerRegistries)
+                        && Long.parseLong(String.valueOf(firstOwnerPerson.props.get("population.simulated_days"))) == 1
+                        && Long.parseLong(String.valueOf(secondOwnerPerson.props.get("population.simulated_days"))) == 1,
+                "cached owner index applies sorted multi-registry results to the correct canonical registries");
+
         PopulationComputeBridge.Captured staleCapture = PopulationComputeBridge.capture(
                 "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
         PopulationSimulation.setNeed(bridgeChild, Need.HUNGER, 9);
@@ -565,6 +602,55 @@ public final class PopulationSimulationTest {
                         dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         java.util.List.of(bridgeRegistry)),
                 "population bridge rejects stale revision before applying a result");
+
+        CharacterRegistry incrementalRegistry = new CharacterRegistry();
+        java.util.List<Character> batchedPeople = new java.util.ArrayList<>();
+        for (int i = 0; i < 600; i++) {
+            Character person = incrementalRegistry.create("Batch " + i, "", "north", "n", 270);
+            PopulationSimulation.setNeed(person, Need.HUNGER, 5);
+            batchedPeople.add(person);
+        }
+        boolean firstBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        long firstBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!firstBatchComplete && firstBatchApplied == 256
+                        && "0".equals(String.valueOf(batchedPeople.get(256).props.get("population.last_simulated_world_day"))),
+                "world-day fallback advances a bounded 256-Character batch without scanning the remaining population"
+                        + " (complete=" + firstBatchComplete + ", applied=" + firstBatchApplied
+                        + ", nextReceipt=" + batchedPeople.get(256).props.get("population.last_simulated_world_day")
+                        + ", registrySize=" + incrementalRegistry.size() + ")");
+        boolean secondBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        boolean thirdBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        long allBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!secondBatchComplete && thirdBatchComplete && allBatchApplied == 600
+                        && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "resumable world-day cursor completes all batches exactly once and preserves per-Character receipts");
+        boolean stableComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        ok(stableComplete && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "completed world-day cursor does not replay already acknowledged population state");
+        Character appendedDuringBatch = incrementalRegistry.create("Late Arrival", "", "north", "n", 270);
+        PopulationSimulation.setNeed(appendedDuringBatch, Need.HUNGER, 5);
+        boolean appendedTailComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        ok(appendedTailComplete && PopulationSimulation.need(appendedDuringBatch, Need.HUNGER) == 15
+                        && PopulationSimulation.need(batchedPeople.get(0), Need.HUNGER) == 15,
+                "new Characters append to the completed cursor without replaying the existing population");
+        CharacterRegistry replacedRegistry = new CharacterRegistry();
+        Character replaced = replacedRegistry.create("Before Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(replaced, Need.HUNGER, 5);
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        CharacterRegistry replacementSource = new CharacterRegistry();
+        Character restoredPerson = replacementSource.create("After Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(restoredPerson, Need.HUNGER, 5);
+        replacedRegistry.fromJson(replacementSource.toJson(), "test-generation-reset");
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        ok(PopulationSimulation.need(replacedRegistry.all().get(0), Need.HUNGER) == 15,
+                "wholesale registry replacement resets the cursor and catches up restored Characters");
 
         CharacterRegistry resumableRegistry = new CharacterRegistry();
         Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
@@ -612,6 +698,17 @@ public final class PopulationSimulationTest {
             baselineFailure.printStackTrace(System.out);
             ok(false, "durable Population baseline initializes, reloads and validates world identity");
         }
+
+        // Regression: cached registry membership must not cache the mutable alive flag.
+        CharacterRegistry cachedLifeStateRegistry = new CharacterRegistry();
+        Character cachedLifeState = cachedLifeStateRegistry.create("Cached Life State", "", "north", "m", 270);
+        PopulationComputeBridge.captureForWorldDay("population-life-state-test", 300, 1, 0,
+                java.util.List.of(cachedLifeStateRegistry));
+        PopulationSimulation.die(cachedLifeStateRegistry, cachedLifeState.id, 300, "test");
+        PopulationComputeBridge.Captured afterCachedDeath = PopulationComputeBridge.captureForWorldDay(
+                "population-life-state-test", 300, 2, 0, java.util.List.of(cachedLifeStateRegistry));
+        ok(afterCachedDeath.characterIds().isEmpty(),
+                "cached population membership re-filters mutable alive state after death");
 
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry));

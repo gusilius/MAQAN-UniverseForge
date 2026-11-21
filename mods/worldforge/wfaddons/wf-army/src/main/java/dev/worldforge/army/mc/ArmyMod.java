@@ -47,6 +47,8 @@ public class ArmyMod {
     static volatile List<String> RAW = List.of();
     private static long ticks;
     private static volatile boolean actionPersistenceBlocked;
+    /** When true, WorldSim is the sole AI recruitment planner; ArmyEngine keeps movement/war AI. */
+    private static volatile boolean worldSimOwnsRecruitment;
 
     public ArmyMod() {
         ArmyActions.installPersistenceBridge(new ArmyActions.PersistenceBridge() {
@@ -74,9 +76,17 @@ public class ArmyMod {
         return Collections.unmodifiableCollection(new ArrayList<>(ARMIES.values()));
     }
 
+    /** WorldSim plans recruitment from the full settlement/troop catalogs; this disables only
+     * ArmyEngine's legacy duplicate recruitment branch, not its war, movement, merge or siege AI. */
+    public static void setWorldSimRecruitmentAuthority(boolean enabled) {
+        worldSimOwnsRecruitment = enabled;
+        for (ArmyEngine engine : ARMIES.values())
+            engine.setAutonomousRecruitmentEnabled(!enabled);
+    }
+
     /** Армии карты поверх движка войн; создание ставит их водителем времени войн. */
     public static ArmyEngine armies(MapData m) {
-        return ARMIES.computeIfAbsent(m, k -> {
+        ArmyEngine engine = ARMIES.computeIfAbsent(m, k -> {
             ArmyEngine a = new ArmyEngine(WarMod.engine(k));
             a.installPersistenceBridge(new ArmyEngine.PersistenceBridge() {
                 @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
@@ -105,6 +115,8 @@ public class ArmyMod {
             }
             return a;
         });
+        engine.setAutonomousRecruitmentEnabled(!worldSimOwnsRecruitment);
+        return engine;
     }
 
     /**

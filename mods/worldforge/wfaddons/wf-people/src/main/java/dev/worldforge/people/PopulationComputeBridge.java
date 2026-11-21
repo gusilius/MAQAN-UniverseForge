@@ -13,15 +13,15 @@ public final class PopulationComputeBridge {
         private final String worldId; private final int year; private final long elapsedDays;
         private final long targetWorldDay;
         private final DomainMutationRevisions.Snapshot revisions;
-        private final List<String> characterIds, allCharacterIds;
+        private final List<String> characterIds;
         private final Map<String,Integer> birthYears;
         private final Map<String,Long> priorDays, elapsedById;
         private final byte[] request;
         private Captured(String worldId,int year,long elapsedDays,long targetWorldDay,DomainMutationRevisions.Snapshot revisions,
-                         List<String> ids,List<String> allIds,Map<String,Integer> birthYears,Map<String,Long> priorDays,
+                         List<String> ids,Map<String,Integer> birthYears,Map<String,Long> priorDays,
                          Map<String,Long> elapsedById,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.targetWorldDay=targetWorldDay;this.revisions=revisions;
-            this.characterIds=List.copyOf(ids);this.allCharacterIds=List.copyOf(allIds);
+            this.characterIds=List.copyOf(ids);
             this.birthYears=Map.copyOf(birthYears);this.priorDays=Map.copyOf(priorDays);this.elapsedById=Map.copyOf(elapsedById);this.request=request.clone();
         }
         public String worldId(){return worldId;} public int year(){return year;} public long elapsedDays(){return elapsedDays;}
@@ -30,8 +30,107 @@ public final class PopulationComputeBridge {
         public List<String> characterIds(){return characterIds;} public boolean hasWork(){return !characterIds.isEmpty();}
         public byte[] request(){return request.clone();}
     }
-    private record Location(CharacterRegistry registry,Character character){}
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
+    /**
+     * Reusable membership-only index. It holds canonical references and is rebuilt
+     * only when registry membership changes, not for every capture/apply operation.
+     */
+    private static final class RegistryIndex {
+        private final List<CharacterRegistry> registries;
+        private final long[] revisions;
+        private final Character[] members;
+        /** Registry ownership is indexed beside sorted members to avoid a registry scan per result. */
+        private final CharacterRegistry[] owners;
+        private RegistryIndex(Collection<CharacterRegistry> source) {
+            registries = List.copyOf(source);
+            revisions = new long[registries.size()];
+            int memberCount = 0;
+            for (CharacterRegistry registry : registries) memberCount = Math.addExact(memberCount, registry.all().size());
+            members = new Character[memberCount];
+            owners = new CharacterRegistry[memberCount];
+            int cursor = 0;
+            for (int i = 0; i < registries.size(); i++) {
+                CharacterRegistry registry = Objects.requireNonNull(registries.get(i));
+                revisions[i] = registry.revision();
+                for (Character character : registry.all()) {
+                    members[cursor] = character;
+                    owners[cursor] = registry;
+                    cursor++;
+                }
+            }
+            sortMembersAndOwners();
+            for (int i = 1; i < members.length; i++) {
+                if (members[i - 1].globalId.equals(members[i].globalId))
+                    throw new IllegalStateException("Duplicate canonical Character UUID: " + members[i].globalId);
+            }
+        }
+        /** In-place paired heapsort avoids allocating one wrapper object per NPC during index rebuild. */
+        private void sortMembersAndOwners() {
+            int size = members.length;
+            for (int root = size / 2 - 1; root >= 0; root--) siftDown(root, size);
+            for (int end = size - 1; end > 0; end--) {
+                swap(0, end);
+                siftDown(0, end);
+            }
+        }
+        private void siftDown(int root, int end) {
+            while (true) {
+                int child = root * 2 + 1;
+                if (child >= end) return;
+                if (child + 1 < end && compare(child, child + 1) < 0) child++;
+                if (compare(root, child) >= 0) return;
+                swap(root, child);
+                root = child;
+            }
+        }
+        private int compare(int left, int right) {
+            return members[left].globalId.compareTo(members[right].globalId);
+        }
+        private void swap(int left, int right) {
+            Character character = members[left];
+            members[left] = members[right];
+            members[right] = character;
+            CharacterRegistry owner = owners[left];
+            owners[left] = owners[right];
+            owners[right] = owner;
+        }
+        private boolean matches(Collection<CharacterRegistry> source) {
+            if (source.size() != registries.size()) return false;
+            int i = 0;
+            for (CharacterRegistry registry : source) {
+                if (registry != registries.get(i) || registry.revision() != revisions[i]) return false;
+                i++;
+            }
+            return true;
+        }
+        private Character[] members() { return members; }
+        private int findIndex(String globalId) {
+            int low = 0, high = members.length - 1;
+            while (low <= high) {
+                int mid = (low + high) >>> 1;
+                int cmp = members[mid].globalId.compareTo(globalId);
+                if (cmp == 0) return mid;
+                if (cmp < 0) low = mid + 1; else high = mid - 1;
+            }
+            return -1;
+        }
+        private Character find(String globalId) {
+            int index = findIndex(globalId);
+            return index < 0 ? null : members[index];
+        }
+        private CharacterRegistry ownerAt(int index) { return owners[index]; }
+    }
+    private static volatile RegistryIndex cachedIndex;
+    private static RegistryIndex indexFor(Collection<CharacterRegistry> registries) {
+        RegistryIndex current = cachedIndex;
+        if (current != null && current.matches(registries)) return current;
+        synchronized (PopulationComputeBridge.class) {
+            current = cachedIndex;
+            if (current == null || !current.matches(registries)) cachedIndex = current = new RegistryIndex(registries);
+            return current;
+        }
+    }
+
     private PopulationComputeBridge(){}
 
     /** Compatibility capture: elapsedDays is measured from world day zero. */
@@ -51,15 +150,14 @@ public final class PopulationComputeBridge {
         Objects.requireNonNull(registries,"registries");
         DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
-        TreeMap<String,Character> ordered=new TreeMap<>();
-        for(CharacterRegistry registry:registries)for(Character c:Objects.requireNonNull(registry).all()){
-            if(!c.alive)continue;
-            if(ordered.putIfAbsent(c.globalId,c)!=null)throw new IllegalStateException("Duplicate canonical Character UUID: "+c.globalId);
-        }
-        List<Object> people=new ArrayList<>(ordered.size());List<String> ids=new ArrayList<>(ordered.size()),allIds=new ArrayList<>(ordered.size());
-        Map<String,Integer> birthYears=new TreeMap<>();Map<String,Long> priorDays=new TreeMap<>(),elapsedById=new TreeMap<>();
-        for(Character c:ordered.values()){
-            allIds.add(c.globalId);
+        RegistryIndex registryIndex = indexFor(registries);
+        Character[] ordered = registryIndex.members();
+        List<Object> people = new ArrayList<>(ordered.length);
+        List<String> ids = new ArrayList<>(ordered.length);
+        Map<String,Integer> birthYears = new HashMap<>();
+        Map<String,Long> priorDays = new HashMap<>(), elapsedById = new HashMap<>();
+        for (Character c : ordered) {
+            if (!c.alive) continue; // cached membership must not cache mutable life-state
             Object rawWorldDay=c.props.get("population.last_simulated_world_day");
             long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
             long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
@@ -84,7 +182,7 @@ public final class PopulationComputeBridge {
         DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical mutation overlapped population capture"));
         if(!before.equals(after))throw new IllegalStateException("Canonical domain changed during population capture");
-        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,ids,allIds,birthYears,priorDays,elapsedById,bytes);
+        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,ids,birthYears,priorDays,elapsedById,bytes);
     }
 
     /** Validates the complete frame before the first write. False means stale and requires retry. */
@@ -134,17 +232,23 @@ public final class PopulationComputeBridge {
             updates.add(new Update(id,needs,intent,age,stage,days,lastYear,worldDay));
         }
         if(!seen.equals(new TreeSet<>(captured.characterIds)))throw new IllegalArgumentException("Population frame Character set differs from captured snapshot");
-        Map<String,Location> current=new HashMap<>();
-        for(CharacterRegistry registry:registries)for(Character c:registry.all())if(c.alive){
-            if(current.putIfAbsent(c.globalId,new Location(registry,c))!=null)throw new IllegalStateException("Duplicate current Character UUID: "+c.globalId);
+        RegistryIndex current = indexFor(registries);
+        if (!WorldForgeApi.revisions().isCurrent(captured.revisions, DomainMutationRevisions.Domain.CHARACTERS)) return false;
+        int[] memberIndices = new int[updates.size()];
+        for (int i = 0; i < updates.size(); i++) {
+            Update u = updates.get(i);
+            int memberIndex = current.findIndex(u.id);
+            if (memberIndex < 0 || !current.members()[memberIndex].alive) return false;
+            memberIndices[i] = memberIndex;
         }
-        if(!current.keySet().equals(new TreeSet<>(captured.allCharacterIds))||!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
-        for(Update u:updates){Location location=current.get(u.id);if(location==null||!location.character.alive)return false;}
-        try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
-            for(Update u:updates){
-                Location location=current.get(u.id);
-                location.registry.applyLifeStageResult(location.character,u.age,u.stage,captured.year);
-                PopulationSimulation.applyComputedResult(location.character,u.needs,u.intent,u.simulatedDays,u.lastYear,u.worldDay);
+        if (!WorldForgeApi.revisions().isCurrent(captured.revisions, DomainMutationRevisions.Domain.CHARACTERS)) return false;
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            for (int i = 0; i < updates.size(); i++) {
+                Update u = updates.get(i);
+                Character character = current.members()[memberIndices[i]];
+                CharacterRegistry owner = current.ownerAt(memberIndices[i]);
+                owner.applyLifeStageResult(character, u.age, u.stage, captured.year);
+                PopulationSimulation.applyComputedResult(character, u.needs, u.intent, u.simulatedDays, u.lastYear, u.worldDay);
             }
         }
         return true;

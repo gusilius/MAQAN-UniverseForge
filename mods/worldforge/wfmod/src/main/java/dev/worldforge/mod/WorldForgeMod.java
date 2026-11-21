@@ -42,12 +42,17 @@ import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryArchiveStore;
+import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
+import dev.worldforge.mod.economy.TreasuryJournalArchive;
+import dev.worldforge.mod.economy.TreasuryCheckpointStore;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.mod.identity.WorldIdentityStore;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -58,9 +63,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * WorldForge: генерация мира по картинке.
- * Карты лежат в config/worldforge/maps/<имя>.worldmap (или папкой <имя>/).
- * Измерение подключается датапаком: "generator": {"type": "worldforge:image", "map": "<имя>"}.
+ * WorldForge planetary surface adapter. Image-backed and procedural planet sources
+ * feed the same terrain, biome, chunk and WorldSim pipeline. Minecraft dimensions are
+ * only physical surface instances; they are not the identity of celestial bodies.
  */
 @Mod(WorldForgeMod.MOD_ID)
 public class WorldForgeMod {
@@ -79,13 +84,18 @@ public class WorldForgeMod {
     private static volatile WorldId worldId;
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
+    private static TreasuryArchiveStore treasuryStore;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         GENERATORS.register("image", () -> MapChunkGenerator.CODEC);
+        GENERATORS.register("planet", () -> MapChunkGenerator.CODEC);
         BIOME_SOURCES.register("image", () -> MapBiomeSource.CODEC);
+        BIOME_SOURCES.register("planet", () -> MapBiomeSource.CODEC);
         GENERATORS.register(bus);
         BIOME_SOURCES.register(bus);
+        net.minecraftforge.fml.ModLoadingContext.get().registerConfig(
+                net.minecraftforge.fml.config.ModConfig.Type.COMMON, MaqanPerformanceConfig.SPEC, "maqan-performance.toml");
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new RegionTracker());
         MinecraftForge.EVENT_BUS.register(new EditorEvents());
@@ -145,60 +155,64 @@ public class WorldForgeMod {
         catch (IOException ex) { LOGGER.error("WorldForge action journal save failed: {}", ex.toString()); }
     }
 
+    private static Path treasuryStoreRoot(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("treasury-store");
+    }
+
+    /** Loads the committed archive/checkpoint; legacy JSON is consulted only for first migration. */
     private static void loadTreasury(MinecraftServer server) {
         treasuryLoadFailed = false;
-        Path file = treasuryFile(server);
+        Path legacy = treasuryFile(server);
         try {
-            TreasuryService.replace(Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger());
-            persistedTreasuryVersion = TreasuryService.current().mutationVersion();
-            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", TreasuryService.current().accountCount(), TreasuryService.current().journalSize());
+            treasuryStore = new TreasuryArchiveStore(treasuryStoreRoot(server));
+            TreasuryLedger loaded = treasuryStore.loadOrMigrate(legacy);
+            TreasuryService.replace(loaded);
+            persistedTreasuryVersion = loaded.mutationVersion();
+            LOGGER.info("WorldForge treasury: loaded canonical archive accounts={} journalEntries={} nextSequence={} mutationVersion={}",
+                    loaded.accountCount(), loaded.journalSize(), loaded.nextSequence(), loaded.mutationVersion());
         } catch (Exception ex) {
-            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());
+            LOGGER.error("WorldForge treasury load failed; refusing to overwrite legacy JSON or committed archive: {}",
+                    ex.toString());
             treasuryLoadFailed = true;
             persistedTreasuryVersion = -1L;
             TreasuryService.replace(new TreasuryLedger());
+            throw new IllegalStateException("WorldForge cannot start with an invalid treasury store", ex);
         }
     }
 
-    /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
+    /** Flushes the canonical archive/checkpoint after addons have migrated their balances. */
     public static boolean saveTreasuryNow(MinecraftServer server) { return saveTreasury(server); }
 
     private static synchronized boolean saveTreasury(MinecraftServer server) {
-        if (server == null || treasuryLoadFailed) {
-            LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
+        if (server == null || treasuryLoadFailed || treasuryStore == null) {
+            LOGGER.error("WorldForge treasury save skipped because its canonical store is unavailable");
             return false;
         }
         TreasuryLedger ledger = TreasuryService.current();
-        // Hold the canonical ledger monitor across dirty-check, snapshot and atomic replacement.
-        // Otherwise a concurrent writer could mutate immediately after a no-op check and receive
-        // a false durable acknowledgement before the next autosave.
         synchronized (ledger) {
-            if (ledger.mutationVersion() == persistedTreasuryVersion) return true;
-            Path file = treasuryFile(server);
+            long currentVersion = ledger.mutationVersion();
+            if (currentVersion == persistedTreasuryVersion) return true;
             long startedNanos = System.nanoTime();
-            long writtenVersion;
             try {
-                Files.createDirectories(file.getParent());
-                Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-                try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-                    writtenVersion = ledger.writeJsonVersioned(writer);
-                }
-                try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
-                catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                long writtenVersion = treasuryStore.save(ledger);
+                if (writtenVersion != currentVersion)
+                    throw new IOException("Treasury changed while its canonical checkpoint was being published");
                 persistedTreasuryVersion = writtenVersion;
                 long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-                int accounts = ledger.accountCount(), entries = ledger.journalSize();
-                LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
-                        accounts, entries, writtenVersion, elapsedMillis);
+                LOGGER.info("WorldForge treasury: durable archive/checkpoint accounts={} journalEntries={} nextSequence={} mutationVersion={} elapsedMs={}",
+                        ledger.accountCount(), ledger.journalSize(), ledger.nextSequence(), writtenVersion, elapsedMillis);
                 if (elapsedMillis >= 1000)
-                    LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
+                    LOGGER.warn("WorldForge treasury archive/checkpoint save exceeded 1s; journalEntries={} elapsedMs={}",
+                            ledger.journalSize(), elapsedMillis);
                 return true;
-            } catch (IOException ex) {
-                LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
+            } catch (IOException | RuntimeException ex) {
+                LOGGER.error("WorldForge treasury canonical save failed; ledger remains dirty for retry: {}", ex.toString());
                 return false;
             }
         }
     }
+
     public static Map<String, MapData> loadedMaps() {
         return MAPS;
     }
@@ -215,19 +229,30 @@ public class WorldForgeMod {
     public static MapData map(String id) {
         return MAPS.computeIfAbsent(id, n -> {
             try {
-                MapData d = null;
+                MapData d;
                 if (n.contains(":")) {
+                    String localId = n.substring(n.indexOf(':') + 1);
                     try {
                         d = loadFromDatapack(n);
-                    } catch (IOException e) {
-                        LOGGER.warn("WorldForge: в датапаках нет карты '{}' ({}), ищу в config", n, e.getMessage());
-                        d = MapData.load(n.substring(n.indexOf(':') + 1), mapsDir());
+                    } catch (FileNotFoundException absentDatapackMap) {
+                        try {
+                            d = MapData.load(localId, mapsDir());
+                        } catch (FileNotFoundException absentLocalMap) {
+                            d = loadProceduralPlanetOrThrow(n, absentLocalMap);
+                        }
                     }
                 } else {
-                    d = MapData.load(n, mapsDir());
+                    try {
+                        d = MapData.load(n, mapsDir());
+                    } catch (FileNotFoundException absentMap) {
+                        d = loadProceduralPlanetOrThrow(n, absentMap);
+                    }
                 }
                 EditorManager.applySaved(ServerLifecycleHooks.getCurrentServer(), d);
-                LOGGER.info("WorldForge: planet={} dimension_map_id={} image={} size={}x{} blocks_per_pixel={}", d.displayName, n, n, d.w, d.h, d.bpp);
+                String planetId = d.planetProfile == null ? n : d.planetProfile.planetId;
+                String sourceMode = d.planetProfile == null ? "image" : d.planetProfile.generationMode;
+                LOGGER.info("WorldForge: planet_id={} source_mode={} surface_id={} display_name={} virtual_size={}x{} blocks_per_pixel={}",
+                        planetId, sourceMode, n, d.displayName, d.w, d.h, d.bpp);
                 return d;
             } catch (IOException | RuntimeException e) {
                 LOGGER.error("WorldForge: explicit map '{}' is unavailable; refusing to substitute synthetic terrain from a fallback map. Expected source under {}",
@@ -235,6 +260,36 @@ public class WorldForgeMod {
                 throw new IllegalStateException("Required WorldForge map '" + n + "' could not be loaded", e);
             }
         });
+    }
+
+    private static MapData loadProceduralPlanetOrThrow(String id, FileNotFoundException missingImageMap) throws IOException {
+        PlanetWorldProfile profile = loadPlanetProfile(id);
+        if (profile == null || !"procedural".equals(profile.generationMode)) throw missingImageMap;
+        LOGGER.info("WorldForge: creating procedural surface planet_id={} seed={} pixels={}x{}",
+                profile.planetId, profile.seed, profile.widthPx, profile.heightPx);
+        return MapData.procedural(id, profile);
+    }
+
+    /** Planet identity/profile lives outside the Minecraft dimension namespace. */
+    private static PlanetWorldProfile loadPlanetProfile(String id) throws IOException {
+        ResourceLocation key = new ResourceLocation(id.contains(":") ? id : "worldforge:" + id);
+        Path planetDir = mapsDir().getParent().resolve("planets");
+        Path profileFile = planetDir.resolve(key.getNamespace()).resolve(key.getPath() + ".planet.json");
+        if (!Files.isRegularFile(profileFile) && "worldforge".equals(key.getNamespace()))
+            profileFile = planetDir.resolve(key.getPath() + ".planet.json");
+        if (Files.isRegularFile(profileFile))
+            return PlanetWorldProfile.parse(Files.readAllBytes(profileFile));
+
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) {
+            ResourceLocation resource = new ResourceLocation(key.getNamespace(),
+                    "worldforge_planets/" + key.getPath() + ".json");
+            Optional<Resource> found = server.getResourceManager().getResource(resource);
+            if (found.isPresent()) try (InputStream input = found.get().open()) {
+                return PlanetWorldProfile.parse(input.readAllBytes());
+            }
+        }
+        return null;
     }
 
     private static MapData loadFromDatapack(String id) throws IOException {
@@ -290,6 +345,7 @@ public class WorldForgeMod {
         EditorManager.forget();
         treasuryTicks = 0;
         persistedTreasuryVersion = -1L;
+        treasuryStore = null;
         worldId = null;
         dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
         actionExecutionLoadFailed = false;

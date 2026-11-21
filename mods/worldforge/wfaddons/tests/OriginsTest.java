@@ -290,6 +290,37 @@ public class OriginsTest {
                         && missingClassProfessionRequirement != null && missingClassProfessionRequirement.contains("временно отсутствует"),
                 "удалённые prerequisite definitions дают безопасный отказ вместо NullPointerException");
 
+        // Batch demographic census must visit each canonical character only once,
+        // while preserving per-realm normalization and parent-race inheritance.
+        Origins census = new Origins(d);
+        Map<String, String> censusOwners = Map.of(
+                "n:census-a1", "realm-a", "n:census-a2", "realm-a",
+                "n:census-b1", "realm-b", "n:census-b2", "realm-b",
+                "n:census-b3", "realm-b");
+        int[] censusRealmLookups = {0};
+        census.hooks = new Origins.Hooks() {
+            @Override public String realmOf(String owner) {
+                censusRealmLookups[0]++;
+                return censusOwners.getOrDefault(owner, "");
+            }
+        };
+        census.setRace("n:census-a1", "human");
+        census.setRace("n:census-a2", "orc");
+        census.setRace("n:census-b1", "dwarf");
+        census.setRace("n:census-b2", "dwarf");
+        census.setRace("n:census-b3", "human");
+        census.publish();
+        Map<String, Map<String, Double>> censusResult = dev.worldforge.mod.api.DemoApi.races(
+                List.of("realm-a", "realm-b", "realm-empty"));
+        ok(censusRealmLookups[0] == censusOwners.size(),
+                "multi-realm demographic census resolves each Character realm once: " + censusRealmLookups[0]);
+        ok(Math.abs(censusResult.get("realm-a").get("human") - 0.5) < 1e-9
+                        && Math.abs(censusResult.get("realm-a").get("orc") - 0.5) < 1e-9
+                        && Math.abs(censusResult.get("realm-b").get("dwarf") - 2.0 / 3.0) < 1e-9
+                        && Math.abs(censusResult.get("realm-b").get("human") - 1.0 / 3.0) < 1e-9,
+                "batch census preserves independent realm shares and race inheritance: " + censusResult);
+        ok(!censusResult.containsKey("realm-empty"), "empty realm census remains empty");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }

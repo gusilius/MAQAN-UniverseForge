@@ -6,6 +6,8 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.settle.SettlementSpacing;
+import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.NameBank;
@@ -78,6 +80,9 @@ public class SettleMod {
     public static volatile Defs DEFS;
     /** Виды поселений (types.json в датапаках). */
     public static volatile dev.worldforge.settle.SettleTypes TYPES = new dev.worldforge.settle.SettleTypes();
+    /** Data-driven structure classes and identity dimensions from structure_catalog.json. */
+    public static volatile dev.worldforge.settle.StructureCatalog STRUCTURE_CATALOG =
+            dev.worldforge.settle.StructureCatalog.empty();
     /** Исходные JSON описаний (в порядке загрузки): их отправляем клиенту вместе с поселением, чтобы окна собрали те же Defs. */
     public static volatile java.util.List<String> DEFS_RAW = java.util.List.of();
     static volatile java.util.List<String> BASE_RAW = java.util.List.of();
@@ -87,6 +92,28 @@ public class SettleMod {
         if (DEFS == null) return java.util.List.of("Поселения ещё не загружены");
         java.util.List<String> raw = new java.util.ArrayList<>(BASE_RAW);
         java.util.List<String> rep = SchemLibrary.loadAll(server, DEFS, raw);
+        // The same in-game admin reload refreshes catalogue metadata as well as schematic
+        // assets, so new structures can be added without restarting the world.
+        var catalogueFiles = new java.util.TreeMap<ResourceLocation, Resource>(
+                server.getResourceManager().listResources("wf_settle",
+                        location -> location.getPath().endsWith("structure_catalog.json")));
+        for (Map.Entry<ResourceLocation, Resource> entry : catalogueFiles.entrySet()) {
+            try (InputStream input = entry.getValue().open()) {
+                dev.worldforge.settle.StructureCatalog refreshed =
+                        dev.worldforge.settle.StructureCatalog.load(
+                                new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                List<String> problems = refreshed.validate(DEFS);
+                if (!problems.isEmpty()) {
+                    rep.addAll(problems.stream().map(problem -> "Каталог: " + problem).toList());
+                    continue;
+                }
+                STRUCTURE_CATALOG = refreshed;
+                rep.add("Каталог структур обновлён: " + refreshed.structureClasses().size()
+                        + " классов, " + refreshed.identityDimensions().size() + " измерений совместимости");
+            } catch (Exception error) {
+                rep.add("Каталог структур не обновлён: " + entry.getKey() + " — " + error.getMessage());
+            }
+        }
         DEFS_RAW = raw;
         Blueprints.clearCache();
         return rep;
@@ -96,6 +123,130 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    private static int lifeRegistryCursor;
+    private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
+        if (interval < 1) return;
+        if (colonySimulationIndexInterval == interval && colonySimulationIndexBuiltAt != Long.MIN_VALUE
+                && tick >= colonySimulationIndexBuiltAt && tick - colonySimulationIndexBuiltAt < 20L) return;
+        Map<Integer, List<Colony>> mutable = new HashMap<>();
+        Set<String> activeIds = new HashSet<>();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
+            int phase = ColonySimulationCadence.phase(colony.s.id, interval);
+            mutable.computeIfAbsent(phase, ignored -> new ArrayList<>()).add(colony);
+            activeIds.add(colony.s.id);
+            LAST_SIMULATED_WORLD_MINUTE.putIfAbsent(colony.s.id, worldMinute);
+        }
+        Map<Integer, List<Colony>> frozen = new HashMap<>();
+        mutable.forEach((phase, colonies) -> {
+            colonies.sort(Comparator.comparing(colony -> colony.s.id));
+            frozen.put(phase, List.copyOf(colonies));
+        });
+        LAST_SIMULATED_WORLD_MINUTE.keySet().retainAll(activeIds);
+        COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
+        colonySimulationIndexInterval = interval;
+        colonySimulationIndexBuiltAt = tick;
+    }
+
+    private static List<Colony> coloniesDueForSimulation(long tick, int interval) {
+        if (interval < 1 || tick < 1) return List.of();
+        int phase = (int) Math.floorMod(tick - 1L, interval);
+        return COLONY_SIMULATION_PHASES.getOrDefault(phase, List.of());
+    }
+
+    /** Last shared-calendar minute simulated by each colony; runtime-only and rebuilt on server start. */
+    private static final Map<String, Long> LAST_SIMULATED_WORLD_MINUTE = new HashMap<>();
+    /** Rotating per-colony resident cursor: only a bounded slice receives a life-AI decision per pass. */
+    private static final Map<String, Integer> LIFE_AI_CURSORS = new HashMap<>();
+    /** Short-lived resident indexes avoid repeated O(residents) companion searches for each resident. */
+    private static final Map<String, ResidentLifeIndex> RESIDENT_LIFE_INDEXES = new HashMap<>();
+    private static final long RESIDENT_LIFE_INDEX_REFRESH_TICKS = 100L;
+
+    private static final class ResidentLifeIndex {
+        final int workerCount;
+        final long builtAtTick;
+        final boolean hasCompanion;
+        final boolean hasLeisure;
+        final Map<String, dev.worldforge.settle.Worker> byPerson;
+        final Map<Long, List<dev.worldforge.settle.Worker>> bySpatialCell;
+
+        ResidentLifeIndex(int workerCount, long builtAtTick, boolean hasCompanion, boolean hasLeisure,
+                          Map<String, dev.worldforge.settle.Worker> byPerson,
+                          Map<Long, List<dev.worldforge.settle.Worker>> bySpatialCell) {
+            this.workerCount = workerCount;
+            this.builtAtTick = builtAtTick;
+            this.hasCompanion = hasCompanion;
+            this.hasLeisure = hasLeisure;
+            this.byPerson = byPerson;
+            this.bySpatialCell = bySpatialCell;
+        }
+    }
+
+    private static long residentSpatialCell(double coordinate) {
+        return (long) Math.floor(coordinate / 32.0);
+    }
+
+    private static long residentSpatialKey(long x, long z) {
+        return (x << 32) ^ (z & 0xffffffffL);
+    }
+
+    private static ResidentLifeIndex residentLifeIndex(Colony colony, long serverTick) {
+        String id = colony.s.id;
+        List<dev.worldforge.settle.Worker> workers = colony.s.workers;
+        ResidentLifeIndex cached = RESIDENT_LIFE_INDEXES.get(id);
+        if (cached != null && cached.workerCount == workers.size()
+                && serverTick >= cached.builtAtTick
+                && serverTick - cached.builtAtTick < RESIDENT_LIFE_INDEX_REFRESH_TICKS) return cached;
+
+        Map<String, dev.worldforge.settle.Worker> byPerson = new HashMap<>();
+        Map<Long, List<dev.worldforge.settle.Worker>> byCell = new HashMap<>();
+        int eligible = 0;
+        for (dev.worldforge.settle.Worker worker : workers) {
+            if (worker.person == null || worker.person.isBlank()) continue;
+            eligible++;
+            byPerson.putIfAbsent(worker.person, worker);
+            long cellX = residentSpatialCell(worker.x), cellZ = residentSpatialCell(worker.z);
+            byCell.computeIfAbsent(residentSpatialKey(cellX, cellZ), ignored -> new ArrayList<>()).add(worker);
+        }
+        boolean hasLeisure = colony.s.buildings.stream().anyMatch(building ->
+                building.state == Building.State.DONE && !building.paused && building.def.category != null
+                        && (building.def.category.equalsIgnoreCase("leisure")
+                        || building.def.id.contains("tavern") || building.def.id.contains("inn")));
+        ResidentLifeIndex refreshed = new ResidentLifeIndex(workers.size(), serverTick, eligible > 1,
+                hasLeisure, byPerson, byCell);
+        RESIDENT_LIFE_INDEXES.put(id, refreshed);
+        return refreshed;
+    }
+
+    private static dev.worldforge.settle.Worker nearestResidentCompanion(
+            dev.worldforge.settle.Worker worker, ResidentLifeIndex index, CharacterRegistry registry) {
+        long cellX = residentSpatialCell(worker.x), cellZ = residentSpatialCell(worker.z);
+        double nearest = 32.0 * 32.0;
+        dev.worldforge.settle.Worker best = null;
+        for (long dx = -2; dx <= 2; dx++) for (long dz = -2; dz <= 2; dz++) {
+            List<dev.worldforge.settle.Worker> candidates =
+                    index.bySpatialCell.get(residentSpatialKey(cellX + dx, cellZ + dz));
+            if (candidates == null) continue;
+            for (dev.worldforge.settle.Worker other : candidates) {
+                if (other == worker || other.person == null || other.person.isBlank()) continue;
+                double offsetX = worker.x - other.x, offsetZ = worker.z - other.z;
+                double distance = offsetX * offsetX + offsetZ * offsetZ;
+                if (distance >= nearest) continue;
+                Character candidate = resolvePerson(registry, other.person);
+                if (candidate != null && candidate.alive) {
+                    nearest = distance;
+                    best = other;
+                }
+            }
+        }
+        return best;
+    }
+    /** Phase buckets avoid scanning the complete colony registry on every server tick. */
+    private static Map<Integer, List<Colony>> COLONY_SIMULATION_PHASES = Map.of();
+    private static long colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+    private static int colonySimulationIndexInterval = -1;
+    /** Static profession definitions are synchronized once per server lifecycle, not every tick. */
+    private static boolean professionsSynced;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
     private static volatile boolean logisticsPersistenceBlocked;
     private static long lastResidentAuditTick = Long.MIN_VALUE;
@@ -474,6 +625,21 @@ public class SettleMod {
                 .orElse(null);
     }
 
+    /**
+     * Finds a deterministic nearby founding position that preserves the 128-block spacing
+     * invariant without merging two independent population bands into one resident ledger.
+     */
+    public static int[] availableEmergentPosition(String dimension, int x, int z, int searchRadius) {
+        if (dimension == null || dimension.isBlank() || searchRadius < 0) return null;
+        List<long[]> occupied = COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && dimension.equals(colony.dim))
+                .filter(colony -> colony.s.population() > 0 || !colony.residentCharacterIds.isEmpty()
+                        || !colony.s.buildings.isEmpty() || !colony.s.workers.isEmpty())
+                .map(colony -> new long[]{colony.cx, colony.cz})
+                .toList();
+        return SettlementSpacing.findAvailablePosition(x, z, occupied, searchRadius);
+    }
+
     private record PersonBinding(CharacterRegistry registry, Character character) {}
 
     /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */
@@ -602,7 +768,7 @@ public class SettleMod {
                 Colony.Site physicalSite = colony.sites.get(building.uid);
                 if (physicalSite == null) continue; // A simulated building is not a recruitment facility until its world structure exists.
                 Blueprints.Plan plan = Blueprints.get(level, building.def);
-                if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
+                if (plan == null || !plan.valid() || physicalSite.placed < plan.blocks().size()) continue;
                 boolean staffed = colony.s.assigned(building.uid).stream()
                         .anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()));
                 if (!staffed) continue;
@@ -764,10 +930,8 @@ public class SettleMod {
                     .filter(other -> other != null && other.s != null && dim.equals(other.dim))
                     .filter(other -> other.s.population() > 0 || !other.residentCharacterIds.isEmpty()
                             || !other.s.buildings.isEmpty() || !other.s.workers.isEmpty())
-                    .filter(other -> {
-                        long dx = (long) other.cx - x, dz = (long) other.cz - z;
-                        return dx * dx + dz * dz < minimumDistanceSq;
-                    })
+                    .filter(other -> SettlementSpacing.conflicts(
+                            (long) other.cx - x, (long) other.cz - z))
                     .min(Comparator.comparingLong(other -> {
                         long dx = (long) other.cx - x, dz = (long) other.cz - z;
                         return dx * dx + dz * dz;
@@ -840,6 +1004,39 @@ public class SettleMod {
         return best;
     }
 
+    /** Selects a structure against the settlement's immutable identity before site search/placement. */
+    private static String identityStructure(Colony colony, String requested, long seed) {
+        if (colony == null || colony.s == null) return requested;
+        String selected = colony.s.defs.selectIdentityBuilding(requested, colony.identityRace, null,
+                colony.identityCulture, colony.governmentId, colony.settlementType,
+                colony.polityFormationId, colony.architectureStyleId, seed);
+        Defs.Building selectedDefinition = selected == null ? null : colony.s.defs.buildings.get(selected);
+        if (selectedDefinition != null && !STRUCTURE_CATALOG.recognizesStructure(selectedDefinition)) {
+            LOGGER.warn("wf_settle: building {} rejected: structure_class '{}' is absent from the active structure catalogue",
+                    selected, selectedDefinition.structureClass);
+            return "";
+        }
+        if (selected == null || selected.isBlank()) {
+            LOGGER.debug("wf_settle: no compatible structure candidate for {} (race={}, culture={}, government={}, type={})",
+                    requested, colony.identityRace, colony.identityCulture, colony.governmentId, colony.settlementType);
+            return "";
+        }
+        return selected;
+    }
+
+    private static boolean placeAutonomousIdentityBuilding(Colony colony, String requestId, String requested,
+                                                         int preferredX, int preferredZ, int radius,
+                                                         boolean preferFertile, boolean preferForest) {
+        if (colony == null || colony.s == null || colony.s.placement(requestId) != null) return false;
+        String candidate = identityStructure(colony, requested, requestId.hashCode());
+        if (candidate.isBlank()) return false;
+        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ, radius, preferFertile, preferForest);
+        if (site == null) return false;
+        int before = colony.s.count(candidate, false);
+        colony.s.placeOnce(requestId, candidate, site[0], site[1]);
+        return colony.s.count(candidate, false) > before;
+    }
+
     /**
      * Adds one residential building only when canonical demographic pressure, food security,
      * public approval and the shared stock ledger all support expansion. Pending houses are
@@ -868,12 +1065,8 @@ public class SettleMod {
                 {ring, -ring / 2}, {ring, ring / 2}, {ring / 2, ring},
                 {-ring / 2, ring}, {-ring, ring / 2}};
         int[] anchor = anchors[ordinal % anchors.length];
-        int[] site = findAutonomousBuildSite(colony, "house", anchor[0], anchor[1],
+        return placeAutonomousIdentityBuilding(colony, request, "house", anchor[0], anchor[1],
                 Math.max(36, ring + 20), false, false);
-        if (site == null) return false;
-        int before = settlement.count("house", false);
-        settlement.placeOnce(request, "house", site[0], site[1]);
-        return settlement.count("house", false) > before;
     }
 
     /**
@@ -916,12 +1109,8 @@ public class SettleMod {
         if (candidate == null) return false;
         String requestId = "wfworldgen.specialization." + candidate;
         if (settlement.placement(requestId) != null) return false;
-        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ,
+        return placeAutonomousIdentityBuilding(colony, requestId, candidate, preferredX, preferredZ,
                 64, false, preferForest);
-        if (site == null) return false;
-        int before = settlement.count(candidate, false);
-        settlement.placeOnce(requestId, candidate, site[0], site[1]);
-        return settlement.count(candidate, false) > before;
     }
 
     /** Connects every autonomous building to the civic hub using the existing A* road graph. */
@@ -1011,65 +1200,26 @@ public class SettleMod {
             boolean changed = false;
             // Establish the civic/storage spine first: dependent village facilities can
             // only be placed after the hall has a durable domain building record.
-            if (settlement.defs.buildings.containsKey("village_hall")
-                    && settlement.placement("wfworldgen.village-hall") == null) {
-                int[] site = findAutonomousBuildSite(colony, "village_hall", 0, 0, 20, false, false);
-                if (site != null) {
-                    int before = settlement.count("village_hall", false);
-                    settlement.placeOnce("wfworldgen.village-hall", "village_hall", site[0], site[1]);
-                    changed |= settlement.count("village_hall", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("village_granary")
-                    && settlement.placement("wfworldgen.village-granary") == null) {
-                int[] site = findAutonomousBuildSite(colony, "village_granary", 12, 8, 30, false, false);
-                if (site != null) {
-                    int before = settlement.count("village_granary", false);
-                    settlement.placeOnce("wfworldgen.village-granary", "village_granary", site[0], site[1]);
-                    changed |= settlement.count("village_granary", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("farm_district")
-                    && settlement.placement("wfworldgen.farm-district") == null) {
-                int[] site = findAutonomousBuildSite(colony, "farm_district", 30, 16, 44, true, false);
-                if (site != null) {
-                    int before = settlement.count("farm_district", false);
-                    settlement.placeOnce("wfworldgen.farm-district", "farm_district", site[0], site[1]);
-                    changed |= settlement.count("farm_district", false) > before;
-                }
-            }
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.village-hall", "village_hall",
+                    0, 0, 20, false, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.village-granary", "village_granary",
+                    12, 8, 30, false, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.farm-district", "farm_district",
+                    30, 16, 44, true, false);
             if (settlement.defs.buildings.containsKey("house")) {
                 for (int i = 0; i < households; i++) {
                     String request = "wfworldgen.house." + i;
                     if (settlement.placement(request) != null) continue;
-                    int[] site = findAutonomousBuildSite(colony, "house",
-                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
-                    if (site == null) continue;
                     if (!ensureFoundingStock(colony, "wood", 20, "house-stock-" + i,
                             TreasuryLedger.Kind.IMPORT, newlyPostedStock)) continue;
-                    int before = settlement.count("house", false);
-                    settlement.placeOnce(request, "house", site[0], site[1]);
-                    changed |= settlement.count("house", false) > before;
+                    changed |= placeAutonomousIdentityBuilding(colony, request, "house",
+                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
                 }
             }
-            if (settlement.defs.buildings.containsKey("farm")
-                    && settlement.placement("wfworldgen.farm") == null) {
-                int[] site = findAutonomousBuildSite(colony, "farm", 24, 0, 44, true, false);
-                if (site != null) {
-                    int before = settlement.count("farm", false);
-                    settlement.placeOnce("wfworldgen.farm", "farm", site[0], site[1]);
-                    changed |= settlement.count("farm", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("lumber_camp")
-                    && settlement.placement("wfworldgen.lumber") == null) {
-                int[] site = findAutonomousBuildSite(colony, "lumber_camp", -24, 0, 44, false, true);
-                if (site != null) {
-                    int before = settlement.count("lumber_camp", false);
-                    settlement.placeOnce("wfworldgen.lumber", "lumber_camp", site[0], site[1]);
-                    changed |= settlement.count("lumber_camp", false) > before;
-                }
-            }
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.farm", "farm",
+                    24, 0, 44, true, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.lumber", "lumber_camp",
+                    -24, 0, 44, false, true);
 
             // Demographic expansion uses canonical population and existing economy/housing definitions.
             changed |= ensureAutonomousHousingGrowth(colony);
@@ -1198,6 +1348,7 @@ public class SettleMod {
     static Defs loadDefs(MinecraftServer server) {
         Defs d = new Defs();
         dev.worldforge.settle.SettleTypes types = new dev.worldforge.settle.SettleTypes();
+        dev.worldforge.settle.StructureCatalog structureCatalog = dev.worldforge.settle.StructureCatalog.empty();
         java.util.List<String> raw = new java.util.ArrayList<>();
         var found = new java.util.TreeMap<ResourceLocation, Resource>(server.getResourceManager().listResources("wf_settle", rl -> rl.getPath().endsWith(".json")));
         for (Map.Entry<ResourceLocation, Resource> r : found.entrySet()) {
@@ -1205,6 +1356,10 @@ public class SettleMod {
                 String txt = new String(in.readAllBytes(), StandardCharsets.UTF_8);
                 d.add(txt);
                 try { types.load(txt); } catch (RuntimeException ex) { LOGGER.error("wf_settle: виды в {}: {}", r.getKey(), ex.toString()); }
+                if (r.getKey().getPath().endsWith("structure_catalog.json")) {
+                    try { structureCatalog = dev.worldforge.settle.StructureCatalog.load(txt); }
+                    catch (RuntimeException ex) { LOGGER.error("wf_settle: каталог структур {} не загружен: {}", r.getKey(), ex.toString()); }
+                }
                 raw.add(txt);
             } catch (Exception ex) {
                 LOGGER.error("wf_settle: ошибка в {}: {}", r.getKey(), ex.toString());
@@ -1214,9 +1369,13 @@ public class SettleMod {
         for (String line : SchemLibrary.loadAll(server, d, raw)) LOGGER.info("wf_settle: схема {}", line);
         DEFS_RAW = raw;
         for (String p : types.validate(d)) LOGGER.warn("wf_settle: {}", p);
+        for (String p : structureCatalog.validate(d)) LOGGER.warn("wf_settle: каталог структур: {}", p);
         TYPES = types;
+        STRUCTURE_CATALOG = structureCatalog;
         for (String p : d.validate()) LOGGER.warn("wf_settle: {}", p);
-        LOGGER.info("wf_settle: зданий {}, профессий {}", d.buildings.size(), d.professions.size());
+        LOGGER.info("wf_settle: зданий {}, профессий {}, видов поселений {}, классов структур {}, identity dimensions {}",
+                d.buildings.size(), d.professions.size(), types.types.size(),
+                structureCatalog.structureClasses().size(), structureCatalog.identityDimensions().size());
         return d;
     }
 
@@ -1293,6 +1452,14 @@ public class SettleMod {
     @SubscribeEvent
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
+        LAST_SIMULATED_WORLD_MINUTE.clear();
+        LIFE_AI_CURSORS.clear();
+        RESIDENT_LIFE_INDEXES.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
+        professionsSynced = false;
+        ColonyInterestIndex.clear();
         IMPORTED_BLUEPRINTS.clear();
         lastResidentAuditTick = Long.MIN_VALUE;
         REPORTED_RESIDENT_LINK_ERRORS.clear();
@@ -1300,19 +1467,32 @@ public class SettleMod {
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
         load(e.getServer());
+        // The shared clock is restored by ClockService on the same lifecycle event.
+        // Seed colony cursors on the first server tick, after every addon has loaded it.
     }
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
         if (DEFS != null) save(e.getServer());
         Bodies.LIVE.clear();
+        LAST_SIMULATED_WORLD_MINUTE.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
     }
 
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
         COLONIES.clear();
+        LAST_SIMULATED_WORLD_MINUTE.clear();
+        COLONY_SIMULATION_PHASES = Map.of();
+        colonySimulationIndexBuiltAt = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
+        ColonyInterestIndex.clear();
+        professionsSynced = false;
         IMPORTED_BLUEPRINTS.clear();
         DEFS = null;
+        STRUCTURE_CATALOG = dev.worldforge.settle.StructureCatalog.empty();
         Blueprints.clearCache();
     }
 
@@ -1523,20 +1703,39 @@ public class SettleMod {
         if (registry == null) return;
         Settlement settlement = colony.s;
         long worldMinute = settlement.worldMinute();
-        for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
+        List<dev.worldforge.settle.Worker> workers = settlement.workers;
+        int workerCount = workers.size();
+        if (workerCount == 0) {
+            dev.worldforge.settle.ResidentLifeEvents.advanceYearly(registry, settlement.year(), PeopleMod.NAMES,
+                    dev.worldforge.mod.MaqanPerformanceConfig.familyEventsResidentsPerTick(), ticks);
+            return;
+        }
+        ResidentLifeIndex residentIndex = residentLifeIndex(colony, ticks);
+        int previousCursor = LIFE_AI_CURSORS.getOrDefault(settlement.id, 0);
+        int batchLimit = settlement.raidIncoming
+                ? dev.worldforge.mod.MaqanPerformanceConfig.lifeAiUrgentResidentsPerPass()
+                : dev.worldforge.mod.MaqanPerformanceConfig.lifeAiResidentsPerPass();
+        ResidentLifeBatch.Window window = ResidentLifeBatch.next(workerCount, previousCursor, batchLimit);
+        LIFE_AI_CURSORS.put(settlement.id, window.nextCursor());
+        for (int offset = 0; offset < window.count(); offset++) {
+            dev.worldforge.settle.Worker worker = workers.get((window.start() + offset) % workerCount);
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
+            if (!settlement.raidIncoming && !(person.props.get("population.ai.pending_action") instanceof String)) {
+                Object nextThinkRaw = person.props.get("population.ai.next_think_minute");
+                if (nextThinkRaw instanceof Number nextThink && worldMinute < nextThink.longValue()) continue;
+            }
 
             // Explicit player/RTS orders always preempt autonomous life goals without granting their effects.
             if (worker.manualOrder || worker.manualFollow) {
                 LifeSimulation.cancelPending(person, "preempted-by-player-order");
-                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                 continue;
             }
             if ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) {
                 if (settlement.raidIncoming) continue;
-                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
             }
             if (!worker.lifeAction.isBlank()
                     && !("travelling".equals(worker.lifeActionStage) || "performing".equals(worker.lifeActionStage))) {
@@ -1547,7 +1746,7 @@ public class SettleMod {
                     || person.traits.contains("brave") || person.traits.contains("courageous")
                     || person.traits.contains("protective");
             if (worker.lifeAction.isBlank() && settlement.raidIncoming && brave) {
-                settlement.updateWorker(worker, current -> {
+                settlement.updateWorkerKnownMember(worker, current -> {
                     current.lifeAction = "defending";
                     current.lifeTargetX = 0; current.lifeTargetZ = 0;
                     current.lifeActionUntil = 1.0e12;
@@ -1556,10 +1755,8 @@ public class SettleMod {
                 continue;
             }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
-            boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
-                    && !b.paused && b.def.category != null
-                    && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
-            boolean hasCompanion = settlement.workers.stream().anyMatch(other -> other != worker);
+            boolean hasLeisure = residentIndex.hasLeisure;
+            boolean hasCompanion = residentIndex.hasCompanion;
             LifeSimulation.Context context = new LifeSimulation.Context(
                     worldMinute,
                     settlement.amount("food") >= 1.0,
@@ -1580,7 +1777,7 @@ public class SettleMod {
                     if (!LifeSimulation.matchesPhysicalAction(action, worker.lifeAction)) {
                         LOGGER.warn("wf_settle: cancelling mismatched life action for Character {} (AI={}, worker={})",
                                 character.globalId, action, worker.lifeAction);
-                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                        settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                         return LifeSimulation.Outcome.BLOCKED;
                     }
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
@@ -1588,28 +1785,26 @@ public class SettleMod {
                     // Settlement.eat(dt) is the authoritative ration ledger for every resident.
                     // Do not debit a second meal here; only ensure the stock has not collapsed to zero.
                     if (action == LifeSimulation.Action.EAT && settlement.amount("food") <= 0) {
-                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                        settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                         return LifeSimulation.Outcome.BLOCKED;
                     }
                     if (action == LifeSimulation.Action.SOCIALIZE) {
-                        dev.worldforge.settle.Worker companion = settlement.workers.stream()
-                                .filter(other -> other.person != null && other.person.equals(worker.lifeSocialTarget))
-                                .findFirst().orElse(null);
+                        dev.worldforge.settle.Worker companion = residentIndex.byPerson.get(worker.lifeSocialTarget);
                         Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
                         if (companion == null || companionPerson == null || !companionPerson.alive) {
-                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                            settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                             return LifeSimulation.Outcome.BLOCKED;
                         }
                         if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
                             double dx = worker.x - companion.x, dz = worker.z - companion.z;
                             if (dx * dx + dz * dz > 16.0) {
-                                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                                settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                                 return LifeSimulation.Outcome.BLOCKED;
                             }
                         }
                         Object tokenRaw = character.props.get("population.ai.pending_token");
                         if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
-                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                            settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                             return LifeSimulation.Outcome.BLOCKED;
                         }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
@@ -1619,9 +1814,9 @@ public class SettleMod {
                         // by PeopleMod's bounded registry checkpoint/shutdown save. Never serialize
                         // every world registry synchronously for each ordinary conversation:
                         // estate-transfer journals are reserved for actual ownership transactions.
-                        settlement.updateWorker(companion, current -> current.status = "общался: " + character.name);
+                        settlement.updateWorkerKnownMember(companion, current -> current.status = "общался: " + character.name);
                     }
-                    settlement.updateWorker(worker, current -> {
+                    settlement.updateWorkerKnownMember(worker, current -> {
                         clearLifeAction(current);
                         current.status = current.building == 0 ? "свободен" : "работает";
                     });
@@ -1633,7 +1828,7 @@ public class SettleMod {
                     case EAT -> {
                         if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        settlement.updateWorker(worker, current -> {
+                        settlement.updateWorkerKnownMember(worker, current -> {
                             beginLifeAction(current, "eating", meal[0], meal[1], 30, worldMinute, context.lod());
                             current.status = "идёт принимать пищу";
                         });
@@ -1641,7 +1836,7 @@ public class SettleMod {
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        settlement.updateWorker(worker, current -> {
+                        settlement.updateWorkerKnownMember(worker, current -> {
                             beginLifeAction(current, "sleeping", home[0], home[1], 8 * 60, worldMinute, context.lod());
                             current.status = "идёт отдыхать";
                         });
@@ -1650,7 +1845,7 @@ public class SettleMod {
                     case SEEK_SAFETY -> {
                         if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
                         double[] shelter = residentShelter(settlement, worker);
-                        settlement.updateWorker(worker, current -> {
+                        settlement.updateWorkerKnownMember(worker, current -> {
                             current.lifeAction = "fleeing";
                             current.lifeTargetX = shelter[0]; current.lifeTargetZ = shelter[1];
                             current.lifeActionUntil = 1.0e12;
@@ -1659,20 +1854,12 @@ public class SettleMod {
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SOCIALIZE -> {
-                        dev.worldforge.settle.Worker companion = null;
-                        double nearest = 32 * 32;
-                        for (dev.worldforge.settle.Worker other : settlement.workers) {
-                            if (other == worker || other.person == null || other.person.isBlank()) continue;
-                            double dx = worker.x - other.x, dz = worker.z - other.z;
-                            double distance = dx * dx + dz * dz;
-                            if (distance < nearest && resolvePerson(registry, other.person) != null) {
-                                nearest = distance; companion = other;
-                            }
-                        }
+                        dev.worldforge.settle.Worker companion =
+                                nearestResidentCompanion(worker, residentIndex, registry);
                         if (companion == null) return LifeSimulation.Outcome.BLOCKED;
                         String companionId = companion.person;
                         double companionX = companion.x, companionZ = companion.z;
-                        settlement.updateWorker(worker, current -> {
+                        settlement.updateWorkerKnownMember(worker, current -> {
                             current.lifeSocialTarget = companionId;
                             beginLifeAction(current, "socializing", companionX, companionZ, 3 * 60, worldMinute, context.lod());
                             current.status = "идёт на встречу";
@@ -1685,12 +1872,12 @@ public class SettleMod {
                     case TRAIN -> {
                         if (worker.generalist() || PopulationSimulation.trainingTarget(character).isBlank())
                             return LifeSimulation.Outcome.BLOCKED;
-                        settlement.updateWorker(worker, current -> current.status = "обучается");
+                        settlement.updateWorkerKnownMember(worker, current -> current.status = "обучается");
                         return LifeSimulation.Outcome.SUCCESS; // skill XP is granted once by LifeSimulation.applyEffects
                     }
                     case RECREATE -> {
                         if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
-                        settlement.updateWorker(worker, current -> current.status = "досуг");
+                        settlement.updateWorkerKnownMember(worker, current -> current.status = "досуг");
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case IDLE -> { return LifeSimulation.Outcome.SUCCESS; }
@@ -1698,7 +1885,8 @@ public class SettleMod {
                 return LifeSimulation.Outcome.BLOCKED;
             });
         }
-        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
+        dev.worldforge.settle.ResidentLifeEvents.advanceYearly(registry, settlement.year(), PeopleMod.NAMES,
+                    dev.worldforge.mod.MaqanPerformanceConfig.familyEventsResidentsPerTick(), ticks);
     }
 
     private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,
@@ -1959,40 +2147,105 @@ public class SettleMod {
         }
     }
 
+    /**
+     * Settlements owns the integration with resident life events because it depends on wf-people,
+     * while wf-people must not depend back on this addon. Work is split fairly across canonical
+     * partitions and remains bounded even when one partition contains most of the population.
+     */
+    private static void advanceCanonicalResidentLife() {
+        try {
+            LinkedHashSet<CharacterRegistry> unique = new LinkedHashSet<>();
+            unique.addAll(PeopleMod.registries().values());
+            unique.addAll(PeopleMod.dimensionRegistries().values());
+            unique.add(PeopleMod.worldRegistry());
+            unique.add(PeopleMod.playerRegistry());
+            List<CharacterRegistry> registries = new ArrayList<>(unique);
+            if (registries.isEmpty()) return;
+            int count = registries.size();
+            int start = Math.floorMod(lifeRegistryCursor++, count);
+            var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
+            long worldDay = clock.dayNumber();
+            int year = clock.year();
+            for (int i = 0; i < count; i++) {
+                int share = 128 / count + (i < 128 % count ? 1 : 0);
+                if (share <= 0) continue;
+                CharacterRegistry registry = registries.get((start + i) % count);
+                registry.processPendingBereavementBatch(share);
+                ResidentLifeEvents.advanceDuePregnanciesBatch(
+                        registry, year, worldDay, PeopleMod.NAMES, share);
+                ResidentLifeEvents.advanceHealthBatch(
+                        registry, worldDay, share);
+            }
+        } catch (LinkageError | RuntimeException error) {
+            LOGGER.error("wf_settle: canonical resident life pass failed: {}", error.toString(), error);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.END || DEFS == null) return;
+        if (e.phase != TickEvent.Phase.END) return;
+        advanceCanonicalResidentLife();
+        if (DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
-        syncCanonicalProfessions();
-        importWorldBlueprintSettlements(server);
         ticks++;
+        if (!professionsSynced) {
+            syncCanonicalProfessions();
+            professionsSynced = true;
+        }
+        // Blueprint packages are immutable during normal play; check for newly mounted maps
+        // on a coarse cadence instead of walking every ServerLevel on every server tick.
+        if (ticks % 100L == 1L) importWorldBlueprintSettlements(server);
+        int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
         if (ticks % 1200 == 0 && ticks != lastResidentAuditTick) {
             lastResidentAuditTick = ticks;
             validateCanonicalResidentLinks();
         }
-        if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
+        if (ticks % (simulationInterval * 10L) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
-        if (ticks % STEP_TICKS == 0) {
-            double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
-            for (Colony c : COLONIES.values()) {
-                if (speed <= 0) break;
-                try {
-                    c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
-                            dev.worldforge.mod.api.WorldForgeApi.clock().year());
-                    c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
-                    remitCrownTaxes(c);
-                    syncPeople(c, server);
-                    if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
-                        ensureAutonomousInfrastructure(server, c.s.id);
-                    runLifeAI(server, c);
-                    c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
-                } catch (RuntimeException ex) {
-                    LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
+        {
+            var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
+            long worldMinute = clock.worldMinute();
+            int worldYear = clock.year();
+            double speed = clock.multiplier();
+            refreshColonySimulationIndex(simulationInterval, ticks, worldMinute);
+            if (speed > 0) {
+                for (Colony c : coloniesDueForSimulation(ticks, simulationInterval)) {
+                    if (c == null || c.s == null || COLONIES.get(c.s.id) != c) continue;
+                    try {
+                        // Stable colony phases spread work across the interval. The shared calendar,
+                        // not wall ticks, preserves exact speed changes and prevents pause catch-up.
+                        long previousMinute = LAST_SIMULATED_WORLD_MINUTE.computeIfAbsent(c.s.id, ignored -> worldMinute);
+                        double elapsedSteps = ColonySimulationCadence.elapsedSteps(previousMinute, worldMinute);
+                        if (elapsedSteps <= 0) continue;
+                        c.s.setWorldCalendar(worldMinute, worldYear);
+                        c.s.tick(elapsedSteps);
+                        // Commit the cursor immediately after the authoritative settlement step:
+                        // optional follow-up failures must never replay this economic/life interval.
+                        LAST_SIMULATED_WORLD_MINUTE.put(c.s.id, worldMinute);
+                        remitCrownTaxes(c);
+                        syncPeople(c, server);
+                        if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
+                            ensureAutonomousInfrastructure(server, c.s.id);
+                        long colonyStep = ColonySimulationCadence.stepNumber(c.s.id, ticks, simulationInterval);
+                        if (c.s.raidIncoming || colonyStep
+                                % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
+                            runLifeAI(server, c);
+                        c.map.tick(c.s, speed); // strategic logistics remains independent of loaded chunks
+                        if (colonyStep % 10L == 0L) {
+                            c.s.types = TYPES;
+                            String rid = realmOf(c);
+                            c.s.refreshType(c.s.population(),
+                                    rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid),
+                                    rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid));
+                        }
+                    } catch (RuntimeException ex) {
+                        LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
+                    }
                 }
             }
-            try {
+            // The shared trade network remains a world-level transaction on its existing cadence.
+            if (ticks % simulationInterval == 0) try {
                 Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
                 for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
                 if (speed > 0) {
@@ -2026,7 +2279,7 @@ public class SettleMod {
                         }
                     }
                     SettlementCaravans.tick(server, NETWORK.shipments.values());
-                    if (ticks % (STEP_TICKS * 10) == 0) {
+                    if (ticks % (simulationInterval * 10L) == 0) {
                         Set<Integer> routeIds = new LinkedHashSet<>(NETWORK.routes.keySet());
                         int created = NETWORK.ensureAutonomousRoutes(all, 2, Math.max(1, all.size() / 3), 2.0);
                         if (created > 0) {
@@ -2047,7 +2300,10 @@ public class SettleMod {
             }
         }
         if (ticks % SITE_TICKS == 0) {
-            for (Colony c : COLONIES.values()) {
+            // Rebuild the spatial index every five seconds; each site pass then visits only
+            // settlements within the materialization radius of an actual player.
+            ColonyInterestIndex.refresh(COLONIES.values(), ticks);
+            for (Colony c : ColonyInterestIndex.nearby(server, SimulationLod.LOCAL_RADIUS)) {
                 ServerLevel lv = c.level(server);
                 if (lv == null) continue;
                 try {

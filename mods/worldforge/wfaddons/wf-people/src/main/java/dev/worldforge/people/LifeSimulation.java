@@ -91,7 +91,7 @@ public final class LifeSimulation {
             }
         }
         long next = number(character.props.get("population.ai.next_think_minute"), Long.MIN_VALUE);
-        if (now < next) return new Decision(Action.IDLE, Outcome.RETRY, 0, "thinking-cooldown", List.of(), next);
+        if (now < next && !context.urgentWorldEvent()) return new Decision(Action.IDLE, Outcome.RETRY, 0, "thinking-cooldown", List.of(), next);
 
         long interval = switch (context.lod()) {
             case ACTIVE -> 1;

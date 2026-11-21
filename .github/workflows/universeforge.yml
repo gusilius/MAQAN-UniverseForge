@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap, fix/worldgen-fragmented-polities-and-diverse-genesis]
+    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap, fix/worldgen-fragmented-polities-and-diverse-genesis, integration/worldgen-rts-unification]
     paths:
       - "mods/worldforge/**"
       - "map.png"
@@ -53,6 +53,12 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "Image generation dependencies failed" }
+
+      - name: Test deterministic procedural continents and hydrology
+        shell: pwsh
+        run: |
+          python -m unittest discover -s mods/worldforge/wfaddons/tools/image-worldgen -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Image-worldgen geography tests failed" }
 
       - uses: dtolnay/rust-toolchain@stable
         with:

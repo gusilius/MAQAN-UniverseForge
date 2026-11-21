@@ -8,12 +8,13 @@ pub mod jni;
 pub mod worldgen;
 pub mod emergence;
 pub mod population;
+pub mod population_social;
 pub mod army;
 pub mod strategic_army;
 pub mod troops;
 pub mod trade;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub type Day = u64;
 pub type Fixed = i64;
@@ -178,7 +179,17 @@ pub struct GeographicCell {
     /// Image-map cells default to year zero; vanilla chunks persist their discovery year.
     #[serde(default)]
     pub discovered_year: u64,
+    /// Profile-authored wilderness is land but is not an initial settlement site.
+    #[serde(default)]
+    pub wilderness: bool,
+    /// Exact terrain-derived settlement anchor from world-blueprint.json.
+    #[serde(default)]
+    pub founding_site: bool,
 }
+
+fn default_settlement_level() -> u8 { 4 }
+fn default_population_density_pct() -> u8 { 38 }
+fn default_wilderness_share_pct() -> u8 { 0 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeographicMap {
@@ -188,6 +199,13 @@ pub struct GeographicMap {
     pub blocks_per_pixel_milli: u64,
     pub political_layers_present: bool,
     pub sample_stride: u32,
+    /// Seven-level occupancy profile. These fields never cap world/state/province counts.
+    #[serde(default = "default_settlement_level")]
+    pub settlement_level: u8,
+    #[serde(default = "default_population_density_pct")]
+    pub population_density_pct: u8,
+    #[serde(default = "default_wilderness_share_pct")]
+    pub wilderness_share_pct: u8,
     pub cells: Vec<GeographicCell>,
 }
 
@@ -577,24 +595,6 @@ fn scoped_reputation(snapshot: &WorldSnapshot, character_id: &str, realm_id: &st
         .and_then(serde_json::Value::as_i64).unwrap_or(0)
 }
 
-fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
-    let mut total = 0_i64;
-    for entry in snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_court" && entry.catalog_id == "court_states") {
-        let world_year = entry.payload.get("world_year").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        if let Some(modifiers) = entry.payload.get("mods").and_then(serde_json::Value::as_array) {
-            for modifier in modifiers {
-                let Some(values) = modifier.as_array() else { continue; };
-                if values.len() < 5 || values[0].as_str() != Some(first)
-                    || values[1].as_str() != Some(second)
-                    || values[4].as_u64().unwrap_or(0) < world_year { continue; }
-                total += values[3].as_i64().unwrap_or(0);
-            }
-        }
-    }
-    total
-}
-
 fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
     let mut pressure = 0_i64;
     for entry in snapshot.catalog_entries.iter().filter(|entry|
@@ -710,24 +710,16 @@ fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool 
             && relation.treaties.iter().any(|value| value == treaty))
 }
 
-fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
-    let instance = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "settlement_instances" && entry.entry_id == settlement_id);
-    let Some(instance_payload) = instance.map(|entry| &entry.payload) else { return true; };
-    let type_id = instance_payload.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
-    let definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "settlement_types" && entry.entry_id == type_id);
-    let building_definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "buildings" && entry.entry_id == building);
-    let has_building_catalog = snapshot.catalog_entries.iter().any(|entry|
-        entry.module_id == "wf_settle" && entry.catalog_id == "buildings");
-    let Some(building_payload) = building_definition.map(|entry| &entry.payload) else {
-        return !has_building_catalog;
-    };
-    if let Some(payload) = definition.map(|entry| &entry.payload) {
+fn settlement_allows_building_from_payloads(
+    instance_payload: Option<&serde_json::Value>,
+    definition_payload: Option<&serde_json::Value>,
+    building_payload: Option<&serde_json::Value>,
+    has_building_catalog: bool,
+    building: &str,
+) -> bool {
+    let Some(instance_payload) = instance_payload else { return true; };
+    let Some(building_payload) = building_payload else { return !has_building_catalog; };
+    if let Some(payload) = definition_payload {
         let banned = payload.get("ban_buildings").or_else(|| payload.get("banBuildings")).or_else(|| payload.get("ban"))
             .and_then(serde_json::Value::as_array);
         if banned.map(|values| values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false) {
@@ -774,6 +766,21 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
         }
     }
     true
+}
+
+fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
+    let instance_payload = catalog_entry(snapshot, "wf_settle", "settlement_instances", settlement_id)
+        .map(|entry| &entry.payload);
+    let Some(instance) = instance_payload else { return true; };
+    let type_id = instance.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
+    let definition_payload = catalog_entry(snapshot, "wf_settle", "settlement_types", type_id)
+        .map(|entry| &entry.payload);
+    let building_payload = catalog_entry(snapshot, "wf_settle", "buildings", building)
+        .map(|entry| &entry.payload);
+    let has_building_catalog = snapshot.catalog_entries.iter()
+        .any(|entry| entry.module_id == "wf_settle" && entry.catalog_id == "buildings");
+    settlement_allows_building_from_payloads(
+        Some(instance), definition_payload, building_payload, has_building_catalog, building)
 }
 
 fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &str) -> Option<(String, u32)> {
@@ -873,32 +880,6 @@ fn effective_army_power(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64>
 }
 
 
-fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &Character>) -> u32 {
-    fn ancestors(person: &Character, characters: &BTreeMap<&str, &Character>) -> BTreeMap<String, u32> {
-        let mut result = BTreeMap::new();
-        let mut queue = std::collections::VecDeque::new();
-        result.insert(person.id.clone(), 0);
-        for parent in [&person.father_id, &person.mother_id] {
-            if !parent.is_empty() { queue.push_back((parent.clone(), 1_u32)); }
-        }
-        while let Some((id, distance)) = queue.pop_front() {
-            if distance > 6 || result.contains_key(&id) { continue; }
-            result.insert(id.clone(), distance);
-            if let Some(parent) = characters.get(id.as_str()) {
-                for ancestor in [&parent.father_id, &parent.mother_id] {
-                    if !ancestor.is_empty() { queue.push_back((ancestor.clone(), distance + 1)); }
-                }
-            }
-        }
-        result
-    }
-    let first = ancestors(a, characters);
-    let second = ancestors(b, characters);
-    first.iter().filter_map(|(id, distance)| second.get(id).map(|other| *distance + *other))
-        .min().unwrap_or(u32::MAX)
-}
-
-
 fn resource_category<'a>(snapshot: &'a WorldSnapshot, resource: &str) -> &'a str {
     let food_kinds = catalog_entry(snapshot, "wf_settle", "food_kinds", "all_food_kinds")
         .and_then(|entry| entry.payload.as_array());
@@ -919,9 +900,20 @@ fn resource_category<'a>(snapshot: &'a WorldSnapshot, resource: &str) -> &'a str
 fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, threatened: bool)
     -> Option<(String, i32, String)> {
     let mut candidates = Vec::new();
-    for entry in snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
-        if !settlement_allows_building(snapshot, &settlement.id, &entry.entry_id) { continue; }
+    // Resolve the settlement instance/type once. The previous per-building helper
+    // rescanned the full catalog several times for every candidate building.
+    let instance_payload = catalog_entry(snapshot, "wf_settle", "settlement_instances", &settlement.id)
+        .map(|entry| &entry.payload);
+    let definition_payload = instance_payload.and_then(|instance| {
+        let type_id = instance.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
+        catalog_entry(snapshot, "wf_settle", "settlement_types", type_id).map(|entry| &entry.payload)
+    });
+    let building_entries = snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings").collect::<Vec<_>>();
+    let has_building_catalog = !building_entries.is_empty();
+    for entry in building_entries {
+        if !settlement_allows_building_from_payloads(
+            instance_payload, definition_payload, Some(&entry.payload), has_building_catalog, &entry.entry_id) { continue; }
         let payload = &entry.payload;
         let category = payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
         let housing = payload.get("housing").and_then(serde_json::Value::as_i64).unwrap_or(0);
@@ -976,14 +968,11 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 }
 
 
-fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
-    // A job can be applied only when the canonical People profession exists and
-    // the settlement domain also declares it as a valid Worker assignment.
-    catalog_entry(snapshot, "wf_people", "professions", id).is_some()
-        && catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
-}
-
-fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
+fn choose_profession_for_output(
+    snapshot: &WorldSnapshot,
+    resource: &str,
+    registered_professions: &BTreeSet<&str>,
+) -> Option<String> {
     let mut choices = Vec::new();
     for building in snapshot.catalog_entries.iter().filter(|entry|
         entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
@@ -1007,7 +996,7 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
         if let Some(jobs) = jobs {
             for (profession, slots) in jobs {
                 let capacity = slots.as_f64().unwrap_or(0.0);
-                if capacity <= 0.0 || !registered_profession(snapshot, profession) { continue; }
+                if capacity <= 0.0 || !registered_professions.contains(profession.as_str()) { continue; }
                 let work = building.payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
                 choices.push((profession.clone(), output / (capacity * work)));
             }
@@ -1017,13 +1006,13 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
     choices.into_iter().next().map(|(profession, _)| profession)
 }
 
-fn choose_builder_profession(snapshot: &WorldSnapshot) -> Option<String> {
+fn choose_builder_profession(snapshot: &WorldSnapshot, registered_professions: &BTreeSet<&str>) -> Option<String> {
     let mut candidates = Vec::new();
     for entry in snapshot.catalog_entries.iter().filter(|entry|
         (entry.module_id == "wf_people" && entry.catalog_id == "professions")
             || (entry.module_id == "wf_settle" && entry.catalog_id == "building_professions")) {
         let id = entry.entry_id.as_str();
-        if !registered_profession(snapshot, id) { continue; }
+        if !registered_professions.contains(id) { continue; }
         let name = entry.payload.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
         let group = entry.payload.get("group").and_then(serde_json::Value::as_str).unwrap_or("");
         let id_match = id.to_ascii_lowercase().contains("builder")
@@ -1050,7 +1039,7 @@ impl WorldSnapshot {
             if !map_ids.insert(map.map_id.as_str()) {
                 return Err(SimError::InvalidSnapshot(format!("duplicate-geographic-map:{}", map.map_id)));
             }
-            let mut cells = BTreeSet::new();
+            let mut cells = HashSet::with_capacity(map.cells.len());
             for cell in &map.cells {
                 if cell.x >= map.width_px || cell.z >= map.height_px || cell.biome.trim().is_empty()
                     || cell.suitability > 100 || !cells.insert((cell.x, cell.z)) {
@@ -1363,37 +1352,111 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         .filter(|border| border.contested_claim)
         .flat_map(|border| [border.a.as_str(), border.b.as_str()])
         .collect();
+
+    // Build frequently queried political projections once per immutable snapshot.
+    // The old border loop repeatedly scanned every war, campaign, intrigue plot,
+    // diplomatic relation and vassal contract for each directed border.
+    let mut intrigue_pressure_by_realm: BTreeMap<&str, i64> = BTreeMap::new();
+    let mut active_campaign_realms: BTreeSet<&str> = BTreeSet::new();
+    for entry in &snapshot.catalog_entries {
+        if entry.module_id == "wf_realms" && entry.catalog_id == "intrigue_plots"
+            && matches!(entry.payload.get("status").and_then(serde_json::Value::as_str),
+                Some("GATHERING" | "ACTIVE")) {
+            if let Some(realm_id) = entry.payload.get("realm_id").and_then(serde_json::Value::as_str) {
+                let progress = entry.payload.get("progress").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                let backers = entry.payload.get("backers").and_then(serde_json::Value::as_array)
+                    .map(Vec::len).unwrap_or(0);
+                *intrigue_pressure_by_realm.entry(realm_id).or_default() +=
+                    (progress / 20.0).round() as i64 + backers.min(10) as i64;
+            }
+        }
+        if entry.module_id == "wf_war" && entry.catalog_id == "war_instances"
+            && entry.payload.get("active").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            for field in ["attacker", "defender", "attacker_members", "defender_members"] {
+                if let Some(value) = entry.payload.get(field) {
+                    if let Some(id) = value.as_str() {
+                        active_campaign_realms.insert(id);
+                    } else if let Some(members) = value.as_array() {
+                        active_campaign_realms.extend(members.iter().filter_map(serde_json::Value::as_str));
+                    }
+                }
+            }
+        }
+    }
+    let mut active_war_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for war in snapshot.wars.iter().filter(|war| war.status == "ACTIVE") {
+        let (a, b) = if war.attacker_realm <= war.defender_realm {
+            (war.attacker_realm.as_str(), war.defender_realm.as_str())
+        } else {
+            (war.defender_realm.as_str(), war.attacker_realm.as_str())
+        };
+        active_war_pairs.insert((a, b));
+    }
+    let mut diplomatic_by_pair = BTreeMap::new();
+    let mut blocked_diplomatic_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    let mut trade_pact_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for relation in &snapshot.diplomatic_relations {
+        let (a, b) = if relation.realm_a <= relation.realm_b {
+            (relation.realm_a.as_str(), relation.realm_b.as_str())
+        } else {
+            (relation.realm_b.as_str(), relation.realm_a.as_str())
+        };
+        // Preserve the old first-match opinion semantics while aggregating treaty
+        // and truce flags across every relation row for this pair.
+        diplomatic_by_pair.entry((a, b)).or_insert(relation);
+        if relation.truce_until_day > snapshot.day || relation.treaties.iter().any(|treaty|
+            matches!(treaty.as_str(), "NON_AGGRESSION" | "ALLIANCE" | "DEFENSIVE_PACT"
+                | "FEUDAL_VASSAL" | "TRIBUTARY" | "PROTECTORATE" | "OCCUPIED"
+                | "PERSONAL_UNION" | "CONFEDERATION_MEMBER")) {
+            blocked_diplomatic_pairs.insert((a, b));
+        }
+        if relation.treaties.iter().any(|treaty| treaty == "TRADE_PACT") {
+            trade_pact_pairs.insert((a, b));
+        }
+    }
+    let mut vassal_by_realm = BTreeMap::new();
+    let mut subject_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for contract in &snapshot.vassal_contracts {
+        vassal_by_realm.insert(contract.vassal_realm.as_str(), contract.loyalty);
+        let (a, b) = if contract.liege_realm <= contract.vassal_realm {
+            (contract.liege_realm.as_str(), contract.vassal_realm.as_str())
+        } else {
+            (contract.vassal_realm.as_str(), contract.liege_realm.as_str())
+        };
+        subject_pairs.insert((a, b));
+    }
     for border in &borders {
         let a = realms[border.a.as_str()];
         let b = realms[border.b.as_str()];
         for (attacker, defender) in [(a, b), (b, a)] {
             let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
-            let intrigue_penalty = realm_intrigue_pressure(snapshot, &attacker.id);
+            let intrigue_penalty = intrigue_pressure_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0);
             let court_penalty = court_instability_pressure(snapshot, &attacker.id);
+            let pair = (
+                std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                std::cmp::max(attacker.id.as_str(), defender.id.as_str()));
             let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
-                + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
+                + if trade_pact_pairs.contains(&pair) { 12 } else { 0 }
                 + market_fragility_penalty(snapshot, &attacker.id);
             if attacker.at_war || defender.at_war
-                || realm_in_active_campaign(snapshot, &attacker.id) || realm_in_active_campaign(snapshot, &defender.id)
+                || active_campaign_realms.contains(attacker.id.as_str())
+                || active_campaign_realms.contains(defender.id.as_str())
                 || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
-                || blocks_autonomous_war(snapshot, &attacker.id, &defender.id)
-                || snapshot.wars.iter().any(|war| war.status == "ACTIVE"
-                    && ((war.attacker_realm == attacker.id && war.defender_realm == defender.id)
-                        || (war.attacker_realm == defender.id && war.defender_realm == attacker.id))) { continue; }
+                || blocked_diplomatic_pairs.contains(&pair)
+                || subject_pairs.contains(&pair)
+                || active_war_pairs.contains(&(
+                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                    std::cmp::max(attacker.id.as_str(), defender.id.as_str()))) { continue; }
             let attacker_power = actual_army_power.get(attacker.id.as_str()).copied()
                 .unwrap_or(attacker.army_strength as f64);
             let defender_power = actual_army_power.get(defender.id.as_str()).copied()
                 .unwrap_or(defender.army_strength as f64);
             let power = if defender_power <= 0.0 { if attacker_power > 0.0 { 100 } else { 50 } }
                 else { ((attacker_power * 100.0 / defender_power).round() as i64).clamp(0, 200) as i32 };
-            let diplomatic_opinion = snapshot.diplomatic_relations.iter()
-                .find(|relation| (relation.realm_a == attacker.id && relation.realm_b == defender.id)
-                    || (relation.realm_a == defender.id && relation.realm_b == attacker.id))
-                .map(|relation| relation.opinion).unwrap_or(0);
-            let subject_penalty = snapshot.vassal_contracts.iter()
-                .find(|contract| contract.vassal_realm == attacker.id)
-                .map(|contract| (100 - contract.loyalty) / 4).unwrap_or(0);
+            let diplomatic_opinion = diplomatic_by_pair.get(&pair).map(|relation| relation.opinion).unwrap_or(0);
+            let subject_penalty = vassal_by_realm.get(attacker.id.as_str())
+                .map(|loyalty| (100 - loyalty) / 4).unwrap_or(0);
             let government_modifier = ["war_score", "military", "warfare", "expansion"]
                 .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
                 .sum::<f64>().round() as i64;
@@ -1455,6 +1518,22 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
 
     // Workforce AI: only reallocates unemployed workers, and never removes
     // workers from food production while food is below the safety reserve.
+    // Profession selection depends only on immutable definitions, not on an individual
+    // workforce row. Build the canonical intersection and choose each production role
+    // once; the former code repeated full catalog scans for every unemployed worker.
+    let people_professions: BTreeSet<&str> = snapshot.catalog_entries.iter()
+        .filter(|entry| entry.module_id == "wf_people" && entry.catalog_id == "professions")
+        .map(|entry| entry.entry_id.as_str()).collect();
+    let settlement_professions: BTreeSet<&str> = snapshot.catalog_entries.iter()
+        .filter(|entry| entry.module_id == "wf_settle" && entry.catalog_id == "building_professions")
+        .map(|entry| entry.entry_id.as_str()).collect();
+    let registered_professions = people_professions.intersection(&settlement_professions)
+        .copied().collect::<BTreeSet<_>>();
+    let food_profession = choose_profession_for_output(snapshot, "food", &registered_professions);
+    let wood_profession = choose_profession_for_output(snapshot, "wood", &registered_professions);
+    let stone_profession = choose_profession_for_output(snapshot, "stone", &registered_professions);
+    let builder_profession = choose_builder_profession(snapshot, &registered_professions);
+
     let mut workforce = snapshot.workforce.iter().collect::<Vec<_>>();
     workforce.sort_by(|a, b| a.settlement_id.cmp(&b.settlement_id));
     for w in workforce {
@@ -1464,13 +1543,13 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         };
         if w.unemployed == 0 { continue; }
         let target = if w.food_output < w.food_need {
-                choose_profession_for_output(snapshot, "food").map(|to| (to, w.food_need - w.food_output))
+                food_profession.clone().map(|to| (to, w.food_need - w.food_output))
             } else if w.wood_output < w.wood_need {
-                choose_profession_for_output(snapshot, "wood").map(|to| (to, w.wood_need - w.wood_output))
+                wood_profession.clone().map(|to| (to, w.wood_need - w.wood_output))
             } else if w.stone_output < w.stone_need {
-                choose_profession_for_output(snapshot, "stone").map(|to| (to, w.stone_need - w.stone_output))
+                stone_profession.clone().map(|to| (to, w.stone_need - w.stone_output))
             } else if s.housing_used < s.housing && s.population > 10 && w.builders == 0 {
-                choose_builder_profession(snapshot).map(|to| (to, 1))
+                builder_profession.clone().map(|to| (to, 1))
             } else { None };
         if let Some((to, deficit)) = target {
             proposals.push(Proposal {
@@ -1501,51 +1580,6 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                         realm: r.id.clone(), settlement: s.id.clone(), unit_role, count,
                         reason: "contested frontier; selected from registered levy/recruitment catalogs, staffed building, manpower and treasury".into(),
                     },
-                });
-            }
-        }
-    }
-
-    // Marriage AI: candidates are ranked by cross-realm benefit, not hard-coded pairings.
-    let mut eligible = snapshot.characters.iter().filter(|c| c.alive && !c.married && c.age >= 18 && c.age <= 70).collect::<Vec<_>>();
-    eligible.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut used = BTreeSet::new();
-    for a in &eligible {
-        if used.contains(a.id.as_str()) { continue; }
-        let mut best: Option<(&Character, i32, i32)> = None;
-        for b in &eligible {
-            if a.id == b.id || a.realm_id.is_empty() || b.realm_id.is_empty() || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
-            let Some(social) = snapshot.social_relations.iter().find(|relation|
-                (relation.character_a == a.id && relation.character_b == b.id)
-                    || (relation.character_a == b.id && relation.character_b == a.id)) else { continue; };
-            let kinship = kinship_distance(a, b, &characters);
-            if kinship <= 2 || social.married || social.relationship < 35 || social.love < 20 { continue; }
-            let social_bonus = social.relationship / 5 + social.love / 10;
-            let kinship_penalty = if (3..=5).contains(&kinship) { 10 } else { 0 };
-            let dynastic_policy = (realm_policy_modifier(snapshot, &a.realm_id, "marriage")
-                + realm_policy_modifier(snapshot, &b.realm_id, "marriage")
-                + realm_policy_modifier(snapshot, &a.realm_id, "diplomacy")
-                + realm_policy_modifier(snapshot, &b.realm_id, "diplomacy")).round() as i64;
-            let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
-                + ((a.prestige + b.prestige) / 8) as i64
-                + if a.house_id != b.house_id { 10 } else { 0 }
-                + social_bonus as i64 + dynastic_policy + court_opinion_modifier(snapshot, &a.id, &b.id)
-                + scoped_reputation(snapshot, &a.id, &a.realm_id) / 10
-                + scoped_reputation(snapshot, &b.id, &b.realm_id) / 10
-                + origin_modifier(snapshot, a, "marriage").round() as i64
-                + origin_modifier(snapshot, b, "marriage").round() as i64
-                - kinship_penalty as i64
-                - (a.age as i32 - b.age as i32).abs() as i64);
-            if score >= 35 && best.map(|(_, current, _)| score > current).unwrap_or(true) { best = Some((b, score, social_bonus)); }
-        }
-        if let Some((b, score, social_bonus)) = best {
-            let roll = stable_hash(snapshot.seed, "marriage", &a.id, &b.id, snapshot.day) % 100;
-            if roll < (score - 20).clamp(0, 70) as u64 {
-                used.insert(a.id.as_str()); used.insert(b.id.as_str());
-                proposals.push(Proposal {
-                    id: proposal_id(snapshot.seed, snapshot.day, "marriage", &a.id, &b.id),
-                    day: snapshot.day,
-                    kind: ProposalKind::DynasticMarriage { first: a.id.clone(), second: b.id.clone(), score, reason: format!("cross-realm dynastic compatibility; social bond contribution={}", social_bonus) },
                 });
             }
         }
@@ -1830,8 +1864,9 @@ mod tests {
             "a realm without contested borders must not recruit from this rule");
     }
 
-    #[test] fn marriage_requires_two_distinct_realms() {
-        let mut s=base(); s.seed=0; s.characters=vec![
+    #[test] fn dynastic_marriage_is_owned_by_court_simulation_not_worldsim() {
+        let mut s=base();
+        s.characters=vec![
             Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into(),..Default::default()},
             Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into(),..Default::default()}
         ];
@@ -1839,7 +1874,9 @@ mod tests {
             character_a: "a".into(), character_b: "b".into(), relationship: 75, love: 65,
             married: false, dating: true, employed: false, last_contact_day: s.day,
         });
-        assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DynasticMarriage{..})));
+        assert!(!decide(&s).unwrap().proposals.iter()
+            .any(|proposal| matches!(proposal.kind, ProposalKind::DynasticMarriage { .. })),
+            "wf-court already owns autonomous marriage evaluation and application");
     }
     #[test]
     fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
@@ -1849,11 +1886,12 @@ mod tests {
             geography: vec![GeographicMap {
                 map_id: "planetos".into(), width_px: 128, height_px: 96,
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
+            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0 },
+                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0 },
+                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                 ],
             }],
         };

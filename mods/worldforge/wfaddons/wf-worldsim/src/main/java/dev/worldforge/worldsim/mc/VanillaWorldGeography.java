@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -56,8 +57,19 @@ public final class VanillaWorldGeography {
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING = new TreeMap<>();
     private static final Set<String> PENDING_KEYS = new HashSet<>();
     private static final int MAX_CAPTURE_CHUNKS_PER_TICK = 8;
+    /** Bound first-time snapshot projection work; a million-cell map is never copied in one tick. */
+    private static final int MAX_SNAPSHOT_REGIONS_PER_TICK = 8;
     private static boolean loaded;
     private static boolean dirty;
+    /** Immutable-by-convention projection reused until an authoritative geography mutation. */
+    private static JsonArray cachedSnapshot;
+    private static SnapshotBuild snapshotBuild;
+
+    private static final class SnapshotBuild {
+        final Iterator<Region> regions = REGIONS.values().iterator();
+        final Map<String, JsonObject> maps = new TreeMap<>();
+        final Map<String, Boolean> political = new TreeMap<>();
+    }
     private static long lastPersistGameTime = Long.MIN_VALUE;
     private static MinecraftServer activeServer;
 
@@ -192,7 +204,7 @@ public final class VanillaWorldGeography {
                 }
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
     }
 
     private static JsonObject sample(ServerLevel level, ChunkAccess chunk,
@@ -368,7 +380,7 @@ public final class VanillaWorldGeography {
                 if (!owner.isBlank()) owned++;
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
         return owned;
     }
 
@@ -425,6 +437,8 @@ public final class VanillaWorldGeography {
             cell.addProperty("ownership_event_cause", cause.name().toLowerCase(java.util.Locale.ROOT));
         }
         dirty = true;
+        cachedSnapshot = null;
+        snapshotBuild = null;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null)
             throw new IllegalStateException("Cannot durably commit political transfer without an active server");
@@ -439,45 +453,81 @@ public final class VanillaWorldGeography {
         return cell == null || !cell.has("biome") ? "" : cell.get("biome").getAsString();
     }
 
-    public static synchronized JsonArray snapshot() {
-        JsonArray result = new JsonArray();
-        for (String mapId : simulationMapIds()) {
-            String dimension = dimensionFromMapId(mapId);
-            WorldBounds world = bounds(dimension);
-            if (world == null) continue;
-            JsonObject map = new JsonObject();
-            map.addProperty("map_id", mapId);
-            // Stable coordinates across all discoveries in this dimension. The current
-            // observed bounds are deliberately not used as an origin, because they grow
-            // when the player explores into a new region.
-            map.addProperty("width_px", WORLD_COORDINATE_EXTENT);
-            map.addProperty("height_px", WORLD_COORDINATE_EXTENT);
-            map.addProperty("blocks_per_pixel_milli", 1000);
-            map.addProperty("sample_stride", SAMPLE_STEP);
-            JsonArray cells = new JsonArray();
-            boolean political = false;
-            for (Region region : REGIONS.values()) {
-                RegionAddress address = regionAddress(region.id);
-                if (address == null || !dimension.equals(address.dimension)) continue;
-                for (JsonObject original : region.cells.values()) {
-                    JsonObject cell = original.deepCopy();
-                    cell.addProperty("x", WORLD_COORDINATE_OFFSET + address.x * REGION_BLOCKS + original.get("x").getAsInt());
-                    cell.addProperty("z", WORLD_COORDINATE_OFFSET + address.z * REGION_BLOCKS + original.get("z").getAsInt());
-                    if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank()) political = true;
-                    cells.add(cell);
-                }
+    /**
+     * Returns a read-only cached projection. Callers must not mutate the returned JsonArray
+     * or its children; it is invalidated only when captured terrain or sovereignty changes.
+     * This prevents a full deep-copy of every persisted cell on every WorldSim cycle.
+     */
+    /**
+     * Advances the immutable geography projection by a bounded number of regions.
+     * Returns false while more regions remain; callers must not submit a partial snapshot.
+     */
+    public static synchronized boolean prepareSnapshotBatch() {
+        if (cachedSnapshot != null) return true;
+        if (snapshotBuild == null) snapshotBuild = new SnapshotBuild();
+        SnapshotBuild build = snapshotBuild;
+        int processed = 0;
+        while (processed < MAX_SNAPSHOT_REGIONS_PER_TICK && build.regions.hasNext()) {
+            Region region = build.regions.next();
+            RegionAddress address = regionAddress(region.id);
+            if (address == null || region.cells.isEmpty() || isImageMapDimension(address.dimension())) {
+                processed++;
+                continue;
             }
-            map.addProperty("political_layers_present", political);
-            map.add("cells", cells);
-            result.add(map);
+            String mapId = "vanilla-world:" + address.dimension();
+            JsonObject map = build.maps.computeIfAbsent(mapId, id -> {
+                JsonObject value = new JsonObject();
+                value.addProperty("map_id", id);
+                value.addProperty("width_px", WORLD_COORDINATE_EXTENT);
+                value.addProperty("height_px", WORLD_COORDINATE_EXTENT);
+                value.addProperty("blocks_per_pixel_milli", 1000);
+                value.addProperty("sample_stride", SAMPLE_STEP);
+                value.add("cells", new JsonArray());
+                return value;
+            });
+            JsonArray cells = map.getAsJsonArray("cells");
+            boolean political = build.political.getOrDefault(mapId, false);
+            for (JsonObject original : region.cells.values()) {
+                JsonObject cell = original.deepCopy();
+                cell.addProperty("x", WORLD_COORDINATE_OFFSET
+                        + address.x * REGION_BLOCKS + original.get("x").getAsInt());
+                cell.addProperty("z", WORLD_COORDINATE_OFFSET
+                        + address.z * REGION_BLOCKS + original.get("z").getAsInt());
+                if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank())
+                    political = true;
+                cells.add(cell);
+            }
+            build.political.put(mapId, political);
+            processed++;
         }
-        return result;
+        if (build.regions.hasNext()) return false;
+
+        JsonArray result = new JsonArray();
+        for (var entry : build.maps.entrySet()) {
+            entry.getValue().addProperty("political_layers_present",
+                    build.political.getOrDefault(entry.getKey(), false));
+            result.add(entry.getValue());
+        }
+        cachedSnapshot = result;
+        snapshotBuild = null;
+        return true;
     }
+
+    /**
+     * Returns only a fully completed projection. Reading the cache never advances a build:
+     * diagnostics and other observers must not perform hidden work or block authoritative apply.
+     */
+    public static synchronized JsonArray snapshot() {
+        return cachedSnapshot;
+    }
+
 
     public static synchronized void load(MinecraftServer server) {
         if (server == null) return;
         if (activeServer != server) {
             REGIONS.clear();
+            cachedSnapshot = null;
+            snapshotBuild = null;
             PENDING.clear(); PENDING_KEYS.clear();
             dirty = false;
             loaded = false;

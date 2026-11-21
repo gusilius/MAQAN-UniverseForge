@@ -12,6 +12,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.people.CharacterInventoryTransactions;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.storage.CharacterWal;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
@@ -84,6 +85,8 @@ public class PeopleMod {
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    /** Durable per-partition incremental journal; snapshots remain the compatibility checkpoint format. */
+    private static final Map<CharacterRegistry, CharacterWal> CHARACTER_WALS = new java.util.IdentityHashMap<>();
     /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
     private static final CharacterRegistry WORLD_REGISTRY = new CharacterRegistry();
     private static final String WORLD_PARTITION_ID = "__world__";
@@ -145,6 +148,8 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
+        NpcSpawner.clearRuntimeState();
+        closeCharacterWals();
         identityPartitionsReady = false;
         REGS.clear();
         DIMENSION_REGISTRIES.clear();
@@ -217,6 +222,7 @@ public class PeopleMod {
                 WORLD_REGISTRY.fromJson(Files.readString(worldFile), world + "|" + WORLD_PARTITION_ID);
             }
             if (WorldForgeMod.worldId() == null) throw new IllegalStateException("WorldId is unavailable for world Character identity partition");
+            openCharacterWal(server, WORLD_REGISTRY, "world", WorldForgeMod.worldId() + "|" + WORLD_PARTITION_ID);
             AUTHORITY.registerMap(WORLD_PARTITION_ID, WORLD_REGISTRY);
             // The Overworld keeps its legacy partition/file for save compatibility. Every
             // additional non-image dimension gets an independent durable Character partition.
@@ -228,6 +234,8 @@ public class PeopleMod {
                 Path dimensionFile = dimensionRegistryFile(server, dimension);
                 if (Files.exists(dimensionFile))
                     dimensionRegistry.fromJson(Files.readString(dimensionFile), WorldForgeMod.worldId() + "|dimension|" + dimension);
+                openCharacterWal(server, dimensionRegistry, "dimension|" + dimension,
+                        WorldForgeMod.worldId() + "|dimension|" + dimension);
                 String partitionId = dimensionPartitionId(dimension);
                 AUTHORITY.registerMap(partitionId, dimensionRegistry);
                 DIMENSION_REGISTRIES.put(dimension, dimensionRegistry);
@@ -241,6 +249,7 @@ public class PeopleMod {
                 if (world == null) throw new IllegalStateException("WorldId is unavailable for player identity migration");
                 PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
             }
+            openCharacterWal(server, PLAYER_REGISTRY, "players", WorldForgeMod.worldId() + "|__players__");
             AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
             indexPlayerCharacters(PLAYER_REGISTRY);
         } catch (Exception ex) {
@@ -344,6 +353,18 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
         }
+        if (server != null) {
+            try {
+                WorldId world = WorldForgeMod.worldId();
+                if (world == null) throw new IllegalStateException("WorldId is unavailable for Character WAL");
+                openCharacterWal(server, reg, "map|" + m.name, world + "|" + m.name);
+            } catch (Exception walFailure) {
+                identityPartitionsReady = false;
+                LOGGER.error("wf_people: map Character WAL recovery failed for '{}'; map is disabled", m.name, walFailure);
+                INVALID_REGS.add(m);
+                return null;
+            }
+        }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
         CharacterRegistry selected = prev != null ? prev : reg;
         if (prev == null) populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
@@ -441,6 +462,49 @@ public class PeopleMod {
                 .resolve("worldforge").resolve("wf_people_dimensions").resolve(token + ".json");
     }
 
+    private static Path characterWalDirectory(MinecraftServer server, String partition) {
+        String token = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("people-wal").resolve(token);
+    }
+
+    private static synchronized void openCharacterWal(MinecraftServer server, CharacterRegistry registry,
+                                                        String partition, String identityNamespace) throws Exception {
+        if (CHARACTER_WALS.containsKey(registry)) return;
+        CharacterWal wal = new CharacterWal(characterWalDirectory(server, partition), 16);
+        try {
+            List<CharacterWal.Record> records = wal.replayAll();
+            for (CharacterWal.Record record : records) {
+                String payload = new String(record.payload(), StandardCharsets.UTF_8);
+                Object decoded = Json.parse(payload);
+                if (!(decoded instanceof Map<?, ?> root)
+                        || !(root.get("character") instanceof Map<?, ?> character)
+                        || !record.globalId().equals(character.get("global_id")))
+                    throw new IllegalStateException("Character WAL identity mismatch in partition " + partition);
+                registry.applyJsonRecord(payload, identityNamespace);
+            }
+            CHARACTER_WALS.put(registry, wal);
+            LOGGER.info("wf_people: recovered Character WAL partition={} records={} characters={}",
+                    partition, records.size(), registry.size());
+        } catch (Exception failure) {
+            try { wal.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    private static synchronized void checkpointCharacterWal(CharacterRegistry registry) throws java.io.IOException {
+        CharacterWal wal = CHARACTER_WALS.get(registry);
+        if (wal != null) wal.checkpoint();
+    }
+
+    private static synchronized void closeCharacterWals() {
+        for (CharacterWal wal : CHARACTER_WALS.values()) {
+            try { wal.close(); }
+            catch (Exception failure) { LOGGER.error("wf_people: failed to close Character WAL cleanly", failure); }
+        }
+        CHARACTER_WALS.clear();
+    }
+
     private static void writeAtomic(Path file, String content) throws java.io.IOException {
         Files.createDirectories(file.getParent());
         Path temp = file.resolveSibling(file.getFileName() + ".tmp");
@@ -481,6 +545,19 @@ public class PeopleMod {
             if (candidate.props.containsKey("estate.transfer_pending")
                     || CharacterInventory.hasPendingTransfer(candidate))
                 return persistAllRegistries(server);
+        }
+        // A durable per-character record is enough for routine transactional writes.
+        // Full registry snapshots are reserved for bounded checkpoints and legacy compatibility.
+        CharacterWal wal = CHARACTER_WALS.get(owner);
+        if (wal != null) {
+            try {
+                wal.append(character.globalId, owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+                return true;
+            } catch (Exception walFailure) {
+                LOGGER.error("wf_people: Character WAL append failed for {}; identity writes are blocked", character.globalId, walFailure);
+                if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
+                return false;
+            }
         }
         if (owner == PLAYER_REGISTRY) {
             if (!playerRegistryAvailable) return false;
@@ -689,7 +766,13 @@ public class PeopleMod {
         if (ordered.size() != registries.size()) {
             LOGGER.warn("wf_people: active estate dependency cycle detected; committing one write-ahead registry snapshot");
             if (!persistRegistriesWithJournal(server, registries, mapOwners, dimensionOwners)) return false;
-            return finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners);
+            if (!finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners)) return false;
+            try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
+            catch (Exception checkpointFailure) {
+                LOGGER.error("wf_people: journaled snapshot committed but Character WAL checkpoint failed", checkpointFailure);
+                return false;
+            }
+            return true;
         }
 
         for (CharacterRegistry registry : ordered) {
@@ -726,7 +809,14 @@ public class PeopleMod {
                 return false;
             }
         }
-        return finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners);
+        if (!finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners)) return false;
+        // Retire WAL records only after every owner snapshot and estate receipt is durable.
+        try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
+        catch (Exception checkpointFailure) {
+            LOGGER.error("wf_people: snapshots committed but Character WAL checkpoint failed; replay remains safe", checkpointFailure);
+            return false;
+        }
+        return true;
     }
 
     /** Retire pending estate markers only after every source and recipient snapshot is durable. */
@@ -781,8 +871,10 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
+        NpcSpawner.clearRuntimeState();
         identityPartitionsReady = false;
         saveAll(e.getServer());
+        closeCharacterWals();
         REGS.clear();
         DIMENSION_REGISTRIES.clear();
         PLAYER_CHARACTERS.clear();
@@ -805,14 +897,21 @@ public class PeopleMod {
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
                     || populationFallbackGeneration != registryGeneration)) {
                 long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
+                boolean fallbackComplete = true;
                 for (CharacterRegistry registry : REGS.values())
-                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
                 for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
-                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
-                PopulationSimulation.advanceToWorldDay(WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
-                PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
-                populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
-                populationFallbackGeneration = registryGeneration;
+                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
+                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                        WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
+                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                        PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
+                if (fallbackComplete) {
+                    populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
+                    populationFallbackGeneration = registryGeneration;
+                }
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());

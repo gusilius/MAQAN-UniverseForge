@@ -25,6 +25,14 @@ public final class CharacterRegistry {
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
+    /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
+    private final Map<String, Character> byGlobalId = new HashMap<>();
+    /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
+    private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
+    /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
+    private final Map<String, String> entityOwnerByUuid = new HashMap<>();
+    private final List<Character> ordered = new ArrayList<>();
+    private final List<Character> orderedView = Collections.unmodifiableList(ordered);
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -41,12 +49,15 @@ public final class CharacterRegistry {
         if (authority == value) authority = null;
     }
     private long revision;
+    /** Changes only when the ordered membership is replaced wholesale (e.g. save restore). */
+    private long membershipGeneration;
 
     private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
 
     private static final class MutationBatchState {
         int depth;
         boolean dirty;
+        final Set<CharacterRegistry> membershipChanged = Collections.newSetFromMap(new IdentityHashMap<>());
         final DomainMutationRevisions.Mutation mutation =
                 WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
     }
@@ -65,6 +76,7 @@ public final class CharacterRegistry {
             if (--state.depth == 0) {
                 MUTATION_BATCH.remove();
                 try {
+                    for (CharacterRegistry registry : state.membershipChanged) registry.revision++;
                     if (state.dirty) state.mutation.commit();
                 } finally {
                     state.mutation.close();
@@ -89,14 +101,38 @@ public final class CharacterRegistry {
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
 
+    /** Stable across appends; changes only when the registry's ordered population is replaced. */
+    public long membershipGeneration() { return membershipGeneration; }
+
     public void addListener(Listener l) { listeners.add(l); }
 
     public Character get(String id) { return byId.get(id); }
 
-    /** Read-only view: callers must use registry operations so lifecycle events cannot be bypassed. */
-    public Collection<Character> all() { return Collections.unmodifiableCollection(byId.values()); }
+    /** Resolves a canonical global UUID without scanning the local registry. */
+    public Character getByGlobalId(String globalId) {
+        return globalId == null || globalId.isBlank() ? null : byGlobalId.get(globalId);
+    }
 
-    public int size() { return byId.size(); }
+    /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
+    public void prepareKinIndex(long day) {
+        CharacterAuthority current = authority;
+        if (current != null) current.rebuildFamilyIndex(day);
+    }
+
+    /** Returns bounded family candidates; callers still apply the canonical kinship predicate. */
+    public List<Character> kinCandidates(Character person) {
+        CharacterAuthority current = authority;
+        if (current == null) return List.of();
+        return current.kinCandidates(person);
+    }
+
+    /**
+     * Read-only append-only insertion-order view. Existing entries never move or disappear;
+     * callers may retain this view and process a captured size in bounded batches.
+     */
+    public List<Character> all() { return orderedView; }
+
+    public int size() { return ordered.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
@@ -118,7 +154,9 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        revision++;
+        byGlobalId.put(c.globalId, c);
+        ordered.add(c);
+        markMembershipMutation();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
@@ -181,13 +219,19 @@ public final class CharacterRegistry {
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
-        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }
+        refreshLifeStages(byId.values(), year);
     }
 
-    private void refreshLifeStagesBatched(int year) {
+    /** Refreshes only the supplied stable batch; safe for resumable server-tick processing. */
+    public void refreshLifeStages(Collection<Character> people, int year) {
+        if (people == null || people.isEmpty()) return;
+        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(people, year); }
+    }
+
+    private void refreshLifeStagesBatched(Collection<Character> people, int year) {
         boolean changed = false;
         boolean lifecyclePublished = false;
-        for (Character character : byId.values()) {
+        for (Character character : people) {
             if (!character.alive) continue;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
@@ -200,8 +244,6 @@ public final class CharacterRegistry {
             Object previousAge = character.props.put("population.age_years", age);
             if (!Objects.equals(previousAge, age)) changed = true;
         }
-        // publish() already advanced the lane for lifecycle changes; age-only refreshes
-        // still invalidate snapshots without counting the same character transition twice.
         if (changed && !lifecyclePublished) recordDomainMutation();
     }
 
@@ -301,11 +343,8 @@ public final class CharacterRegistry {
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
         String uuid = requireText(entityUuid, "entity UUID");
-        for (Character other : byId.values()) {
-            if (other == c) continue;
-            Object raw = other.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings && bindings.containsValue(uuid)) return false;
-        }
+        String previousOwner = entityOwnerByUuid.get(uuid);
+        if (previousOwner != null && !previousOwner.equals(c.id)) return false;
         Object raw = c.props.get("population.entity_bindings");
         Map<String, Object> bindings;
         if (raw instanceof Map<?, ?> map) {
@@ -314,7 +353,10 @@ public final class CharacterRegistry {
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
         if (Objects.equals(bindings.get(kind), uuid)) return true;
-        bindings.put(kind, uuid);
+        Object previousUuid = bindings.put(kind, uuid);
+        if (previousUuid instanceof String oldUuid && !oldUuid.equals(uuid)
+                && !bindings.containsValue(oldUuid)) entityOwnerByUuid.remove(oldUuid, c.id);
+        entityOwnerByUuid.put(uuid, c.id);
         c.props.put("population.entity_bindings", bindings);
         recordDomainMutation();
         return true;
@@ -337,9 +379,35 @@ public final class CharacterRegistry {
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
+        if (!bindings.containsValue(uuid)) entityOwnerByUuid.remove(uuid, c.id);
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
         recordDomainMutation();
+    }
+
+    /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
+    public String entityBindingOwner(String entityUuid) {
+        String characterId = entityOwnerByUuid.get(entityUuid);
+        Character character = characterId == null ? null : byId.get(characterId);
+        return character == null ? null : character.globalId;
+    }
+
+    private void removeEntityBindings(Character character) {
+        Object raw = character.props.get("population.entity_bindings");
+        if (raw instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, character.id);
+    }
+
+    private void indexEntityBindings(Character character) {
+        Object raw = character.props.get("population.entity_bindings");
+        if (raw instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value) {
+                String owner = entityOwnerByUuid.putIfAbsent(value, character.id);
+                if (owner != null && !owner.equals(character.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + value
+                            + " is bound to multiple Characters: " + owner + " and " + character.id);
+            }
     }
 
     private static void addGlobalChild(Character parent, String childGlobalId) {
@@ -383,6 +451,12 @@ public final class CharacterRegistry {
     }
 
     /** Advances the shared lane after a canonical Character write has completed. */
+    private void markMembershipMutation() {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null) batch.membershipChanged.add(this);
+        else revision++;
+    }
+
     private static void recordDomainMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
         if (batch != null) {
@@ -441,45 +515,148 @@ public final class CharacterRegistry {
         List<Character.Post> vacated = new ArrayList<>(c.posts);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
-        c.props.remove("population.entity_bindings");
+        Object deathBindings = c.props.remove("population.entity_bindings");
+        if (deathBindings instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, c.id);
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         recordBereavement(c, deathYear);
+        processPendingBereavementBatch(DEFAULT_BEREAVEMENT_BATCH_SIZE);
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         c.props.put("death.lifecycle.completed", true);
         return vacated;
     }
 
-    /** Family and trusted friends remember a death on their own canonical Character records. */
-    private void recordBereavement(Character deceased,int deathYear) {
-        if(Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
-        long minute=Math.max(0L,(long)deathYear*525600L);
-        for(Character survivor:byId.values()) {
-            if(survivor==deceased||!survivor.alive) continue;
-            int intensity=0;
-            if(deceased.spouse.equals(survivor.id)||survivor.spouse.equals(deceased.id)
-                    ||deceased.father.equals(survivor.id)||deceased.mother.equals(survivor.id)
-                    ||survivor.father.equals(deceased.id)||survivor.mother.equals(deceased.id)
-                    ||deceased.children.contains(survivor.id)||survivor.children.contains(deceased.id)) intensity=4;
-            else {
-                boolean sibling=(!deceased.father.isBlank()&&deceased.father.equals(survivor.father))
-                        ||(!deceased.mother.isBlank()&&deceased.mother.equals(survivor.mother));
-                if(sibling) intensity=3;
-                else {
-                    int relationship=relationshipScore(survivor,deceased.globalId);
-                    if(relationship>=70) intensity=3;
-                    else if(relationship>=35) intensity=2;
-                }
-            }
-            if(intensity==0) continue;
-            String eventId="death:bereavement:"+deceased.globalId+":"+survivor.globalId;
-            CharacterDevelopment.recordExperience(survivor,CharacterDevelopment.Experience.BEREAVEMENT,
-                    eventId,"lost "+deceased.name,minute,intensity);
-            CharacterDevelopment.remember(survivor,eventId+":memory","bereavement",deceased.globalId,
-                    "death of "+deceased.name,-intensity*15,minute);
+    /**
+     * Death only prepares a bounded, durable recipient list. Applying memories is
+     * deliberately deferred to processPendingBereavementBatch().
+     */
+    private void recordBereavement(Character deceased, int deathYear) {
+        if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))
+                || deceased.props.containsKey("death.bereavement.recipients")) return;
+        LinkedHashSet<String> recipients = new LinkedHashSet<>();
+        addLivingCandidate(recipients, deceased.spouse);
+        addLivingCandidate(recipients, deceased.father);
+        addLivingCandidate(recipients, deceased.mother);
+        for (String childId : deceased.children) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, childId);
         }
-        deceased.props.put("death.bereavement.completed",true);
+        Character father = deceased.father.isBlank() ? null : byId.get(deceased.father);
+        Character mother = deceased.mother.isBlank() ? null : byId.get(deceased.mother);
+        if (father != null) for (String siblingId : father.children) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, siblingId);
+        }
+        if (mother != null && recipients.size() < MAX_BEREAVEMENT_RECIPIENTS)
+            for (String siblingId : mother.children) {
+                if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+                addLivingCandidate(recipients, siblingId);
+            }
+        Object rawRelationships = deceased.props.get("social.relationships");
+        if (rawRelationships instanceof Map<?, ?> relationships) {
+            int inspected = 0;
+            for (Map.Entry<?, ?> entry : relationships.entrySet()) {
+                if (inspected++ >= MAX_BEREAVEMENT_RECIPIENTS
+                        || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+                if (!(entry.getKey() instanceof String globalId)
+                        || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
+                Character friend = byGlobalId.get(globalId);
+                if (friend != null && friend.alive && friend != deceased
+                        && relationshipScore(friend, deceased.globalId) >= 35)
+                    recipients.add(friend.globalId);
+            }
+        }
+        deceased.props.put("death.bereavement.recipients", new ArrayList<>(recipients));
+        deceased.props.put("death.bereavement.cursor", 0);
+        deceased.props.put("death.bereavement.year", deathYear);
+        pendingBereavement.addLast(deceased.globalId);
+        recordDomainMutation();
     }
+
+    private static final int MAX_BEREAVEMENT_RECIPIENTS = 256;
+    public static final int DEFAULT_BEREAVEMENT_BATCH_SIZE = 32;
+
+    private void addLivingCandidate(Set<String> candidates, String localId) {
+        if (localId == null || localId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
+        Character candidate = byId.get(localId);
+        if (candidate != null && candidate.alive) candidates.add(candidate.globalId);
+    }
+
+    /**
+     * Applies a bounded number of death consequences. The recipient list and cursor
+     * live in the deceased Character props, so WAL/checkpoint persistence resumes safely.
+     * Per-recipient event IDs make replay idempotent if a crash precedes cursor persistence.
+     */
+    public int processPendingBereavementBatch(int maxRecipients) {
+        if (maxRecipients < 1) throw new IllegalArgumentException("maxRecipients must be positive");
+        int processed = 0;
+        try (MutationBatch ignored = beginMutationBatch()) {
+            while (processed < maxRecipients && !pendingBereavement.isEmpty()) {
+                String deceasedGlobalId = pendingBereavement.peekFirst();
+                Character deceased = byGlobalId.get(deceasedGlobalId);
+                if (deceased == null) {
+                    pendingBereavement.removeFirst();
+                    continue;
+                }
+                Object rawRecipients = deceased.props.get("death.bereavement.recipients");
+                if (!(rawRecipients instanceof List<?> recipients)) {
+                    deceased.props.put("death.bereavement.completed", true);
+                    pendingBereavement.removeFirst();
+                    recordCharacterMutation();
+                    continue;
+                }
+                int cursor = deceased.props.get("death.bereavement.cursor") instanceof Number n
+                        ? Math.max(0, n.intValue()) : 0;
+                int deathYear = deceased.props.get("death.bereavement.year") instanceof Number n
+                        ? n.intValue() : 0;
+                long minute = Math.max(0L, (long) deathYear * 525600L);
+                while (cursor < recipients.size() && processed < maxRecipients) {
+                    Object rawGlobalId = recipients.get(cursor++);
+                    processed++;
+                    if (!(rawGlobalId instanceof String survivorGlobalId)) continue;
+                    Character survivor = byGlobalId.get(survivorGlobalId);
+                    if (survivor == null || !survivor.alive || survivor == deceased) continue;
+                    int intensity = 0;
+                    boolean directFamily = deceased.spouse.equals(survivor.id)
+                            || deceased.father.equals(survivor.id) || deceased.mother.equals(survivor.id)
+                            || survivor.father.equals(deceased.id) || survivor.mother.equals(deceased.id)
+                            || deceased.children.contains(survivor.id) || survivor.children.contains(deceased.id);
+                    if (directFamily) intensity = 4;
+                    else {
+                        boolean sibling = (!deceased.father.isBlank() && deceased.father.equals(survivor.father))
+                                || (!deceased.mother.isBlank() && deceased.mother.equals(survivor.mother));
+                        if (sibling) intensity = 3;
+                        else {
+                            int relationship = relationshipScore(survivor, deceased.globalId);
+                            if (relationship >= 70) intensity = 3;
+                            else if (relationship >= 35) intensity = 2;
+                        }
+                    }
+                    if (intensity == 0) continue;
+                    String eventId = "death:bereavement:" + deceased.globalId + ":" + survivor.globalId;
+                    CharacterDevelopment.recordExperience(survivor, CharacterDevelopment.Experience.BEREAVEMENT,
+                            eventId, "lost " + deceased.name, minute, intensity);
+                    CharacterDevelopment.remember(survivor, eventId + ":memory", "bereavement", deceased.globalId,
+                            "death of " + deceased.name, -intensity * 15, minute);
+                }
+                deceased.props.put("death.bereavement.cursor", cursor);
+                recordCharacterMutation();
+                if (cursor >= recipients.size()) {
+                    deceased.props.put("death.bereavement.completed", true);
+                    deceased.props.remove("death.bereavement.recipients");
+                    deceased.props.remove("death.bereavement.cursor");
+                    deceased.props.remove("death.bereavement.year");
+                    pendingBereavement.removeFirst();
+                    recordCharacterMutation();
+                } else break;
+            }
+        }
+        return processed;
+    }
+
+    public int pendingBereavementEvents() { return pendingBereavement.size(); }
 
     private static int relationshipScore(Character observer,String subjectGlobalId) {
         Object raw=observer.props.get("social.relationships");
@@ -599,6 +776,76 @@ public final class CharacterRegistry {
     }
 
     // ------------------------------------------------------------------ сохранение
+
+    /**
+     * Encode one canonical Character using the exact wf-people/3 record schema.
+     * This is the record codec boundary used by incremental persistence; it deliberately
+     * retains global identity, family links, posts, traits and every extension property.
+     */
+    public String toJsonRecord(Character c) {
+        Objects.requireNonNull(c, "character");
+        if (byId.get(c.id) != c) throw new IllegalArgumentException("Character does not belong to this registry: " + c.id);
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", c.id); record.put("global_id", c.globalId); record.put("name", c.name);
+        record.put("house", c.house); record.put("culture", c.culture); record.put("gender", c.gender);
+        record.put("birth", c.birthYear); record.put("alive", c.alive);
+        record.put("father", c.father); record.put("mother", c.mother); record.put("spouse", c.spouse);
+        record.put("children", new ArrayList<Object>(c.children));
+        List<Object> posts = new ArrayList<>();
+        for (Character.Post post : c.posts) posts.add(new ArrayList<Object>(List.of(post.role, post.place)));
+        record.put("posts", posts);
+        record.put("traits", new ArrayList<Object>(c.traits));
+        record.put("props", new LinkedHashMap<>(c.props));
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("format", "wf-people-record/1");
+        root.put("schema_version", 3);
+        root.put("next", next);
+        root.put("character", record);
+        return Json.write(root);
+    }
+
+    /**
+     * Restore/replace one record from the incremental journal. The normal wf-people/1..3
+     * parser remains the sole validator/migrator, so the record codec cannot drift from
+     * the legacy identity rules. Callers must replay records in per-shard sequence order.
+     */
+    public void applyJsonRecord(String json, String identityNamespace) {
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
+                || !(root.get("character") instanceof Map<?, ?> rawCharacter))
+            throw new IllegalArgumentException("Invalid incremental Character record");
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("format", "wf-people/3");
+        snapshot.put("schema_version", 3);
+        snapshot.put("next", root.get("next") instanceof Number n ? n : next);
+        snapshot.put("characters", List.of(rawCharacter));
+        CharacterRegistry decoded = new CharacterRegistry();
+        decoded.fromJson(Json.write(snapshot), identityNamespace);
+        Character restored = decoded.all().iterator().next();
+        Object restoredBindings = restored.props.get("population.entity_bindings");
+        if (restoredBindings instanceof Map<?, ?> bindings) for (Object uuid : bindings.values())
+            if (uuid instanceof String value) {
+                String owner = entityOwnerByUuid.get(value);
+                if (owner != null && !owner.equals(restored.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + value + " is already owned by Character " + owner);
+            }
+        Character previous = byId.get(restored.id);
+        if (previous != null) removeEntityBindings(previous);
+        previous = byId.put(restored.id, restored);
+        indexEntityBindings(restored);
+        if (previous == null) ordered.add(restored);
+        else {
+            for (int index = 0; index < ordered.size(); index++) {
+                if (ordered.get(index) == previous) { ordered.set(index, restored); break; }
+            }
+        }
+        if (restored.id.matches("c[0-9]+")) {
+            try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
+            catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
+        }
+        if (previous == null) markMembershipMutation();
+        recordDomainMutation();
+    }
 
     public String toJson() { return toJson(null); }
 
@@ -752,8 +999,21 @@ public final class CharacterRegistry {
         }
         byId.clear();
         byId.putAll(loaded);
+        byGlobalId.clear();
+        pendingBereavement.clear();
+        for (Character character : loaded.values()) {
+            byGlobalId.put(character.globalId, character);
+            if (!Boolean.TRUE.equals(character.props.get("death.bereavement.completed"))
+                    && character.props.get("death.bereavement.recipients") instanceof List<?>)
+                pendingBereavement.addLast(character.globalId);
+        }
+        entityOwnerByUuid.clear();
+        entityOwnerByUuid.putAll(entityOwners);
+        ordered.clear();
+        ordered.addAll(loaded.values());
+        membershipGeneration++;
         next = safeNext;
-        revision++;
+        markMembershipMutation();
         recordDomainMutation();
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);

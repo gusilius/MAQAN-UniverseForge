@@ -62,6 +62,76 @@ SETTLEMENT_PROFILES = {
     7: {"key": "planetary_civilization", "wilderness_share": 0.00, "population_density": 1.00},
 }
 
+def settlement_opportunities_for_area(area_pixels: int, population_density: float) -> int:
+    """Scale settlement opportunities with viable land area and the selected density profile.
+
+    One geographic anchor per province remains the minimum; large provinces gain
+    additional independent sites, and denser profiles lower the area needed per site.
+    """
+    area = max(0, int(area_pixels))
+    density = min(1.0, max(0.0, float(population_density)))
+    pixels_per_site = max(180.0, 1800.0 * (1.0 - 0.82 * density))
+    return max(1, int(math.ceil(area / pixels_per_site)))
+
+
+def choose_spaced_settlement_point(cells: np.ndarray, preferred: int, width: int, seed: int,
+                                    reserved_points: list[int] | None = None,
+                                    minimum_distance: int = 6) -> int | None:
+    """Keep a province's anchor away from sites already placed elsewhere on the map."""
+    candidates = np.asarray(cells, dtype=np.int64)
+    if candidates.size == 0:
+        return None
+    reserved = np.asarray(reserved_points if reserved_points is not None else [], dtype=np.int64)
+    if reserved.size == 0:
+        return int(preferred) if np.any(candidates == int(preferred)) else int(candidates[0])
+    xs, zs = candidates % width, candidates // width
+    distances = np.full(candidates.size, np.iinfo(np.int64).max, dtype=np.int64)
+    for point in reserved:
+        px, pz = int(point) % width, int(point) // width
+        distances = np.minimum(distances, (xs - px) ** 2 + (zs - pz) ** 2)
+    minimum_squared = max(1, int(minimum_distance)) ** 2
+    preferred_index = np.flatnonzero(candidates == int(preferred))
+    if preferred_index.size and int(distances[preferred_index[0]]) >= minimum_squared:
+        return int(preferred)
+    farthest = int(distances.max())
+    # Small/fragmented provinces may not have a full spacing radius available.
+    # Retain the best distinct pixel rather than silently deleting their only anchor.
+    if farthest < 4:
+        return None
+    tied = candidates[distances == farthest]
+    return min((int(point) for point in tied),
+               key=lambda point: ((point * 2654435761 + seed) & 0xFFFFFFFF))
+
+
+def spread_settlement_points(cells: np.ndarray, anchor: int, count: int,
+                             width: int, seed: int, reserved_points: list[int] | None = None,
+                             minimum_distance: int = 6) -> list[int]:
+    """Pick deterministic, spatially separated land pixels, including across province borders."""
+    candidates = np.asarray(cells, dtype=np.int64)
+    if count <= 0 or candidates.size <= 1:
+        return []
+    selected = [int(anchor)]
+    reserved = np.asarray(reserved_points if reserved_points is not None else [], dtype=np.int64)
+    xs = candidates % width
+    zs = candidates // width
+    minimum_squared = max(1, int(minimum_distance)) ** 2
+    for _ in range(count):
+        distances = np.full(candidates.size, np.iinfo(np.int64).max, dtype=np.int64)
+        blocked = np.concatenate((reserved, np.asarray(selected, dtype=np.int64)))
+        for point in blocked:
+            px, pz = int(point) % width, int(point) // width
+            distances = np.minimum(distances, (xs - px) ** 2 + (zs - pz) ** 2)
+        distances[np.isin(candidates, blocked)] = -1
+        farthest = int(distances.max())
+        if farthest < minimum_squared:
+            break
+        tied = candidates[distances == farthest]
+        chosen = min((int(point) for point in tied),
+                     key=lambda point: ((point * 2654435761 + seed) & 0xFFFFFFFF))
+        selected.append(chosen)
+    return selected[1:]
+
+
 
 def stable_name(seed: int, index: int, suffix: str = "") -> str:
     rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (index * 0x9E3779B97F4A7C15))
@@ -1157,6 +1227,12 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     titles = []
     realms = []
     settlements = []
+    reserved_settlement_points = []
+    density = float(settlement_profile["population_density"])
+    pixels_per_site = max(180.0, 1800.0 * (1.0 - 0.82 * density))
+    minimum_spacing = max(8, int(round(math.sqrt(pixels_per_site) * 0.35)))
+    base_spacing = max(6, minimum_spacing // 2)
+    province_flat = province_labels.ravel()
     region_neighbors = {region_id: set() for region_id in region_meta}
     for pid, neighbors in province_neighbors.items():
         for neighbor in neighbors:
@@ -1267,30 +1343,60 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
             },
         })
 
-        def add_settlement(kind: str, point: int, serial: int) -> None:
-            sx, sz = point % width, point // width
+        def add_settlement(kind: str, point: int, serial: int,
+                           candidate_cells=None, minimum_distance: int = base_spacing) -> bool:
+            selected_point = int(point)
+            if candidate_cells is not None:
+                candidate = choose_spaced_settlement_point(
+                    candidate_cells, selected_point, width,
+                    seed ^ (rid * 0x9E3779B1) ^ (serial * 0x85EBCA77),
+                    reserved_settlement_points, minimum_distance)
+                if candidate is None:
+                    return False
+                selected_point = candidate
+            sx, sz = selected_point % width, selected_point // width
             settlements.append({
                 "id": f"{kind}_{rid + 1:02d}_{serial:02d}", "type": kind,
                 "name": stable_name(seed, rid * 100 + serial, " " + kind.title()),
                 "realm_id": f"realm_{rid + 1:02d}",
-                "province_id": province_labels[point],
+                "province_id": province_labels[selected_point],
                 "pixel": [sx, sz],
                 "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
                           round((sz + 0.5 - height / 2) * blocks_per_pixel)],
             })
+            reserved_settlement_points.append(selected_point)
+            return True
 
-        add_settlement("capital", capital, 1)
+        capital_cells = np.flatnonzero(province_flat == capital_pid)
+        add_settlement("capital", capital, 1, capital_cells, base_spacing)
         for offset, pid in enumerate(pids[1:], 2):
+            province_cells = np.flatnonzero(province_flat == pid)
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
-                           province_meta[pid]["seed"], offset)
+                           province_meta[pid]["seed"], offset, province_cells, base_spacing)
+
+        # Province anchors are a floor, not the total settlement budget. Larger
+        # provinces gain additional dispersed opportunities according to the selected
+        # population-density profile; no fixed realm/province count caps this pass.
+        for pid in pids:
+            province = province_meta[pid]
+            province_cells = np.flatnonzero(province_flat == pid)
+            target_sites = settlement_opportunities_for_area(province["area"], density)
+            extra_points = spread_settlement_points(
+                province_cells, int(province["seed"]), target_sites - 1,
+                width, seed ^ (rid * 0x9E3779B1) ^ (pid * 0x85EBCA77),
+                reserved_points=reserved_settlement_points, minimum_distance=minimum_spacing)
+            for extra_index, point in enumerate(extra_points):
+                add_settlement("village", point, 1000 + int(pid) * 16 + extra_index)
+
         mountain_code = ANALYSIS_CLASSES.index("mountains")
         mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:
-            add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
+            add_settlement("fortress", mountain_cells[len(mountain_cells) // 2],
+                           20 + rid, mountain_cells, base_spacing)
         coast_cells = [i for i in realm_cells if coast_mask[i]]
         if coast_cells:
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
-            add_settlement("port", coast_cells[0], 30 + rid)
+            add_settlement("port", coast_cells[0], 30 + rid, coast_cells, base_spacing)
         # Every polity needs at least a capital and one additional settlement
         # anchor, even when its territorial footprint is a single province.
         realm_settlement_count = sum(
@@ -1298,7 +1404,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         if realm_settlement_count < 2:
             fallback_point = next((point for point in reversed(realm_cells)
                                    if point != capital), capital)
-            add_settlement("village", fallback_point, 90 + rid)
+            add_settlement("village", fallback_point, 90 + rid, realm_cells, base_spacing)
 
     geography_started = time.perf_counter()
     # Geographic layers come from the shared semantic classifier and seeded relief.
@@ -1315,34 +1421,24 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         "sea_level": 63, "min_y": -64, "max_y": 320,
         "biomes": BIOMES, "spawn": [(spawn_x + 0.5) / width, (spawn_z + 0.5) / height],
     }
-    # Image analysis supplies geography only. Province and region polygons are
-    # neutral administrative geography; states, rulers, dynasties and sovereignty
-    # are created later by the installed WorldForge mods in the running save.
-    titles = [item for item in titles if int(item["tier"]) in (0, 1)]
+    # Preserve the complete generated territorial skeleton. State-tier titles are
+    # unowned formation candidates: wf-realms assigns governments, rulers and
+    # sovereignty in the running world, but the generator must not erase their borders.
     for item in titles:
         item["name"] = ""
-        item["key"] = ("province_" if int(item["tier"]) == 0 else "region_") + str(int(item["id"]))
-        if int(item["tier"]) == 1:
-            item["parent"] = 0
-    realms = []
-    # Candidate points are geography hints, not instantiated/named settlements.
-    # wf-settlements chooses their actual type, name, residents and ownership.
-    settlements = []
-    for province_id, meta in sorted(province_meta.items()):
-        point = int(meta["seed"])
-        sx, sz = point % width, point // width
-        settlements.append({
-            "id": f"site_{province_id:06d}", "type": "site", "name": "",
-            "realm_id": "", "province_id": province_id,
-            "pixel": [sx, sz],
-            "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
-                      round((sz + 0.5 - height / 2) * blocks_per_pixel)],
-        })
+    # Settlement seeds are geographic opportunities, not a one-per-province cap.
+    # Keep all terrain-derived anchors (capital/town/village/fortress/port locations),
+    # but leave final naming, settlement class and ownership to the authoritative mods.
+    for item in settlements:
+        item["name"] = ""
+        item["realm_id"] = ""
+        item["type"] = "site"
     titles_doc = {
         "format": "worldforge-titles/1", "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel,
         "tiers": [{"index": 0, "key": "province", "name": "Province"},
-                  {"index": 1, "key": "region", "name": "Region"}],
+                  {"index": 1, "key": "region", "name": "Region"},
+                  {"index": 2, "key": "state", "name": "State"}],
         "titles": sorted(titles, key=lambda item: item["id"]),
     }
     titles_by_id = {int(item["id"]): item for item in titles}
@@ -1361,13 +1457,16 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     province_array = province_labels.reshape((height, width))
     province_palette = np.zeros((int(province_labels.max()) + 1, 3), dtype=np.uint8)
     region_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
+    state_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
     for province_id in province_meta:
         region_id = region_for_province[province_id]
         province_palette[province_id] = region_rgb[region_id]
         region_lut[province_id] = region_id
+        state_lut[province_id] = int(province_meta[province_id]["realm"]) + 1
     geography_rgb = province_palette[province_array]
     geography_rgb[wilderness_mask] = (104, 111, 83)
     region_grid = region_lut[province_array]
+    state_grid = state_lut[province_array]
     province_edge = np.zeros((height, width), dtype=bool)
     province_edge[:, 1:] |= (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
     province_edge[1:, :] |= (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
@@ -1376,8 +1475,13 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     region_edge[1:, :] |= (region_grid[1:, :] != region_grid[:-1, :]) & (region_grid[1:, :] > 0) & (region_grid[:-1, :] > 0)
     from scipy import ndimage
     region_edge = ndimage.binary_dilation(region_edge, iterations=2)
+    state_edge = np.zeros((height, width), dtype=bool)
+    state_edge[:, 1:] |= (state_grid[:, 1:] != state_grid[:, :-1]) & (state_grid[:, 1:] > 0) & (state_grid[:, :-1] > 0)
+    state_edge[1:, :] |= (state_grid[1:, :] != state_grid[:-1, :]) & (state_grid[1:, :] > 0) & (state_grid[:-1, :] > 0)
+    state_edge = ndimage.binary_dilation(state_edge, iterations=3)
     geography_rgb[province_edge] = (63, 67, 72)
     geography_rgb[region_edge] = (20, 22, 28)
+    geography_rgb[state_edge] = (8, 10, 16)
     geography_preview = Image.fromarray(geography_rgb, "RGB")
     from io import BytesIO
     geography_buffer = BytesIO()
@@ -1398,9 +1502,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
         "wilderness_land_pixels": unclaimed_land_pixels,
         "province_count": len(province_meta), "region_count": len(region_meta),
+        "state_candidate_count": len(realm_provinces),
         "settlement_count": len(settlements),
-        # Stable geography IDs and adjacency only. No state/realm/ruler identities
-        # are serialized into the world package.
+        # Stable geography and unowned state-formation boundaries are serialized;
+        # runtime profile mods remain authoritative for active realm identities.
         "provinces": [{"id": pid, "region_id": region_for_province[pid],
                        "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                        "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
@@ -1610,13 +1715,15 @@ def validate_package(path: Path) -> dict:
             if int(province_grid[cap_z, cap_x]) != pid:
                 raise AssertionError(f"province {pid} geographic anchor is outside its province")
         if realms.get("realms") != []:
-            raise AssertionError("image-derived worldmap must not contain pre-authored realms")
+            raise AssertionError("unowned state-formation candidates must not be imported as sovereign realms")
         if "realms" in blueprint or "realm_count" in blueprint:
-            raise AssertionError("world blueprint must not serialize canonical realm data")
-        if len(titles["tiers"]) != 2 or [int(t["index"]) for t in titles["tiers"]] != [0, 1]:
-            raise AssertionError("image worldmap must expose only province and region geography tiers")
-        if len(titles["titles"]) != blueprint["province_count"] + blueprint["region_count"]:
-            raise AssertionError("geographic title count does not match province/region blueprint")
+            raise AssertionError("world blueprint must not serialize canonical active realm identities")
+        expected_tiers = [0, 1, 2]
+        if [int(t["index"]) for t in titles["tiers"]] != expected_tiers:
+            raise AssertionError("image worldmap must retain province, region and state-candidate tiers")
+        if len(titles["titles"]) != (blueprint["province_count"] + blueprint["region_count"]
+                                     + blueprint["state_candidate_count"]):
+            raise AssertionError("territorial title count does not match province/region/state blueprint")
         by_id = {int(item["id"]): item for item in titles["titles"]}
         if len(by_id) != len(titles["titles"]):
             raise AssertionError("geographic title IDs are not globally unique")
@@ -1626,10 +1733,12 @@ def validate_package(path: Path) -> dict:
             tier, parent = int(item["tier"]), int(item["parent"])
             if tier == 0 and (parent not in by_id or int(by_id[parent]["tier"]) != 1):
                 raise AssertionError(f"province is not nested in a geographic region: {item['key']}")
-            if tier == 1 and parent != 0:
-                raise AssertionError(f"geographic region must not be nested in a sovereign state: {item['key']}")
-            if tier not in (0, 1):
-                raise AssertionError(f"unsupported pre-authored political title tier: {tier}")
+            if tier == 1 and (parent not in by_id or int(by_id[parent]["tier"]) != 2):
+                raise AssertionError(f"region is not nested in its state-formation boundary: {item['key']}")
+            if tier == 2 and parent != 0:
+                raise AssertionError(f"state-formation boundary must be a root title: {item['key']}")
+            if tier not in (0, 1, 2):
+                raise AssertionError(f"unsupported territorial title tier: {tier}")
         province_ids_set = {int(item["id"]) for item in blueprint["provinces"]}
         for settlement in blueprint["settlements"]:
             x, z = settlement["pixel"]
@@ -1641,8 +1750,13 @@ def validate_package(path: Path) -> dict:
                 raise AssertionError("settlement candidates must be unnamed and politically unassigned")
         if len(blueprint["settlements"]) != blueprint["settlement_count"]:
             raise AssertionError("settlement candidate count differs from the blueprint")
+        if blueprint["settlement_count"] < blueprint["province_count"]:
+            raise AssertionError("settlement opportunities must cover every viable province at minimum")
+        if blueprint["state_candidate_count"] <= 0:
+            raise AssertionError("image worldmap lost all state-formation boundaries")
         return {
             "worldmap": path.name, "realm_count": 0,
+            "state_candidate_count": blueprint["state_candidate_count"],
             "province_count": blueprint["province_count"],
             "region_count": blueprint["region_count"],
             "settlement_count": blueprint["settlement_count"],

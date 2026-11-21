@@ -6,6 +6,7 @@ import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 public final class SettlementMapTest {
     private static int failures;
@@ -118,6 +119,41 @@ public final class SettlementMapTest {
         catch (IllegalArgumentException expected) { disconnectedRejected = true; }
         ok(disconnectedRejected, "logistics cannot connect warehouses on separate road components");
 
+        TreasuryService.replace(new TreasuryLedger());
+        Settlement periodicEconomy = new Settlement("periodic_economy_test", "Periodic economy test", defs);
+        periodicEconomy.setCanonicalPopulation(100);
+        periodicEconomy.add(Defs.SILVER, 1000);
+        periodicEconomy.add("wood", 100);
+        periodicEconomy.add("planks", 100);
+        Building periodicMarket = periodicEconomy.place("market", 0, 0);
+        periodicMarket.state = Building.State.DONE;
+        Building periodicTavern = periodicEconomy.place("tavern", 8, 0);
+        periodicTavern.state = Building.State.DONE;
+        long financialEntriesBeforeAccrual = TreasuryService.current().journal().stream()
+                .filter(entry -> entry.kind() != TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && entry.kind() != TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED).count();
+        int silverEntriesBeforeAccrual = TreasuryService.current()
+                .entriesForAccount("settlement:periodic_economy_test").size();
+        periodicEconomy.tick(60); // one world day in the settlement clock
+        long financialEntriesAfterAccrual = TreasuryService.current().journal().stream()
+                .filter(entry -> entry.kind() != TreasuryLedger.Kind.ACCOUNT_CREATED
+                        && entry.kind() != TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED).count();
+        ok(financialEntriesAfterAccrual == financialEntriesBeforeAccrual
+                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1000) < 1e-8,
+                "taxes and operating costs accrue without writing treasury entries every simulation step");
+        Settlement periodicReloaded = Settlement.fromJson(periodicEconomy.toJson(), defs);
+        periodicReloaded.tick(1742); // close the first 30-day accounting period
+        List<TreasuryLedger.Entry> periodicEntries = TreasuryService.current().entriesForAccount(
+                "settlement:periodic_economy_test");
+        ok(periodicEntries.size() == silverEntriesBeforeAccrual + 2
+                        && periodicEntries.stream().filter(entry -> entry.category().equals("population-tax")).count() == 1
+                        && periodicEntries.stream().filter(entry -> entry.category().equals("building-upkeep")).count() == 1,
+                "one period produces one tax receipt and one aggregate upkeep receipt per settlement category");
+        ok(periodicReloaded.amount(Defs.SILVER) > 1000
+                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1810) < 1e-6,
+                "periodic tax credits and building upkeep reconcile to the exact persisted balance after reload");
+
+        TreasuryService.replace(new TreasuryLedger());
         Settlement funded = new Settlement("treasury_settlement_test", "Treasury settlement test", defs);
         funded.add(Defs.SILVER, 100);
         ok(TreasuryService.current().balance("settlement:treasury_settlement_test") == 100,
@@ -164,6 +200,8 @@ public final class SettlementMapTest {
                         && TreasuryService.current().balance("settlement:legacy_scope_test") == 0,
                 "legacy unscoped money and commodity accounts migrate once into dimension-scoped accounts");
 
+        ok(dev.worldforge.mod.Json.write(map.toMap()).equals(map.toJson()),
+                "structured terrain snapshots serialize identically without a JSON parse round-trip");
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),

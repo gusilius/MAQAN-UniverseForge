@@ -7,6 +7,9 @@ use crate::emergence::{advance, EmergenceRequest};
 /// Must match NativeWorldSimulation.NATIVE_ABI_VERSION in the Java host.
 pub const NATIVE_ABI_VERSION: i32 = 6;
 
+const MAX_JNI_INPUT_BYTES: i32 = 64 * 1024 * 1024;
+const MAX_JNI_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
 type JNIEnvPtr = *mut *const *const c_void;
 type JObject = *mut c_void;
 
@@ -19,13 +22,16 @@ unsafe fn read_bytes(env: JNIEnvPtr, array: JObject, max_len: i32) -> Option<Vec
     let exception: extern "system" fn(JNIEnvPtr) -> u8 = mem::transmute(*table.add(228));
     let len = get_len(env, array);
     if len < 0 || len > max_len { return None; }
-    let mut bytes = vec![0_i8; len as usize];
-    if len > 0 { get_region(env, array, 0, len, bytes.as_mut_ptr()); }
+    // Allocate the final byte buffer directly. The previous i8 buffer followed by
+    // from_raw_parts(...).to_vec() briefly held two full native copies of every JNI
+    // request, which is costly for geography-heavy world snapshots.
+    let mut bytes = vec![0_u8; len as usize];
+    if len > 0 { get_region(env, array, 0, len, bytes.as_mut_ptr().cast::<i8>()); }
     if exception(env) != 0 { return None; }
-    Some(std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), bytes.len()).to_vec())
+    Some(bytes)
 }
 unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
-    if env.is_null() || bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 { return std::ptr::null_mut(); }
+    if env.is_null() || bytes.is_empty() || bytes.len() > MAX_JNI_OUTPUT_BYTES { return std::ptr::null_mut(); }
     let table = *env;
     if table.is_null() { return std::ptr::null_mut(); }
     let new_array: extern "system" fn(JNIEnvPtr, i32) -> JObject = mem::transmute(*table.add(176));
@@ -61,8 +67,8 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeDecide(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
-    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => error_json("invalid_input", "JNI input unavailable or too large"),
+    let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
+        None => error_json("invalid_input", "decision input unavailable or exceeds 64 MiB"),
         Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected snapshot schema_version=1"),
         Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
             Ok(snapshot) => match decide(&snapshot) {
@@ -96,8 +102,8 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceEmergence(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
-    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => error_json("invalid_input", "emergence input unavailable or too large"),
+    let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
+        None => error_json("invalid_input", "emergence input unavailable or exceeds 64 MiB"),
         Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected emergence request schema_version=1"),
         Some(bytes) => match serde_json::from_slice::<EmergenceRequest>(&bytes) {
             Ok(request) => match advance(request) {
@@ -200,6 +206,12 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 
 #[cfg(test)]
 mod abi_tests {
+    #[test]
+    fn emergence_input_and_output_limits_are_64_mib() {
+        assert_eq!(super::MAX_JNI_INPUT_BYTES, 64 * 1024 * 1024);
+        assert_eq!(super::MAX_JNI_OUTPUT_BYTES, 64 * 1024 * 1024);
+    }
+
     #[test]
     fn native_abi_matches_java_host_contract() {
         assert_eq!(super::NATIVE_ABI_VERSION, 6);

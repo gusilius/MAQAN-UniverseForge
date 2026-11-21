@@ -45,6 +45,8 @@ public final class CharacterAuthorityTest {
                 "one physical entity UUID cannot be attached to two Characters across map partitions");
         check(authority.bindEntity(b.globalId, "troop", "another-physical-entity"),
                 "a distinct physical body can bind to a different map-owned Character");
+        check(authority.bindEntity(a.globalId, "portrait", "shared-physical-entity"),
+                "one Character may expose the same canonical body UUID through multiple body projections");
         boolean registryAliasRejected = false;
         try {
             authority.registerMap("north-alias", north);

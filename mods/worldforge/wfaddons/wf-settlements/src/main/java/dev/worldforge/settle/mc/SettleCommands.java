@@ -47,6 +47,25 @@ public final class SettleCommands {
                             c.getSource().sendSuccess(() -> Component.literal("Схемы перечитаны: " + (rep.isEmpty() ? "файлов нет" : "\n" + String.join("\n", rep))), true);
                             return rep.size();
                         })))
+                .then(Commands.literal("identity").requires(SettleCommands::op)
+                        .then(Commands.literal("style")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.architectureStyleId = id;
+                                    return "Архитектурный стиль образования установлен: " + id
+                                            + ". Расовая архитектура остаётся отдельным слоем.";
+                                }))))
+                        .then(Commands.literal("formation")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.polityFormationId = id;
+                                    return "Форма образования установлена: " + id
+                                            + ". Политические постройки будут подбираться отдельно от расовых.";
+                                }))))
+                        .then(Commands.literal("show").executes(c -> order(c, colony ->
+                                "Раса=" + colony.identityRace + ", культура=" + colony.identityCulture
+                                        + ", правительство=" + colony.governmentId + ", форма=" + colony.polityFormationId
+                                        + ", стиль=" + colony.architectureStyleId + ", тип=" + colony.settlementType))))
                 .then(Commands.literal("build").requires(SettleCommands::op)
                         .then(Commands.argument("def", StringArgumentType.word())
                                 .suggests((c, b) -> SharedSuggestionProvider.suggest(SettleMod.DEFS == null ? java.util.List.of() : SettleMod.DEFS.buildings.keySet(), b))
@@ -63,11 +82,31 @@ public final class SettleCommands {
                         }))))
                 .then(Commands.literal("assign").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
-                                .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
-                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
-                                    col.s.assign(w, uid);
-                                    return "Рабочий #" + w + " отправлен в здание #" + uid;
-                                })))))
+                                .then(Commands.argument("uid", IntegerArgumentType.integer(1))
+                                        .executes(c -> order(c, col -> {
+                                            int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                            col.s.assign(w, uid);
+                                            return "Рабочий #" + w + " отправлен в здание #" + uid;
+                                        }))
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .suggests((c, b) -> {
+                                                    CommandSourceStack source = c.getSource();
+                                                    Colony colony = SettleMod.nearest(source.getLevel(),
+                                                            source.getPosition().x, source.getPosition().z);
+                                                    if (colony == null) return b.buildFuture();
+                                                    Building building = colony.s.building(
+                                                            IntegerArgumentType.getInteger(c, "uid"));
+                                                    if (building == null) return b.buildFuture();
+                                                    java.util.Set<String> roles = new java.util.TreeSet<>(building.def.jobs.keySet());
+                                                    if (building.state == Building.State.BUILDING) roles.add("builder");
+                                                    return SharedSuggestionProvider.suggest(roles, b);
+                                                })
+                                                .executes(c -> order(c, col -> {
+                                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                                    String role = StringArgumentType.getString(c, "role");
+                                                    col.s.assign(w, uid, role);
+                                                    return "Рабочий #" + w + " назначен на роль '" + role + "' в здании #" + uid;
+                                                }))))))
                 .then(Commands.literal("hauler").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
                                 .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
@@ -370,6 +409,13 @@ public final class SettleCommands {
             ServerLevel lv = col.level(c.getSource().getServer());
             if (lv != null) col.captureTerrain(lv, x - 16, z - 16, x + 16, z + 16);
             dev.worldforge.settle.Defs.Building definition = SettleMod.DEFS.buildings.get(def);
+            if (definition != null && !col.s.defs.isIdentityCompatible(def, col.identityRace, null,
+                    col.identityCulture, col.governmentId, col.settlementType,
+                    col.polityFormationId, col.architectureStyleId)) {
+                throw new Settlement.OrderException("Постройка '" + definition.name
+                        + "' несовместима с идентичностью образования. Выберите подходящий вариант каталога "
+                        + "или измените стиль/форму образования.");
+            }
             if (definition != null && !col.map.cells().isEmpty())
                 col.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
             Building b = col.s.place(def, x, z);

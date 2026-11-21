@@ -10,8 +10,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.levelgen.Heightmap;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -22,6 +24,8 @@ public final class Bodies {
     public static final double SPAWN = SimulationLod.WORKER_SPAWN_RADIUS, DESPAWN = SimulationLod.WORKER_RETAIN_RADIUS;
     /** "поселение#рабочий" -> UUID живого тела. Тело, которого здесь нет, само исчезает (см. WFWorker.tick). */
     public static final Map<String, UUID> LIVE = new HashMap<>();
+
+    private record ColonyRuntime(Colony colony, ServerLevel level, boolean retain, boolean spawn) {}
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
 
@@ -39,54 +43,119 @@ public final class Bodies {
         }
     }
 
+    private static void decrement(Map<String, Integer> counts, String colonyId) {
+        int current = counts.getOrDefault(colonyId, 0);
+        if (current <= 1) counts.remove(colonyId);
+        else counts.put(colonyId, current - 1);
+    }
+
     public static void tick(MinecraftServer server) {
-        int spawned = 0;
-        for (Colony c : SettleMod.COLONIES.values()) {
-            ServerLevel lv = c.level(server);
-            if (lv == null) continue;
-            String prefix = c.s.id + "#";
-            String dimension = lv.dimension().location().toString();
-            boolean keep = SimulationLod.shouldRetainWorkers(dimension, c.cx, c.cz);
-            boolean spawn = SimulationLod.shouldSpawnWorkers(dimension, c.cx, c.cz);
-            Iterator<Map.Entry<String, UUID>> it = LIVE.entrySet().iterator();
-            while (it.hasNext()) {                                                 // убрать лишние тела: игроков нет рядом или рабочего больше нет
-                Map.Entry<String, UUID> e = it.next();
-                if (!e.getKey().startsWith(prefix)) continue;
-                boolean alive = false;
-                try {
-                    alive = c.s.worker(Integer.parseInt(e.getKey().substring(prefix.length()))) != null;
-                } catch (NumberFormatException ignored) {
-                }
-                if (!keep || !alive) {
-                    Entity body = lv.getEntity(e.getValue());
-                    if (body != null) body.discard();
-                    it.remove();
-                }
+        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass();
+        if (spawnBudget <= 0) return;
+
+        /*
+         * Build the active colony view once. The previous implementation scanned
+         * the entire LIVE map once per colony, making body maintenance O(C * L)
+         * for C colonies and L materialized bodies.
+         */
+        List<ColonyRuntime> activeColonies = new ArrayList<>(SettleMod.COLONIES.size());
+        Map<String, ColonyRuntime> byColonyId = new HashMap<>(Math.max(16, SettleMod.COLONIES.size() * 2));
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            ServerLevel level = colony.level(server);
+            if (level == null) continue;
+            String id = colony.s.id;
+            String dimension = level.dimension().location().toString();
+            ColonyRuntime runtime = new ColonyRuntime(colony, level,
+                    SimulationLod.shouldRetainWorkers(dimension, colony.cx, colony.cz),
+                    SimulationLod.shouldSpawnWorkers(dimension, colony.cx, colony.cz));
+            activeColonies.add(runtime);
+            byColonyId.put(id, runtime);
+        }
+
+        // One pass over all tracked bodies: validate ownership and count survivors.
+        Map<String, Integer> bodyCounts = new HashMap<>();
+        Iterator<Map.Entry<String, UUID>> live = LIVE.entrySet().iterator();
+        while (live.hasNext()) {
+            Map.Entry<String, UUID> entry = live.next();
+            String liveKey = entry.getKey();
+            int separator = liveKey.lastIndexOf('#');
+            if (separator <= 0 || separator == liveKey.length() - 1) continue;
+            String colonyId = liveKey.substring(0, separator);
+            ColonyRuntime runtime = byColonyId.get(colonyId);
+            // Preserve records for dimensions that are not currently available, as before.
+            if (runtime == null) continue;
+
+            bodyCounts.merge(colonyId, 1, Integer::sum);
+            boolean workerExists = false;
+            try {
+                workerExists = runtime.colony().s.worker(
+                        Integer.parseInt(liveKey.substring(separator + 1))) != null;
+            } catch (NumberFormatException ignored) {
+                // Invalid legacy keys are stale and are removed below.
             }
-            if (!spawn) continue;
-            for (Worker w : c.s.workers) {
-                if (spawned >= 4) return;                                          // не больше нескольких за проход
-                String k = key(c.s.id, w.id);
-                UUID u = LIVE.get(k);
-                Entity body = u == null ? null : lv.getEntity(u);
-                if (hasLoadedVanillaVillagerBody(w, lv)) {
+
+            if (!runtime.retain() || !workerExists) {
+                Entity body = runtime.level().getEntity(entry.getValue());
+                if (body != null) {
+                    body.discard();
+                    dev.worldforge.mod.MaqanPerformanceTelemetry.workerDespawned();
+                }
+                live.remove();
+                decrement(bodyCounts, colonyId);
+            }
+        }
+
+        // Spawn in the same colony iteration order, using O(1) per-colony counts.
+        int spawned = 0;
+        int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
+        for (ColonyRuntime runtime : activeColonies) {
+            if (!runtime.spawn() || spawned >= spawnBudget) continue;
+            Colony colony = runtime.colony();
+            ServerLevel level = runtime.level();
+            String colonyId = colony.s.id;
+            int colonyBodyCount = bodyCounts.getOrDefault(colonyId, 0);
+            if (colonyBodyCount >= colonyBodyLimit) continue;
+
+            for (Worker worker : colony.s.workers) {
+                if (spawned >= spawnBudget || colonyBodyCount >= colonyBodyLimit) break;
+                String liveKey = key(colonyId, worker.id);
+                UUID trackedUuid = LIVE.get(liveKey);
+                Entity body = trackedUuid == null ? null : level.getEntity(trackedUuid);
+                if (hasLoadedVanillaVillagerBody(worker, level)) {
                     if (body != null) body.discard();
-                    LIVE.remove(k);
+                    if (LIVE.remove(liveKey) != null) {
+                        decrement(bodyCounts, colonyId);
+                        colonyBodyCount--;
+                    }
                     continue;
                 }
                 if (body != null && body.isAlive()) continue;
-                int x = c.cx + lv.random.nextInt(9) - 4, z = c.cz + lv.random.nextInt(9) - 4;
-                if (!lv.hasChunkAt(new BlockPos(x, 64, z))) continue;
-                int y = lv.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                WFWorker e = SettleMod.WORKER.get().create(lv);
-                if (e == null) continue;
-                e.colonyId = c.s.id;
-                e.workerId = w.id;
-                e.moveTo(x + 0.5, y, z + 0.5, lv.random.nextFloat() * 360f, 0f);
-                LIVE.put(k, e.getUUID());                                          // сначала запись, потом добавление: проверка тела пройдёт
-                e.refreshName();
-                lv.addFreshEntity(e);
-                spawned++;
+
+                int x = colony.cx + level.random.nextInt(9) - 4;
+                int z = colony.cz + level.random.nextInt(9) - 4;
+                if (!level.hasChunkAt(new BlockPos(x, 64, z))) continue;
+                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                WFWorker entity = SettleMod.WORKER.get().create(level);
+                if (entity == null) continue;
+                entity.colonyId = colonyId;
+                entity.workerId = worker.id;
+                entity.moveTo(x + 0.5, y, z + 0.5, level.random.nextFloat() * 360f, 0f);
+                boolean alreadyTracked = trackedUuid != null;
+                LIVE.put(liveKey, entity.getUUID());
+                entity.refreshName();
+                if (level.addFreshEntity(entity)) {
+                    dev.worldforge.mod.MaqanPerformanceTelemetry.workerSpawned();
+                    spawned++;
+                    if (!alreadyTracked) {
+                        bodyCounts.merge(colonyId, 1, Integer::sum);
+                        colonyBodyCount++;
+                    }
+                } else {
+                    if (LIVE.remove(liveKey) != null) {
+                        decrement(bodyCounts, colonyId);
+                        colonyBodyCount--;
+                    }
+                }
             }
         }
     }

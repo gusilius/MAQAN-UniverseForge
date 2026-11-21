@@ -5,6 +5,7 @@ import dev.worldforge.mod.*;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.*;
 import dev.worldforge.people.bridge.DialogueBridge;
+import dev.worldforge.settle.ResidentSocial;
 
 import java.nio.file.*;
 import java.util.*;
@@ -55,6 +56,16 @@ public class PeopleTest {
                         && NameBank.settlementCategory("city").equals("cities")
                         && NameBank.settlementCategory("tribal_community").equals("tribal_camps"),
                 "settlement type IDs resolve to specialized naming pools");
+        NameBank.NameReservations houseReservations = names.reservations(List.of("Existing House"));
+        Set<String> allocatedHouses = new HashSet<>();
+        boolean uniqueHouseBatch = true;
+        for (int i = 0; i < 96; i++) {
+            String house = names.generateUnique("human", "human", "houses",
+                    new Random(20261119L + i), houseReservations);
+            uniqueHouseBatch &= !house.isBlank() && allocatedHouses.add(house.toLowerCase(Locale.ROOT));
+        }
+        ok(uniqueHouseBatch && allocatedHouses.size() == 96,
+                "incremental house-name reservations allocate a large batch without rescanning or duplicate names");
         ok(names.poolForRace("elf", "elf").cities.size() >= 18
                         && names.poolForRace("dwarf", "dwarf").cities.size() >= 18
                         && names.poolForRace("clockwork", "human").male.size() >= 18,
@@ -404,6 +415,68 @@ public class PeopleTest {
                         &&CharacterInventory.items(journalReload.get(journalPerson.id)).stream()
                         .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
                 "canonical personal inventories and item data survive CharacterRegistry save/load");
+
+        CharacterRegistry bereavementRegistry = new CharacterRegistry();
+        Character sharedParent = bereavementRegistry.create("Общий родитель", "", "", "m", -40);
+        Character deceasedResident = bereavementRegistry.create("Умерший родственник", "", "", "m", 0);
+        Character siblingResident = bereavementRegistry.create("Живой брат", "", "", "m", 2);
+        deceasedResident.father = sharedParent.id;
+        sharedParent.children.add(deceasedResident.id);
+        siblingResident.father = sharedParent.id;
+        sharedParent.children.add(siblingResident.id);
+        Character trustedFriend = bereavementRegistry.create("Друг", "", "", "m", 1);
+        Character stranger = bereavementRegistry.create("Незнакомец", "", "", "m", 1);
+        deceasedResident.props.put("social.relationships", new LinkedHashMap<>(Map.of(trustedFriend.globalId, 85)));
+        trustedFriend.props.put("social.relationships", new LinkedHashMap<>(Map.of(deceasedResident.globalId, 85)));
+        PopulationSimulation.die(bereavementRegistry, deceasedResident.id, 40, "natural");
+        ok(CharacterDevelopment.memories(siblingResident, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(trustedFriend, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(stranger, 32).stream()
+                        .noneMatch(memory -> "bereavement".equals(memory.get("kind"))),
+                "death bereavement reaches indexed siblings and reciprocal friends without notifying unrelated residents");
+        ok(bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
+                "canonical global Character lookup resolves social event recipients directly");
+
+        CharacterRegistry queuedBereavement = new CharacterRegistry();
+        Character queuedDeceased = queuedBereavement.create("Умерший", "", "", "m", 0);
+        List<Character> queuedFriends = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            Character friend = queuedBereavement.create("Друг " + i, "", "", "m", 1);
+            queuedFriends.add(friend);
+            queuedDeceased.props.putIfAbsent("social.relationships", new LinkedHashMap<String, Object>());
+            @SuppressWarnings("unchecked") Map<String, Object> socialMap =
+                    (Map<String, Object>) queuedDeceased.props.get("social.relationships");
+            socialMap.put(friend.globalId, 90);
+            friend.props.put("social.relationships", new LinkedHashMap<>(Map.of(queuedDeceased.globalId, 90)));
+        }
+        PopulationSimulation.die(queuedBereavement, queuedDeceased.id, 40, "natural");
+        ok(!Boolean.TRUE.equals(queuedDeceased.props.get("death.bereavement.completed"))
+                        && queuedBereavement.pendingBereavementEvents() == 1,
+                "large bereavement fan-out remains queued after the first bounded death batch");
+        String queuedSave = queuedBereavement.toJson();
+        CharacterRegistry queuedReload = new CharacterRegistry();
+        queuedReload.fromJson(queuedSave);
+        ok(queuedReload.pendingBereavementEvents() == 1,
+                "pending bereavement dispatch is reconstructed from durable Character properties after reload");
+        int firstQueuedBatch = queuedReload.processPendingBereavementBatch(16);
+        ok(firstQueuedBatch == 16 && queuedReload.pendingBereavementEvents() == 1,
+                "bereavement queue advances by a strict recipient budget");
+        while (queuedReload.pendingBereavementEvents() > 0)
+            queuedReload.processPendingBereavementBatch(16);
+        ok(Boolean.TRUE.equals(queuedReload.get(queuedDeceased.id).props.get("death.bereavement.completed"))
+                        && queuedFriends.stream().allMatch(friend -> {
+                            Character restored = queuedReload.getByGlobalId(friend.globalId);
+                            return restored != null && CharacterDevelopment.memories(restored, 8).stream()
+                                    .anyMatch(memory -> "bereavement".equals(memory.get("kind")));
+                        }),
+                "queued death consequences resume to completion without losing recipients across save/load");
+        Character socialCapPerson = queuedReload.create("Социальный", "", "", "m", 1);
+        for (int i = 0; i < 400; i++) ResidentSocial.adjust(socialCapPerson, "external:" + i, 1);
+        ok(((Map<?, ?>) socialCapPerson.props.get("social.relationships")).size()
+                        <= ResidentSocial.MAX_RELATIONSHIPS_PER_CHARACTER,
+                "social relationship neighbourhood stays within its configured memory and event-fan-out bound");
 
         Character heir = journal.create("Наследник", "", "", "m", 20);
         Character parent = journal.create("Умерший житель", "", "", "m", 0);

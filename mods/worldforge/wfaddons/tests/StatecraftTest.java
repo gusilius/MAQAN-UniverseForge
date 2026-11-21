@@ -85,6 +85,27 @@ public final class StatecraftTest {
         check(conflictingOwnershipRejected,
                 "an imported province cannot silently change sovereign ownership without a transfer event");
 
+        String unclaimedRealmsJson = """
+                {"format":"worldforge-realms/1","realms":[]}
+                """;
+        dev.worldforge.mod.TitleData unclaimedMap = dev.worldforge.mod.TitleData.create(
+                titlesJson, unclaimedRealmsJson, new short[]{1, 2}, 2, 1);
+        Statecraft firstClaim = new Statecraft();
+        check(firstClaim.syncMapTitles("image-world", unclaimedMap) == 5
+                        && firstClaim.title(Statecraft.mapTitleId("image-world", "p_north")).realmId
+                                .equals("unclaimed:image-world"),
+                "geographic map titles may begin as neutral unclaimed placeholders");
+        check(firstClaim.syncMapTitles("image-world", imageTitles) == 0
+                        && firstClaim.title(Statecraft.mapTitleId("image-world", "p_north")).realmId.equals("northland")
+                        && firstClaim.title(Statecraft.mapTitleId("image-world", "r_north")).realmId.equals("northland")
+                        && firstClaim.title(Statecraft.mapTitleId("image-world", "p_south")).realmId.equals("northland"),
+                "the first generated sovereign ownership claim propagates through map title descendants");
+        boolean firstClaimTransferRejected = false;
+        try { firstClaim.syncMapTitles("image-world", conflictingMap); }
+        catch (IllegalStateException expected) { firstClaimTransferRejected = true; }
+        check(firstClaimTransferRejected,
+                "first-claim support does not permit silent transfers between established realms");
+
         // Deep custom map hierarchies must remain intact beyond the five broad CK rank buckets.
         String deepTitlesJson = """
                 {"format":"worldforge-titles/1","blocks_per_pixel":1.0,

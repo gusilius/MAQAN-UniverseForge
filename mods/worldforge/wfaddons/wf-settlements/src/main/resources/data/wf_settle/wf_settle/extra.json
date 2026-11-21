@@ -203,6 +203,239 @@
       "upkeep": 2,
       "safety": 2,
       "description": "Осадная инженерная мастерская: кузнецы и инженеры создают, обслуживают и готовят осадные машины."
+    },
+    "cottage_elf": {
+      "name": "Лесное родовое жилище",
+      "category": "housing",
+      "cost": {
+        "wood": 18,
+        "planks": 8
+      },
+      "work": 24,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "birch",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "elf",
+        "wood_elf",
+        "fae"
+      ],
+      "architecture_tags": [
+        "forest",
+        "arboreal"
+      ],
+      "description": "Жилище лесных народов из светлой древесины, вписанное в лесную среду."
+    },
+    "longhouse_orc": {
+      "name": "Орочий длинный дом",
+      "category": "housing",
+      "cost": {
+        "wood": 24,
+        "stone": 8
+      },
+      "work": 28,
+      "size": [
+        7,
+        5
+      ],
+      "housing": 6,
+      "blueprint": "",
+      "architecture_material": "spruce",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "orc",
+        "steppe_orc",
+        "nomad"
+      ],
+      "architecture_tags": [
+        "steppe",
+        "clan"
+      ],
+      "description": "Просторный клановый длинный дом для орочьей общины."
+    },
+    "burrow_goblin": {
+      "name": "Гоблинская нора",
+      "category": "housing",
+      "cost": {
+        "wood": 12,
+        "stone": 16
+      },
+      "work": 30,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "dark_oak",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "goblin",
+        "halfling",
+        "hill_halfling"
+      ],
+      "architecture_tags": [
+        "burrow",
+        "hills"
+      ],
+      "description": "Низкое укреплённое жилище, приспособленное к склонам и холмам."
+    },
+    "stilt_saurian": {
+      "name": "Свайный дом ящеров",
+      "category": "housing",
+      "cost": {
+        "wood": 26
+      },
+      "work": 32,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "warped",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "saurian",
+        "marsh_saurian"
+      ],
+      "architecture_tags": [
+        "wetland",
+        "stilt"
+      ],
+      "description": "Поднятое на сваях жилище для болотных поселений."
+    },
+    "hall_feudal": {
+      "name": "Феодальная палата",
+      "category": "civic",
+      "cost": {
+        "wood": 55,
+        "stone": 65
+      },
+      "work": 95,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "stone",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "feudal_monarchy",
+        "elective_monarchy",
+        "empire_throne"
+      ],
+      "description": "Административный двор феодального правителя и его вассалов."
+    },
+    "hall_republic": {
+      "name": "Зал городского совета",
+      "category": "civic",
+      "cost": {
+        "wood": 65,
+        "stone": 35
+      },
+      "work": 90,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "birch",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "merchant_republic",
+        "guild_league",
+        "sage_council"
+      ],
+      "description": "Зал выборного совета, гильдий и городских представителей."
+    },
+    "hall_tribal": {
+      "name": "Круг старейшин",
+      "category": "civic",
+      "cost": {
+        "wood": 45,
+        "stone": 20
+      },
+      "work": 70,
+      "size": [
+        7,
+        5
+      ],
+      "blueprint": "",
+      "architecture_material": "spruce",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "tribal_clans",
+        "horde",
+        "nomad_khanate",
+        "marsh_enclave"
+      ],
+      "description": "Открытый круг собраний кланов и старейшин."
+    },
+    "hall_theocracy": {
+      "name": "Святилище верховной власти",
+      "category": "civic",
+      "cost": {
+        "stone": 90,
+        "wood": 25
+      },
+      "work": 120,
+      "size": [
+        7,
+        9
+      ],
+      "blueprint": "",
+      "architecture_material": "sandstone",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "theocracy"
+      ],
+      "description": "Центр религиозного управления, обрядов и власти духовенства."
+    },
+    "hall_military": {
+      "name": "Штаб военного совета",
+      "category": "civic",
+      "cost": {
+        "stone": 65,
+        "wood": 45
+      },
+      "work": 100,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "deepslate",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "military_junta"
+      ],
+      "description": "Штаб военного правления, командования и снабжения гарнизонов."
+    },
+    "hall_holdfast": {
+      "name": "Зал горного клана",
+      "category": "civic",
+      "cost": {
+        "stone": 100,
+        "wood": 25
+      },
+      "work": 115,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "deepslate",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "holdfast"
+      ],
+      "description": "Каменный зал кланового совета горного оплота."
     }
   }
 }

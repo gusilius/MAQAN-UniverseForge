@@ -81,7 +81,8 @@ public final class SchemLibrary {
     public static Blueprints.Plan plan(String base) {
         return PLANS.computeIfAbsent(base, k -> {
             Schematic s = SCHEMS.get(k);
-            if (s == null) return null;
+            if (s == null) return new Blueprints.Plan(1, 1, 1, List.of(), true,
+                    "Схема «" + k + "» отсутствует в библиотеке");
             BlockState[] pal = new BlockState[s.palette.size()];
             int missing = 0;
             for (int i = 0; i < pal.length; i++) {
@@ -94,7 +95,12 @@ public final class SchemLibrary {
                     SettleMod.LOGGER.warn("wf_settle: схема {}: неизвестный блок {}", k, str);
                 }
             }
-            if (missing > 0) SettleMod.LOGGER.warn("wf_settle: схема {}: пропущено видов блоков: {}", k, missing);
+            if (missing > 0) {
+                String error = "Схема «" + k + "»: " + missing
+                        + " неизвестных типов блоков. Строительство остановлено, чтобы не создавать неполное здание.";
+                SettleMod.LOGGER.error("wf_settle: {}", error);
+                return new Blueprints.Plan(s.sx, s.sy, s.sz, List.of(), true, error);
+            }
             List<Blueprints.Entry> list = new ArrayList<>();
             for (int y = 0; y < s.sy; y++) for (int z = 0; z < s.sz; z++) for (int x = 0; x < s.sx; x++) {
                 BlockState st = pal[s.cells[s.index(x, y, z)]];
