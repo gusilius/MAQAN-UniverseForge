@@ -123,7 +123,13 @@ public final class TreasuryJournalArchive {
             }
             published = true;
             nextSequence = decoded.lastSequence() + 1;
-            referenceIndex.append(decoded.entries(), nextSequence);
+            // A previous crash may have published a segment but failed before advancing
+            // the index cursor. Rebuild from the now-canonical archive before appending,
+            // otherwise the stale cursor would permanently reject the next segment.
+            if (!referenceIndex.isCurrent(decoded.firstSequence()))
+                referenceIndex.rebuild(this);
+            else
+                referenceIndex.append(decoded.entries(), nextSequence);
             return true;
         } finally {
             if (!published) Files.deleteIfExists(temporary);
