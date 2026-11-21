@@ -427,10 +427,7 @@ public final class TreasuryLedger {
         List<Entry> result = new ArrayList<>(2);
         if (historyArchive != null) {
             try {
-                historyArchive.forEachEntry(entry -> {
-                    if (key.equals(referenceKey(entry.accountId(), entry.kind(), entry.reference())))
-                        result.add(entry);
-                });
+                result.addAll(historyArchive.readReferenceEntries(accountId, kind.name(), clean(reference)));
             } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
         }
         for (Entry entry : journal) {

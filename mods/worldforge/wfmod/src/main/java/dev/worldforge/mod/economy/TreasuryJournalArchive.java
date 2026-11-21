@@ -29,6 +29,7 @@ public final class TreasuryJournalArchive {
     private final Path directory;
     private final long firstSequence;
     private long nextSequence;
+    private final TreasuryReferenceIndex referenceIndex;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
         if (directory == null || firstExpectedSequence < 1)
@@ -37,6 +38,8 @@ public final class TreasuryJournalArchive {
         this.firstSequence = firstExpectedSequence;
         Files.createDirectories(directory);
         this.nextSequence = verifyExisting(firstExpectedSequence);
+        this.referenceIndex = new TreasuryReferenceIndex(directory.resolve("reference-index"));
+        if (!referenceIndex.isCurrent(this.nextSequence)) referenceIndex.rebuild(this);
     }
 
     public synchronized long nextSequence() { return nextSequence; }
@@ -120,6 +123,7 @@ public final class TreasuryJournalArchive {
             }
             published = true;
             nextSequence = decoded.lastSequence() + 1;
+            referenceIndex.append(decoded.entries(), nextSequence);
             return true;
         } finally {
             if (!published) Files.deleteIfExists(temporary);
@@ -165,6 +169,25 @@ public final class TreasuryJournalArchive {
         if (expected != nextSequence)
             throw new IOException("Treasury archive suffix ended at " + (expected - 1)
                     + " but archive requires " + (nextSequence - 1));
+    }
+
+    /** Exact-reference lookup via the compact disk index; hash collisions are checked against journal rows. */
+    public synchronized List<TreasuryLedger.Entry> readReferenceEntries(String accountId, String kind,
+                                                                          String reference) throws IOException {
+        if (accountId == null || accountId.isBlank() || kind == null || kind.isBlank())
+            throw new IllegalArgumentException("Treasury reference lookup requires account and kind");
+        if (!referenceIndex.isCurrent(nextSequence)) referenceIndex.rebuild(this);
+        List<TreasuryLedger.Entry> matches = new ArrayList<>();
+        for (long sequence : referenceIndex.find(accountId, kind, reference)) {
+            List<TreasuryLedger.Entry> page = readPage(sequence, 1);
+            if (page.isEmpty()) continue;
+            TreasuryLedger.Entry entry = page.get(0);
+            if (accountId.equals(entry.accountId()) && kind.equals(entry.kind().name())
+                    && (reference == null ? "" : reference.trim()).equals(entry.reference()))
+                matches.add(entry);
+        }
+        matches.sort(Comparator.comparingLong(TreasuryLedger.Entry::sequence));
+        return List.copyOf(matches);
     }
 
     /** A bounded account-history page; nextSequence is the exclusive resume cursor. */
