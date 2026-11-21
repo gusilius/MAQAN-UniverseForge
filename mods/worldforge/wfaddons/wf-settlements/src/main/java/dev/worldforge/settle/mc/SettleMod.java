@@ -6,6 +6,7 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.NameBank;
@@ -121,6 +122,7 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    private static int lifeRegistryCursor;
     private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
         if (interval < 1) return;
         if (colonySimulationIndexInterval == interval && colonySimulationIndexBuiltAt != Long.MIN_VALUE
@@ -2131,9 +2133,45 @@ public class SettleMod {
         }
     }
 
+    /**
+     * Settlements owns the integration with resident life events because it depends on wf-people,
+     * while wf-people must not depend back on this addon. Work is split fairly across canonical
+     * partitions and remains bounded even when one partition contains most of the population.
+     */
+    private static void advanceCanonicalResidentLife() {
+        try {
+            LinkedHashSet<CharacterRegistry> unique = new LinkedHashSet<>();
+            unique.addAll(PeopleMod.registries().values());
+            unique.addAll(PeopleMod.dimensionRegistries().values());
+            unique.add(PeopleMod.worldRegistry());
+            unique.add(PeopleMod.playerRegistry());
+            List<CharacterRegistry> registries = new ArrayList<>(unique);
+            if (registries.isEmpty()) return;
+            int count = registries.size();
+            int start = Math.floorMod(lifeRegistryCursor++, count);
+            var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
+            long worldDay = clock.dayNumber();
+            int year = clock.year();
+            for (int i = 0; i < count; i++) {
+                int share = 128 / count + (i < 128 % count ? 1 : 0);
+                if (share <= 0) continue;
+                CharacterRegistry registry = registries.get((start + i) % count);
+                registry.processPendingBereavementBatch(share);
+                ResidentLifeEvents.advanceDuePregnanciesBatch(
+                        registry, year, worldDay, PeopleMod.NAMES, share);
+                ResidentLifeEvents.advanceHealthBatch(
+                        registry, worldDay, share);
+            }
+        } catch (LinkageError | RuntimeException error) {
+            LOGGER.error("wf_settle: canonical resident life pass failed: {}", error.toString(), error);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.END || DEFS == null) return;
+        if (e.phase != TickEvent.Phase.END) return;
+        advanceCanonicalResidentLife();
+        if (DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;

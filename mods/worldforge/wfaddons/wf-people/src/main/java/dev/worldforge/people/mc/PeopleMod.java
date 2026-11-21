@@ -19,7 +19,6 @@ import dev.worldforge.people.Courts;
 import dev.worldforge.people.TerritorialIdentity;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
-import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.people.PopulationWorldBaseline;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
@@ -114,7 +113,6 @@ public class PeopleMod {
     private static volatile long populationBaselineDay = Long.MIN_VALUE;
     private static volatile long populationRegistryGeneration;
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
-    private static int lifeRegistryCursor;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -894,24 +892,6 @@ public class PeopleMod {
         try {
             long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
-            // Fair, rotating per-registry budgets prevent one large map from starving other partitions.
-            List<CharacterRegistry> lifeRegistries = new ArrayList<>(REGS.values());
-            lifeRegistries.addAll(DIMENSION_REGISTRIES.values());
-            lifeRegistries.add(WORLD_REGISTRY);
-            lifeRegistries.add(PLAYER_REGISTRY);
-            if (!lifeRegistries.isEmpty()) {
-                int startRegistry = Math.floorMod(lifeRegistryCursor++, lifeRegistries.size());
-                int count = lifeRegistries.size();
-                for (int i = 0; i < count; i++) {
-                    CharacterRegistry registry = lifeRegistries.get((startRegistry + i) % count);
-                    int share = 128 / count + (i < 128 % count ? 1 : 0);
-                    if (share <= 0) continue;
-                    registry.processPendingBereavementBatch(share);
-                    ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, share);
-                    ResidentLifeEvents.advanceHealthBatch(registry, currentWorldDay, share);
-                }
-            }
-
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
             long registryGeneration = populationRegistryGeneration;
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
