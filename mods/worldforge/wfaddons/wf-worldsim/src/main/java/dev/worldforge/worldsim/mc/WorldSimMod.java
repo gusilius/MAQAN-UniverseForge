@@ -788,7 +788,7 @@ public final class WorldSimMod {
                     + "|" + livingCharacters + "|" + namedCharacters + "|" + namedSettlements + "|"
                     + courtOffices + "|" + realms.size() + "|" + namedPolities + "|" + rulers + "|"
                     + dynasties + "|" + titles + "|" + namedTitles + "|" + governments + "|"
-                    + raceIds + "|" + settlementTypeCounts + "|" + blueprintSiteTypeCounts + "|"
+                    + raceIds.size() + "|" + settlementTypeCounts + "|" + blueprintSiteTypeCounts + "|"
                     + governmentTypes + "|" + vassalContracts.size() + "|" + subjectTypes + "|" + titleRanks;
             String previousFingerprint = LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.put(source.id, fingerprint);
             if (!fingerprint.equals(previousFingerprint)) {
