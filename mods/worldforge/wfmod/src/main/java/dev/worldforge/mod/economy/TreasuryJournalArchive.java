@@ -29,6 +29,9 @@ public final class TreasuryJournalArchive {
     private final Path directory;
     private final long firstSequence;
     private long nextSequence;
+    // Segment files are immutable and this archive has one synchronized writer.
+    // Keep the ordered directory snapshot for the lifetime of the archive instance.
+    private List<Path> segmentFilesCache;
     private final TreasuryReferenceIndex referenceIndex;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
@@ -122,6 +125,12 @@ public final class TreasuryJournalArchive {
                 throw new IOException("Atomic treasury segment publication is not supported by this filesystem", unsupported);
             }
             published = true;
+            if (segmentFilesCache != null) {
+                List<Path> updatedSegments = new ArrayList<>(segmentFilesCache.size() + 1);
+                updatedSegments.addAll(segmentFilesCache);
+                updatedSegments.add(destination);
+                segmentFilesCache = List.copyOf(updatedSegments);
+            }
             nextSequence = decoded.lastSequence() + 1;
             // A previous crash may have published a segment but failed before advancing
             // the index cursor. Rebuild from the now-canonical archive before appending,
@@ -152,10 +161,11 @@ public final class TreasuryJournalArchive {
             throw new IOException("Requested treasury archive sequence is outside the retained range");
         long expected = requestedFirstSequence;
         if (requestedFirstSequence == nextSequence) return;
-        for (Path path : segmentFiles()) {
-            // Segment filenames carry fixed-width sequence bounds. Skip older immutable
-            // segments before opening or decoding them; otherwise every paged read
-            // repeatedly parses the entire archive prefix.
+        List<Path> segments = segmentFiles();
+        for (int i = firstSegmentAtOrAfter(segments, requestedFirstSequence); i < segments.size(); i++) {
+            Path path = segments.get(i);
+            // Binary-search immutable filename bounds before opening or decoding segments.
+            // A resumed page therefore does not walk the entire archived prefix.
             if (segmentLastSequence(path) < requestedFirstSequence) continue;
             TreasuryJournalSegment.Decoded decoded;
             try {
@@ -223,9 +233,11 @@ public final class TreasuryJournalArchive {
         long[] cursor = {firstSequence};
         boolean[] full = {false};
         if (firstSequence < nextSequence) {
-            for (Path path : segmentFiles()) {
+            List<Path> segments = segmentFiles();
+            for (int i = firstSegmentAtOrAfter(segments, cursor[0]); i < segments.size(); i++) {
+                Path path = segments.get(i);
                 // Resume directly at the first segment whose filename range can contain
-                // the requested cursor; do not deserialize every earlier segment per page.
+                // the requested cursor; do not walk or deserialize earlier segments.
                 if (segmentLastSequence(path) < cursor[0]) continue;
                 TreasuryJournalSegment.Decoded decoded;
                 try {
@@ -339,12 +351,26 @@ public final class TreasuryJournalArchive {
     }
 
     private List<Path> segmentFiles() throws IOException {
+        if (segmentFilesCache != null) return segmentFilesCache;
         List<Path> files = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "segment-*.json")) {
             for (Path path : stream) files.add(path);
         }
         files.sort(Comparator.comparing(path -> path.getFileName().toString()));
-        return files;
+        segmentFilesCache = List.copyOf(files);
+        return segmentFilesCache;
+    }
+
+    /** Finds the first immutable segment whose inclusive end can contain the requested sequence. */
+    private static int firstSegmentAtOrAfter(List<Path> segments, long sequence) throws IOException {
+        int low = 0;
+        int high = segments.size();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (segmentLastSequence(segments.get(middle)) < sequence) low = middle + 1;
+            else high = middle;
+        }
+        return low;
     }
 
     private Path segmentPath(long first, long last) {
