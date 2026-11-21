@@ -648,7 +648,7 @@ public final class WorldSimMod {
                 || !state.has("polities") || !state.get("polities").isJsonArray()) return;
         // snapshot() deep-copies persisted geography; do it once per diagnostic pass,
         // not once per dimension.
-        List<com.google.gson.JsonElement> vanillaGeography = VanillaWorldGeography.snapshot();
+        JsonArray vanillaGeography = VanillaWorldGeography.snapshot();
         for (EmergenceSource source : emergenceSources()) {
             long bands = state.getAsJsonArray("bands").asList().stream()
                     .filter(JsonObject.class::isInstance).map(JsonObject.class::cast)
