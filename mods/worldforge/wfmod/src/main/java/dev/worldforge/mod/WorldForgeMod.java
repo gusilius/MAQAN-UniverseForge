@@ -31,6 +31,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
+import net.minecraftforge.event.entity.EntityTravelToDimensionEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
@@ -85,6 +87,9 @@ public class WorldForgeMod {
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
     private static TreasuryArchiveStore treasuryStore;
+    private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
+    private static volatile Path planetActivationFile;
+    private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -358,13 +363,10 @@ public class WorldForgeMod {
     public void onCreateSpawn(LevelEvent.CreateSpawnPosition e) {
         if (!(e.getLevel() instanceof ServerLevel level)) return;
         if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator gen)) return;
-        try {
-            BlockPos p = gen.findSpawn();
-            e.getSettings().setSpawn(p, 0.0F);
-            e.setCanceled(true);
-        } catch (RuntimeException ex) {
-            LOGGER.error("WorldForge: не удалось выбрать точку спавна", ex);
-        }
+        // Do not scan/decode a whole planetary raster during server startup.
+        // The first visitor's safe arrival position becomes the planet's respawn point.
+        e.getSettings().setSpawn(DORMANT_PLANET_SPAWN, 0.0F);
+        e.setCanceled(true);
     }
 
     @SubscribeEvent

@@ -178,6 +178,8 @@ public final class WorldSimMod {
         // from its complete .worldmap package even before a player visits that dimension.
         if (server != null) for (ServerLevel level : server.getAllLevels()) {
             if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            String dimension = level.dimension().location().toString();
+            if (!WorldForgeMod.isPlanetDimensionActive(dimension)) continue;
             MapData map;
             try { map = generator.data(); }
             catch (RuntimeException unavailable) {
