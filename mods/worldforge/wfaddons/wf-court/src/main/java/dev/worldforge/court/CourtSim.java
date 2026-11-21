@@ -212,11 +212,14 @@ public final class CourtSim {
     // ------------------------------------------------------------------ ход
 
     public void tick(double days) {
+        long elapsed = (long) Math.floor(days);
+        long target = day + elapsed;
         // A virtual court can be attached before WorldSim has materialized its population.
-        // Do not spend the first annual pass on an empty registry: run it once as soon as
-        // canonical Characters become available, even if the calendar boundary has passed.
-        if (!populationLifecycleInitialized && reg.size() > 0) yearly();
-        long target = day + (long) Math.floor(days);
+        // If the population appears after an annual boundary, catch it up immediately.
+        // If this tick itself crosses the boundary, let the normal yearly pass do the work
+        // exactly once rather than running a catch-up and a calendar pass back-to-back.
+        if (!populationLifecycleInitialized && reg.size() > 0 && elapsed > 0
+                && Math.floorDiv(target, 365L) == Math.floorDiv(day, 365L)) yearly();
         while (day < target) {
             day++;
             stepSchemes();
