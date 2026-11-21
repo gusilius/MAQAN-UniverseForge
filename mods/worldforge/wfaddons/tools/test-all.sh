@@ -20,7 +20,8 @@ mkdir -p "$OUT/classes"
 # compile every adapter against the real Minecraft/Forge classpath.
 mapfile -t CANDIDATE_SRC < <(
   {
-    find "$CORE/src/main/java" -name '*.java' -not -path '*/mc/*'
+    find "$CORE/src/main/java" -name '*.java' -not -path '*/mc/*' \
+      ! -path "$CORE/src/main/java/dev/worldforge/mod/economy/TreasuryArchiveMigration.java"
     find wf-*/src/main/java -name '*.java' -not -path '*/mc/*' \
       ! -path 'wf-relations/src/main/java/dev/worldforge/relations/NpcSocialSimulation.java'
   } | sort -u
