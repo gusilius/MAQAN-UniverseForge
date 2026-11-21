@@ -414,10 +414,13 @@ fn bootstrap_initial_civilizations(
             + (roll(seed, "authored-polity-size", &map.map_id,
             &format!("{group_x}:{group_z}"), 0) % 5) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
+        let mut selected_index = SpatialBuckets::new();
         for cell in candidates {
-            if spatial_has_nearby(&occupied, (cell.x, cell.z), bucket_span, separation_sq) { continue; }
+            let point = (cell.x, cell.z);
+            if spatial_has_nearby(&occupied, point, bucket_span, separation_sq)
+                || spatial_has_nearby(&selected_index, point, bucket_span, separation_sq) { continue; }
             selected.push(cell);
-            spatial_insert(&mut occupied, (cell.x, cell.z), bucket_span);
+            spatial_insert(&mut selected_index, point, bucket_span);
             if selected.len() == target_communities { break; }
         }
         // A sovereign polity needs a real regional population base, not a single village.
