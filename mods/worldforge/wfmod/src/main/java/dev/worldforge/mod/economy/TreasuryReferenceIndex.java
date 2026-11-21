@@ -33,11 +33,18 @@ final class TreasuryReferenceIndex {
         try {
             long indexedNext = Long.parseLong(Files.readString(cursorFile, StandardCharsets.US_ASCII).trim());
             if (indexedNext != archiveNext) return false;
+            long indexedRecords = 0;
             for (int bucket = 0; bucket < BUCKETS; bucket++) {
                 Path path = bucketPath(bucket);
-                if (Files.exists(path) && Files.size(path) % RECORD_BYTES != 0) return false;
+                if (!Files.exists(path)) continue;
+                long bytes = Files.size(path);
+                if (bytes % RECORD_BYTES != 0) return false;
+                indexedRecords += bytes / RECORD_BYTES;
             }
-            return true;
+            // One index record must exist for every canonical journal entry. A valid-looking
+            // cursor alone is insufficient: a deleted whole bucket would otherwise cause
+            // false negatives while all remaining buckets still look structurally sound.
+            return indexedRecords == archiveNext - 1;
         } catch (RuntimeException invalid) { return false; }
     }
 

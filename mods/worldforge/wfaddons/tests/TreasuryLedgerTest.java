@@ -889,6 +889,19 @@ public final class TreasuryLedgerTest {
                             && java.nio.file.Files.readString(referenceIndexCursor).trim()
                                     .equals(Long.toString(rebuiltReferenceIndex.nextSequence())),
                     "damaged treasury reference-index cursor is rebuilt from the verified canonical archive");
+            java.nio.file.Path referenceIndexDirectory = referenceIndexCursor.getParent();
+            try (java.util.stream.Stream<java.nio.file.Path> buckets = java.nio.file.Files.list(referenceIndexDirectory)) {
+                java.nio.file.Path bucketToDelete = buckets.filter(path -> path.getFileName().toString().endsWith(".bin"))
+                        .findFirst().orElseThrow();
+                java.nio.file.Files.delete(bucketToDelete);
+            }
+            TreasuryLedger rebuiltMissingBucket = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
+                    .loadOrMigrate(legacyFile);
+            ok(rebuiltMissingBucket.entriesForReference("store:final", TreasuryLedger.Kind.OPENING,
+                            "store:final").size() == 1
+                            && rebuiltMissingBucket.entriesForReference("store:later-again", TreasuryLedger.Kind.OPENING,
+                                    "store:later-again").size() == 1,
+                    "reference index rebuilds when a complete bucket is missing despite a valid cursor");
             ok(committedVersion == finalReload.mutationVersion()
                             && finalReload.hasAccount("store:final")
                             && close(finalReload.balance("store:final"), 5),
