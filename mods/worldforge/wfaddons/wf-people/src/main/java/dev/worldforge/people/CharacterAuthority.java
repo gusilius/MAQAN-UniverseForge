@@ -163,12 +163,10 @@ public final class CharacterAuthority {
         CharacterRegistry owner = registries.get(identity.mapId());
         if (person == null || owner == null || !person.alive) return false;
 
+        // Check one reverse-index entry per partition, independent of population size.
         for (CharacterRegistry registry : registries.values()) {
-            for (Character candidate : registry.all()) {
-                if (globalCharacterId.equals(candidate.globalId)) continue;
-                Object raw = candidate.props.get("population.entity_bindings");
-                if (raw instanceof Map<?, ?> bindings && bindings.containsValue(entityUuid)) return false;
-            }
+            String existingOwner = registry.entityBindingOwner(entityUuid);
+            if (existingOwner != null && !globalCharacterId.equals(existingOwner)) return false;
         }
         return owner.bindEntity(person.id, bodyKind, entityUuid);
     }

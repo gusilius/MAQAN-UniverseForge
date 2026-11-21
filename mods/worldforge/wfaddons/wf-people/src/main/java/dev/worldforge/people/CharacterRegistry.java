@@ -25,6 +25,8 @@ public final class CharacterRegistry {
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
+    /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
+    private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     private final List<Character> ordered = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
@@ -312,11 +314,8 @@ public final class CharacterRegistry {
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
         String uuid = requireText(entityUuid, "entity UUID");
-        for (Character other : byId.values()) {
-            if (other == c) continue;
-            Object raw = other.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings && bindings.containsValue(uuid)) return false;
-        }
+        String previousOwner = entityOwnerByUuid.get(uuid);
+        if (previousOwner != null && !previousOwner.equals(c.id)) return false;
         Object raw = c.props.get("population.entity_bindings");
         Map<String, Object> bindings;
         if (raw instanceof Map<?, ?> map) {
@@ -325,7 +324,10 @@ public final class CharacterRegistry {
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
         if (Objects.equals(bindings.get(kind), uuid)) return true;
-        bindings.put(kind, uuid);
+        Object previousUuid = bindings.put(kind, uuid);
+        if (previousUuid instanceof String oldUuid && !oldUuid.equals(uuid)
+                && !bindings.containsValue(oldUuid)) entityOwnerByUuid.remove(oldUuid, c.id);
+        entityOwnerByUuid.put(uuid, c.id);
         c.props.put("population.entity_bindings", bindings);
         recordDomainMutation();
         return true;
@@ -348,9 +350,35 @@ public final class CharacterRegistry {
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
+        if (!bindings.containsValue(uuid)) entityOwnerByUuid.remove(uuid, c.id);
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
         recordDomainMutation();
+    }
+
+    /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
+    public String entityBindingOwner(String entityUuid) {
+        String characterId = entityOwnerByUuid.get(entityUuid);
+        Character character = characterId == null ? null : byId.get(characterId);
+        return character == null ? null : character.globalId;
+    }
+
+    private void removeEntityBindings(Character character) {
+        Object raw = character.props.get("population.entity_bindings");
+        if (raw instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, character.id);
+    }
+
+    private void indexEntityBindings(Character character) {
+        Object raw = character.props.get("population.entity_bindings");
+        if (raw instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value) {
+                String owner = entityOwnerByUuid.putIfAbsent(value, character.id);
+                if (owner != null && !owner.equals(character.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + value
+                            + " is bound to multiple Characters: " + owner + " and " + character.id);
+            }
     }
 
     private static void addGlobalChild(Character parent, String childGlobalId) {
@@ -458,7 +486,10 @@ public final class CharacterRegistry {
         List<Character.Post> vacated = new ArrayList<>(c.posts);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
-        c.props.remove("population.entity_bindings");
+        Object deathBindings = c.props.remove("population.entity_bindings");
+        if (deathBindings instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, c.id);
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         recordBereavement(c, deathYear);
         for (Listener l : listeners) l.died(c);
@@ -662,7 +693,17 @@ public final class CharacterRegistry {
         CharacterRegistry decoded = new CharacterRegistry();
         decoded.fromJson(Json.write(snapshot), identityNamespace);
         Character restored = decoded.all().iterator().next();
-        Character previous = byId.put(restored.id, restored);
+        Object restoredBindings = restored.props.get("population.entity_bindings");
+        if (restoredBindings instanceof Map<?, ?> bindings) for (Object uuid : bindings.values())
+            if (uuid instanceof String value) {
+                String owner = entityOwnerByUuid.get(value);
+                if (owner != null && !owner.equals(restored.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + value + " is already owned by Character " + owner);
+            }
+        Character previous = byId.get(restored.id);
+        if (previous != null) removeEntityBindings(previous);
+        previous = byId.put(restored.id, restored);
+        indexEntityBindings(restored);
         if (previous == null) ordered.add(restored);
         else {
             for (int index = 0; index < ordered.size(); index++) {
@@ -829,6 +870,8 @@ public final class CharacterRegistry {
         }
         byId.clear();
         byId.putAll(loaded);
+        entityOwnerByUuid.clear();
+        entityOwnerByUuid.putAll(entityOwners);
         ordered.clear();
         ordered.addAll(loaded.values());
         next = safeNext;
