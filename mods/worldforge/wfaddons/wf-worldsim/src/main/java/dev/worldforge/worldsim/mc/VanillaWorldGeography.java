@@ -58,6 +58,8 @@ public final class VanillaWorldGeography {
     private static final int MAX_CAPTURE_CHUNKS_PER_TICK = 8;
     private static boolean loaded;
     private static boolean dirty;
+    /** Immutable-by-convention projection reused until an authoritative geography mutation. */
+    private static JsonArray cachedSnapshot;
     private static long lastPersistGameTime = Long.MIN_VALUE;
     private static MinecraftServer activeServer;
 
@@ -192,7 +194,7 @@ public final class VanillaWorldGeography {
                 }
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; }
     }
 
     private static JsonObject sample(ServerLevel level, ChunkAccess chunk,
@@ -425,6 +427,7 @@ public final class VanillaWorldGeography {
             cell.addProperty("ownership_event_cause", cause.name().toLowerCase(java.util.Locale.ROOT));
         }
         dirty = true;
+        cachedSnapshot = null;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null)
             throw new IllegalStateException("Cannot durably commit political transfer without an active server");
@@ -439,7 +442,13 @@ public final class VanillaWorldGeography {
         return cell == null || !cell.has("biome") ? "" : cell.get("biome").getAsString();
     }
 
+    /**
+     * Returns a read-only cached projection. Callers must not mutate the returned JsonArray
+     * or its children; it is invalidated only when captured terrain or sovereignty changes.
+     * This prevents a full deep-copy of every persisted cell on every WorldSim cycle.
+     */
     public static synchronized JsonArray snapshot() {
+        if (cachedSnapshot != null) return cachedSnapshot;
         JsonArray result = new JsonArray();
         for (String mapId : simulationMapIds()) {
             String dimension = dimensionFromMapId(mapId);
@@ -471,13 +480,15 @@ public final class VanillaWorldGeography {
             map.add("cells", cells);
             result.add(map);
         }
-        return result;
+        cachedSnapshot = result;
+        return cachedSnapshot;
     }
 
     public static synchronized void load(MinecraftServer server) {
         if (server == null) return;
         if (activeServer != server) {
             REGIONS.clear();
+            cachedSnapshot = null;
             PENDING.clear(); PENDING_KEYS.clear();
             dirty = false;
             loaded = false;
