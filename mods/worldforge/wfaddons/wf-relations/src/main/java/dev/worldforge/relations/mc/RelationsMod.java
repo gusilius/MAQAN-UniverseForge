@@ -54,18 +54,17 @@ public class RelationsMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int elapsedDays = WorldForgeApi.clock().pull("wf_relations");
+                // Drain elapsed social time incrementally; the cursor advances only
+                // by one day, preventing accelerated time from causing an unbounded burst.
+                int elapsedDays = WorldForgeApi.clock().pullLimited("wf_relations", 1);
                 if (elapsedDays > 0) {
-                    int currentDay = RelationsMc.dayNumber();
-                    int firstDay = Math.max(0, currentDay - elapsedDays + 1);
-                    int totalInteractions = 0;
-                    for (int day = firstDay; day <= currentDay; day++) {
-                        RelationsMc.REL.tick(day);
-                        int year = WorldForgeApi.clock().startYear + day / 365;
-                        totalInteractions += NpcSocialSimulation.advance(RelationsMc.REL, day, year);
-                    }
-                    if (totalInteractions > 0 && currentDay % 30 < elapsedDays)
-                        LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, currentDay);
+                    int day = Math.toIntExact(WorldForgeApi.clock().consumedDay("wf_relations"));
+                    int year = WorldForgeApi.clock().startYear + day / 365;
+                    RelationsMc.REL.tick(day);
+                    int totalInteractions = NpcSocialSimulation.advance(RelationsMc.REL, day, year);
+                    if (totalInteractions > 0 && day % 30 == 0)
+                        LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, day);
+                }
                 }
             }
             if (ticks % SAVE_EVERY == 0) RelationsMc.save(e.getServer());

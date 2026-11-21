@@ -77,8 +77,24 @@ public final class GameClock {
     public int pull(String consumer) {
         long now = (long) Math.floor(elapsed);
         Long last = pulled.put(consumer, now);
-        return last == null ? 0 : (int) Math.max(0, now - last);
+        return last == null ? 0 : (int) Math.min(Integer.MAX_VALUE, Math.max(0, now - last));
     }
+
+    /** Consume a bounded number of elapsed days without discarding the remaining backlog. */
+    public int pullLimited(String consumer, int maxDays) {
+        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
+        if (maxDays < 1) throw new IllegalArgumentException("maxDays must be positive");
+        long now = (long) Math.floor(elapsed);
+        Long last = pulled.get(consumer);
+        if (last == null) { pulled.put(consumer, now); return 0; }
+        long pending = Math.max(0L, now - last);
+        int delivered = (int) Math.min((long) maxDays, pending);
+        if (delivered > 0) pulled.put(consumer, last + delivered);
+        return delivered;
+    }
+
+    /** Last fully consumed calendar day; -1 until this consumer has initialized its cursor. */
+    public long consumedDay(String consumer) { return pulled.getOrDefault(consumer, -1L); }
 
     /** Множитель для систем реального времени (поселения): 0 на паузе, иначе скорость. */
     public double multiplier() { return (double) SPEEDS[speed] * simulationTickMultiplier; }
