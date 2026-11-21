@@ -28,6 +28,37 @@ public final class NpcSocialSimulation {
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
 
+    // Rumor delivery can ask for the same witness's contacts many times in one
+    // simulated day. Build the expensive polity membership index once per day;
+    // relationship strengths are still read live from the Bond store below.
+    private static volatile long contactIndexDay = Long.MIN_VALUE;
+    private static volatile Map<String, List<Character>> contactsByPolity = Map.of();
+
+    private static synchronized Map<String, List<Character>> contactsByPolity(long day) {
+        if (contactIndexDay == day) return contactsByPolity;
+        Map<String, List<Character>> building = new TreeMap<>();
+        if (PeopleMod.identityPartitionsReady()) {
+            for (CharacterIdentity identity : PeopleMod.authority().identities()) {
+                if ("__players__".equals(identity.mapId())) continue;
+                CharacterRegistry registry = PeopleMod.authority().registry(identity.mapId());
+                if (registry == null) continue;
+                for (Character person : registry.all()) {
+                    if (!person.alive) continue;
+                    String polity = polityOf(person);
+                    if (!polity.isBlank()) building.computeIfAbsent(polity, ignored -> new ArrayList<>()).add(person);
+                }
+            }
+        }
+        Map<String, List<Character>> immutable = new TreeMap<>();
+        building.forEach((polity, members) -> {
+            members.sort(Comparator.comparing(person -> person.globalId));
+            immutable.put(polity, List.copyOf(members));
+        });
+        contactsByPolity = Collections.unmodifiableMap(immutable);
+        contactIndexDay = day;
+        return contactsByPolity;
+    }
+
     public static int advance(Relations relations, int day, int year) {
         if (relations == null || !PeopleMod.identityPartitionsReady()) return 0;
         Map<String, CharacterRegistry> registries = new TreeMap<>();
@@ -344,14 +375,15 @@ public final class NpcSocialSimulation {
         if (registry == null) return List.of();
         String witnessPolity = polityOf(witness);
         if (!Objects.equals(witnessPolity, polityId)) return List.of();
+        List<Character> members = contactsByPolity(RelationsMc.dayNumber()).getOrDefault(polityId, List.of());
+        if (members.isEmpty()) return List.of();
         List<Contact> result = new ArrayList<>();
-        for (Character candidate : registry.all()) {
-            if (!candidate.alive || candidate == witness || !Objects.equals(polityOf(candidate), polityId)) continue;
+        for (Character candidate : members) {
+            if (candidate == witness || !candidate.alive) continue;
             Relations.Bond bond = RelationsMc.REL.peek("npc:" + witness.globalId, "npc:" + candidate.globalId);
             if (bond == null) continue;
             result.add(new Contact(candidate.globalId, bond.affinity, polityId, true, true));
         }
-        result.sort(Comparator.comparing(Contact::characterId));
         return result;
     }
 
