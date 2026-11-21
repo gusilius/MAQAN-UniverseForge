@@ -844,6 +844,20 @@ public final class TreasuryLedgerTest {
                     "second checkpoint archives only the new tail and keeps archive queries complete");
             TreasuryLedger finalReload = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
                     .loadOrMigrate(legacyFile);
+            ok(finalReload.entriesForReference("store:final", TreasuryLedger.Kind.OPENING, "store:final").size() == 1
+                            && finalReload.entriesForReference("store:later-again", TreasuryLedger.Kind.OPENING,
+                                    "store:later-again").size() == 1,
+                    "disk-backed treasury reference index returns exact historical postings after restart");
+            java.nio.file.Path referenceIndexCursor = storeRoot.resolve(
+                    "treasury-store/archive/reference-index/CURRENT");
+            java.nio.file.Files.writeString(referenceIndexCursor, "stale-index");
+            TreasuryLedger rebuiltReferenceIndex = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
+                    .loadOrMigrate(legacyFile);
+            ok(rebuiltReferenceIndex.entriesForReference("store:final", TreasuryLedger.Kind.OPENING,
+                            "store:final").size() == 1
+                            && java.nio.file.Files.readString(referenceIndexCursor).trim()
+                                    .equals(Long.toString(rebuiltReferenceIndex.nextSequence())),
+                    "damaged treasury reference-index cursor is rebuilt from the verified canonical archive");
             ok(committedVersion == finalReload.mutationVersion()
                             && finalReload.hasAccount("store:final")
                             && close(finalReload.balance("store:final"), 5),
