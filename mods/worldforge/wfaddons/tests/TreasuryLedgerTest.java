@@ -882,9 +882,13 @@ public final class TreasuryLedgerTest {
                             && java.nio.file.Files.readString(legacyFile).equals(legacyBytes)
                             && java.nio.file.Files.isRegularFile(storeRoot.resolve("treasury-store/checkpoints/CURRENT.json")),
                     "canonical treasury store migrates legacy JSON once and leaves the source untouched");
+            ok(java.nio.file.Files.isRegularFile(storeRoot.resolve("treasury-store/LEGACY_RECONCILED")),
+                    "canonical treasury store records the reconciled legacy backup fingerprint");
             migrated.open("store:later", "store:later", "silver", 40);
             String newerLegacyBytes = migrated.toJson();
             java.nio.file.Files.writeString(legacyFile, newerLegacyBytes);
+            java.nio.file.Files.setLastModifiedTime(legacyFile,
+                    java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 2_000));
             TreasuryArchiveStore reopenedStore = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"));
             TreasuryLedger reopenedLedger = reopenedStore.loadOrMigrate(legacyFile);
             ok(reopenedLedger.hasAccount("store:later")

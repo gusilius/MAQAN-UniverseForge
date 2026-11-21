@@ -90,6 +90,9 @@ public final class WorldSimMod {
     /** True while one or more authored image maps are being sampled off-thread. */
     private static volatile boolean imageGeographyPending;
     private static WorldSimComputeScheduler.Result pendingApplyResult;
+    private static long serverTickSequence;
+    private static long pendingApplyRetryAtTick;
+    private static int pendingApplyFailureCount;
     private static JsonObject pendingApplyEmergenceFrame;
     private static JsonObject pendingApplyDecisionFrame;
     private static JsonObject pendingCandidateEmergenceState;
@@ -353,6 +356,8 @@ public final class WorldSimMod {
         COMPUTE_SCHEDULER.close();
         pendingComputeRevision = Long.MIN_VALUE;
         pendingApplyResult = null;
+        pendingApplyRetryAtTick = 0;
+        pendingApplyFailureCount = 0;
         pendingCandidateEmergenceState = null;
         emergentPeopleProgress = null;
         PROFILER.setGauge("worldsim.compute.busy", 0);
@@ -380,6 +385,7 @@ public final class WorldSimMod {
     private void processServerTick(TickEvent.ServerTickEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        serverTickSequence++;
         if (++lodTicks % 20 == 0) publishObservers(server);
         if (!emergentRealmsRehydrated && emergenceState != null) {
             int rehydrationYear = emergenceYear(emergenceState, WorldForgeApi.clock().year());
@@ -429,10 +435,17 @@ public final class WorldSimMod {
                     pendingApplyDecisionFrame = null;
                     pendingCandidateEmergenceState = null;
                     emergentPeopleProgress = null;
+                    pendingApplyFailureCount = 0;
+                    pendingApplyRetryAtTick = 0;
                 }
             }
         }
         if (pendingApplyResult != null) {
+            if (serverTickSequence < pendingApplyRetryAtTick) {
+                PROFILER.setGauge("worldsim.compute.retry_backoff", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.compute.retry_backoff", 0);
             try {
                 if (!applyComputeResult(server, pendingApplyResult)) {
                     PROFILER.setGauge("worldsim.compute.busy", 1);
@@ -444,12 +457,20 @@ public final class WorldSimMod {
                 pendingCandidateEmergenceState = null;
                 emergentPeopleProgress = null;
                 pendingComputeRevision = Long.MIN_VALUE;
+                pendingApplyFailureCount = 0;
+                pendingApplyRetryAtTick = 0;
             } catch (Exception error) {
-                // Keep the frame and its staged native state. A transient save/materialization
-                // failure must not discard the only result or start a competing compute cycle.
+                // Preserve the authoritative frame, but do not hammer the same failing operation
+                // every 50 ms. Exponential backoff caps at 128 ticks (6.4 seconds).
+                pendingApplyFailureCount = Math.min(16, pendingApplyFailureCount + 1);
+                long retryDelay = Math.min(128L, 1L << Math.min(7, pendingApplyFailureCount - 1));
+                pendingApplyRetryAtTick = serverTickSequence + retryDelay;
                 PROFILER.setGauge("worldsim.compute.busy", 1);
-                LOGGER.error("wf_worldsim: authoritative frame remains pending at day {}; retrying next server tick",
-                        pendingComputeRevision, error);
+                PROFILER.setGauge("worldsim.compute.retry_failures", pendingApplyFailureCount);
+                if (pendingApplyFailureCount == 1 || pendingApplyFailureCount % 10 == 0) {
+                    LOGGER.error("wf_worldsim: authoritative frame remains pending at day {}; retry {} in {} server ticks",
+                            pendingComputeRevision, pendingApplyFailureCount, retryDelay, error);
+                }
                 return;
             }
         }
@@ -466,6 +487,18 @@ public final class WorldSimMod {
             PROFILER.setGauge("worldsim.compute.busy", 1);
             return;
         }
+        // Do not snapshot a half-loaded geography cache. Chunk observations drain first,
+        // then the immutable region projection is assembled in bounded per-tick batches.
+        if (VanillaWorldGeography.pendingChunkCount() > 0) {
+            PROFILER.setGauge("worldsim.geography.waiting_for_chunk_capture", 1);
+            return;
+        }
+        PROFILER.setGauge("worldsim.geography.waiting_for_chunk_capture", 0);
+        if (!VanillaWorldGeography.prepareSnapshotBatch()) {
+            PROFILER.setGauge("worldsim.geography.snapshot_building", 1);
+            return;
+        }
+        PROFILER.setGauge("worldsim.geography.snapshot_building", 0);
 
         try {
             long phaseStarted = System.nanoTime();

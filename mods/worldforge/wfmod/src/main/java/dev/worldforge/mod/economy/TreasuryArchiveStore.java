@@ -3,6 +3,8 @@ package dev.worldforge.mod.economy;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
@@ -32,19 +34,22 @@ public final class TreasuryArchiveStore {
         Path manifest = root.resolve("checkpoints").resolve("CURRENT.json");
         if (Files.isRegularFile(manifest)) {
             TreasuryCheckpointStore.Checkpoint checkpoint = checkpoints.loadOrRecover(archive);
-            // During the old shadow period the legacy JSON could be committed while shadow
-            // synchronization failed. If that intact legacy ledger is ahead, import only
-            // its verified suffix instead of silently rolling those transactions back.
-            TreasuryLedger legacy;
-            try { legacy = readLegacyIfValid(legacyJson); }
-            catch (IOException invalidLegacyBackup) { legacy = null; }
-            if (legacy != null && legacy.nextSequence() > archive.nextSequence()) {
-                verifyLegacyPrefix(legacy, archive);
-                archive.appendAll(legacy.entriesFromSequence(archive.nextSequence()));
-                if (archive.nextSequence() != legacy.nextSequence())
-                    throw new IOException("Recovered legacy treasury suffix did not reach its sequence boundary");
-                checkpoints.publish(TreasuryLedgerSnapshot.capture(legacy), archive);
-                checkpoint = checkpoints.load(archive);
+            // The legacy file is only a recovery source for the old shadow-write window.
+            // Once its exact size/mtime fingerprint has been reconciled, do not deserialize
+            // a potentially huge JSON ledger again on every ordinary server startup.
+            if (legacyNeedsReconciliation(legacyJson, manifest)) {
+                TreasuryLedger legacy;
+                try { legacy = readLegacyIfValid(legacyJson); }
+                catch (IOException invalidLegacyBackup) { legacy = null; }
+                if (legacy != null && legacy.nextSequence() > archive.nextSequence()) {
+                    verifyLegacyPrefix(legacy, archive);
+                    archive.appendAll(legacy.entriesFromSequence(archive.nextSequence()));
+                    if (archive.nextSequence() != legacy.nextSequence())
+                        throw new IOException("Recovered legacy treasury suffix did not reach its sequence boundary");
+                    checkpoints.publish(TreasuryLedgerSnapshot.capture(legacy), archive);
+                    checkpoint = checkpoints.load(archive);
+                }
+                markLegacyReconciled(legacyJson);
             }
             return TreasuryLedger.restoreFromCheckpoint(checkpoint, archive);
         }
@@ -53,7 +58,47 @@ public final class TreasuryArchiveStore {
         if (legacy == null) legacy = new TreasuryLedger();
         TreasuryArchiveMigration.migrate(legacy, archive, checkpoints);
         TreasuryCheckpointStore.Checkpoint committed = checkpoints.load(archive);
+        markLegacyReconciled(legacyJson);
         return TreasuryLedger.restoreFromCheckpoint(committed, archive);
+    }
+
+    private Path legacyMarker() { return root.resolve("LEGACY_RECONCILED"); }
+
+    private boolean legacyNeedsReconciliation(Path legacyJson, Path manifest) throws IOException {
+        if (legacyJson == null || !Files.isRegularFile(legacyJson)) return false;
+        String fingerprint = Files.size(legacyJson) + "\\n"
+                + Files.getLastModifiedTime(legacyJson).toString();
+        Path marker = legacyMarker();
+        if (Files.isRegularFile(marker)
+                && Files.readString(marker, StandardCharsets.UTF_8).equals(fingerprint)) return false;
+        // A canonical checkpoint written after the legacy file is already newer than
+        // the shadow backup. Equal timestamps remain conservative and trigger one check.
+        if (Files.getLastModifiedTime(legacyJson).compareTo(Files.getLastModifiedTime(manifest)) < 0) {
+            writeLegacyMarker(marker, fingerprint);
+            return false;
+        }
+        return true;
+    }
+
+    private void markLegacyReconciled(Path legacyJson) {
+        if (legacyJson == null || !Files.isRegularFile(legacyJson)) return;
+        try {
+            String fingerprint = Files.size(legacyJson) + "\\n"
+                    + Files.getLastModifiedTime(legacyJson).toString();
+            writeLegacyMarker(legacyMarker(), fingerprint);
+        } catch (IOException ignored) {
+            // Marker loss costs a one-time legacy recheck, never correctness.
+        }
+    }
+
+    private static void writeLegacyMarker(Path marker, String fingerprint) throws IOException {
+        Path temporary = marker.resolveSibling(marker.getFileName() + ".tmp");
+        Files.writeString(temporary, fingerprint, StandardCharsets.UTF_8);
+        try {
+            Files.move(temporary, marker, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+            Files.move(temporary, marker, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static TreasuryLedger readLegacyIfValid(Path legacyJson) throws IOException {
