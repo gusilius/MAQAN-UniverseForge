@@ -370,7 +370,7 @@ public final class VanillaWorldGeography {
                 if (!owner.isBlank()) owned++;
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; }
         return owned;
     }
 
