@@ -21,6 +21,7 @@ public final class CharacterAuthority {
     private final Map<String, Long> indexedRevisions = new HashMap<>();
     /** Immutable sorted identity snapshot reused by estate/succession queries until membership changes. */
     private List<CharacterIdentity> sortedIdentityCache;
+    private long familyIndexDay = Long.MIN_VALUE;
     private volatile WorldId worldId;
 
     public synchronized void beginWorld(WorldId id) {
@@ -48,6 +49,7 @@ public final class CharacterAuthority {
         familyBySpouseLegacy.clear();
         indexedRevisions.clear();
         sortedIdentityCache = null;
+        familyIndexDay = Long.MIN_VALUE;
         worldId = null;
     }
 
@@ -181,6 +183,7 @@ public final class CharacterAuthority {
         indexedRevisions.clear();
         indexedRevisions.putAll(nextRevisions);
         sortedIdentityCache = null;
+        familyIndexDay = Long.MIN_VALUE;
     }
 
     public synchronized Character get(CharacterIdentity identity) {
@@ -256,8 +259,9 @@ public final class CharacterAuthority {
      * directly by legacy-compatible systems, so membership revisions alone are not sufficient
      * to keep this projection current. Never call this from an individual death/estate lookup.
      */
-    public synchronized void rebuildFamilyIndex() {
+    public synchronized void rebuildFamilyIndex(long day) {
         refreshIndex();
+        if (familyIndexDay == day) return;
         Map<String, Set<CharacterIdentity>> parentGlobal = new HashMap<>();
         Map<String, Set<CharacterIdentity>> parentLegacy = new HashMap<>();
         Map<String, Set<CharacterIdentity>> childGlobal = new HashMap<>();
@@ -313,6 +317,7 @@ public final class CharacterAuthority {
         familyByChildLegacy = childLegacy;
         familyBySpouseGlobal = spouseGlobal;
         familyBySpouseLegacy = spouseLegacy;
+        familyIndexDay = day;
     }
 
     /**
