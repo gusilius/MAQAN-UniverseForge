@@ -82,9 +82,32 @@ public final class ClockService {
         }
     }
 
+    /**
+     * Clock checkpoints must remain independent from the canonical treasury archive.
+     * TreasuryApi.allLedgers() reconstructs per-realm projections from archived journal
+     * history and is intentionally not a tick-time persistence operation.
+     *
+     * The old root-level wf_treasury.json is still read on startup for legacy migration,
+     * but the canonical treasury is now persisted by WorldForgeMod/TreasuryArchiveStore.
+     */
     private static void save(MinecraftServer s) {
-        try { Files.writeString(ledgerFile(s), Json.write(new java.util.LinkedHashMap<String, Object>(dev.worldforge.mod.api.TreasuryApi.allLedgers()))); } catch (Exception ex) { WorldForgeMod.LOGGER.error("WorldForge: книга казны не сохранена: {}", ex.toString()); }
-        try { Files.writeString(file(s), WorldForgeApi.clock().toJson()); } catch (Exception ex) { WorldForgeMod.LOGGER.error("WorldForge: часы не сохранены: {}", ex.toString()); }
+        try {
+            Path target = file(s);
+            Path temporary = Files.createTempFile(target.getParent(), "wf-clock-", ".tmp");
+            try {
+                Files.writeString(temporary, WorldForgeApi.clock().toJson());
+                try {
+                    Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+        } catch (Exception ex) {
+            WorldForgeMod.LOGGER.error("WorldForge: часы не сохранены; следующий checkpoint повторит попытку: {}", ex.toString());
+        }
     }
 
     private static int say(CommandSourceStack s) {
