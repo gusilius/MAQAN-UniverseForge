@@ -6,6 +6,7 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
@@ -173,6 +174,29 @@ public final class ResidentLifeEventsTest {
         check(PopulationSimulation.trainingXp(pupil, "farming") == 15
                         && PopulationSimulation.skillRank(pupil, "farming") == 0,
                 "children inherit learning opportunities gradually without copying guardian skill ranks");
+
+        CharacterRegistry dueBirthRegistry = new CharacterRegistry();
+        Character dueMother = dueBirthRegistry.create("Мать", "house-due", "north", "f", 1975);
+        Character dueFather = dueBirthRegistry.create("Отец", "house-due", "north", "m", 1974);
+        dueBirthRegistry.marry(dueMother.id, dueFather.id, 2000);
+        dueMother.props.put("family.pregnancy.father_id", dueFather.id);
+        dueMother.props.put("family.pregnancy.start_day", 100L);
+        dueMother.props.put("family.pregnancy.due_day", 370L);
+        dueMother.props.put("family.pregnancy.conception_year", 2000);
+        dueMother.props.put("social.last_family_year", 2001);
+        check(ResidentLifeEvents.advanceDuePregnanciesBatch(dueBirthRegistry, 2001, 369L, null, 16) > 0
+                        && dueMother.children.isEmpty(),
+                "a pregnancy is not delivered before its persisted due day");
+        String dueSave = dueBirthRegistry.toJson();
+        CharacterRegistry dueReload = new CharacterRegistry();
+        dueReload.fromJson(dueSave);
+        int dueBirthWork = ResidentLifeEvents.advanceDuePregnanciesBatch(dueReload, 2001, 370L, null, 16);
+        Character restoredMother = dueReload.get(dueMother.id);
+        Character restoredFather = dueReload.get(dueFather.id);
+        check(dueBirthWork > 0 && restoredMother.children.size() == 1
+                        && restoredFather.children.size() == 1
+                        && !FamilyPlanning.isPregnant(restoredMother),
+                "due-date queue delivers on the persisted day after reload, independent of the annual family pass marker");
 
         CharacterRegistry sameYearRegistry = new CharacterRegistry();
         sameYearRegistry.create("Первый", "", "north", "m", 1990);

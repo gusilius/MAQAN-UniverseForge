@@ -99,6 +99,11 @@ public final class FamilyPlanning {
         return true;
     }
 
+    /** Returns the persisted due day, or -1 when this Character has no active pregnancy. */
+    public static long dueDay(Character mother) {
+        return isPregnant(mother) ? number(mother.props.get(PREFIX + "due_day"), -1L) : -1L;
+    }
+
     /** Returns the canonical father id only when a persisted pregnancy is due. */
     public static String dueFatherId(Character mother, long worldDay) {
         if (!isPregnant(mother) || worldDay < number(mother.props.get(PREFIX + "due_day"), Long.MAX_VALUE))

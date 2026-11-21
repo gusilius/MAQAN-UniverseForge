@@ -19,6 +19,7 @@ import dev.worldforge.people.Courts;
 import dev.worldforge.people.TerritorialIdentity;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.people.PopulationWorldBaseline;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
@@ -908,6 +909,25 @@ public class PeopleMod {
                 lifeEventBudget -= Math.min(lifeEventBudget, WORLD_REGISTRY.processPendingBereavementBatch(lifeEventBudget));
             if (lifeEventBudget > 0)
                 PLAYER_REGISTRY.processPendingBereavementBatch(lifeEventBudget);
+
+            // Pregnancy due dates are processed independently of the annual family pass.
+            int birthBudget = 128;
+            for (CharacterRegistry registry : REGS.values()) {
+                if (birthBudget <= 0) break;
+                birthBudget -= Math.min(birthBudget,
+                        ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, birthBudget));
+            }
+            for (CharacterRegistry registry : DIMENSION_REGISTRIES.values()) {
+                if (birthBudget <= 0) break;
+                birthBudget -= Math.min(birthBudget,
+                        ResidentLifeEvents.advanceDuePregnanciesBatch(registry, YEAR, currentWorldDay, NAMES, birthBudget));
+            }
+            if (birthBudget > 0)
+                birthBudget -= Math.min(birthBudget, ResidentLifeEvents.advanceDuePregnanciesBatch(
+                        WORLD_REGISTRY, YEAR, currentWorldDay, NAMES, birthBudget));
+            if (birthBudget > 0)
+                ResidentLifeEvents.advanceDuePregnanciesBatch(PLAYER_REGISTRY, YEAR, currentWorldDay, NAMES, birthBudget);
+
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
             long registryGeneration = populationRegistryGeneration;
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay

@@ -18,7 +18,16 @@ public final class ResidentLifeEvents {
 
     private static final int MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR = 32;
     private static final Map<CharacterRegistry, RegistryPassState> REGISTRY_PASSES = new WeakHashMap<>();
+    private static final Map<CharacterRegistry, PregnancySchedule> PREGNANCY_SCHEDULES = new WeakHashMap<>();
     private static final AtomicLong SYNCHRONOUS_TOKENS = new AtomicLong();
+
+    private record DuePregnancy(long dueDay, String motherGlobalId) {}
+    private static final class PregnancySchedule {
+        final PriorityQueue<DuePregnancy> due = new PriorityQueue<>(Comparator
+                .comparingLong(DuePregnancy::dueDay).thenComparing(DuePregnancy::motherGlobalId));
+        final Map<String, Long> queued = new HashMap<>();
+        int scanCursor;
+    }
 
     private static final class YearSession {
         final int year;
@@ -201,6 +210,71 @@ public final class ResidentLifeEvents {
         return false;
     }
 
+    /**
+     * Advances the persisted pregnancy due-date schedule under a strict work budget.
+     * New conceptions are indexed immediately; a rotating compatibility scan discovers
+     * pregnancies from existing saves without a population-wide tick scan.
+     */
+    public static int advanceDuePregnanciesBatch(CharacterRegistry registry, int year, long worldDay,
+                                                  NameBank names, int budget) {
+        if (registry == null || budget <= 0) return 0;
+        PregnancySchedule schedule;
+        synchronized (PREGNANCY_SCHEDULES) {
+            schedule = PREGNANCY_SCHEDULES.computeIfAbsent(registry, ignored -> new PregnancySchedule());
+        }
+        List<Character> people = registry.all();
+        int size = Math.min(registry.size(), people.size());
+        if (size == 0) return 0;
+
+        // Reserve half the budget for due deliveries, while still discovering legacy pregnancies.
+        int scanBudget = schedule.due.isEmpty() ? budget : budget / 2;
+        int start = Math.floorMod(schedule.scanCursor, size);
+        int scanned = Math.min(scanBudget, size);
+        for (int i = 0; i < scanned; i++) {
+            Character person = people.get((start + i) % size);
+            if (FamilyPlanning.isPregnant(person)) enqueuePregnancy(registry, person);
+        }
+        schedule.scanCursor = (start + scanned) % size;
+
+        int processed = scanned;
+        while (processed < budget && !schedule.due.isEmpty()
+                && schedule.due.peek().dueDay() <= worldDay) {
+            DuePregnancy due = schedule.due.poll();
+            processed++;
+            Long activeDueDay = schedule.queued.get(due.motherGlobalId());
+            if (activeDueDay == null || activeDueDay.longValue() != due.dueDay()) continue;
+            schedule.queued.remove(due.motherGlobalId());
+            Character mother = registry.getByGlobalId(due.motherGlobalId());
+            if (mother == null || !FamilyPlanning.isPregnant(mother)
+                    || FamilyPlanning.dueDay(mother) != due.dueDay()) {
+                continue;
+            }
+            if (mother.alive) {
+                if (!FamilyPlanning.dueFatherId(mother, worldDay).isBlank())
+                    deliverDuePregnancy(registry, mother, year, worldDay, names);
+                else
+                    FamilyPlanning.cancel(mother, null, "father-unavailable", year);
+            } else {
+                FamilyPlanning.cancel(mother, null, "mother-unavailable", year);
+            }
+        }
+        return processed;
+    }
+
+    private static void enqueuePregnancy(CharacterRegistry registry, Character mother) {
+        if (mother == null || !FamilyPlanning.isPregnant(mother)) return;
+        PregnancySchedule schedule;
+        synchronized (PREGNANCY_SCHEDULES) {
+            schedule = PREGNANCY_SCHEDULES.computeIfAbsent(registry, ignored -> new PregnancySchedule());
+        }
+        long dueDay = FamilyPlanning.dueDay(mother);
+        Long existingDueDay = schedule.queued.get(mother.globalId);
+        if (existingDueDay == null || existingDueDay.longValue() != dueDay) {
+            schedule.queued.put(mother.globalId, dueDay);
+            schedule.due.add(new DuePregnancy(dueDay, mother.globalId));
+        }
+    }
+
     private static Character personAt(YearSession session, int index) {
         return index < session.initialSize ? session.people.get(index)
                 : session.newborns.get(index - session.initialSize);
@@ -213,46 +287,49 @@ public final class ResidentLifeEvents {
         if (!"f".equalsIgnoreCase(person.gender)) return null;
         Character mother = person;
         if (FamilyPlanning.isPregnant(mother)) {
-            String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
-            if (dueFatherId.isBlank()) return null;
-            Character biologicalFather = registry.get(dueFatherId);
-            if (biologicalFather == null) {
-                FamilyPlanning.cancel(mother, null, "father-unavailable", year);
-                return null;
-            }
-            String gender = Math.floorMod(Objects.hash(mother.id, biologicalFather.id, year, "gender"), 2) == 0 ? "f" : "m";
-            String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
-            if (names != null) {
-                String race = mother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
-                        : biologicalFather.props.get("origin.race") instanceof String fr ? fr : "";
-                String culture = mother.culture == null || mother.culture.isBlank() ? biologicalFather.culture : mother.culture;
-                try {
-                    childName = names.pickGivenName(race, culture, gender,
-                            new Random(Objects.hash(mother.globalId, biologicalFather.globalId, year, "birth-name")));
-                } catch (IllegalStateException unavailablePool) {
-                    // Preserve the stable fallback if a data pack has no compatible name pool.
-                }
-            }
-            
-            Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
-            
-            child.traits.add("curious");
-            child.props.put("family.father_name", biologicalFather.name);
-            child.props.put("family.mother_name", mother.name);
-            ResidentSocial.adjust(biologicalFather, child.globalId, 35);
-            ResidentSocial.adjust(mother, child.globalId, 35);
-            ResidentSocial.adjust(child, biologicalFather.globalId, 35);
-            ResidentSocial.adjust(child, mother.globalId, 35);
-            
-            FamilyPlanning.complete(mother, biologicalFather, year, child.id);
-            
-            return child;
+            if (FamilyPlanning.dueFatherId(mother, worldDay).isBlank()) return null;
+            return deliverDuePregnancy(registry, mother, year, worldDay, names);
         }
         Character spouse = mother.spouse == null || mother.spouse.isBlank() ? null : registry.get(mother.spouse);
-        if (spouse != null && spouse.alive && mother.id.equals(spouse.spouse))
-            FamilyPlanning.tryConceive(mother, spouse, year, worldDay,
-                    Objects.hash(mother.globalId, spouse.globalId));
+        if (spouse != null && spouse.alive && mother.id.equals(spouse.spouse)
+                && FamilyPlanning.tryConceive(mother, spouse, year, worldDay,
+                        Objects.hash(mother.globalId, spouse.globalId)))
+            enqueuePregnancy(registry, mother);
         return null;
+    }
+
+    private static Character deliverDuePregnancy(CharacterRegistry registry, Character mother, int year,
+                                                  long worldDay, NameBank names) {
+        String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
+        if (dueFatherId.isBlank()) return null;
+        Character biologicalFather = registry.get(dueFatherId);
+        if (biologicalFather == null || !biologicalFather.alive) {
+            FamilyPlanning.cancel(mother, biologicalFather, "father-unavailable", year);
+            return null;
+        }
+        String gender = Math.floorMod(Objects.hash(mother.id, biologicalFather.id, year, "gender"), 2) == 0 ? "f" : "m";
+        String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
+        if (names != null) {
+            String race = mother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
+                    : biologicalFather.props.get("origin.race") instanceof String fr ? fr : "";
+            String culture = mother.culture == null || mother.culture.isBlank() ? biologicalFather.culture : mother.culture;
+            try {
+                childName = names.pickGivenName(race, culture, gender,
+                        new Random(Objects.hash(mother.globalId, biologicalFather.globalId, year, "birth-name")));
+            } catch (IllegalStateException unavailablePool) {
+                // Preserve the stable fallback if a data pack has no compatible name pool.
+            }
+        }
+        Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
+        child.traits.add("curious");
+        child.props.put("family.father_name", biologicalFather.name);
+        child.props.put("family.mother_name", mother.name);
+        ResidentSocial.adjust(biologicalFather, child.globalId, 35);
+        ResidentSocial.adjust(mother, child.globalId, 35);
+        ResidentSocial.adjust(child, biologicalFather.globalId, 35);
+        ResidentSocial.adjust(child, mother.globalId, 35);
+        FamilyPlanning.complete(mother, biologicalFather, year, child.id);
+        return child;
     }
 
     private static void processMaritalConflict(CharacterRegistry registry, Character person, int year) {
