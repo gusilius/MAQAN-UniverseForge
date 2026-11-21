@@ -113,6 +113,19 @@ public final class CharacterRegistry {
         return globalId == null || globalId.isBlank() ? null : byGlobalId.get(globalId);
     }
 
+    /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
+    public void prepareKinIndex() {
+        CharacterAuthority current = authority;
+        if (current != null) current.rebuildFamilyIndex();
+    }
+
+    /** Returns bounded family candidates; callers still apply the canonical kinship predicate. */
+    public List<Character> kinCandidates(Character person) {
+        CharacterAuthority current = authority;
+        if (current == null) return List.of();
+        return current.kinCandidates(person);
+    }
+
     /**
      * Read-only append-only insertion-order view. Existing entries never move or disappear;
      * callers may retain this view and process a captured size in bounded batches.
