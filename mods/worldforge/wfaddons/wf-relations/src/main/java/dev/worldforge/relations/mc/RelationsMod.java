@@ -65,7 +65,6 @@ public class RelationsMod {
                     if (totalInteractions > 0 && day % 30 == 0)
                         LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, day);
                 }
-                }
             }
             if (ticks % SAVE_EVERY == 0) RelationsMc.save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_relations: ошибка тика: {}", ex.toString()); }

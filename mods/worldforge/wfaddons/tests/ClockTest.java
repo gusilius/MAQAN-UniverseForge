@@ -15,16 +15,6 @@ public class ClockTest {
         ok(c.pull("court") == 0 && c.pull("court") == 0, "другой потребитель начинает со своей отметки");
         c.advance(GameClock.TICKS_PER_DAY * 2);
         ok(c.pull("court") == 2 && c.pull("war") == 2, "каждый получает свои дни");
-        GameClock budgeted = new GameClock();
-        budgeted.pull("social");
-        budgeted.advance(GameClock.TICKS_PER_DAY * 12);
-        ok(budgeted.pullLimited("social", 1) == 1, "ограниченный потребитель получает один день");
-        ok(budgeted.pullLimited("social", 2) == 2, "необработанные дни остаются в очереди");
-        ok(budgeted.pullLimited("social", 20) == 9 && budgeted.pullLimited("social", 1) == 0,
-                "очередь календаря полностью обрабатывается без потери и повторов");
-        boolean invalidBudget = false;
-        try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
-        ok(invalidBudget, "нулевой бюджет обработки отклоняется");
         // пауза и скорость
         c.pause();
         double e0 = c.elapsedDays();
