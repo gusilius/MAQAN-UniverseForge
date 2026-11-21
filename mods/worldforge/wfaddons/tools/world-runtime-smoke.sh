@@ -324,7 +324,9 @@ for key in sorted(expected):
     if key == map_id and int(row["map_anchors"]) <= 0:
         raise SystemExit(f"{key}: image-map settlements were not reused/materialized as canonical anchors")
 (out / "same-server-world-genesis.json").write_text(json.dumps({key: rows[key] for key in sorted(expected)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-print("SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS")\nprint("IMAGE_DIMENSION_CHUNK_GENERATED=PASS")\nprint("IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS")
+print("SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS")
+print("IMAGE_DIMENSION_CHUNK_GENERATED=PASS")
+print("IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS")
 for key in sorted(expected): print("WORLD_GENESIS=" + json.dumps(rows[key], ensure_ascii=False, sort_keys=True))
 PY
   printf '%s\n' "stop" >> in.txt
@@ -334,7 +336,8 @@ PY
   SERVER_PID=""
   cp server.log "$OUTPUT/server.log"
   echo "SMOKE_SERVER_SHUTDOWN_CODE=$SERVER_EXIT_CODE"
-  echo "SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS"\n  echo "IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS"
+  echo "SAME_SERVER_LAZY_WORLD_ACCEPTANCE=PASS"
+  echo "IMAGE_DIMENSION_WORLD_SIM_DORMANT_UNTIL_VISIT=PASS"
   echo "NO_CAMPAIGN_OR_SCENARIO=1"
   CURRENT_STAGE="dual_world_genesis_complete"
   exit 0
