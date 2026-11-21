@@ -117,6 +117,22 @@ public class CourtTest {
         }
         ok(sharedBirthGuard, "shared court/settlement family lifecycle produces a reproducible annual birth for integration testing");
 
+        // A virtual court may be attached before WorldSim creates its first residents.
+        // Empty years must not consume the one-time population lifecycle initialization.
+        CharacterRegistry delayedRegistry = new CharacterRegistry();
+        CourtSim delayedCourt = new CourtSim(s.d, null, delayedRegistry, s.defs, s.names, 29L, 300);
+        delayedCourt.tick(365);
+        boolean deferredWhileEmpty = !delayedCourt.populationLifecycleInitialized();
+        delayedRegistry.create("Первый житель", "Дом", "north", "m", 300);
+        delayedCourt.tick(1);
+        String delayedSave = delayedCourt.toJson();
+        CourtSim delayedReload = new CourtSim(s.d, null, delayedRegistry, s.defs, s.names, 30L, 300);
+        delayedReload.fromJson(delayedSave);
+        ok(deferredWhileEmpty && delayedCourt.populationLifecycleInitialized()
+                        && delayedReload.populationLifecycleInitialized()
+                        && delayedReload.toJson().equals(delayedSave),
+                "court defers its first annual population pass until canonical residents exist and persists that initialization");
+
         // совет
         String realm = null;
         for (TitleData.Realm r : s.d.realmList()) if (!r.subjectIds.isEmpty()) { realm = r.id; break; }

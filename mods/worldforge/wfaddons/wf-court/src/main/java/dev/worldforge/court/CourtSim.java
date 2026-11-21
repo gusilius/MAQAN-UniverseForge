@@ -89,9 +89,32 @@ public final class CourtSim {
     public final int startYear;
     private int nextId = 1;
 
+    private boolean populationLifecycleInitialized;
+
     public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int startYear) {
-        this.d = d; this.ed = ed; this.reg = reg; this.defs = defs; this.names = names; this.seed = seed; this.startYear = startYear;
+        this(d, ed, reg, defs, names, seed, startYear, 0L, reg != null && reg.size() > 0);
     }
+
+    /** Creates a new court aligned to the world's existing clock, with one catch-up pass when people arrive. */
+    public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names,
+                    long seed, int startYear, long initialDay) {
+        this(d, ed, reg, defs, names, seed, startYear, initialDay, false);
+    }
+
+    private CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names,
+                     long seed, int startYear, long initialDay, boolean lifecycleInitialized) {
+        this.d = d;
+        this.ed = ed;
+        this.reg = Objects.requireNonNull(reg, "character registry");
+        this.defs = defs;
+        this.names = names;
+        this.seed = seed;
+        this.startYear = startYear;
+        this.day = Math.max(0L, initialDay);
+        this.populationLifecycleInitialized = lifecycleInitialized;
+    }
+
+    public boolean populationLifecycleInitialized() { return populationLifecycleInitialized; }
 
     public int year() { return startYear + (int) (day / 365); }
 
@@ -189,6 +212,10 @@ public final class CourtSim {
     // ------------------------------------------------------------------ ход
 
     public void tick(double days) {
+        // A virtual court can be attached before WorldSim has materialized its population.
+        // Do not spend the first annual pass on an empty registry: run it once as soon as
+        // canonical Characters become available, even if the calendar boundary has passed.
+        if (!populationLifecycleInitialized && reg.size() > 0) yearly();
         long target = day + (long) Math.floor(days);
         while (day < target) {
             day++;
@@ -207,8 +234,11 @@ public final class CourtSim {
     }
 
     private void yearly() {
-        lifeCycle();
-        Marriages.aiYear(this);
+        if (reg.size() > 0) {
+            lifeCycle();
+            Marriages.aiYear(this);
+            populationLifecycleInitialized = true;
+        }
         if (ed != null) Courts.ensure(d, ed, reg, defs, names, seed + day, year());
     }
 
@@ -925,6 +955,7 @@ public final class CourtSim {
         }
         CourtSim v = new CourtSim(d, null, reg, defs, names, seed, startYear);
         v.day = day;
+        v.populationLifecycleInitialized = populationLifecycleInitialized;
         v.humans.addAll(humans);
         v.me = mine;
         for (Opinions.Modifier m : opinions.mods) if (ids.contains(m.from) && ids.contains(m.to)) v.opinions.mods.add(m);
@@ -948,7 +979,9 @@ public final class CourtSim {
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-court/1");
-        root.put("day", day); root.put("next", nextId);
+        root.put("day", day);
+        root.put("population_lifecycle_initialized", populationLifecycleInitialized);
+        root.put("next", nextId);
         root.put("humans", new ArrayList<Object>(humans)); root.put("players", new LinkedHashMap<String, Object>(players)); root.put("me", me);
         root.put("cooldown", new LinkedHashMap<String, Object>(cooldown));
         List<Object> mods = new ArrayList<>();
@@ -980,7 +1013,11 @@ public final class CourtSim {
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         if (!"wf-court/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат двора");
-        day = ((Number) root.get("day")).longValue(); nextId = ((Number) root.get("next")).intValue();
+        day = ((Number) root.get("day")).longValue();
+        Object lifecycleFlag = root.get("population_lifecycle_initialized");
+        populationLifecycleInitialized = lifecycleFlag instanceof Boolean value
+                ? value : day > 0L && reg.size() > 0;
+        nextId = ((Number) root.get("next")).intValue();
         humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); regencies.clear(); schemes.clear(); pending.clear(); news.clear();
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
         players.clear();

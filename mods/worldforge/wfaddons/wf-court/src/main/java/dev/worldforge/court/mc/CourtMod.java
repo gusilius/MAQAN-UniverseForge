@@ -80,7 +80,8 @@ public class CourtMod {
         if (reg == null) return null;
         return COURTS.computeIfAbsent(m, k -> {
             var ed = EditorManager.editorFor(k);
-            CourtSim s = new CourtSim(k.titles, ed, reg, PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(k), PeopleMod.YEAR);
+            CourtSim s = new CourtSim(k.titles, ed, reg, PeopleMod.ROLES, PeopleMod.NAMES,
+                    PeopleMod.seed(k), PeopleMod.YEAR, WorldForgeApi.clock().dayNumber());
             for (String j : EVENT_JSON) {
                 try { s.addEvent(j); } catch (Exception ex) { LOGGER.error("wf_court: ошибка события: {}", ex.toString()); }
             }
@@ -243,7 +244,7 @@ public class CourtMod {
             long seed = WorldForgeMod.worldId() == null ? key.hashCode()
                     : WorldForgeMod.worldId().toString().hashCode() ^ key.hashCode();
             CourtSim created = new CourtSim(data, null, registry, PeopleMod.ROLES,
-                    PeopleMod.NAMES, seed, PeopleMod.YEAR);
+                    PeopleMod.NAMES, seed, PeopleMod.YEAR, WorldForgeApi.clock().dayNumber());
             created.hooks = new CourtSim.Hooks() {
                 @Override public void news(String text) {
                     if (text != null && text.startsWith("MAQAN_AUTONOMOUS_BIRTH"))
