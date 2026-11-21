@@ -188,7 +188,6 @@ public final class WorldSimMod {
                 continue;
             }
             if (map == null) continue;
-            String dimension = level.dimension().location().toString();
             String previousDimension = registeredMapSources.putIfAbsent(map.name, dimension);
             if (previousDimension != null) {
                 if (!previousDimension.equals(dimension))

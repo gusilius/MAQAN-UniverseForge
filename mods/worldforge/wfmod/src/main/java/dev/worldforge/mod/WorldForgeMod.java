@@ -32,6 +32,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.entity.EntityTravelToDimensionEvent;
+import net.minecraftforge.event.entity.EntityTravelToDimensionEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -87,6 +88,9 @@ public class WorldForgeMod {
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
     private static TreasuryArchiveStore treasuryStore;
+    private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
+    private static volatile Path planetActivationFile;
+    private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
     private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
     private static volatile Path planetActivationFile;
     private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
@@ -222,6 +226,16 @@ public class WorldForgeMod {
         return MAPS;
     }
 
+    /** Registration is metadata only; only the Overworld and visited planetary surfaces simulate. */
+    public static boolean isPlanetDimensionActive(String dimension) {
+        return "minecraft:overworld".equals(dimension)
+                || (dimension != null && planetActivation.isDimensionActive(dimension));
+    }
+
+    public static boolean isMapActive(String mapId) {
+        return planetActivation.isMapActive(mapId);
+    }
+
     public static Path mapsDir() {
         return FMLPaths.CONFIGDIR.get().resolve(MOD_ID).resolve("maps");
     }
@@ -323,8 +337,12 @@ public class WorldForgeMod {
         persistedTreasuryVersion = -1L;
         MAPS.clear();
         try {
-            Path identityFile = e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
-                    .resolve("worldforge").resolve("world_id.txt");
+            Path worldRoot = e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT);
+            planetActivationFile = worldRoot.resolve("worldforge").resolve("planet-activation.json");
+            planetActivation = PlanetActivationState.load(planetActivationFile);
+            LOGGER.info("WorldForge: restored visited planetary surfaces={} (unvisited surfaces remain dormant)",
+                    planetActivation.activeMapsByDimension().size());
+            Path identityFile = worldRoot.resolve("worldforge").resolve("world_id.txt");
             worldId = WorldIdentityStore.loadOrCreate(identityFile);
             LOGGER.info("WorldForge: world identity {}", worldId);
         } catch (IOException ex) {
@@ -356,6 +374,74 @@ public class WorldForgeMod {
         actionExecutionLoadFailed = false;
         biomes = null;
         MAPS.clear();
+        planetActivation = PlanetActivationState.empty();
+        planetActivationFile = null;
+    }
+
+    @SubscribeEvent
+    public void onPlanetTravel(EntityTravelToDimensionEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        MinecraftServer server = player.getServer();
+        ServerLevel target = server == null ? null : server.getLevel(event.getDimension());
+        if (target != null && target.getChunkSource().getGenerator() instanceof MapChunkGenerator
+                && !activatePlanet(player, target, "pre-travel")) event.setCanceled(true);
+    }
+
+    @SubscribeEvent
+    public void onPlanetArrival(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player)
+            initializeVisitedPlanet(player, player.serverLevel(), "dimension-arrival");
+    }
+
+    @SubscribeEvent
+    public void onPlanetLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player)
+            initializeVisitedPlanet(player, player.serverLevel(), "player-login");
+    }
+
+    private static void initializeVisitedPlanet(ServerPlayer player, ServerLevel level, String cause) {
+        if (!activatePlanet(player, level, cause)
+                || !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator)) return;
+        String dimension = level.dimension().location().toString();
+        PlanetActivationState current = planetActivation;
+        if (current.isSpawnInitialized(dimension)) return;
+        // First actual arrival is already a generated point; do not scan the whole planet for spawn.
+        level.setDefaultSpawnPos(player.blockPosition(), player.getYRot());
+        persistPlanetActivation(player, current.markSpawnInitialized(dimension));
+    }
+
+    private static boolean activatePlanet(ServerPlayer player, ServerLevel level, String cause) {
+        if (level == null || !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) return true;
+        String dimension = level.dimension().location().toString();
+        PlanetActivationState next;
+        try { next = planetActivation.activate(dimension, generator.mapName()); }
+        catch (RuntimeException conflict) {
+            LOGGER.error("WorldForge: refusing unsafe planet activation dimension={} map={} cause={}",
+                    dimension, generator.mapName(), cause, conflict);
+            if (player != null) player.sendSystemMessage(Component.literal("WorldForge: конфликт идентичности планеты; переход отменён."));
+            return false;
+        }
+        return next == planetActivation || persistPlanetActivation(player, next);
+    }
+
+    private static boolean persistPlanetActivation(ServerPlayer player, PlanetActivationState next) {
+        Path file = planetActivationFile;
+        if (file == null) {
+            LOGGER.error("WorldForge: planet activation store is not ready; refusing activation");
+            if (player != null) player.sendSystemMessage(Component.literal("WorldForge: хранилище планет ещё не готово."));
+            return false;
+        }
+        try {
+            next.save(file);
+            planetActivation = next;
+            LOGGER.info("WorldForge: visited planetary surfaces committed active_surfaces={}",
+                    next.activeMapsByDimension().size());
+            return true;
+        } catch (IOException error) {
+            LOGGER.error("WorldForge: planet activation could not be persisted; refusing travel", error);
+            if (player != null) player.sendSystemMessage(Component.literal("WorldForge: не удалось сохранить активацию планеты; переход отменён."));
+            return false;
+        }
     }
 
     /** Игрок появляется на суше, а не посреди океана в точке (0, 0). */

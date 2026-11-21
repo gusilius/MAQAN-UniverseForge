@@ -290,7 +290,10 @@ public final class VanillaWorldGeography {
      * the map package and once from observed chunks), duplicating bands, settlements and polities.
      */
     public static boolean isOrdinaryGeographyLevel(ServerLevel level) {
-        return level != null && !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator);
+        return level != null
+                && !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator)
+                && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(
+                        level.dimension().location().toString());
     }
 
     private static boolean isImageMapDimension(String dimension) {

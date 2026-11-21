@@ -80,7 +80,8 @@ public class MapBiomeSource extends BiomeSource {
 
     @Override
     public Holder<Biome> getNoiseBiome(int qx, int qy, int qz, Climate.Sampler sampler) {
-        if (!WorldForgeMod.isMapActive(mapName)) return fallbackBiome();
+        // A biome query is a real terrain-generation request; map data is loaded lazily here,
+        // not during dimension registration or global biome enumeration.
         MapData m = WorldForgeMod.map(mapName);
         int idx = m.biomeIndexAt(QuartPos.toBlock(qx) + 2, QuartPos.toBlock(qz) + 2);
         return resolve().get(idx);
