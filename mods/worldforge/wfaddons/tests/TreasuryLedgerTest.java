@@ -917,7 +917,12 @@ public final class TreasuryLedgerTest {
             ok(committedVersion == finalReload.mutationVersion()
                             && finalReload.hasAccount("store:final")
                             && close(finalReload.balance("store:final"), 5),
-                    "canonical treasury save appends only new entries and atomically publishes a verified checkpoint");
+                    "canonical treasury save appends only new entries and atomically publishes a verified checkpoint"
+                            + " (savedVersion=" + committedVersion + ", reloadVersion=" + finalReload.mutationVersion()
+                            + ", hasFinal=" + finalReload.hasAccount("store:final")
+                            + ", finalBalance=" + finalReload.balance("store:final")
+                            + ", archiveNext=" + new TreasuryArchiveStore(storeRoot.resolve("treasury-store")).nextSequence()
+                            + ")");
             java.nio.file.Path checkpointDir = storeRoot.resolve("treasury-store/checkpoints");
             java.nio.file.Path currentManifest = checkpointDir.resolve("CURRENT.json");
             Object manifestObject = Json.parse(java.nio.file.Files.readString(currentManifest));
@@ -930,7 +935,13 @@ public final class TreasuryLedgerTest {
             ok(recoveredPrevious.hasAccount("store:final")
                             && close(recoveredPrevious.balance("store:final"), 5)
                             && recoveredPrevious.mutationVersion() == committedVersion,
-                    "treasury checkpoint recovery uses PREVIOUS and replays the journal suffix after snapshot damage");
+                    "treasury checkpoint recovery uses PREVIOUS and replays the journal suffix after snapshot damage"
+                            + " (hasFinal=" + recoveredPrevious.hasAccount("store:final")
+                            + ", finalBalance=" + recoveredPrevious.balance("store:final")
+                            + ", recoveredVersion=" + recoveredPrevious.mutationVersion()
+                            + ", expectedVersion=" + committedVersion
+                            + ", archiveNext=" + new TreasuryArchiveStore(storeRoot.resolve("treasury-store")).nextSequence()
+                            + ")");
             java.nio.file.Files.writeString(newestSnapshot, validNewestSnapshot);
             java.nio.file.Files.writeString(currentManifest, "{ interrupted");
             TreasuryLedger recoveredPointer = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
