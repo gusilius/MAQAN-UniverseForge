@@ -6,7 +6,10 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.io.ByteArrayOutputStream;
 
 /**
  * Compact disk-backed exact-reference candidate index. Each fixed-width record stores
@@ -40,15 +43,53 @@ final class TreasuryReferenceIndex {
 
     synchronized void rebuild(TreasuryJournalArchive archive) throws IOException {
         clearBuckets();
-        archive.forEachEntry(entry -> appendRecord(entry.accountId(), entry.kind().name(),
-                entry.reference(), entry.sequence()));
-        publishCursor(archive.nextSequence());
+        List<TreasuryLedger.Entry> batch = new ArrayList<>(4096);
+        archive.forEachEntry(entry -> {
+            batch.add(entry);
+            if (batch.size() == 4096) {
+                try { appendRecords(batch); }
+                catch (IOException failure) { throw new IndexWriteFailure(failure); }
+                batch.clear();
+            }
+        });
+        try {
+            if (!batch.isEmpty()) appendRecords(batch);
+            publishCursor(archive.nextSequence());
+        } catch (IndexWriteFailure failure) {
+            throw failure.cause;
+        }
     }
 
     synchronized void append(List<TreasuryLedger.Entry> entries, long exclusiveNextSequence) throws IOException {
-        for (TreasuryLedger.Entry entry : entries)
-            appendRecord(entry.accountId(), entry.kind().name(), entry.reference(), entry.sequence());
+        appendRecords(entries);
         publishCursor(exclusiveNextSequence);
+    }
+
+    /** Groups records by bucket so a checkpoint writes at most 256 files, not one fsync per entry. */
+    private void appendRecords(List<TreasuryLedger.Entry> entries) throws IOException {
+        Map<Integer, ByteArrayOutputStream> batches = new HashMap<>();
+        for (TreasuryLedger.Entry entry : entries) {
+            String key = String.valueOf(entry.accountId()) + "\\u0000" + entry.kind().name()
+                    + "\\u0000" + (entry.reference() == null ? "" : entry.reference().trim());
+            long fingerprint = fingerprint(key);
+            int bucketId = (int) fingerprint & 0xff;
+            ByteArrayOutputStream batch = batches.computeIfAbsent(bucketId, ignored -> new ByteArrayOutputStream());
+            ByteBuffer record = ByteBuffer.allocate(RECORD_BYTES).putLong(fingerprint).putLong(entry.sequence());
+            batch.writeBytes(record.array());
+        }
+        for (Map.Entry<Integer, ByteArrayOutputStream> batch : batches.entrySet()) {
+            try (FileChannel channel = FileChannel.open(bucketPath(batch.getKey()), StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                ByteBuffer bytes = ByteBuffer.wrap(batch.getValue().toByteArray());
+                while (bytes.hasRemaining()) channel.write(bytes);
+                channel.force(false);
+            }
+        }
+    }
+
+    private static final class IndexWriteFailure extends RuntimeException {
+        final IOException cause;
+        IndexWriteFailure(IOException cause) { super(cause); this.cause = cause; }
     }
 
     synchronized List<Long> find(String accountId, String kind, String reference) throws IOException {
@@ -69,20 +110,6 @@ final class TreasuryReferenceIndex {
             }
         }
         return List.copyOf(sequences);
-    }
-
-    private void appendRecord(String accountId, String kind, String reference, long sequence) throws IOException {
-        String key = String.valueOf(accountId) + "\u0000" + String.valueOf(kind) + "\u0000"
-                + (reference == null ? "" : reference.trim());
-        long fingerprint = fingerprint(key);
-        Path bucket = bucketPath((int) fingerprint & 0xff);
-        try (FileChannel channel = FileChannel.open(bucket, StandardOpenOption.CREATE,
-                StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
-            ByteBuffer record = ByteBuffer.allocate(RECORD_BYTES).putLong(fingerprint).putLong(sequence);
-            record.flip();
-            while (record.hasRemaining()) channel.write(record);
-            channel.force(false);
-        }
     }
 
     private void publishCursor(long exclusiveNextSequence) throws IOException {
