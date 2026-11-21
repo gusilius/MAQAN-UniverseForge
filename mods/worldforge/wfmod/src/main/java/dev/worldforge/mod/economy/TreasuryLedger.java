@@ -227,7 +227,6 @@ public final class TreasuryLedger {
         String[] suffixTransactionId = {null};
         long[] suffixExpected = {state.nextSequence()};
         long[] suffixEntries = {0};
-        long[] extraAccountMutations = {0};
         try {
             archive.forEachEntryFrom(state.nextSequence(), entry -> {
                 if (entry.sequence() != suffixExpected[0]++)
@@ -250,7 +249,6 @@ public final class TreasuryLedger {
                         throw new IllegalStateException("Invalid treasury account-created event: " + entry.accountId());
                     account = new Account(entry.accountId(), entry.memo(), entry.currency(), entry.balanceAfter());
                     restored.accounts.put(account.id, account);
-                    extraAccountMutations[0]++;
                 } else {
                     if (account == null || !account.currency.equals(entry.currency()))
                         throw new IllegalStateException("Treasury suffix references an unknown or mismatched account: " + entry.accountId());
@@ -322,7 +320,8 @@ public final class TreasuryLedger {
         restored.historyArchive = archive;
         restored.archivedThroughSequence = archive.nextSequence() - 1;
         restored.transactionSequence = Math.max(state.nextTransactionSequence(), restored.transactionSequence);
-        restored.mutationVersion = state.mutationVersion() + suffixEntries[0] + extraAccountMutations[0];
+        // Every durable journal posting already increments mutationVersion; ACCOUNT_CREATED is a posting too.
+        restored.mutationVersion = state.mutationVersion() + suffixEntries[0];
         restored.restoring = false;
         return restored;
     }

@@ -877,7 +877,7 @@ public final class TreasuryLedgerTest {
                     && reopenedLedger.entriesFromSequence(reopenedStore.nextSequence()).size() == 2;
             ok(newTailOnly,
                     "post-checkpoint postings form a bounded tail beginning at the archive's exclusive sequence");
-            reopenedStore.save(reopenedLedger);
+            long secondCommittedVersion = reopenedStore.save(reopenedLedger);
             ok(reopenedLedger.pendingJournalSize() == 0
                             && reopenedLedger.entriesForAccount("store:later-again").size() == 2,
                     "second checkpoint archives only the new tail and keeps archive queries complete");
@@ -914,7 +914,7 @@ public final class TreasuryLedgerTest {
                             && rebuiltMissingBucket.entriesForReference("store:later-again", TreasuryLedger.Kind.OPENING,
                                     "store:later-again").size() == 1,
                     "reference index rebuilds when a complete bucket is missing despite a valid cursor");
-            ok(committedVersion == finalReload.mutationVersion()
+            ok(secondCommittedVersion == finalReload.mutationVersion()
                             && finalReload.hasAccount("store:final")
                             && close(finalReload.balance("store:final"), 5),
                     "canonical treasury save appends only new entries and atomically publishes a verified checkpoint"
@@ -934,12 +934,12 @@ public final class TreasuryLedgerTest {
                     .loadOrMigrate(legacyFile);
             ok(recoveredPrevious.hasAccount("store:final")
                             && close(recoveredPrevious.balance("store:final"), 5)
-                            && recoveredPrevious.mutationVersion() == committedVersion,
+                            && recoveredPrevious.mutationVersion() == secondCommittedVersion,
                     "treasury checkpoint recovery uses PREVIOUS and replays the journal suffix after snapshot damage"
                             + " (hasFinal=" + recoveredPrevious.hasAccount("store:final")
                             + ", finalBalance=" + recoveredPrevious.balance("store:final")
                             + ", recoveredVersion=" + recoveredPrevious.mutationVersion()
-                            + ", expectedVersion=" + committedVersion
+                            + ", expectedVersion=" + secondCommittedVersion
                             + ", archiveNext=" + new TreasuryArchiveStore(storeRoot.resolve("treasury-store")).nextSequence()
                             + ")");
             java.nio.file.Files.writeString(newestSnapshot, validNewestSnapshot);
