@@ -87,6 +87,7 @@ public final class GameClock {
     public int pullLimited(String consumer, int maxDays) {
         if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
         if (maxDays < 1) throw new IllegalArgumentException("maxDays must be positive");
+        durableConsumers.add(consumer);
         long now = (long) Math.floor(elapsed);
         Long last = pulled.get(consumer);
         if (last == null) { pulled.put(consumer, now); return 0; }
@@ -98,31 +99,6 @@ public final class GameClock {
     }
 
     /** Last fully consumed day; -1 until the consumer cursor is initialized. */
-    public long consumedDay(String consumer) {
-        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
-        return pulled.getOrDefault(consumer, -1L);
-    }
-
-    /**
-     * Consume at most maxDays while preserving the unconsumed backlog for later calls.
-     * The cursor advances only by the number of days returned.
-     */
-    public int pullLimited(String consumer, int maxDays) {
-        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
-        if (maxDays < 1) throw new IllegalArgumentException("maxDays must be positive");
-        long now = (long) Math.floor(elapsed);
-        Long last = pulled.get(consumer);
-        if (last == null) {
-            pulled.put(consumer, now);
-            return 0;
-        }
-        long pending = Math.max(0L, now - last);
-        int delivered = (int) Math.min((long) maxDays, pending);
-        if (delivered > 0) pulled.put(consumer, last + delivered);
-        return delivered;
-    }
-
-    /** Last fully consumed day; -1 until the consumer cursor has been initialized. */
     public long consumedDay(String consumer) {
         if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
         return pulled.getOrDefault(consumer, -1L);
