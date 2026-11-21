@@ -27,6 +27,8 @@ public final class CharacterRegistry {
     private final Map<String, Character> byId = new LinkedHashMap<>();
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, Character> byGlobalId = new HashMap<>();
+    /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
+    private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     private final List<Character> ordered = new ArrayList<>();
@@ -505,6 +507,7 @@ public final class CharacterRegistry {
                 entityOwnerByUuid.remove(value, c.id);
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         recordBereavement(c, deathYear);
+        processPendingBereavementBatch(DEFAULT_BEREAVEMENT_BATCH_SIZE);
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         c.props.put("death.lifecycle.completed", true);
@@ -512,72 +515,134 @@ public final class CharacterRegistry {
     }
 
     /**
-     * Family and trusted friends remember a death through the deceased's bounded
-     * relationship neighbourhood. A death must never scan the entire population.
-     * ResidentSocial writes reciprocal Character-to-Character links, so the deceased's
-     * relationship map is the fan-out index; family links provide a legacy-safe fallback.
+     * Death only prepares a bounded, durable recipient list. Applying memories is
+     * deliberately deferred to processPendingBereavementBatch().
      */
     private void recordBereavement(Character deceased, int deathYear) {
-        if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
-        long minute = Math.max(0L, (long) deathYear * 525600L);
-        LinkedHashSet<Character> candidates = new LinkedHashSet<>();
-
-        addLivingCandidate(candidates, deceased.spouse);
-        addLivingCandidate(candidates, deceased.father);
-        addLivingCandidate(candidates, deceased.mother);
-        for (String childId : deceased.children) addLivingCandidate(candidates, childId);
-
-        // Siblings are resolved through the two parent records, not by scanning byId.
+        if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))
+                || deceased.props.containsKey("death.bereavement.recipients")) return;
+        LinkedHashSet<String> recipients = new LinkedHashSet<>();
+        addLivingCandidate(recipients, deceased.spouse);
+        addLivingCandidate(recipients, deceased.father);
+        addLivingCandidate(recipients, deceased.mother);
+        for (String childId : deceased.children) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, childId);
+        }
         Character father = deceased.father.isBlank() ? null : byId.get(deceased.father);
         Character mother = deceased.mother.isBlank() ? null : byId.get(deceased.mother);
-        if (father != null) for (String siblingId : father.children) addLivingCandidate(candidates, siblingId);
-        if (mother != null) for (String siblingId : mother.children) addLivingCandidate(candidates, siblingId);
-
+        if (father != null) for (String siblingId : father.children) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, siblingId);
+        }
+        if (mother != null && recipients.size() < MAX_BEREAVEMENT_RECIPIENTS)
+            for (String siblingId : mother.children) {
+                if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+                addLivingCandidate(recipients, siblingId);
+            }
         Object rawRelationships = deceased.props.get("social.relationships");
         if (rawRelationships instanceof Map<?, ?> relationships) {
+            int inspected = 0;
             for (Map.Entry<?, ?> entry : relationships.entrySet()) {
+                if (inspected++ >= MAX_BEREAVEMENT_RECIPIENTS
+                        || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
                 if (!(entry.getKey() instanceof String globalId)
-                        || !(entry.getValue() instanceof Number score)
-                        || score.intValue() < 35) continue;
+                        || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
                 Character friend = byGlobalId.get(globalId);
                 if (friend != null && friend.alive && friend != deceased
                         && relationshipScore(friend, deceased.globalId) >= 35)
-                    candidates.add(friend);
+                    recipients.add(friend.globalId);
             }
         }
-
-        for (Character survivor : candidates) {
-            int intensity = 0;
-            boolean directFamily = deceased.spouse.equals(survivor.id)
-                    || deceased.father.equals(survivor.id) || deceased.mother.equals(survivor.id)
-                    || survivor.father.equals(deceased.id) || survivor.mother.equals(deceased.id)
-                    || deceased.children.contains(survivor.id) || survivor.children.contains(deceased.id);
-            if (directFamily) intensity = 4;
-            else {
-                boolean sibling = (!deceased.father.isBlank() && deceased.father.equals(survivor.father))
-                        || (!deceased.mother.isBlank() && deceased.mother.equals(survivor.mother));
-                if (sibling) intensity = 3;
-                else {
-                    int relationship = relationshipScore(survivor, deceased.globalId);
-                    if (relationship >= 70) intensity = 3;
-                    else if (relationship >= 35) intensity = 2;
-                }
-            }
-            if (intensity == 0) continue;
-            String eventId = "death:bereavement:" + deceased.globalId + ":" + survivor.globalId;
-            CharacterDevelopment.recordExperience(survivor, CharacterDevelopment.Experience.BEREAVEMENT,
-                    eventId, "lost " + deceased.name, minute, intensity);
-            CharacterDevelopment.remember(survivor, eventId + ":memory", "bereavement", deceased.globalId,
-                    "death of " + deceased.name, -intensity * 15, minute);
-        }
-        deceased.props.put("death.bereavement.completed", true);
+        deceased.props.put("death.bereavement.recipients", new ArrayList<>(recipients));
+        deceased.props.put("death.bereavement.cursor", 0);
+        deceased.props.put("death.bereavement.year", deathYear);
+        pendingBereavement.addLast(deceased.globalId);
+        recordDomainMutation();
     }
 
-    private void addLivingCandidate(Set<Character> candidates, String localId) {
-        if (localId == null || localId.isBlank()) return;
+    private static final int MAX_BEREAVEMENT_RECIPIENTS = 256;
+    public static final int DEFAULT_BEREAVEMENT_BATCH_SIZE = 32;
+
+    private void addLivingCandidate(Set<String> candidates, String localId) {
+        if (localId == null || localId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
         Character candidate = byId.get(localId);
-        if (candidate != null && candidate.alive) candidates.add(candidate);
+        if (candidate != null && candidate.alive) candidates.add(candidate.globalId);
     }
+
+    /**
+     * Applies a bounded number of death consequences. The recipient list and cursor
+     * live in the deceased Character props, so WAL/checkpoint persistence resumes safely.
+     * Per-recipient event IDs make replay idempotent if a crash precedes cursor persistence.
+     */
+    public int processPendingBereavementBatch(int maxRecipients) {
+        if (maxRecipients < 1) throw new IllegalArgumentException("maxRecipients must be positive");
+        int processed = 0;
+        try (MutationBatch ignored = beginMutationBatch()) {
+            while (processed < maxRecipients && !pendingBereavement.isEmpty()) {
+                String deceasedGlobalId = pendingBereavement.peekFirst();
+                Character deceased = byGlobalId.get(deceasedGlobalId);
+                if (deceased == null) {
+                    pendingBereavement.removeFirst();
+                    continue;
+                }
+                Object rawRecipients = deceased.props.get("death.bereavement.recipients");
+                if (!(rawRecipients instanceof List<?> recipients)) {
+                    deceased.props.put("death.bereavement.completed", true);
+                    pendingBereavement.removeFirst();
+                    recordCharacterMutation();
+                    continue;
+                }
+                int cursor = deceased.props.get("death.bereavement.cursor") instanceof Number n
+                        ? Math.max(0, n.intValue()) : 0;
+                int deathYear = deceased.props.get("death.bereavement.year") instanceof Number n
+                        ? n.intValue() : 0;
+                long minute = Math.max(0L, (long) deathYear * 525600L);
+                while (cursor < recipients.size() && processed < maxRecipients) {
+                    Object rawGlobalId = recipients.get(cursor++);
+                    processed++;
+                    if (!(rawGlobalId instanceof String survivorGlobalId)) continue;
+                    Character survivor = byGlobalId.get(survivorGlobalId);
+                    if (survivor == null || !survivor.alive || survivor == deceased) continue;
+                    int intensity = 0;
+                    boolean directFamily = deceased.spouse.equals(survivor.id)
+                            || deceased.father.equals(survivor.id) || deceased.mother.equals(survivor.id)
+                            || survivor.father.equals(deceased.id) || survivor.mother.equals(deceased.id)
+                            || deceased.children.contains(survivor.id) || survivor.children.contains(deceased.id);
+                    if (directFamily) intensity = 4;
+                    else {
+                        boolean sibling = (!deceased.father.isBlank() && deceased.father.equals(survivor.father))
+                                || (!deceased.mother.isBlank() && deceased.mother.equals(survivor.mother));
+                        if (sibling) intensity = 3;
+                        else {
+                            int relationship = relationshipScore(survivor, deceased.globalId);
+                            if (relationship >= 70) intensity = 3;
+                            else if (relationship >= 35) intensity = 2;
+                        }
+                    }
+                    if (intensity == 0) continue;
+                    String eventId = "death:bereavement:" + deceased.globalId + ":" + survivor.globalId;
+                    CharacterDevelopment.recordExperience(survivor, CharacterDevelopment.Experience.BEREAVEMENT,
+                            eventId, "lost " + deceased.name, minute, intensity);
+                    CharacterDevelopment.remember(survivor, eventId + ":memory", "bereavement", deceased.globalId,
+                            "death of " + deceased.name, -intensity * 15, minute);
+                }
+                deceased.props.put("death.bereavement.cursor", cursor);
+                recordCharacterMutation();
+                if (cursor >= recipients.size()) {
+                    deceased.props.put("death.bereavement.completed", true);
+                    deceased.props.remove("death.bereavement.recipients");
+                    deceased.props.remove("death.bereavement.cursor");
+                    deceased.props.remove("death.bereavement.year");
+                    pendingBereavement.removeFirst();
+                    recordCharacterMutation();
+                } else break;
+            }
+        }
+        return processed;
+    }
+
+    public int pendingBereavementEvents() { return pendingBereavement.size(); }
 
     private static int relationshipScore(Character observer,String subjectGlobalId) {
         Object raw=observer.props.get("social.relationships");
@@ -921,7 +986,13 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         byGlobalId.clear();
-        for (Character character : loaded.values()) byGlobalId.put(character.globalId, character);
+        pendingBereavement.clear();
+        for (Character character : loaded.values()) {
+            byGlobalId.put(character.globalId, character);
+            if (!Boolean.TRUE.equals(character.props.get("death.bereavement.completed"))
+                    && character.props.get("death.bereavement.recipients") instanceof List<?>)
+                pendingBereavement.addLast(character.globalId);
+        }
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
         ordered.clear();

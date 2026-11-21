@@ -892,6 +892,22 @@ public class PeopleMod {
         try {
             long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
+            // Life-event consequences are resumed in a fixed budget, independently of population size.
+            int lifeEventBudget = 128;
+            for (CharacterRegistry registry : REGS.values()) {
+                if (lifeEventBudget <= 0) break;
+                lifeEventBudget -= Math.min(lifeEventBudget,
+                        registry.processPendingBereavementBatch(lifeEventBudget));
+            }
+            for (CharacterRegistry registry : DIMENSION_REGISTRIES.values()) {
+                if (lifeEventBudget <= 0) break;
+                lifeEventBudget -= Math.min(lifeEventBudget,
+                        registry.processPendingBereavementBatch(lifeEventBudget));
+            }
+            if (lifeEventBudget > 0)
+                lifeEventBudget -= Math.min(lifeEventBudget, WORLD_REGISTRY.processPendingBereavementBatch(lifeEventBudget));
+            if (lifeEventBudget > 0)
+                PLAYER_REGISTRY.processPendingBereavementBatch(lifeEventBudget);
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
             long registryGeneration = populationRegistryGeneration;
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay

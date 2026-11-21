@@ -9,6 +9,8 @@ import java.util.Map;
 /** Persistent, bounded social relationship scores stored on the canonical Character. */
 public final class ResidentSocial {
     private static final String KEY = "social.relationships";
+    /** A bounded neighbourhood keeps every social event's fan-out and per-NPC memory bounded. */
+    public static final int MAX_RELATIONSHIPS_PER_CHARACTER = 256;
     private ResidentSocial() {}
 
     public static int score(Character person, String otherCharacterOrPlayerId) {
@@ -26,11 +28,18 @@ public final class ResidentSocial {
         Object raw = person.props.get(KEY);
         Map<String, Object> relationships = new LinkedHashMap<>();
         if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet())
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (relationships.size() >= MAX_RELATIONSHIPS_PER_CHARACTER) break;
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
                     relationships.put(key, clamp(n.intValue()));
+            }
         }
         int next = clamp(score(person, otherCharacterOrPlayerId) + delta);
+        if (!relationships.containsKey(otherCharacterOrPlayerId)
+                && relationships.size() >= MAX_RELATIONSHIPS_PER_CHARACTER) {
+            String oldest = relationships.keySet().iterator().next();
+            relationships.remove(oldest);
+        }
         relationships.put(otherCharacterOrPlayerId, next);
         person.props.put(KEY, relationships);
         return next;
