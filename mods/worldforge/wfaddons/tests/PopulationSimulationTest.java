@@ -603,6 +603,44 @@ public final class PopulationSimulationTest {
                         java.util.List.of(bridgeRegistry)),
                 "population bridge rejects stale revision before applying a result");
 
+        CharacterRegistry batchedRegistry = new CharacterRegistry();
+        java.util.List<Character> batchedPeople = new java.util.ArrayList<>();
+        for (int i = 0; i < 600; i++) {
+            Character person = batchedRegistry.create("Batch " + i, "", "north", "n", 270);
+            PopulationSimulation.setNeed(person, Need.HUNGER, 5);
+            batchedPeople.add(person);
+        }
+        boolean firstBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        long firstBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!firstBatchComplete && firstBatchApplied == 256
+                        && !batchedPeople.get(256).props.containsKey("population.last_simulated_world_day"),
+                "world-day fallback advances a bounded 256-Character batch without scanning the remaining population");
+        boolean secondBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        boolean thirdBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        long allBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!secondBatchComplete && thirdBatchComplete && allBatchApplied == 600
+                        && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "resumable world-day cursor completes all batches exactly once and preserves per-Character receipts");
+        boolean stableComplete = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        ok(stableComplete && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "completed world-day cursor does not replay already acknowledged population state");
+        Character appendedDuringBatch = batchedRegistry.create("Late Arrival", "", "north", "n", 270);
+        PopulationSimulation.setNeed(appendedDuringBatch, Need.HUNGER, 5);
+        boolean membershipRestarted = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        PopulationSimulation.advanceToWorldDayBatch(batchedRegistry, 1, 0, 301, 256);
+        boolean membershipCaughtUp = PopulationSimulation.advanceToWorldDayBatch(
+                batchedRegistry, 1, 0, 301, 256);
+        ok(!membershipRestarted && membershipCaughtUp
+                        && PopulationSimulation.need(appendedDuringBatch, Need.HUNGER) == 15,
+                "new registry membership invalidates the cursor and safely catches up the appended Character");
+
         CharacterRegistry resumableRegistry = new CharacterRegistry();
         Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
         PopulationSimulation.setNeed(resumable, Need.HUNGER, 5);

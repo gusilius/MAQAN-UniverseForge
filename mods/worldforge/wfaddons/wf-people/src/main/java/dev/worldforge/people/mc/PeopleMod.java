@@ -897,14 +897,21 @@ public class PeopleMod {
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
                     || populationFallbackGeneration != registryGeneration)) {
                 long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
+                boolean fallbackComplete = true;
                 for (CharacterRegistry registry : REGS.values())
-                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
                 for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
-                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
-                PopulationSimulation.advanceToWorldDay(WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
-                PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
-                populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
-                populationFallbackGeneration = registryGeneration;
+                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
+                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                        WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
+                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
+                        PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
+                if (fallbackComplete) {
+                    populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
+                    populationFallbackGeneration = registryGeneration;
+                }
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());

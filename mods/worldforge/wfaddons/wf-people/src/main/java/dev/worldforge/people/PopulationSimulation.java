@@ -10,6 +10,10 @@ import java.util.*;
  * never independent people. This class is deliberately free of Minecraft classes.
  */
 public final class PopulationSimulation {
+    private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
+    private record WorldDayCursor(long targetDay, long fallbackDay, int year,
+                                   long registryRevision, int nextIndex, boolean complete) { }
+    private static final Map<CharacterRegistry, WorldDayCursor> WORLD_DAY_CURSORS = new WeakHashMap<>();
     public static final int MAX_NEED = 100;
     public static final int SKILL_XP_PER_RANK = 100;
     public static final int MAX_SKILL_RANK = 20;
@@ -510,6 +514,49 @@ public final class PopulationSimulation {
         Objects.requireNonNull(registry, "registry");
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             advanceBatched(registry, elapsedDays, year, -1L);
+        }
+    }
+
+    /**
+     * Resumable Java fallback. Processes at most maxCharacters from the append-only registry view
+     * and preserves each Character's durable receipt, so interruption/restart safely resumes.
+     * Returns true only when the complete current registry membership has been visited.
+     */
+    public static boolean advanceToWorldDayBatch(CharacterRegistry registry, long targetWorldDay,
+                                                  long fallbackStartDay, int year, int maxCharacters) {
+        Objects.requireNonNull(registry, "registry");
+        if (targetWorldDay < 0 || fallbackStartDay < 0 || targetWorldDay < fallbackStartDay)
+            throw new IllegalArgumentException("invalid world-day range");
+        if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
+        synchronized (WORLD_DAY_CURSORS) {
+            long revision = registry.revision();
+            WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            if (cursor == null || cursor.targetDay() != targetWorldDay
+                    || cursor.fallbackDay() != fallbackStartDay || cursor.year() != year
+                    || cursor.registryRevision() != revision) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, revision, 0, false);
+            }
+            if (cursor.complete()) return true;
+            List<Character> members = registry.all();
+            int start = Math.min(cursor.nextIndex(), members.size());
+            int end = Math.min(members.size(), start + maxCharacters);
+            if (start < end) {
+                List<Character> batch = new ArrayList<>(members.subList(start, end));
+                try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+                    registry.refreshLifeStages(batch, year);
+                    for (Character character : batch) {
+                        if (!character.alive) continue;
+                        Object raw = character.props.get("population.last_simulated_world_day");
+                        long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
+                        if (previous >= targetWorldDay) continue;
+                        advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                    }
+                }
+            }
+            boolean complete = end >= registry.size();
+            WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
+                    year, revision, end, complete));
+            return complete;
         }
     }
 
