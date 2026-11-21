@@ -1003,6 +1003,17 @@ public final class WorldSimMod {
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.
         Set<String> threatenedRealms = new HashSet<>();
+        Map<String, Long> lastWarDayByRealm = new HashMap<>();
+        // Build the realm-to-war projection once. Scanning the complete war list inside
+        // every realm iteration made snapshot cost O(realms × wars).
+        for (var war : RealmsMod.POLITICS.wars()) {
+            lastWarDayByRealm.merge(war.attackerRealm, war.startDay, Math::max);
+            lastWarDayByRealm.merge(war.defenderRealm, war.startDay, Math::max);
+            if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
+                threatenedRealms.add(war.attackerRealm);
+                threatenedRealms.add(war.defenderRealm);
+            }
+        }
         Map<String, Double> actualArmyPower = new HashMap<>();
         // wf-army owns its rosters and unit definitions. WorldSim reads every loaded map
         // through the module API; it never estimates an army from civilian population.
@@ -1061,16 +1072,8 @@ public final class WorldSimMod {
             item.addProperty("stability", (int) number(realm.props.get("stability"), 50));
             item.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
             item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, number(realm.props.get("expansion_pressure"), 0))));
-            long lastWarDay = 0;
-            boolean atWar = false;
-            for (var war : RealmsMod.POLITICS.wars()) {
-                if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
-                lastWarDay = Math.max(lastWarDay, war.startDay);
-                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
-                    atWar = true;
-                    threatenedRealms.add(realm.id);
-                }
-            }
+            boolean atWar = threatenedRealms.contains(realm.id);
+            long lastWarDay = lastWarDayByRealm.getOrDefault(realm.id, 0L);
             item.addProperty("at_war", atWar);
             item.addProperty("last_war_day", lastWarDay);
             realms.add(item);
