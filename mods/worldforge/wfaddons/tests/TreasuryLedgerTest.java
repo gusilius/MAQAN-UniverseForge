@@ -840,6 +840,34 @@ public final class TreasuryLedgerTest {
         }
 
         try {
+            java.nio.file.Path digestRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-digest-cache-");
+            TreasuryLedger digestLedger = new TreasuryLedger();
+            digestLedger.open("digest:account", "digest:account", "silver", 100);
+            digestLedger.deposit("digest:account", 5, TreasuryLedger.Kind.PRODUCTION,
+                    "digest-test", "digest:first", 1, "first immutable prefix");
+            TreasuryJournalArchive digestArchive = new TreasuryJournalArchive(digestRoot.resolve("archive"), 1);
+            digestArchive.appendAll(digestLedger.journal());
+            long immutablePrefixNext = digestArchive.nextSequence();
+            String digestFirst = digestArchive.archiveDigestThrough(immutablePrefixNext);
+            String digestRepeated = digestArchive.archiveDigestThrough(immutablePrefixNext);
+            digestLedger.deposit("digest:account", 7, TreasuryLedger.Kind.PRODUCTION,
+                    "digest-test", "digest:second", 2, "new append-only suffix");
+            digestArchive.appendAll(digestLedger.entriesFromSequence(immutablePrefixNext));
+            String digestOldPrefixAfterAppend = digestArchive.archiveDigestThrough(immutablePrefixNext);
+            String digestFullArchive = digestArchive.archiveDigestThrough(digestArchive.nextSequence());
+            ok(digestFirst.equals(digestRepeated) && digestFirst.equals(digestOldPrefixAfterAppend)
+                            && !digestFirst.equals(digestFullArchive),
+                    "treasury archive digest cache reuses immutable prefixes and excludes later appended history");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(digestRoot)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(file -> {
+                    try { java.nio.file.Files.deleteIfExists(file); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "treasury immutable digest cache lifecycle: " + ex.getMessage());
+        }
+
+        try {
             java.nio.file.Path storeRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-canonical-store-");
             java.nio.file.Path legacyFile = storeRoot.resolve("wf_treasury.json");
             TreasuryLedger legacySource = new TreasuryLedger();
