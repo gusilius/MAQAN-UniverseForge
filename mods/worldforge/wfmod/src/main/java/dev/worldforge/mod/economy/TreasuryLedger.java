@@ -780,6 +780,7 @@ public final class TreasuryLedger {
                 throw new IllegalArgumentException("Invalid treasury archived-through sequence");
             declaredArchivedThrough = archivedNumber.longValue();
         }
+        ledger.archivedThroughSequence = declaredArchivedThrough;
         long previousSequence = declaredArchivedThrough;
         long firstJournalSequence = 0;
         Map<String, List<Entry>> transactions = new HashMap<>();
