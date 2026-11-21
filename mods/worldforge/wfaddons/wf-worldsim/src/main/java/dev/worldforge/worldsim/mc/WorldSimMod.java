@@ -646,6 +646,9 @@ public final class WorldSimMod {
     private static void logWorldGenesisDiagnostics(MinecraftServer server, JsonObject state) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()
                 || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        // snapshot() deep-copies persisted geography; do it once per diagnostic pass,
+        // not once per dimension.
+        List<com.google.gson.JsonElement> vanillaGeography = VanillaWorldGeography.snapshot();
         for (EmergenceSource source : emergenceSources()) {
             long bands = state.getAsJsonArray("bands").asList().stream()
                     .filter(JsonObject.class::isInstance).map(JsonObject.class::cast)
@@ -976,6 +979,8 @@ public final class WorldSimMod {
         JsonArray diplomaticRelations = new JsonArray(), vassalContracts = new JsonArray(), wars = new JsonArray();
         JsonArray armies = new JsonArray(), socialRelations = new JsonArray(), namedEntities = new JsonArray();
         JsonArray geography = new JsonArray();
+        Set<String> catalogEntryKeys = new HashSet<>();
+        Set<String> namedEntityKeys = new HashSet<>();
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
@@ -1434,13 +1439,13 @@ public final class WorldSimMod {
         // Feed native decisions from the full, already-loaded addon definitions.
         // The owning addons remain authoritative; this is a read-only projection of their
         // effective datapack registries, not a second set of hard-coded definitions.
-        int progressDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_progress",
+        int progressDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_progress",
                 "dev.worldforge.progress.mc.ProgressMod", "DEFS");
-        int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_genesis",
+        int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_genesis",
                 "dev.worldforge.genesis.mc.GenesisMod", "DEFS");
-        int formsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_forms",
+        int formsDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "DEFS");
-        int questsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_quests",
+        int questsDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_quests",
                 "dev.worldforge.quests.mc.QuestsMod", "DEFS");
         JsonObject formsRuntime = exportOptionalFieldStoreSnapshot("wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "FORMS");
@@ -1974,7 +1979,7 @@ public final class WorldSimMod {
      * Map keys are stable domain IDs; collection entries use their declared id when
      * present and a deterministic ordinal only for genuinely anonymous rows.
      */
-    private static int exportDefinitionCatalogs(JsonArray target, String moduleId,
+    private static int exportDefinitionCatalogs(JsonArray target, Set<String> catalogEntryKeys, String moduleId,
                                                 String ownerClassName, String definitionsField) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return 0;
         int exported = 0;
@@ -2204,29 +2209,25 @@ public final class WorldSimMod {
         item.addProperty("entity_count", Math.max(0, entityCount)); target.add(item);
     }
 
-    private static void addCatalogEntry(JsonArray target, String moduleId, String catalogId,
+    private static void addCatalogEntry(JsonArray target, Set<String> keys, String moduleId, String catalogId,
                                         String entryId, String name, com.google.gson.JsonElement payload) {
         if (entryId == null || entryId.isBlank()) return;
-        for (var existing : target) if (existing.isJsonObject()) {
-            JsonObject row = existing.getAsJsonObject();
-            if (moduleId.equals(row.get("module_id").getAsString())
-                    && catalogId.equals(row.get("catalog_id").getAsString())
-                    && entryId.equals(row.get("entry_id").getAsString())) return;
-        }
+        String key = moduleId + '\u0000' + catalogId + '\u0000' + entryId;
+        if (!keys.add(key)) return;
         JsonObject item = new JsonObject();
         item.addProperty("module_id", moduleId); item.addProperty("catalog_id", catalogId);
         item.addProperty("entry_id", entryId); item.addProperty("name", name == null ? "" : name);
-        item.add("payload", payload == null ? new JsonObject() : payload.deepCopy());
+        // These projected payloads are newly created and become owned by this snapshot.
+        // Avoid recursively deep-copying every catalog row a second time.
+        item.add("payload", payload == null ? new JsonObject() : payload);
         target.add(item);
     }
 
-    private static void addNamedEntity(JsonArray target, String id, String kind, String name,
+    private static void addNamedEntity(JsonArray target, Set<String> keys, String id, String kind, String name,
                                        String parentId, String ownerId) {
         if (id == null || id.isBlank()) return;
-        for (var existing : target) if (existing.isJsonObject()) {
-            JsonObject row = existing.getAsJsonObject();
-            if (kind.equals(row.get("kind").getAsString()) && id.equals(row.get("id").getAsString())) return;
-        }
+        String key = kind + '\u0000' + id;
+        if (!keys.add(key)) return;
         JsonObject item = new JsonObject();
         item.addProperty("id", id); item.addProperty("kind", kind);
         item.addProperty("name", name == null ? "" : name);
