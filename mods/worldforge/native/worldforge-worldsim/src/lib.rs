@@ -14,7 +14,7 @@ pub mod strategic_army;
 pub mod troops;
 pub mod trade;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub type Day = u64;
 pub type Fixed = i64;
@@ -968,14 +968,11 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 }
 
 
-fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
-    // A job can be applied only when the canonical People profession exists and
-    // the settlement domain also declares it as a valid Worker assignment.
-    catalog_entry(snapshot, "wf_people", "professions", id).is_some()
-        && catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
-}
-
-fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
+fn choose_profession_for_output(
+    snapshot: &WorldSnapshot,
+    resource: &str,
+    registered_professions: &BTreeSet<&str>,
+) -> Option<String> {
     let mut choices = Vec::new();
     for building in snapshot.catalog_entries.iter().filter(|entry|
         entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
@@ -999,7 +996,7 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
         if let Some(jobs) = jobs {
             for (profession, slots) in jobs {
                 let capacity = slots.as_f64().unwrap_or(0.0);
-                if capacity <= 0.0 || !registered_profession(snapshot, profession) { continue; }
+                if capacity <= 0.0 || !registered_professions.contains(profession.as_str()) { continue; }
                 let work = building.payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
                 choices.push((profession.clone(), output / (capacity * work)));
             }
@@ -1009,13 +1006,13 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
     choices.into_iter().next().map(|(profession, _)| profession)
 }
 
-fn choose_builder_profession(snapshot: &WorldSnapshot) -> Option<String> {
+fn choose_builder_profession(snapshot: &WorldSnapshot, registered_professions: &BTreeSet<&str>) -> Option<String> {
     let mut candidates = Vec::new();
     for entry in snapshot.catalog_entries.iter().filter(|entry|
         (entry.module_id == "wf_people" && entry.catalog_id == "professions")
             || (entry.module_id == "wf_settle" && entry.catalog_id == "building_professions")) {
         let id = entry.entry_id.as_str();
-        if !registered_profession(snapshot, id) { continue; }
+        if !registered_professions.contains(id) { continue; }
         let name = entry.payload.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
         let group = entry.payload.get("group").and_then(serde_json::Value::as_str).unwrap_or("");
         let id_match = id.to_ascii_lowercase().contains("builder")
@@ -1042,7 +1039,7 @@ impl WorldSnapshot {
             if !map_ids.insert(map.map_id.as_str()) {
                 return Err(SimError::InvalidSnapshot(format!("duplicate-geographic-map:{}", map.map_id)));
             }
-            let mut cells = BTreeSet::new();
+            let mut cells = HashSet::with_capacity(map.cells.len());
             for cell in &map.cells {
                 if cell.x >= map.width_px || cell.z >= map.height_px || cell.biome.trim().is_empty()
                     || cell.suitability > 100 || !cells.insert((cell.x, cell.z)) {
@@ -1396,13 +1393,26 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         active_war_pairs.insert((a, b));
     }
     let mut diplomatic_by_pair = BTreeMap::new();
+    let mut blocked_diplomatic_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    let mut trade_pact_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
     for relation in &snapshot.diplomatic_relations {
         let (a, b) = if relation.realm_a <= relation.realm_b {
             (relation.realm_a.as_str(), relation.realm_b.as_str())
         } else {
             (relation.realm_b.as_str(), relation.realm_a.as_str())
         };
-        diplomatic_by_pair.insert((a, b), relation);
+        // Preserve the old first-match opinion semantics while aggregating treaty
+        // and truce flags across every relation row for this pair.
+        diplomatic_by_pair.entry((a, b)).or_insert(relation);
+        if relation.truce_until_day > snapshot.day || relation.treaties.iter().any(|treaty|
+            matches!(treaty.as_str(), "NON_AGGRESSION" | "ALLIANCE" | "DEFENSIVE_PACT"
+                | "FEUDAL_VASSAL" | "TRIBUTARY" | "PROTECTORATE" | "OCCUPIED"
+                | "PERSONAL_UNION" | "CONFEDERATION_MEMBER")) {
+            blocked_diplomatic_pairs.insert((a, b));
+        }
+        if relation.treaties.iter().any(|treaty| treaty == "TRADE_PACT") {
+            trade_pact_pairs.insert((a, b));
+        }
     }
     let mut vassal_by_realm = BTreeMap::new();
     let mut subject_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
@@ -1422,25 +1432,19 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
             let intrigue_penalty = intrigue_pressure_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0);
             let court_penalty = court_instability_pressure(snapshot, &attacker.id);
+            let pair = (
+                std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                std::cmp::max(attacker.id.as_str(), defender.id.as_str()));
             let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
-                + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
+                + if trade_pact_pairs.contains(&pair) { 12 } else { 0 }
                 + market_fragility_penalty(snapshot, &attacker.id);
             if attacker.at_war || defender.at_war
                 || active_campaign_realms.contains(attacker.id.as_str())
                 || active_campaign_realms.contains(defender.id.as_str())
                 || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
-                || diplomatic_by_pair.get(&(
-                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
-                    std::cmp::max(attacker.id.as_str(), defender.id.as_str())))
-                    .map(|relation| relation.truce_until_day > snapshot.day || relation.treaties.iter().any(|treaty|
-                        matches!(treaty.as_str(), "NON_AGGRESSION" | "ALLIANCE" | "DEFENSIVE_PACT"
-                            | "FEUDAL_VASSAL" | "TRIBUTARY" | "PROTECTORATE" | "OCCUPIED"
-                            | "PERSONAL_UNION" | "CONFEDERATION_MEMBER")))
-                    .unwrap_or(false)
-                || subject_pairs.contains(&(
-                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
-                    std::cmp::max(attacker.id.as_str(), defender.id.as_str())))
+                || blocked_diplomatic_pairs.contains(&pair)
+                || subject_pairs.contains(&pair)
                 || active_war_pairs.contains(&(
                     std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
                     std::cmp::max(attacker.id.as_str(), defender.id.as_str()))) { continue; }
@@ -1450,9 +1454,6 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 .unwrap_or(defender.army_strength as f64);
             let power = if defender_power <= 0.0 { if attacker_power > 0.0 { 100 } else { 50 } }
                 else { ((attacker_power * 100.0 / defender_power).round() as i64).clamp(0, 200) as i32 };
-            let pair = (
-                std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
-                std::cmp::max(attacker.id.as_str(), defender.id.as_str()));
             let diplomatic_opinion = diplomatic_by_pair.get(&pair).map(|relation| relation.opinion).unwrap_or(0);
             let subject_penalty = vassal_by_realm.get(attacker.id.as_str())
                 .map(|loyalty| (100 - loyalty) / 4).unwrap_or(0);
@@ -1517,6 +1518,22 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
 
     // Workforce AI: only reallocates unemployed workers, and never removes
     // workers from food production while food is below the safety reserve.
+    // Profession selection depends only on immutable definitions, not on an individual
+    // workforce row. Build the canonical intersection and choose each production role
+    // once; the former code repeated full catalog scans for every unemployed worker.
+    let people_professions: BTreeSet<&str> = snapshot.catalog_entries.iter()
+        .filter(|entry| entry.module_id == "wf_people" && entry.catalog_id == "professions")
+        .map(|entry| entry.entry_id.as_str()).collect();
+    let settlement_professions: BTreeSet<&str> = snapshot.catalog_entries.iter()
+        .filter(|entry| entry.module_id == "wf_settle" && entry.catalog_id == "building_professions")
+        .map(|entry| entry.entry_id.as_str()).collect();
+    let registered_professions = people_professions.intersection(&settlement_professions)
+        .copied().collect::<BTreeSet<_>>();
+    let food_profession = choose_profession_for_output(snapshot, "food", &registered_professions);
+    let wood_profession = choose_profession_for_output(snapshot, "wood", &registered_professions);
+    let stone_profession = choose_profession_for_output(snapshot, "stone", &registered_professions);
+    let builder_profession = choose_builder_profession(snapshot, &registered_professions);
+
     let mut workforce = snapshot.workforce.iter().collect::<Vec<_>>();
     workforce.sort_by(|a, b| a.settlement_id.cmp(&b.settlement_id));
     for w in workforce {
@@ -1526,13 +1543,13 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         };
         if w.unemployed == 0 { continue; }
         let target = if w.food_output < w.food_need {
-                choose_profession_for_output(snapshot, "food").map(|to| (to, w.food_need - w.food_output))
+                food_profession.clone().map(|to| (to, w.food_need - w.food_output))
             } else if w.wood_output < w.wood_need {
-                choose_profession_for_output(snapshot, "wood").map(|to| (to, w.wood_need - w.wood_output))
+                wood_profession.clone().map(|to| (to, w.wood_need - w.wood_output))
             } else if w.stone_output < w.stone_need {
-                choose_profession_for_output(snapshot, "stone").map(|to| (to, w.stone_need - w.stone_output))
+                stone_profession.clone().map(|to| (to, w.stone_need - w.stone_output))
             } else if s.housing_used < s.housing && s.population > 10 && w.builders == 0 {
-                choose_builder_profession(snapshot).map(|to| (to, 1))
+                builder_profession.clone().map(|to| (to, 1))
             } else { None };
         if let Some((to, deficit)) = target {
             proposals.push(Proposal {
