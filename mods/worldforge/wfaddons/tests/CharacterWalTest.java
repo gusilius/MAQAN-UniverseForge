@@ -83,6 +83,10 @@ public final class CharacterWalTest {
             }
             for (CompletableFuture<CharacterWal.Record> future : futures) future.get(10, TimeUnit.SECONDS);
             writer.close();
+            CompletableFuture<CharacterWal.Record> rejectedReceipt = new CompletableFuture<>();
+            boolean rejectedAfterClose = !writer.submit(id, new byte[]{9}, rejectedReceipt)
+                    && rejectedReceipt.isCompletedExceptionally();
+            ok(rejectedAfterClose, "rejected WAL submissions complete their durable receipt instead of hanging callers");
             wal.close();
             try (CharacterWal replay = new CharacterWal(writerDirectory, 8)) {
                 ok(acceptedCount == 300 && replay.replayAll().size() == 300

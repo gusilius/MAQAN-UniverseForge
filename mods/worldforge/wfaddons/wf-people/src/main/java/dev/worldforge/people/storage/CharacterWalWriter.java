@@ -32,12 +32,23 @@ public final class CharacterWalWriter implements AutoCloseable {
         worker.start();
     }
 
-    public synchronized boolean submit(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) {
+    public boolean submit(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) {
         Objects.requireNonNull(globalId, "globalId");
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(durable, "durable");
-        if (!accepting.get() || failure != null) return false;
-        return queue.offer(new Pending(globalId, payload.clone(), durable));
+        IOException rejection = null;
+        boolean accepted;
+        synchronized (this) {
+            if (!accepting.get() || failure != null) {
+                rejection = failure != null ? failure : new IOException("Character WAL writer is closed");
+                accepted = false;
+            } else {
+                accepted = queue.offer(new Pending(globalId, payload.clone(), durable));
+                if (!accepted) rejection = new IOException("Character WAL writer queue is full");
+            }
+        }
+        if (!accepted) durable.completeExceptionally(rejection);
+        return accepted;
     }
 
     public int queued() { return queue.size(); }
