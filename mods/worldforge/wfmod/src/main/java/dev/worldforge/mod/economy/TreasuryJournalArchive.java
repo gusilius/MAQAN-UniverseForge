@@ -15,6 +15,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.function.Consumer;
@@ -32,6 +34,13 @@ public final class TreasuryJournalArchive {
     // Segment files are immutable and this archive has one synchronized writer.
     // Keep the ordered directory snapshot for the lifetime of the archive instance.
     private List<Path> segmentFilesCache;
+    // Immutable archive prefixes never change. Reuse their verified digest during the
+    // publish -> previous-checkpoint validation -> round-trip validation sequence.
+    private final Map<Long, String> digestCache = new LinkedHashMap<>(8, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<Long, String> eldest) {
+            return size() > 8;
+        }
+    };
     private final TreasuryReferenceIndex referenceIndex;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
@@ -59,6 +68,8 @@ public final class TreasuryJournalArchive {
         if (checkpointNextSequence < firstSequence || checkpointNextSequence > nextSequence)
             throw new IOException("Treasury archive does not contain checkpoint prefix in retained range ["
                     + firstSequence + ", " + nextSequence + "]");
+        String cached = digestCache.get(checkpointNextSequence);
+        if (cached != null) return cached;
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long expected = firstSequence;
@@ -68,13 +79,18 @@ public final class TreasuryJournalArchive {
                 if (decoded.firstSequence() != expected)
                     throw new IOException("Treasury archive sequence gap while fingerprinting");
                 if (decoded.firstSequence() >= checkpointNextSequence) break;
-                List<TreasuryLedger.Entry> prefix = decoded.entries().stream()
-                        .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
+                List<TreasuryLedger.Entry> prefix = decoded.lastSequence() < checkpointNextSequence
+                        ? decoded.entries()
+                        : decoded.entries().stream()
+                                .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
                 if (!prefix.isEmpty()) {
-                    TreasuryJournalSegment.Decoded prefixSegment = TreasuryJournalSegment.decode(
-                            TreasuryJournalSegment.encode(prefix));
-                    String line = prefixSegment.firstSequence() + ":" + prefixSegment.lastSequence()
-                            + ":" + prefixSegment.checksum() + "\n";
+                    // Full immutable segments already carry a verified checksum. Only a
+                    // checkpoint boundary inside a segment needs a temporary prefix encode.
+                    String prefixChecksum = prefix.size() == decoded.entries().size()
+                            ? decoded.checksum()
+                            : TreasuryJournalSegment.decode(TreasuryJournalSegment.encode(prefix)).checksum();
+                    String line = prefix.get(0).sequence() + ":" + prefix.get(prefix.size() - 1).sequence()
+                            + ":" + prefixChecksum + "\n";
                     digest.update(line.getBytes(StandardCharsets.UTF_8));
                 }
                 expected = decoded.lastSequence() + 1;
@@ -85,7 +101,9 @@ public final class TreasuryJournalArchive {
             byte[] bytes = digest.digest();
             StringBuilder hex = new StringBuilder(bytes.length * 2);
             for (byte value : bytes) hex.append(String.format("%02x", value & 0xff));
-            return hex.toString();
+            String result = hex.toString();
+            digestCache.put(checkpointNextSequence, result);
+            return result;
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
         } catch (RuntimeException invalid) {
