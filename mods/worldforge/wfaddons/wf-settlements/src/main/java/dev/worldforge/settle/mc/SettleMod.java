@@ -626,25 +626,18 @@ public class SettleMod {
     }
 
     /**
-     * Finds the nearest active canonical settlement inside the emergence exclusion radius.
-     * WorldSim uses this as a deterministic coalescing target when a new geographic band
-     * would otherwise create a second active settlement too close to an existing one.
+     * Finds a deterministic nearby founding position that preserves the 128-block spacing
+     * invariant without merging two independent population bands into one resident ledger.
      */
-    public static Colony nearbyActiveSettlement(String dimension, int x, int z) {
-        if (dimension == null || dimension.isBlank()) return null;
-        return COLONIES.values().stream()
+    public static int[] availableEmergentPosition(String dimension, int x, int z, int searchRadius) {
+        if (dimension == null || dimension.isBlank() || searchRadius < 0) return null;
+        List<long[]> occupied = COLONIES.values().stream()
                 .filter(colony -> colony != null && colony.s != null && dimension.equals(colony.dim))
                 .filter(colony -> colony.s.population() > 0 || !colony.residentCharacterIds.isEmpty()
                         || !colony.s.buildings.isEmpty() || !colony.s.workers.isEmpty())
-                .filter(colony -> SettlementSpacing.conflicts(
-                        (long) colony.cx - x, (long) colony.cz - z))
-                .min(Comparator
-                        .comparingLong((Colony colony) -> {
-                            long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
-                            return dx * dx + dz * dz;
-                        })
-                        .thenComparing(colony -> colony.s.id))
-                .orElse(null);
+                .map(colony -> new long[]{colony.cx, colony.cz})
+                .toList();
+        return SettlementSpacing.findAvailablePosition(x, z, occupied, searchRadius);
     }
 
     private record PersonBinding(CharacterRegistry registry, Character character) {}

@@ -2315,16 +2315,20 @@ public final class WorldSimMod {
                     colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64, boundSettlementIds);
                 }
                 if (colony == null) {
-                    // A generated band may overlap an active colony created by an earlier band.
-                    // Coalesce the new band into that canonical settlement instead of throwing
-                    // during frame application and retrying the same authoritative frame forever.
-                    colony = SettleMod.nearbyActiveSettlement(dimension, x, z);
-                    if (colony != null) {
-                        LOGGER.info("wf_worldsim: coalesced overlapping genesis band {} into active settlement {} in {}",
-                                bandId, colony.s.id, dimension);
+                    // Keep each population band attached to its own resident ledger. If its
+                    // geographic center violates spacing, deterministically move only the
+                    // physical settlement anchor to the nearest available site.
+                    int[] foundingPosition = SettleMod.availableEmergentPosition(dimension, x, z, 1024);
+                    if (foundingPosition == null) {
+                        throw new IllegalStateException("No non-overlapping founding position within 1024 blocks for "
+                                + bandId + " in " + dimension);
                     }
-                }
-                if (colony == null) {
+                    if (foundingPosition[0] != x || foundingPosition[1] != z) {
+                        LOGGER.info("wf_worldsim: relocated founding anchor for band {} from {},{} to {},{} in {}",
+                                bandId, x, z, foundingPosition[0], foundingPosition[1], dimension);
+                        x = foundingPosition[0];
+                        z = foundingPosition[1];
+                    }
                     // The band ID is a temporary structural label, not a final display name.
                     colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
                             settlementId, x, z, "worldsim:settlement:" + bandId);
