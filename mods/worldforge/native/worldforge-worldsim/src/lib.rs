@@ -710,24 +710,16 @@ fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool 
             && relation.treaties.iter().any(|value| value == treaty))
 }
 
-fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
-    let instance = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "settlement_instances" && entry.entry_id == settlement_id);
-    let Some(instance_payload) = instance.map(|entry| &entry.payload) else { return true; };
-    let type_id = instance_payload.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
-    let definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "settlement_types" && entry.entry_id == type_id);
-    let building_definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settle"
-            && entry.catalog_id == "buildings" && entry.entry_id == building);
-    let has_building_catalog = snapshot.catalog_entries.iter().any(|entry|
-        entry.module_id == "wf_settle" && entry.catalog_id == "buildings");
-    let Some(building_payload) = building_definition.map(|entry| &entry.payload) else {
-        return !has_building_catalog;
-    };
-    if let Some(payload) = definition.map(|entry| &entry.payload) {
+fn settlement_allows_building_from_payloads(
+    instance_payload: Option<&serde_json::Value>,
+    definition_payload: Option<&serde_json::Value>,
+    building_payload: Option<&serde_json::Value>,
+    has_building_catalog: bool,
+    building: &str,
+) -> bool {
+    let Some(instance_payload) = instance_payload else { return true; };
+    let Some(building_payload) = building_payload else { return !has_building_catalog; };
+    if let Some(payload) = definition_payload {
         let banned = payload.get("ban_buildings").or_else(|| payload.get("banBuildings")).or_else(|| payload.get("ban"))
             .and_then(serde_json::Value::as_array);
         if banned.map(|values| values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false) {
@@ -774,6 +766,21 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
         }
     }
     true
+}
+
+fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
+    let instance_payload = catalog_entry(snapshot, "wf_settle", "settlement_instances", settlement_id)
+        .map(|entry| &entry.payload);
+    let Some(instance) = instance_payload else { return true; };
+    let type_id = instance.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
+    let definition_payload = catalog_entry(snapshot, "wf_settle", "settlement_types", type_id)
+        .map(|entry| &entry.payload);
+    let building_payload = catalog_entry(snapshot, "wf_settle", "buildings", building)
+        .map(|entry| &entry.payload);
+    let has_building_catalog = snapshot.catalog_entries.iter()
+        .any(|entry| entry.module_id == "wf_settle" && entry.catalog_id == "buildings");
+    settlement_allows_building_from_payloads(
+        Some(instance), definition_payload, building_payload, has_building_catalog, building)
 }
 
 fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &str) -> Option<(String, u32)> {
@@ -893,9 +900,20 @@ fn resource_category<'a>(snapshot: &'a WorldSnapshot, resource: &str) -> &'a str
 fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, threatened: bool)
     -> Option<(String, i32, String)> {
     let mut candidates = Vec::new();
-    for entry in snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
-        if !settlement_allows_building(snapshot, &settlement.id, &entry.entry_id) { continue; }
+    // Resolve the settlement instance/type once. The previous per-building helper
+    // rescanned the full catalog several times for every candidate building.
+    let instance_payload = catalog_entry(snapshot, "wf_settle", "settlement_instances", &settlement.id)
+        .map(|entry| &entry.payload);
+    let definition_payload = instance_payload.and_then(|instance| {
+        let type_id = instance.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
+        catalog_entry(snapshot, "wf_settle", "settlement_types", type_id).map(|entry| &entry.payload)
+    });
+    let building_entries = snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings").collect::<Vec<_>>();
+    let has_building_catalog = !building_entries.is_empty();
+    for entry in building_entries {
+        if !settlement_allows_building_from_payloads(
+            instance_payload, definition_payload, Some(&entry.payload), has_building_catalog, &entry.entry_id) { continue; }
         let payload = &entry.payload;
         let category = payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
         let housing = payload.get("housing").and_then(serde_json::Value::as_i64).unwrap_or(0);
