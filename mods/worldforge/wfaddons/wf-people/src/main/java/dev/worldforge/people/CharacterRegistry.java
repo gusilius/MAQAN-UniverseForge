@@ -114,9 +114,9 @@ public final class CharacterRegistry {
     }
 
     /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
-    public void prepareKinIndex() {
+    public void prepareKinIndex(long day) {
         CharacterAuthority current = authority;
-        if (current != null) current.rebuildFamilyIndex();
+        if (current != null) current.rebuildFamilyIndex(day);
     }
 
     /** Returns bounded family candidates; callers still apply the canonical kinship predicate. */
