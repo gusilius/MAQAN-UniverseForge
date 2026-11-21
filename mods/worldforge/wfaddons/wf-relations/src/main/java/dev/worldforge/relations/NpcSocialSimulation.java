@@ -367,7 +367,7 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, -2, day, "rivalry", witnesses);
             reputation(b, polity, -2, day, "rivalry", witnesses);
-            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=rivalry a={} b={} day={",
+            RelationsMod.LOGGER.debug("wf_relations: autonomous social event kind=rivalry a={} b={} day={}",
                     a.globalId, b.globalId, day);
         }
     }
