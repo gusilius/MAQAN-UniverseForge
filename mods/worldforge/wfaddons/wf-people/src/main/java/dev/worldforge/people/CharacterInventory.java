@@ -902,11 +902,15 @@ public final class CharacterInventory {
         Character mother = related(authority, registry, deceased.props.get("family.mother_global_id"), deceased.mother);
         if (mother != null && mother.alive) return mother;
 
-        for (Character candidate : registry.all())
-            if (candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
-        if (authority != null) for (CharacterIdentity identity : authority.identities()) {
-            Character candidate = authority.get(identity);
-            if (candidate != null && candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
+        if (authority != null) {
+            // The yearly CourtSim pass prepares this world-wide relationship index once.
+            // Estate settlement now visits only relatives, never every Character per death.
+            for (Character candidate : registry.kinCandidates(deceased))
+                if (candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
+        } else {
+            // Standalone registries used by tools/tests have no world authority.
+            for (Character candidate : registry.all())
+                if (candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
         }
         return null;
     }
