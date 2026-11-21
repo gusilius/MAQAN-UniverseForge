@@ -6,6 +6,7 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.settle.SettlementSpacing;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
@@ -624,6 +625,28 @@ public class SettleMod {
                 .orElse(null);
     }
 
+    /**
+     * Finds the nearest active canonical settlement inside the emergence exclusion radius.
+     * WorldSim uses this as a deterministic coalescing target when a new geographic band
+     * would otherwise create a second active settlement too close to an existing one.
+     */
+    public static Colony nearbyActiveSettlement(String dimension, int x, int z) {
+        if (dimension == null || dimension.isBlank()) return null;
+        return COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && dimension.equals(colony.dim))
+                .filter(colony -> colony.s.population() > 0 || !colony.residentCharacterIds.isEmpty()
+                        || !colony.s.buildings.isEmpty() || !colony.s.workers.isEmpty())
+                .filter(colony -> SettlementSpacing.conflicts(
+                        (long) colony.cx - x, (long) colony.cz - z))
+                .min(Comparator
+                        .comparingLong((Colony colony) -> {
+                            long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                            return dx * dx + dz * dz;
+                        })
+                        .thenComparing(colony -> colony.s.id))
+                .orElse(null);
+    }
+
     private record PersonBinding(CharacterRegistry registry, Character character) {}
 
     /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */
@@ -914,10 +937,8 @@ public class SettleMod {
                     .filter(other -> other != null && other.s != null && dim.equals(other.dim))
                     .filter(other -> other.s.population() > 0 || !other.residentCharacterIds.isEmpty()
                             || !other.s.buildings.isEmpty() || !other.s.workers.isEmpty())
-                    .filter(other -> {
-                        long dx = (long) other.cx - x, dz = (long) other.cz - z;
-                        return dx * dx + dz * dz < minimumDistanceSq;
-                    })
+                    .filter(other -> SettlementSpacing.conflicts(
+                            (long) other.cx - x, (long) other.cz - z))
                     .min(Comparator.comparingLong(other -> {
                         long dx = (long) other.cx - x, dz = (long) other.cz - z;
                         return dx * dx + dz * dz;

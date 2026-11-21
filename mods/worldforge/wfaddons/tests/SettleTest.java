@@ -58,6 +58,12 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(SettlementSpacing.conflicts(127, 0)
+                        && SettlementSpacing.conflicts(-127, 0)
+                        && SettlementSpacing.conflicts(90, 90)
+                        && !SettlementSpacing.conflicts(128, 0)
+                        && !SettlementSpacing.conflicts(91, 91),
+                "overlapping emergence sites are detected deterministically at the exact 128-block boundary");
         SettleTypes settlementTypes = new SettleTypes();
         settlementTypes.load(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/types.json")));
         Settlement emptyBlueprintSite = new Settlement("empty_blueprint_site", "Empty site", d);

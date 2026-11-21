@@ -2315,6 +2315,16 @@ public final class WorldSimMod {
                     colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64, boundSettlementIds);
                 }
                 if (colony == null) {
+                    // A generated band may overlap an active colony created by an earlier band.
+                    // Coalesce the new band into that canonical settlement instead of throwing
+                    // during frame application and retrying the same authoritative frame forever.
+                    colony = SettleMod.nearbyActiveSettlement(dimension, x, z);
+                    if (colony != null) {
+                        LOGGER.info("wf_worldsim: coalesced overlapping genesis band {} into active settlement {} in {}",
+                                bandId, colony.s.id, dimension);
+                    }
+                }
+                if (colony == null) {
                     // The band ID is a temporary structural label, not a final display name.
                     colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
                             settlementId, x, z, "worldsim:settlement:" + bandId);
