@@ -558,7 +558,7 @@ public final class PopulationSimulation {
             }
             WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
                     year, generation, end));
-            return complete;
+            return end >= registry.size();
         }
     }
 
