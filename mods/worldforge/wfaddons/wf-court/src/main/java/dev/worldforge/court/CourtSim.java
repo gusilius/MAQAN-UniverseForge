@@ -216,6 +216,9 @@ public final class CourtSim {
 
     private void lifeCycle() {
         int y = year();
+        // Prepare the world-wide family index once per annual pass, not once per death.
+        // This keeps estate succession exact while avoiding population-wide scans for each heir.
+        reg.prepareKinIndex();
         List<Character> all = new ArrayList<>(reg.all());
         for (Character c : all) {
             if (!c.alive) continue;
