@@ -34,6 +34,10 @@ public final class TreasuryJournalArchive {
     // Segment files are immutable and this archive has one synchronized writer.
     // Keep the ordered directory snapshot for the lifetime of the archive instance.
     private List<Path> segmentFilesCache;
+    private record SegmentMeta(long firstSequence, long lastSequence, String checksum, Path path) { }
+    // Populated while segments are checksum-verified on open and extended only after
+    // an atomic append. Save-time digesting never reparses old 65k-entry JSON segments.
+    private List<SegmentMeta> segmentMetadataCache;
     // Immutable archive prefixes never change. Reuse their verified digest during the
     // publish -> previous-checkpoint validation -> round-trip validation sequence.
     private final Map<Long, String> digestCache = new LinkedHashMap<>(8, 0.75f, true) {
@@ -73,28 +77,30 @@ public final class TreasuryJournalArchive {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long expected = firstSequence;
-            for (Path path : segmentFiles()) {
-                TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
-                        Files.readString(path, StandardCharsets.UTF_8));
-                if (decoded.firstSequence() != expected)
+            List<SegmentMeta> metadata = segmentMetadataCache;
+            if (metadata == null) throw new IOException("Treasury archive segment metadata is unavailable");
+            for (SegmentMeta segment : metadata) {
+                if (segment.firstSequence() != expected)
                     throw new IOException("Treasury archive sequence gap while fingerprinting");
-                if (decoded.firstSequence() >= checkpointNextSequence) break;
-                List<TreasuryLedger.Entry> prefix = decoded.lastSequence() < checkpointNextSequence
-                        ? decoded.entries()
-                        : decoded.entries().stream()
-                                .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
-                if (!prefix.isEmpty()) {
-                    // Full immutable segments already carry a verified checksum. Only a
-                    // checkpoint boundary inside a segment needs a temporary prefix encode.
-                    String prefixChecksum = prefix.size() == decoded.entries().size()
-                            ? decoded.checksum()
-                            : TreasuryJournalSegment.decode(TreasuryJournalSegment.encode(prefix)).checksum();
-                    String line = prefix.get(0).sequence() + ":" + prefix.get(prefix.size() - 1).sequence()
-                            + ":" + prefixChecksum + "\n";
-                    digest.update(line.getBytes(StandardCharsets.UTF_8));
+                if (segment.firstSequence() >= checkpointNextSequence) break;
+                String prefixChecksum = segment.checksum();
+                long prefixLast = segment.lastSequence();
+                if (segment.lastSequence() >= checkpointNextSequence) {
+                    // Only arbitrary mid-segment checkpoints need a partial-prefix decode.
+                    TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
+                            Files.readString(segment.path(), StandardCharsets.UTF_8));
+                    List<TreasuryLedger.Entry> prefix = decoded.entries().stream()
+                            .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
+                    if (prefix.isEmpty()) break;
+                    TreasuryJournalSegment.Decoded partial = TreasuryJournalSegment.decode(
+                            TreasuryJournalSegment.encode(prefix));
+                    prefixChecksum = partial.checksum();
+                    prefixLast = partial.lastSequence();
                 }
-                expected = decoded.lastSequence() + 1;
-                if (decoded.lastSequence() >= checkpointNextSequence - 1) break;
+                String line = segment.firstSequence() + ":" + prefixLast + ":" + prefixChecksum + "\n";
+                digest.update(line.getBytes(StandardCharsets.UTF_8));
+                expected = prefixLast + 1;
+                if (prefixLast >= checkpointNextSequence - 1) break;
             }
             if (expected < checkpointNextSequence)
                 throw new IOException("Treasury archive is missing checkpoint prefix entries");
@@ -148,6 +154,13 @@ public final class TreasuryJournalArchive {
                 updatedSegments.addAll(segmentFilesCache);
                 updatedSegments.add(destination);
                 segmentFilesCache = List.copyOf(updatedSegments);
+            }
+            if (segmentMetadataCache != null) {
+                List<SegmentMeta> updatedMetadata = new ArrayList<>(segmentMetadataCache.size() + 1);
+                updatedMetadata.addAll(segmentMetadataCache);
+                updatedMetadata.add(new SegmentMeta(decoded.firstSequence(), decoded.lastSequence(),
+                        decoded.checksum(), destination));
+                segmentMetadataCache = List.copyOf(updatedMetadata);
             }
             nextSequence = decoded.lastSequence() + 1;
             // A previous crash may have published a segment but failed before advancing
@@ -347,6 +360,7 @@ public final class TreasuryJournalArchive {
 
     private long verifyExisting(long expected) throws IOException {
         long next = expected;
+        List<SegmentMeta> verifiedMetadata = new ArrayList<>();
         for (Path path : segmentFiles()) {
             Matcher matcher = FILE_NAME.matcher(path.getFileName().toString());
             if (!matcher.matches()) throw new IOException("Invalid treasury segment filename: " + path.getFileName());
@@ -363,8 +377,11 @@ public final class TreasuryJournalArchive {
             if (decoded.firstSequence() != next)
                 throw new IOException("Treasury archive sequence gap/overlap: expected " + next
                         + " but found " + decoded.firstSequence());
+            verifiedMetadata.add(new SegmentMeta(decoded.firstSequence(), decoded.lastSequence(),
+                    decoded.checksum(), path));
             next = decoded.lastSequence() + 1;
         }
+        segmentMetadataCache = List.copyOf(verifiedMetadata);
         return next;
     }
 
