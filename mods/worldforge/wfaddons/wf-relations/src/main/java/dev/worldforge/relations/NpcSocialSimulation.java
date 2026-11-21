@@ -128,22 +128,34 @@ public final class NpcSocialSimulation {
                     .filter(person -> person.alive && year - person.birthYear >= 18
                             && person.props.containsKey("emergence.polity_id"))
                     .sorted(Comparator.comparing(person -> person.globalId)).toList();
-            for (Character traveler : adults) {
-                if (!hasTravelRole(traveler) || adults.size() < 2) continue;
+            // Index travelers by settlement band once. A per-traveler scan of the
+            // entire adult population degenerates to O(N^2) when a polity has one
+            // settlement or when most candidates share the traveler's home band.
+            Map<String, List<Character>> adultsByBand = new TreeMap<>();
+            for (Character adult : adults) {
+                String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
+                adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
+            }
+            List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
+            if (travelBands.size() > 1) {
                 long travelEpoch = Math.floorDiv(day, 30);
-                int start = Math.floorMod((int) mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch), adults.size());
-                for (int offset = 0; offset < adults.size(); offset++) {
-                    Character candidate = adults.get((start + offset) % adults.size());
-                    if (candidate == traveler) continue;
+                for (Character traveler : adults) {
+                    if (!hasTravelRole(traveler)) continue;
                     String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
-                    String otherBand = String.valueOf(candidate.props.getOrDefault("emergence.band_id", ""));
-                    if (homeBand.equals(otherBand)) continue;
-                    // Trade routes and diplomatic missions both cross political borders;
+                    long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
+                    int startBand = Math.floorMod((int) travelHash, travelBands.size());
+                    String targetBand = travelBands.get(startBand);
+                    if (targetBand.equals(homeBand))
+                        targetBand = travelBands.get((startBand + 1) % travelBands.size());
+                    List<Character> candidates = adultsByBand.get(targetBand);
+                    if (candidates == null || candidates.isEmpty()) continue;
+                    Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
+                    if (candidate == traveler) continue;
+                    // Trade routes and diplomatic missions both cross settlement bands;
                     // ordinary residents never enter this inter-settlement contact path.
                     interact(relations, registry, traveler, candidate,
-                            "travel:" + homeBand + ":" + otherBand, adults, day, year);
+                            "travel:" + homeBand + ":" + targetBand, adults, day, year);
                     interactions++;
-                    break;
                 }
             }
         }
