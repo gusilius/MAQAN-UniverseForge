@@ -261,7 +261,8 @@ public final class VanillaWorldGeography {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
                 .filter(region -> {
                     RegionAddress address = regionAddress(region.id);
-                    return address != null && !isImageMapDimension(address.dimension());
+                    return address != null && !isImageMapDimension(address.dimension())
+                            && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension());
                 })
                 .map(region -> region.id).toList();
     }
@@ -269,7 +270,8 @@ public final class VanillaWorldGeography {
     public static synchronized java.util.List<String> simulationMapIds() {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
                 .map(region -> regionAddress(region.id)).filter(java.util.Objects::nonNull)
-                .filter(address -> !isImageMapDimension(address.dimension()))
+                .filter(address -> !isImageMapDimension(address.dimension())
+                        && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension()))
                 .map(RegionAddress::dimension).distinct().sorted()
                 .map(dimension -> "vanilla-world:" + dimension).toList();
     }
@@ -473,7 +475,8 @@ public final class VanillaWorldGeography {
         while (processed < MAX_SNAPSHOT_REGIONS_PER_TICK && build.regions.hasNext()) {
             Region region = build.regions.next();
             RegionAddress address = regionAddress(region.id);
-            if (address == null || region.cells.isEmpty() || isImageMapDimension(address.dimension())) {
+            if (address == null || region.cells.isEmpty() || isImageMapDimension(address.dimension())
+                    || !dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension())) {
                 processed++;
                 continue;
             }

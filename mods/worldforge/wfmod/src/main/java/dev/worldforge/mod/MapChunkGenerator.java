@@ -60,6 +60,10 @@ public class MapChunkGenerator extends ChunkGenerator {
         return CODEC;
     }
 
+    public String mapName() {
+        return mapName;
+    }
+
     public MapData data() {
         return sampler().map();
     }

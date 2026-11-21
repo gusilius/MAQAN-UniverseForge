@@ -173,9 +173,8 @@ public final class WorldSimMod {
         List<EmergenceSource> sources = new ArrayList<>();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         Map<String, String> registeredMapSources = new HashMap<>();
-        // Enumerate the actual loaded ServerLevels, not only maps already touched by a
-        // generated chunk or command. This bootstraps a map planet's strategic geography
-        // from its complete .worldmap package even before a player visits that dimension.
+        // Enumerate registered levels, but do not open their map package or create a
+        // strategic source until a player has durably activated that planetary surface.
         if (server != null) for (ServerLevel level : server.getAllLevels()) {
             if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
             String dimension = level.dimension().location().toString();

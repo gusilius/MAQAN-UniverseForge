@@ -32,7 +32,6 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.entity.EntityTravelToDimensionEvent;
-import net.minecraftforge.event.entity.EntityTravelToDimensionEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -88,9 +87,6 @@ public class WorldForgeMod {
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
     private static TreasuryArchiveStore treasuryStore;
-    private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
-    private static volatile Path planetActivationFile;
-    private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
     private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
     private static volatile Path planetActivationFile;
     private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
