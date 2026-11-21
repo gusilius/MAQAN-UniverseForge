@@ -9,6 +9,22 @@ public final class ResidentLifeSchedulerTest {
         if (!value) throw new AssertionError(message);
     }
 
+
+    private static Object registryPassField(CharacterRegistry registry, String fieldName) {
+        try {
+            java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
+            passesField.setAccessible(true);
+            java.util.Map<?, ?> passes = (java.util.Map<?, ?>) passesField.get(null);
+            Object state = passes.get(registry);
+            if (state == null) return null;
+            java.lang.reflect.Field stateField = state.getClass().getDeclaredField(fieldName);
+            stateField.setAccessible(true);
+            return stateField.get(state);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("cannot inspect resident life pass state", failure);
+        }
+    }
+
     public static void main(String[] args) {
         CharacterRegistry registry = new CharacterRegistry();
         for (int i = 0; i < 11; i++) {

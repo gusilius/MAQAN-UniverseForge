@@ -39,7 +39,7 @@ PURE_ADAPTER_SRC=(
   wf-settlements/src/main/java/dev/worldforge/settle/mc/ColonySimulationCadence.java
   wf-settlements/src/main/java/dev/worldforge/settle/mc/ResidentLifeBatch.java
   wf-people/src/main/java/dev/worldforge/people/mc/NpcSpawnSpatialIndex.java
-  ../wfmod/src/main/java/dev/worldforge/mod/economy/TreasuryArchiveMigration.java
+  "$CORE/src/main/java/dev/worldforge/mod/economy/TreasuryArchiveMigration.java"
 )
 for source in "${PURE_ADAPTER_SRC[@]}"; do
   if [ ! -f "$source" ]; then
