@@ -1444,35 +1444,30 @@ public final class WorldSimMod {
         JsonObject formsRuntime = exportOptionalFieldStoreSnapshot("wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "FORMS");
         if (formsRuntime != null) {
-            root.add("forms_runtime", formsRuntime);
             addCatalogEntry(catalogEntries, "wf_forms", "runtime_state", "forms",
                     "Persisted character form and affliction state", formsRuntime);
         }
         JsonObject questsRuntime = exportOptionalFieldStoreSnapshot("wf_quests",
                 "dev.worldforge.quests.mc.QuestsMod", "QUESTS");
         if (questsRuntime != null) {
-            root.add("quests_runtime", questsRuntime);
             addCatalogEntry(catalogEntries, "wf_quests", "runtime_state", "quests",
                     "Active quests, fired world events and durable quest history", questsRuntime);
         }
         JsonObject reputationSnapshot = exportOptionalStoreSnapshot("wf_reputation",
                 "dev.worldforge.reputation.mc.ReputationMod", "store");
         if (reputationSnapshot != null) {
-            root.add("reputation_runtime", reputationSnapshot);
             addCatalogEntry(catalogEntries, "wf_reputation", "runtime_state", "reputation",
                     "Canonical scoped reputation and witness knowledge", reputationSnapshot);
         }
         JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
                 "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
         if (relationsSnapshot != null) {
-            root.add("relations_runtime", relationsSnapshot);
             addCatalogEntry(catalogEntries, "wf_relations", "runtime_state", "relationships",
                     "Canonical social bonds, requests and persistent history", relationsSnapshot);
         }
         JsonObject tradeSnapshot = exportOptionalModuleSnapshot("wf_trade",
                 "dev.worldforge.trade.mc.TradeMod", "worldSnapshotJson");
         if (tradeSnapshot != null) {
-            root.add("trade_runtime", tradeSnapshot);
             JsonObject goods = tradeSnapshot.has("goods") ? tradeSnapshot.getAsJsonObject("goods") : new JsonObject();
             for (var entry : goods.entrySet()) {
                 String goodId = entry.getKey();
@@ -1503,7 +1498,6 @@ public final class WorldSimMod {
         JsonObject troopSnapshot = exportOptionalModuleSnapshot("wf_troops",
                 "dev.worldforge.troops.mc.TroopsMod", "worldSnapshotJson");
         if (troopSnapshot != null) {
-            root.add("military_runtime", troopSnapshot);
             JsonObject unitDefinitions = troopSnapshot.has("unit_definitions")
                     ? troopSnapshot.getAsJsonObject("unit_definitions") : new JsonObject();
             for (var entry : unitDefinitions.entrySet()) {
@@ -1531,6 +1525,9 @@ public final class WorldSimMod {
             addCatalogEntry(catalogEntries, "wf_troops", "runtime_state", "military",
                     "Physical military state and durable ledgers", troopSnapshot);
         }
+        // Native WorldSnapshot has no raw *_runtime fields. Their authoritative payloads are
+        // already projected into catalog_entries above; attaching the same complete JSON trees
+        // again as unknown top-level properties only duplicates bytes in both JNI requests.
         // CourtSim remains the owner of schemes, regencies, factions, pending events,
         // council opinions and court news; WorldSim reads its complete persisted state.
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
