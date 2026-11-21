@@ -93,7 +93,7 @@ final class TreasuryReferenceIndex {
     }
 
     synchronized List<Long> find(String accountId, String kind, String reference) throws IOException {
-        String key = String.valueOf(accountId) + "\u0000" + String.valueOf(kind) + "\u0000"
+        String key = String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000"
                 + (reference == null ? "" : reference.trim());
         long fingerprint = fingerprint(key);
         Path bucket = bucketPath((int) fingerprint & 0xff);

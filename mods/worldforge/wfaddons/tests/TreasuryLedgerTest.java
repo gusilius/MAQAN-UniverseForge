@@ -848,6 +848,10 @@ public final class TreasuryLedgerTest {
                             && finalReload.entriesForReference("store:later-again", TreasuryLedger.Kind.OPENING,
                                     "store:later-again").size() == 1,
                     "disk-backed treasury reference index returns exact historical postings after restart");
+            ok(finalReload.hasTransaction("store:final", TreasuryLedger.Kind.OPENING, "store:final")
+                            && finalReload.hasTransaction("store:later-again", TreasuryLedger.Kind.OPENING,
+                                    "store:later-again"),
+                    "archived opening references remain protected against duplicate transaction retries after restart");
             java.nio.file.Path referenceIndexCursor = storeRoot.resolve(
                     "treasury-store/archive/reference-index/CURRENT");
             java.nio.file.Files.writeString(referenceIndexCursor, "stale-index");
