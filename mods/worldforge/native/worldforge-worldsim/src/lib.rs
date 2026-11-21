@@ -1337,37 +1337,107 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         .filter(|border| border.contested_claim)
         .flat_map(|border| [border.a.as_str(), border.b.as_str()])
         .collect();
+
+    // Build frequently queried political projections once per immutable snapshot.
+    // The old border loop repeatedly scanned every war, campaign, intrigue plot,
+    // diplomatic relation and vassal contract for each directed border.
+    let mut intrigue_pressure_by_realm: BTreeMap<&str, i64> = BTreeMap::new();
+    let mut active_campaign_realms: BTreeSet<&str> = BTreeSet::new();
+    for entry in &snapshot.catalog_entries {
+        if entry.module_id == "wf_realms" && entry.catalog_id == "intrigue_plots"
+            && matches!(entry.payload.get("status").and_then(serde_json::Value::as_str),
+                Some("GATHERING" | "ACTIVE")) {
+            if let Some(realm_id) = entry.payload.get("realm_id").and_then(serde_json::Value::as_str) {
+                let progress = entry.payload.get("progress").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                let backers = entry.payload.get("backers").and_then(serde_json::Value::as_array)
+                    .map(Vec::len).unwrap_or(0);
+                *intrigue_pressure_by_realm.entry(realm_id).or_default() +=
+                    (progress / 20.0).round() as i64 + backers.min(10) as i64;
+            }
+        }
+        if entry.module_id == "wf_war" && entry.catalog_id == "war_instances"
+            && entry.payload.get("active").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            for field in ["attacker", "defender", "attacker_members", "defender_members"] {
+                if let Some(value) = entry.payload.get(field) {
+                    if let Some(id) = value.as_str() {
+                        active_campaign_realms.insert(id);
+                    } else if let Some(members) = value.as_array() {
+                        active_campaign_realms.extend(members.iter().filter_map(serde_json::Value::as_str));
+                    }
+                }
+            }
+        }
+    }
+    let mut active_war_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for war in snapshot.wars.iter().filter(|war| war.status == "ACTIVE") {
+        let (a, b) = if war.attacker_realm <= war.defender_realm {
+            (war.attacker_realm.as_str(), war.defender_realm.as_str())
+        } else {
+            (war.defender_realm.as_str(), war.attacker_realm.as_str())
+        };
+        active_war_pairs.insert((a, b));
+    }
+    let mut diplomatic_by_pair = BTreeMap::new();
+    for relation in &snapshot.diplomatic_relations {
+        let (a, b) = if relation.realm_a <= relation.realm_b {
+            (relation.realm_a.as_str(), relation.realm_b.as_str())
+        } else {
+            (relation.realm_b.as_str(), relation.realm_a.as_str())
+        };
+        diplomatic_by_pair.insert((a, b), relation);
+    }
+    let mut vassal_by_realm = BTreeMap::new();
+    let mut subject_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for contract in &snapshot.vassal_contracts {
+        vassal_by_realm.insert(contract.vassal_realm.as_str(), contract.loyalty);
+        let (a, b) = if contract.liege_realm <= contract.vassal_realm {
+            (contract.liege_realm.as_str(), contract.vassal_realm.as_str())
+        } else {
+            (contract.vassal_realm.as_str(), contract.liege_realm.as_str())
+        };
+        subject_pairs.insert((a, b));
+    }
     for border in &borders {
         let a = realms[border.a.as_str()];
         let b = realms[border.b.as_str()];
         for (attacker, defender) in [(a, b), (b, a)] {
             let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
-            let intrigue_penalty = realm_intrigue_pressure(snapshot, &attacker.id);
+            let intrigue_penalty = intrigue_pressure_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0);
             let court_penalty = court_instability_pressure(snapshot, &attacker.id);
             let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
                 + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
                 + market_fragility_penalty(snapshot, &attacker.id);
             if attacker.at_war || defender.at_war
-                || realm_in_active_campaign(snapshot, &attacker.id) || realm_in_active_campaign(snapshot, &defender.id)
+                || active_campaign_realms.contains(attacker.id.as_str())
+                || active_campaign_realms.contains(defender.id.as_str())
                 || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
-                || blocks_autonomous_war(snapshot, &attacker.id, &defender.id)
-                || snapshot.wars.iter().any(|war| war.status == "ACTIVE"
-                    && ((war.attacker_realm == attacker.id && war.defender_realm == defender.id)
-                        || (war.attacker_realm == defender.id && war.defender_realm == attacker.id))) { continue; }
+                || diplomatic_by_pair.get(&(
+                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                    std::cmp::max(attacker.id.as_str(), defender.id.as_str())))
+                    .map(|relation| relation.truce_until_day > snapshot.day || relation.treaties.iter().any(|treaty|
+                        matches!(treaty.as_str(), "NON_AGGRESSION" | "ALLIANCE" | "DEFENSIVE_PACT"
+                            | "FEUDAL_VASSAL" | "TRIBUTARY" | "PROTECTORATE" | "OCCUPIED"
+                            | "PERSONAL_UNION" | "CONFEDERATION_MEMBER")))
+                    .unwrap_or(false)
+                || subject_pairs.contains(&(
+                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                    std::cmp::max(attacker.id.as_str(), defender.id.as_str())))
+                || active_war_pairs.contains(&(
+                    std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                    std::cmp::max(attacker.id.as_str(), defender.id.as_str()))) { continue; }
             let attacker_power = actual_army_power.get(attacker.id.as_str()).copied()
                 .unwrap_or(attacker.army_strength as f64);
             let defender_power = actual_army_power.get(defender.id.as_str()).copied()
                 .unwrap_or(defender.army_strength as f64);
             let power = if defender_power <= 0.0 { if attacker_power > 0.0 { 100 } else { 50 } }
                 else { ((attacker_power * 100.0 / defender_power).round() as i64).clamp(0, 200) as i32 };
-            let diplomatic_opinion = snapshot.diplomatic_relations.iter()
-                .find(|relation| (relation.realm_a == attacker.id && relation.realm_b == defender.id)
-                    || (relation.realm_a == defender.id && relation.realm_b == attacker.id))
-                .map(|relation| relation.opinion).unwrap_or(0);
-            let subject_penalty = snapshot.vassal_contracts.iter()
-                .find(|contract| contract.vassal_realm == attacker.id)
-                .map(|contract| (100 - contract.loyalty) / 4).unwrap_or(0);
+            let pair = (
+                std::cmp::min(attacker.id.as_str(), defender.id.as_str()),
+                std::cmp::max(attacker.id.as_str(), defender.id.as_str()));
+            let diplomatic_opinion = diplomatic_by_pair.get(&pair).map(|relation| relation.opinion).unwrap_or(0);
+            let subject_penalty = vassal_by_realm.get(attacker.id.as_str())
+                .map(|loyalty| (100 - loyalty) / 4).unwrap_or(0);
             let government_modifier = ["war_score", "military", "warfare", "expansion"]
                 .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
                 .sum::<f64>().round() as i64;
