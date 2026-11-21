@@ -786,7 +786,7 @@ public final class WorldSimMod {
             if (source.map == null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
-                for (var geographyElement : VanillaWorldGeography.snapshot()) {
+                for (var geographyElement : vanillaGeography) {
                     if (!geographyElement.isJsonObject()) continue;
                     JsonObject geographyMap = geographyElement.getAsJsonObject();
                     if (!source.id.equals(geographyMap.has("map_id") ? geographyMap.get("map_id").getAsString() : "")) continue;
@@ -1025,7 +1025,7 @@ public final class WorldSimMod {
                         ? dev.worldforge.realms.Statecraft.mapTitleId(map.name, map.titles.get(army.location).key) : "");
                 formation.add("unit_counts", GSON.toJsonTree(new TreeMap<>(army.units)));
                 formation.addProperty("power", finite(power));
-                addNamedEntity(namedEntities, map.name + ":" + army.id, "army", army.name, "", army.realm);
+                addNamedEntity(namedEntities, namedEntityKeys, map.name + ":" + army.id, "army", army.name, "", army.realm);
                 if (RealmsMod.realm(army.realm) != null) armies.add(formation);
             }
             for (TitleData.Realm realm : map.titles.realms.values()) {
@@ -1033,7 +1033,7 @@ public final class WorldSimMod {
                 economy.addProperty("manpower_pool", Math.max(0, engine.pool(realm.id)));
                 economy.addProperty("gold", finite(engine.gold(realm.id)));
                 economy.addProperty("capital_title_id", engine.capital(realm.id));
-                addCatalogEntry(catalogEntries, "wf_army", "realm_economy", realm.id, realm.name, economy);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_army", "realm_economy", realm.id, realm.name, economy);
             }
             for (var unit : engine.types.values()) {
                 JsonObject definition = new JsonObject();
@@ -1046,11 +1046,11 @@ public final class WorldSimMod {
                 definition.addProperty("upkeep", finite(unit.upkeep));
                 definition.addProperty("levy", unit.levy);
                 definition.add("counters", GSON.toJsonTree(unit.counters));
-                addCatalogEntry(catalogEntries, "wf_army", "unit_types", unit.id, unit.name, definition);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_army", "unit_types", unit.id, unit.name, definition);
             }
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
-            addNamedEntity(namedEntities, realm.id, "realm", realm.name, "", realm.id);
+            addNamedEntity(namedEntities, namedEntityKeys, realm.id, "realm", realm.name, "", realm.id);
             JsonObject item = new JsonObject();
             item.addProperty("id", realm.id);
             long population = (long) number(realm.props.get("population"), 0);
@@ -1085,9 +1085,9 @@ public final class WorldSimMod {
             balance.addProperty("last_income", finite(treasury.lastIncome));
             balance.addProperty("last_expenses", finite(treasury.lastExpenses));
             balance.addProperty("tax_days", treasury.taxDays);
-            addCatalogEntry(catalogEntries, "wf_realms", "realm_treasuries",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "realm_treasuries",
                     treasuryRealm.id, treasuryRealm.name, balance);
-            addCatalogEntry(catalogEntries, "wf_realms", "inheritance_laws",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "inheritance_laws",
                     treasuryRealm.id, treasuryRealm.name,
                     GSON.toJsonTree(Map.of("law", RealmsMod.POLITICS.inheritanceLaw(treasuryRealm.id).name())));
         }
@@ -1099,8 +1099,8 @@ public final class WorldSimMod {
             plotData.addProperty("kind", plot.kind.name()); plotData.addProperty("status", plot.status.name());
             plotData.addProperty("progress", finite(plot.progress)); plotData.addProperty("discovered", plot.discovered);
             plotData.add("backers", GSON.toJsonTree(new TreeSet<>(plot.backers)));
-            addCatalogEntry(catalogEntries, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
-            addNamedEntity(namedEntities, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
+            addNamedEntity(namedEntities, namedEntityKeys, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
         }
         // Export the complete authoritative Statecraft graph, not just at_war flags.
         for (var relation : RealmsMod.POLITICS.relations()) {
@@ -1132,20 +1132,20 @@ public final class WorldSimMod {
             wars.add(row);
         }
         for (var government : RealmsMod.DEFS.levels) {
-            addCatalogEntry(catalogEntries, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
-            addNamedEntity(namedEntities, government.id(), "government_level", government.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
+            addNamedEntity(namedEntities, namedEntityKeys, government.id(), "government_level", government.name(), "", "");
         }
         for (var terrain : RealmsMod.DEFS.terrains.values())
-            addCatalogEntry(catalogEntries, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
         for (var doctrineBranch : RealmsMod.DEFS.branches.values()) {
-            addCatalogEntry(catalogEntries, "wf_realms", "doctrine_branches", doctrineBranch.id(), doctrineBranch.name(), GSON.toJsonTree(doctrineBranch));
-            addNamedEntity(namedEntities, doctrineBranch.id(), "doctrine_branch", doctrineBranch.name(), "", "");
-            for (var node : doctrineBranch.nodes()) addNamedEntity(namedEntities, node.key(), "doctrine", node.name(), doctrineBranch.id(), "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "doctrine_branches", doctrineBranch.id(), doctrineBranch.name(), GSON.toJsonTree(doctrineBranch));
+            addNamedEntity(namedEntities, namedEntityKeys, doctrineBranch.id(), "doctrine_branch", doctrineBranch.name(), "", "");
+            for (var node : doctrineBranch.nodes()) addNamedEntity(namedEntities, namedEntityKeys, node.key(), "doctrine", node.name(), doctrineBranch.id(), "");
         }
         for (var law : RealmsMod.DEFS.laws.values()) {
-            addCatalogEntry(catalogEntries, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
-            addNamedEntity(namedEntities, law.id(), "law", law.name(), "", "");
-            for (var option : law.options()) addNamedEntity(namedEntities,
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
+            addNamedEntity(namedEntities, namedEntityKeys, law.id(), "law", law.name(), "", "");
+            for (var option : law.options()) addNamedEntity(namedEntities, namedEntityKeys,
                     law.id() + ":" + option.id(), "law_option", option.name(), law.id(), "");
         }
         // Shared pair set prevents exact province-adjacency borders from being
@@ -1169,7 +1169,7 @@ public final class WorldSimMod {
             definition.addProperty("doctrine_slots", government.doctrineSlots());
             definition.addProperty("law_slots", government.lawSlots());
             governmentDefinitions.add(definition);
-            addNamedEntity(namedEntities, government.id(), "government_type", government.name(), "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, government.id(), "government_type", government.name(), "", "");
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             var policy = RealmsMod.REALMS.state(realm.id);
@@ -1247,7 +1247,7 @@ public final class WorldSimMod {
                 title.add("neighbors", neighbors);
                 if (emittedPoliticalTitleIds.add(titleId)) {
                     politicalTitles.add(title);
-                    addNamedEntity(namedEntities, titleId, "title", sourceTitle.name, parentId, realmId);
+                    addNamedEntity(namedEntities, namedEntityKeys, titleId, "title", sourceTitle.name, parentId, realmId);
                 }
             }
         }
@@ -1278,16 +1278,16 @@ public final class WorldSimMod {
             title.add("claims", claims);
             title.add("neighbors", new JsonArray());
             politicalTitles.add(title);
-            addNamedEntity(namedEntities, political.id, "title", political.name, parent, political.realmId);
+            addNamedEntity(namedEntities, namedEntityKeys, political.id, "title", political.name, parent, political.realmId);
         }
         for (var dynasty : RealmsMod.POLITICS.dynasties()) {
-            addNamedEntity(namedEntities, dynasty.houseId, "dynasty", dynasty.name, "", "");
-            addNamedEntity(namedEntities, dynasty.houseId, "house_or_dynasty", dynasty.name, "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, dynasty.houseId, "dynasty", dynasty.name, "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, dynasty.houseId, "house_or_dynasty", dynasty.name, "", "");
             JsonObject dynastyData = new JsonObject();
             dynastyData.addProperty("founder_character_id", dynasty.founderCharacterId);
             dynastyData.addProperty("prestige", dynasty.prestige);
             dynastyData.add("member_character_ids", GSON.toJsonTree(new TreeSet<>(dynasty.members)));
-            addCatalogEntry(catalogEntries, "wf_realms", "dynasties", dynasty.houseId, dynasty.name, dynastyData);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "dynasties", dynasty.houseId, dynasty.name, dynastyData);
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
@@ -1337,9 +1337,9 @@ public final class WorldSimMod {
             int roadSegments = s == null || colony.map == null ? 0 : colony.map.roads.values().stream()
                     .mapToInt(road -> Math.max(0, road.builtSegments)).sum();
             item.addProperty("roads", roadSegments);
-            addNamedEntity(namedEntities, s.id, "settlement", s.name, "", settlementRealm);
+            addNamedEntity(namedEntities, namedEntityKeys, s.id, "settlement", s.name, "", settlementRealm);
             for (Building building : s.buildings) if (building != null && building.def != null)
-                addNamedEntity(namedEntities, s.id + ":building:" + building.uid, "building",
+                addNamedEntity(namedEntities, namedEntityKeys, s.id + ":building:" + building.uid, "building",
                         building.def.name, "", s.id);
             // Export the actual infrastructure graph, not merely a road count.
             if (colony.map != null) {
@@ -1354,20 +1354,20 @@ public final class WorldSimMod {
                         nodes.add(point);
                     }
                     roadData.add("path", nodes);
-                    addCatalogEntry(catalogEntries, "wf_settle", "road_network",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "road_network",
                             s.id + ":road:" + road.id, "Road " + road.id, roadData);
                 }
                 for (var plan : colony.map.plans.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "construction_plans",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "construction_plans",
                             s.id + ":plan:" + plan.buildingUid, plan.buildingId, GSON.toJsonTree(plan));
                 for (var warehouse : colony.map.warehouses.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "warehouses",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "warehouses",
                             s.id + ":warehouse:" + warehouse.id, warehouse.id, GSON.toJsonTree(warehouse));
                 for (var job : colony.map.logistics.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "logistics_jobs",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "logistics_jobs",
                             s.id + ":logistics:" + job.id, job.resource, GSON.toJsonTree(job));
                 for (var parcel : colony.map.parcels.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "land_parcels",
                             s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
             }
             JsonObject settlementIdentity = new JsonObject();
@@ -1400,7 +1400,7 @@ public final class WorldSimMod {
             settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
             settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
             settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
-            addCatalogEntry(catalogEntries, "wf_settle", "settlement_instances", s.id, s.name, settlementIdentity);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "settlement_instances", s.id, s.name, settlementIdentity);
             item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
@@ -1429,13 +1429,13 @@ public final class WorldSimMod {
             workforce.add(w);
         }
         JsonObject namePools = GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()).getAsJsonObject();
-        addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools", namePools);
+        addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools", namePools);
         if (namePools.has("cultures") && namePools.get("cultures").isJsonObject())
             for (var culture : namePools.getAsJsonObject("cultures").entrySet())
-                addNamedEntity(namedEntities, culture.getKey(), "culture", culture.getKey(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, culture.getKey(), "culture", culture.getKey(), "", "");
         if (namePools.has("races") && namePools.get("races").isJsonObject())
             for (var race : namePools.getAsJsonObject("races").entrySet())
-                addNamedEntity(namedEntities, race.getKey(), "race", race.getKey(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, race.getKey(), "race", race.getKey(), "", "");
         // Feed native decisions from the full, already-loaded addon definitions.
         // The owning addons remain authoritative; this is a read-only projection of their
         // effective datapack registries, not a second set of hard-coded definitions.
@@ -1450,25 +1450,25 @@ public final class WorldSimMod {
         JsonObject formsRuntime = exportOptionalFieldStoreSnapshot("wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "FORMS");
         if (formsRuntime != null) {
-            addCatalogEntry(catalogEntries, "wf_forms", "runtime_state", "forms",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_forms", "runtime_state", "forms",
                     "Persisted character form and affliction state", formsRuntime);
         }
         JsonObject questsRuntime = exportOptionalFieldStoreSnapshot("wf_quests",
                 "dev.worldforge.quests.mc.QuestsMod", "QUESTS");
         if (questsRuntime != null) {
-            addCatalogEntry(catalogEntries, "wf_quests", "runtime_state", "quests",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_quests", "runtime_state", "quests",
                     "Active quests, fired world events and durable quest history", questsRuntime);
         }
         JsonObject reputationSnapshot = exportOptionalStoreSnapshot("wf_reputation",
                 "dev.worldforge.reputation.mc.ReputationMod", "store");
         if (reputationSnapshot != null) {
-            addCatalogEntry(catalogEntries, "wf_reputation", "runtime_state", "reputation",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_reputation", "runtime_state", "reputation",
                     "Canonical scoped reputation and witness knowledge", reputationSnapshot);
         }
         JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
                 "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
         if (relationsSnapshot != null) {
-            addCatalogEntry(catalogEntries, "wf_relations", "runtime_state", "relationships",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_relations", "runtime_state", "relationships",
                     "Canonical social bonds, requests and persistent history", relationsSnapshot);
         }
         JsonObject tradeSnapshot = exportOptionalModuleSnapshot("wf_trade",
@@ -1479,26 +1479,26 @@ public final class WorldSimMod {
                 String goodId = entry.getKey();
                 String goodName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
                         ? entry.getValue().getAsJsonObject().get("name").getAsString() : goodId;
-                addCatalogEntry(catalogEntries, "wf_trade", "goods", goodId, goodName, entry.getValue());
-                addNamedEntity(namedEntities, goodId, "trade_good", goodName, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "goods", goodId, goodName, entry.getValue());
+                addNamedEntity(namedEntities, namedEntityKeys, goodId, "trade_good", goodName, "", "");
             }
             JsonObject markets = tradeSnapshot.has("markets") ? tradeSnapshot.getAsJsonObject("markets") : new JsonObject();
             for (var entry : markets.entrySet())
-                addCatalogEntry(catalogEntries, "wf_trade", "markets", entry.getKey(), entry.getKey(), entry.getValue());
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "markets", entry.getKey(), entry.getKey(), entry.getValue());
             JsonArray caravans = tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans") : new JsonArray();
             for (var element : caravans) if (element.isJsonObject()) {
                 JsonObject caravan = element.getAsJsonObject();
                 String id = caravan.get("id").getAsString();
-                addCatalogEntry(catalogEntries, "wf_trade", "caravans", id, "Caravan " + id, caravan);
-                addNamedEntity(namedEntities, id, "caravan", "Caravan " + id, "", caravan.has("owner") ? caravan.get("owner").getAsString() : "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "caravans", id, "Caravan " + id, caravan);
+                addNamedEntity(namedEntities, namedEntityKeys, id, "caravan", "Caravan " + id, "", caravan.has("owner") ? caravan.get("owner").getAsString() : "");
             }
             JsonArray ambushes = tradeSnapshot.has("ambushes") ? tradeSnapshot.getAsJsonArray("ambushes") : new JsonArray();
             for (var element : ambushes) if (element.isJsonObject()) {
                 JsonObject ambush = element.getAsJsonObject();
                 String id = ambush.get("id").getAsString();
-                addCatalogEntry(catalogEntries, "wf_trade", "ambushes", id, "Ambush " + id, ambush);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "ambushes", id, "Ambush " + id, ambush);
             }
-            addCatalogEntry(catalogEntries, "wf_trade", "runtime_state", "trade",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "runtime_state", "trade",
                     "Markets, caravans, ambushes and trade shocks", tradeSnapshot);
         }
         JsonObject troopSnapshot = exportOptionalModuleSnapshot("wf_troops",
@@ -1510,8 +1510,8 @@ public final class WorldSimMod {
                 String unitId = entry.getKey();
                 String unitName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
                         ? entry.getValue().getAsJsonObject().get("name").getAsString() : unitId;
-                addCatalogEntry(catalogEntries, "wf_troops", "physical_unit_types", unitId, unitName, entry.getValue());
-                addNamedEntity(namedEntities, unitId, "troop_type", unitName, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_troops", "physical_unit_types", unitId, unitName, entry.getValue());
+                addNamedEntity(namedEntities, namedEntityKeys, unitId, "troop_type", unitName, "", "");
             }
             JsonArray liveTroops = troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops") : new JsonArray();
             for (var element : liveTroops) if (element.isJsonObject()) {
@@ -1520,15 +1520,15 @@ public final class WorldSimMod {
                 String unitId = troop.has("unit_id") ? troop.get("unit_id").getAsString() : "";
                 String unitName = unitDefinitions.has(unitId) && unitDefinitions.getAsJsonObject(unitId).has("name")
                         ? unitDefinitions.getAsJsonObject(unitId).get("name").getAsString() : unitId;
-                addNamedEntity(namedEntities, entityId, "physical_troop", unitName, "", troop.has("realm_id") ? troop.get("realm_id").getAsString() : "");
+                addNamedEntity(namedEntities, namedEntityKeys, entityId, "physical_troop", unitName, "", troop.has("realm_id") ? troop.get("realm_id").getAsString() : "");
             }
             JsonArray squadRows = troopSnapshot.has("squads") ? troopSnapshot.getAsJsonArray("squads") : new JsonArray();
             for (var element : squadRows) if (element.isJsonObject()) {
                 JsonObject squad = element.getAsJsonObject();
-                addNamedEntity(namedEntities, squad.get("id").getAsString(), "squad",
+                addNamedEntity(namedEntities, namedEntityKeys, squad.get("id").getAsString(), "squad",
                         squad.get("name").getAsString(), "", squad.has("realm") ? squad.get("realm").getAsString() : "");
             }
-            addCatalogEntry(catalogEntries, "wf_troops", "runtime_state", "military",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_troops", "runtime_state", "military",
                     "Physical military state and durable ledgers", troopSnapshot);
         }
         // Native WorldSnapshot has no raw *_runtime fields. Their authoritative payloads are
@@ -1542,7 +1542,7 @@ public final class WorldSimMod {
             if (court != null) {
                 JsonObject courtState = com.google.gson.JsonParser.parseString(court.toJson()).getAsJsonObject();
                 courtState.addProperty("world_year", WorldForgeApi.clock().year());
-                addCatalogEntry(catalogEntries, "wf_court", "court_states", map.name, map.name, courtState);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_court", "court_states", map.name, map.name, courtState);
             }
         }
         // wf-war owns active campaigns, casus belli, occupation, peace terms and truces.
@@ -1550,7 +1550,7 @@ public final class WorldSimMod {
             if (map == null || map.titles == null) continue;
             WarEngine warEngine = WarMod.engine(map);
             for (var cb : warEngine.cbs.values())
-                addCatalogEntry(catalogEntries, "wf_war", "casus_belli", cb.id, cb.name, GSON.toJsonTree(cb));
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "casus_belli", cb.id, cb.name, GSON.toJsonTree(cb));
             for (var war : warEngine.wars.values()) {
                 JsonObject warData = new JsonObject();
                 warData.addProperty("id", war.id); warData.addProperty("attacker", war.attacker);
@@ -1569,56 +1569,56 @@ public final class WorldSimMod {
                 warData.addProperty("peace_offer_white", war.offerWhite);
                 warData.add("goals", GSON.toJsonTree(war.goals)); warData.add("occupied", GSON.toJsonTree(war.occupied));
                 warData.add("log", GSON.toJsonTree(war.log));
-                addCatalogEntry(catalogEntries, "wf_war", "war_instances",
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "war_instances",
                         map.name + ":" + war.id, "War " + war.id, warData);
-                addNamedEntity(namedEntities, map.name + ":" + war.id, "war", "War " + war.id, "", war.attacker);
+                addNamedEntity(namedEntities, namedEntityKeys, map.name + ":" + war.id, "war", "War " + war.id, "", war.attacker);
             }
-            addCatalogEntry(catalogEntries, "wf_war", "truces", map.name, map.name,
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "truces", map.name, map.name,
                     GSON.toJsonTree(warEngine.truces));
         }
         if (SettleMod.DEFS != null) {
             for (var building : SettleMod.DEFS.buildings.values()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
-                addNamedEntity(namedEntities, building.id, "building_definition", building.name, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
+                addNamedEntity(namedEntities, namedEntityKeys, building.id, "building_definition", building.name, "", "");
             }
             for (var profession : SettleMod.DEFS.professions.values()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
-                addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
+                addNamedEntity(namedEntities, namedEntityKeys, profession.id, "profession", profession.name, "", "");
             }
             for (var resource : SettleMod.DEFS.resourceNames.entrySet()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
                                 "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0),
                                 "category", dev.worldforge.settle.Defs.resourceCategory(resource.getKey()))));
-                addNamedEntity(namedEntities, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
             }
             for (var comfort : SettleMod.DEFS.comfort.entrySet())
-                addCatalogEntry(catalogEntries, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
-            addCatalogEntry(catalogEntries, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
                     GSON.toJsonTree(SettleMod.DEFS.foodKinds));
         }
         for (var type : SettleMod.TYPES.types.values()) {
-            addCatalogEntry(catalogEntries, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
-            addNamedEntity(namedEntities, type.id(), "settlement_type", type.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
+            addNamedEntity(namedEntities, namedEntityKeys, type.id(), "settlement_type", type.name(), "", "");
         }
         // Export all loaded profession definitions and all configured race/class/origin
         // definitions from their owning modules, preserving their complete JSON shape.
         for (var profession : PeopleMod.PROFESSIONS.all()) {
-            addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
-            addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
+            addNamedEntity(namedEntities, namedEntityKeys, profession.id, "profession", profession.name, "", "");
         }
         for (var race : OriginsMod.ORIGINS.defs.races.values()) {
-            addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
-            addNamedEntity(namedEntities, race.id(), "race", race.name(), race.parent(), "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
+            addNamedEntity(namedEntities, namedEntityKeys, race.id(), "race", race.name(), race.parent(), "");
         }
         for (var cls : OriginsMod.ORIGINS.defs.classes.values()) {
-            addCatalogEntry(catalogEntries, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
-            addNamedEntity(namedEntities, cls.id(), "character_class", cls.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
+            addNamedEntity(namedEntities, namedEntityKeys, cls.id(), "character_class", cls.name(), "", "");
         }
         for (var profession : OriginsMod.DEFS.professions.values())
-            addCatalogEntry(catalogEntries, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
         for (var synergy : OriginsMod.DEFS.synergies.values())
-            addCatalogEntry(catalogEntries, "wf_origins", "synergies", synergy.id(), synergy.name(), GSON.toJsonTree(synergy));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "synergies", synergy.id(), synergy.name(), GSON.toJsonTree(synergy));
         // Resolve band -> polity from the last committed emergence frame. Residents from
         // either geography source then enter the same Character snapshot by canonical UUID.
         Map<String, String> polityByBand = new HashMap<>();
@@ -1721,7 +1721,7 @@ public final class WorldSimMod {
                 item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
                 item.addProperty("house_id", person.house == null ? "" : person.house);
                 item.addProperty("display_name", person.name == null ? "" : person.name);
-                addNamedEntity(namedEntities, person.globalId, "character", person.name, "", realmId);
+                addNamedEntity(namedEntities, namedEntityKeys, person.globalId, "character", person.name, "", realmId);
                 Origins.Build origin = OriginsMod.ORIGINS.peek("n:" + person.globalId);
                 item.addProperty("race_id", origin != null && origin.race != null ? origin.race
                         : String.valueOf(person.props.getOrDefault("origin.race", "")));
@@ -1998,7 +1998,7 @@ public final class WorldSimMod {
                         String id = String.valueOf(entry.getKey());
                         if (id.isBlank()) continue;
                         String name = definitionName(entry.getValue(), id);
-                        addCatalogEntry(target, moduleId, catalogId, id, name, GSON.toJsonTree(entry.getValue()));
+                        addCatalogEntry(target, catalogEntryKeys, moduleId, catalogId, id, name, GSON.toJsonTree(entry.getValue()));
                         exported++;
                     }
                 } else if (value instanceof Collection<?> collection) {
@@ -2006,7 +2006,7 @@ public final class WorldSimMod {
                     for (Object entry : collection) {
                         String id = definitionId(entry);
                         if (id.isBlank()) id = String.format(Locale.ROOT, "%s:%06d", catalogId, ordinal);
-                        addCatalogEntry(target, moduleId, catalogId, id,
+                        addCatalogEntry(target, catalogEntryKeys, moduleId, catalogId, id,
                                 definitionName(entry, id), GSON.toJsonTree(entry));
                         ordinal++;
                         exported++;
@@ -2015,7 +2015,7 @@ public final class WorldSimMod {
                         || value instanceof String)) {
                     JsonObject settings = new JsonObject();
                     settings.addProperty(catalogId, String.valueOf(value));
-                    addCatalogEntry(target, moduleId, "settings", catalogId, catalogId, settings);
+                    addCatalogEntry(target, catalogEntryKeys, moduleId, "settings", catalogId, catalogId, settings);
                     exported++;
                 }
             }
