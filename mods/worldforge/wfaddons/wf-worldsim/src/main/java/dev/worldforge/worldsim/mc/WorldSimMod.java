@@ -483,6 +483,7 @@ public final class WorldSimMod {
             if (emergenceState != null) emergenceRequest.add("state", emergenceState.deepCopy());
             byte[] emergenceInput = GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8);
             PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
+            logSnapshotFootprint(snapshot, input.length, emergenceInput.length);
 
             WorldSimComputeScheduler.Ticket ticket =
                     new WorldSimComputeScheduler.Ticket(worldId, "worldsim.compute.cycle", day, lifecycleEpoch,
@@ -1915,6 +1916,40 @@ public final class WorldSimMod {
         return root;
     }
 
+
+    /**
+     * Reports the real JNI request sizes and cardinalities of their largest world domains.
+     * This is intentionally observational: it never truncates or mutates authoritative state.
+     */
+    private static void logSnapshotFootprint(JsonObject snapshot, int decisionBytes, int emergenceBytes) {
+        JsonObject counts = new JsonObject();
+        for (String key : List.of("geography", "titles", "borders", "realms", "settlements",
+                "characters", "social_relations", "catalog_entries", "diplomatic_relations",
+                "vassal_contracts", "wars", "armies", "named_entities", "workforce",
+                "capabilities", "government_definitions", "realm_governments")) {
+            if (!snapshot.has(key)) continue;
+            var value = snapshot.get(key);
+            if (value.isJsonArray()) counts.addProperty(key, value.getAsJsonArray().size());
+            else if (value.isJsonObject()) counts.addProperty(key, value.getAsJsonObject().size());
+        }
+        int geographyCells = 0;
+        if (snapshot.has("geography") && snapshot.get("geography").isJsonArray()) {
+            for (var map : snapshot.getAsJsonArray("geography")) {
+                if (map.isJsonObject() && map.getAsJsonObject().has("cells")
+                        && map.getAsJsonObject().get("cells").isJsonArray()) {
+                    geographyCells = (int) Math.min(Integer.MAX_VALUE,
+                            (long) geographyCells + map.getAsJsonObject().getAsJsonArray("cells").size());
+                }
+            }
+        }
+        PROFILER.setGauge("worldsim.jni.decision_input_bytes", decisionBytes);
+        PROFILER.setGauge("worldsim.jni.emergence_input_bytes", emergenceBytes);
+        PROFILER.setGauge("worldsim.snapshot.geography_cells", geographyCells);
+        if (decisionBytes >= 1024 * 1024 || emergenceBytes >= 1024 * 1024) {
+            LOGGER.info("wf_worldsim: JNI snapshot footprint decision_bytes={} emergence_bytes={} duplicated_snapshot_bytes={} geography_cells={} section_counts={}",
+                    decisionBytes, emergenceBytes, Math.min(decisionBytes, emergenceBytes), geographyCells, counts);
+        }
+    }
 
     private static String troopRecruitmentBuilding(String armyUnitId) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_troops")) return "barracks";
