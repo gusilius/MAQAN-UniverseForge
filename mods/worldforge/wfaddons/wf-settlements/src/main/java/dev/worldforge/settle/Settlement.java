@@ -327,7 +327,7 @@ public final class Settlement {
             if (stockLedgerEntries >= 0) {
                 // The settlement file may have been committed after the treasury file.
                 // Decide once per loaded snapshot, before any imports append reconciliation entries.
-                reconcileStockMirror = stockLedgerEntries > ledger.journal().size();
+                reconcileStockMirror = stockLedgerEntries > (ledger.nextSequence() - 1);
             } else {
                 // Legacy snapshots have no sequence marker. Keep their old one-time mirror
                 // reconciliation unless a durable army food transfer proves the ledger is newer.
@@ -2099,7 +2099,7 @@ public final class Settlement {
         for (String resource : new TreeSet<>(stock.keySet())) amount(resource);
         amount(Defs.SILVER);
         syncAllResourceMirrors();
-        stockLedgerEntries = TreasuryService.current().journal().size();
+        stockLedgerEntries = TreasuryService.current().nextSequence() - 1;
         stockReconciliationChecked = true;
         reconcileStockMirror = false;
         Map<String, Object> root = new LinkedHashMap<>();
