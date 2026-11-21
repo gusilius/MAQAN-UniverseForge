@@ -202,7 +202,6 @@ public final class TreasuryLedger {
                 if (!entry.credit() && entry.kind() == Kind.LOGISTICS
                         && "army-field-rations".equals(entry.category()))
                     prefixRationAccounts.add(entry.accountId());
-                restored.journal.add(entry);
                 restored.indexEntry(entry);
                 prefixBalances.put(entry.accountId(), entry.balanceAfter());
                 restored.transactionSequence = Math.max(restored.transactionSequence,
@@ -314,7 +313,6 @@ public final class TreasuryLedger {
                 if (!entry.credit() && entry.kind() == Kind.LOGISTICS
                         && "army-field-rations".equals(entry.category()))
                     restored.armyFieldRationDebitAccounts.add(entry.accountId());
-                restored.journal.add(entry);
                 restored.indexEntry(entry);
                 restored.transactionSequence = Math.max(restored.transactionSequence,
                         nextTransactionSequence(entry.transactionId()));

@@ -661,6 +661,10 @@ public final class TreasuryLedgerTest {
             TreasuryCheckpointStore.Checkpoint restoredCheckpoint = migrationCheckpoints.load(migrationArchive);
             TreasuryLedgerSnapshot.State restoredState = TreasuryLedgerSnapshot.decode(restoredCheckpoint.snapshotJson());
             TreasuryLedger restoredLedger = TreasuryLedger.restoreFromCheckpoint(restoredCheckpoint, migrationArchive);
+            ok(restoredLedger.pendingJournalSize() == 0
+                            && restoredLedger.journalSize() == migrationLedger.journalSize()
+                            && restoredLedger.entriesForAccount("migration:treasury").size() > 0,
+                    "checkpoint restore verifies the full archive without retaining prefix or suffix entries in the live heap");
             ok(migration.nextSequence() == migrationLedger.nextSequence()
                             && migration.archivedEntries() == migrationLedger.journalSize()
                             && migrationArchive.nextSequence() == migrationLedger.nextSequence()
@@ -755,6 +759,11 @@ public final class TreasuryLedgerTest {
             replayArchive.appendAll(replaySource.entriesFromSequence(replayCursor));
             TreasuryCheckpointStore.Checkpoint replayLoaded = replayCheckpoints.load(replayArchive);
             TreasuryLedger replayed = TreasuryLedger.restoreFromCheckpoint(replayLoaded, replayArchive);
+            ok(replayed.pendingJournalSize() == 0
+                            && replayed.journalSize() == replaySource.journalSize()
+                            && replayed.entriesForAccount("replay:treasury").size()
+                                    == replaySource.entriesForAccount("replay:treasury").size(),
+                    "checkpoint suffix replay reconstructs state and indexes without retaining archived suffix entries");
             boolean replayAccountsMatch = replayed.accountCount() == replaySource.accountCount()
                     && replayed.hasAccount("replay:empty") && replayed.hasAccount("replay:funded")
                     && close(replayed.balance("replay:treasury"), replaySource.balance("replay:treasury"))
