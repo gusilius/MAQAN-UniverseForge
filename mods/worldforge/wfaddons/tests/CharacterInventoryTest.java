@@ -258,7 +258,7 @@ public final class CharacterInventoryTest {
         CharacterInventory.add(crossMapDeceased, "minecraft:diamond", 14);
         worldAuthority.registerMap("settlement:north", settlementPeople);
         worldAuthority.registerMap("__players__", playerPeople);
-        settlementPeople.prepareKinIndex();
+        settlementPeople.prepareKinIndex(365L);
         ok(settlementPeople.kinCandidates(crossMapDeceased).contains(playerHeir)
                         && !settlementPeople.kinCandidates(crossMapDeceased).contains(unrelated),
                 "prepared family index returns cross-registry spouse candidates without scanning unrelated population");
