@@ -68,6 +68,17 @@ final class TreasuryReferenceIndex {
     }
 
     synchronized void append(List<TreasuryLedger.Entry> entries, long exclusiveNextSequence) throws IOException {
+        long indexedNext = Files.isRegularFile(cursorFile)
+                ? Long.parseLong(Files.readString(cursorFile, StandardCharsets.US_ASCII).trim()) : 1L;
+        if (exclusiveNextSequence < indexedNext)
+            throw new IOException("Treasury reference index cannot move backwards");
+        long expected = indexedNext;
+        for (TreasuryLedger.Entry entry : entries) {
+            if (entry.sequence() != expected++)
+                throw new IOException("Treasury reference-index append is not contiguous at " + (expected - 1));
+        }
+        if (expected != exclusiveNextSequence)
+            throw new IOException("Treasury reference-index append does not reach its published cursor");
         appendRecords(entries);
         publishCursor(exclusiveNextSequence);
     }
