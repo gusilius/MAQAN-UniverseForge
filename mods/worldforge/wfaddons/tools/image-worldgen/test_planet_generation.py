@@ -44,7 +44,7 @@ class ProceduralPlanetGenerationTests(unittest.TestCase):
         # swallowed by the ocean's boundary-connected component.
         labels = np.full((32, 48), CLASSES.index("grassland"), dtype=np.uint8)
         labels[:, :8] = CLASSES.index("ocean")
-        labels[15, 8:30] = CLASSES.index("waterway")
+        labels[15, 8:35] = CLASSES.index("waterway")
         labels[8:20, 30:42] = CLASSES.index("lake")
         rgb = np.asarray(__import__("image_map_analysis").render_labels(labels))
         classified, report = classify(rgb)

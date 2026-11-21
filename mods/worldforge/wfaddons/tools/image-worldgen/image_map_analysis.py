@@ -69,7 +69,9 @@ def classify(rgb):
         max_width = ndimage.maximum(distance, labels=components, index=np.arange(1, count + 1)) * 2
         lake_by_component = np.zeros(count + 1, dtype=bool)
         lake_by_component[1:] = (sizes[1:] >= 90) & (max_width >= 7)
-        lake_mask = inland & lake_by_component[components]
+        # Classify only the broad interior of a sufficiently large water body as
+        # lake. Narrow branches that connect it to rivers/ocean remain waterways.
+        lake_mask = inland & lake_by_component[components] & (distance >= 3.5)
         river_mask = inland & ~lake_mask
         labels[river_mask] = idx["waterway"]
         labels[lake_mask] = idx["lake"]
