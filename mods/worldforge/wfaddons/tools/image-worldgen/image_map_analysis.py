@@ -50,14 +50,16 @@ def classify(rgb):
     # Open ocean is blue water connected to the image boundary. Inland water
     # is segmented separately so coastlines and rivers are not mistaken for land.
     blue = (hue >= 165) & (hue <= 235) & (sat >= .38) & (b > g * 1.08) & (b > 55)
-    # The procedural palette deliberately separates dark deep-ocean blue,
-    # medium lake blue and bright cyan river channels. Do not flood-fill every
-    # blue pixel together: a river connected to the coast must remain a river.
-    deep_ocean = blue & (val < .68)
+    # The procedural palette uses a cyan hue for river channels and a bluer
+    # hue for ocean/lake water. Exclude cyan channels before boundary flood-fill:
+    # rivers connected to the coast must remain waterways, while light-blue
+    # open oceans from source maps must still be recognized as ocean.
+    cyan_channel = blue & (hue >= 178) & (hue <= 202) & (val >= .68)
+    ocean_candidates = blue & ~cyan_channel
     edge = np.zeros((h, w), bool)
-    edge[0] = deep_ocean[0]; edge[-1] = deep_ocean[-1]
-    edge[:, 0] = deep_ocean[:, 0]; edge[:, -1] = deep_ocean[:, -1]
-    ocean = ndimage.binary_propagation(edge, mask=deep_ocean,
+    edge[0] = ocean_candidates[0]; edge[-1] = ocean_candidates[-1]
+    edge[:, 0] = ocean_candidates[:, 0]; edge[:, -1] = ocean_candidates[:, -1]
+    ocean = ndimage.binary_propagation(edge, mask=ocean_candidates,
         structure=np.array([[0,1,0],[1,1,1],[0,1,0]], bool))
     labels[ocean] = idx["ocean"]; assigned |= ocean
 
