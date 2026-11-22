@@ -119,6 +119,37 @@ public class SettleMod {
         return rep;
     }
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
+    /** Registry identity changes only when a Colony is inserted, replaced or removed. */
+    private static volatile long colonyRegistryRevision;
+    private static volatile long colonySimulationIndexRevision = Long.MIN_VALUE;
+    private record TradeViews(Map<String, Settlement> settlements,
+                              Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors) { }
+    private static volatile TradeViews cachedTradeViews = new TradeViews(Map.of(), Map.of());
+    private static volatile long tradeViewsRevision = Long.MIN_VALUE;
+
+    private static void markColonyRegistryChanged() { colonyRegistryRevision++; }
+
+    /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
+    private static TradeViews tradeViews() {
+        long revision = colonyRegistryRevision;
+        TradeViews current = cachedTradeViews;
+        if (tradeViewsRevision == revision) return current;
+        synchronized (SettleMod.class) {
+            revision = colonyRegistryRevision;
+            if (tradeViewsRevision == revision) return cachedTradeViews;
+            Map<String, Settlement> settlements = new LinkedHashMap<>();
+            Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors = new LinkedHashMap<>();
+            for (Colony colony : COLONIES.values()) {
+                if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
+                settlements.put(colony.s.id, colony.s);
+                anchors.put(colony.s.id,
+                        new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
+            }
+            cachedTradeViews = new TradeViews(Map.copyOf(settlements), Map.copyOf(anchors));
+            tradeViewsRevision = revision;
+            return cachedTradeViews;
+        }
+    }
     private static final Map<String, String> WORKER_COLONY_BY_PERSON = new HashMap<>();
     private static dev.worldforge.mod.api.DomainMutationRevisions.Snapshot workerOwnershipRevision;
     private static boolean workerOwnershipIndexBuilt;
@@ -131,8 +162,9 @@ public class SettleMod {
     private static int lifeRegistryCursor;
     private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
         if (interval < 1) return;
-        if (colonySimulationIndexInterval == interval && colonySimulationIndexBuiltAt != Long.MIN_VALUE
-                && tick >= colonySimulationIndexBuiltAt && tick - colonySimulationIndexBuiltAt < 20L) return;
+        long registryRevision = colonyRegistryRevision;
+        if (colonySimulationIndexInterval == interval
+                && colonySimulationIndexRevision == registryRevision) return;
         Map<Integer, List<Colony>> mutable = new HashMap<>();
         Set<String> activeIds = new HashSet<>();
         for (Colony colony : COLONIES.values()) {
@@ -151,6 +183,7 @@ public class SettleMod {
         COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
         colonySimulationIndexInterval = interval;
         colonySimulationIndexBuiltAt = tick;
+        colonySimulationIndexRevision = registryRevision;
     }
 
     private static List<Colony> coloniesDueForSimulation(long tick, int interval) {
@@ -895,6 +928,7 @@ public class SettleMod {
         c.genesisOperationId = genesisOperationId == null ? "" : genesisOperationId;
         c.captureTerrain(lv);
         COLONIES.put(id, c);
+        markColonyRegistryChanged();
         return c;
     }
 
@@ -905,6 +939,7 @@ public class SettleMod {
         Colony colony = foundEmergentInMemory(server, dimension, id, name, x, z, operationId);
         if (existing == null && !saveDurably(server)) {
             COLONIES.remove(id, colony);
+            markColonyRegistryChanged();
             throw new IllegalStateException("Could not durably persist emergent settlement " + id);
         }
         return colony;
@@ -949,6 +984,7 @@ public class SettleMod {
         Colony colony = new Colony(settlement, dim, x, z);
         colony.genesisOperationId = operationId == null ? "" : operationId;
         COLONIES.put(id, colony);
+        markColonyRegistryChanged();
         LOGGER.info("wf_settle: map-first settlement staged id={} dim={} x={} z={} (no synthetic workers or stock)",
                 id, dim, x, z);
         return colony;
@@ -1394,6 +1430,7 @@ public class SettleMod {
     static void load(MinecraftServer server) {
         resetWorkerIndexes();
         COLONIES.clear();
+        markColonyRegistryChanged();
         NETWORK = new dev.worldforge.settle.TradeNetwork();
         Path f = file(server);
         if (!Files.exists(f)) return;
@@ -1404,6 +1441,7 @@ public class SettleMod {
                     Colony c = Colony.fromMap((Map<String, Object>) o, DEFS);
                     c.s.types = TYPES;
                     COLONIES.put(c.s.id, c);
+                    markColonyRegistryChanged();
                 } catch (Exception ex) {
                     LOGGER.error("wf_settle: поселение не прочитано: {}", ex.toString());
                 }
@@ -1485,6 +1523,10 @@ public class SettleMod {
     public void onStopped(ServerStoppedEvent e) {
         resetWorkerIndexes();
         COLONIES.clear();
+        markColonyRegistryChanged();
+        cachedTradeViews = new TradeViews(Map.of(), Map.of());
+        tradeViewsRevision = Long.MIN_VALUE;
+        colonySimulationIndexRevision = Long.MIN_VALUE;
         LAST_SIMULATED_WORLD_MINUTE.clear();
         COLONY_SIMULATION_PHASES = Map.of();
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
@@ -2317,12 +2359,10 @@ public class SettleMod {
             }
             // The shared trade network remains a world-level transaction on its existing cadence.
             if (ticks % simulationInterval == 0) try {
-                Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
-                for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
+                TradeViews views = tradeViews();
+                Map<String, Settlement> all = views.settlements();
                 if (speed > 0) {
-                    Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors = new LinkedHashMap<>();
-                    for (Colony colony : COLONIES.values())
-                        anchors.put(colony.s.id, new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
+                    Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors = views.anchors();
                     int pendingTradeEvents = NETWORK.events.size();
                     NETWORK.tick(all, speed, anchors, SettleMod::planShipmentPath);
                     if (NETWORK.events.size() > pendingTradeEvents) {
