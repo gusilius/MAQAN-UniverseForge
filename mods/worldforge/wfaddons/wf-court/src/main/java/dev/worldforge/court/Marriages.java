@@ -120,14 +120,28 @@ public final class Marriages {
                 .thenComparing(character -> character.id);
         candidatesByRealm.values().forEach(pool -> pool.sort(order));
 
+        final int maxSourceCandidates = 4;
+        final int maxPartnerRealms = 16;
+        final int maxCandidatesPerPartnerRealm = 4;
         for (String ra : realms) {
             if (s.rnd("marry", ra.hashCode() + s.day).nextDouble() > 0.35) continue;
+            List<Character> sourcePool = candidatesByRealm.getOrDefault(ra, List.of());
+            if (sourcePool.isEmpty()) continue;
             Character best = null, bestB = null;
             int bestScore = Integer.MIN_VALUE;
-            for (Character a : candidatesByRealm.getOrDefault(ra, List.of())) {
-                for (String rb : realms) {
+            for (int sourceIndex = 0; sourceIndex < Math.min(maxSourceCandidates, sourcePool.size()); sourceIndex++) {
+                Character a = sourcePool.get(sourceIndex);
+                Random partnerOrder = s.rnd("marry:partners:" + a.id, ra.hashCode() + s.day);
+                int start = partnerOrder.nextInt(realms.size());
+                int attempts = Math.min(realms.size(), maxPartnerRealms + 1);
+                for (int attempt = 0; attempt < attempts; attempt++) {
+                    String rb = realms.get((start + attempt) % realms.size());
                     if (rb.equals(ra)) continue;
-                    for (Character b : candidatesByRealm.getOrDefault(rb, List.of())) {
+                    List<Character> partnerPool = candidatesByRealm.getOrDefault(rb, List.of());
+                    for (int candidateIndex = 0;
+                         candidateIndex < Math.min(maxCandidatesPerPartnerRealm, partnerPool.size());
+                         candidateIndex++) {
+                        Character b = partnerPool.get(candidateIndex);
                         if (a.gender.equals(b.gender)) continue;
                         Offer offer = evaluate(s, a.id, b.id);
                         if (offer.ok && offer.score > bestScore) {

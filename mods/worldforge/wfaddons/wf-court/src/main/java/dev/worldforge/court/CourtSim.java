@@ -90,6 +90,22 @@ public final class CourtSim {
     private int nextId = 1;
 
     private boolean populationLifecycleInitialized;
+    private static final int YEARLY_LIFE_BUDGET_PER_TICK = 512;
+    private static final class YearlyLifePass {
+        final List<Character> people;
+        final int populationSize;
+        final int year;
+        int phase;
+        int cursor;
+        YearlyLifePass(List<Character> people, int populationSize, int year) {
+            this.people = people;
+            this.populationSize = populationSize;
+            this.year = year;
+        }
+    }
+    private YearlyLifePass yearlyLifePass;
+    private Map<String, List<Character>> regencyCandidateIndex = new HashMap<>();
+    private boolean regencyCandidateIndexBuilt;
 
     public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int startYear) {
         this(d, ed, reg, defs, names, seed, startYear, 0L, reg != null && reg.size() > 0);
@@ -214,18 +230,16 @@ public final class CourtSim {
     public void tick(double days) {
         long elapsed = (long) Math.floor(days);
         long target = day + elapsed;
-        // A virtual court can be attached before WorldSim has materialized its population.
-        // If the population appears after an annual boundary, catch it up immediately.
-        // If this tick itself crosses the boundary, let the normal yearly pass do the work
-        // exactly once rather than running a catch-up and a calendar pass back-to-back.
         if (!populationLifecycleInitialized && reg.size() > 0 && elapsed > 0
                 && Math.floorDiv(target, 365L) == Math.floorDiv(day, 365L)) yearly();
         while (day < target) {
             day++;
             stepSchemes();
-            if (day % 30 == 0) { monthly(); }
+            if (day % 30 == 0) monthly();
             if (day % 365 == 0) yearly();
         }
+        // CourtMod calls tick(0) between calendar days to advance the annual population cursor.
+        if (yearlyLifePass != null) advanceYearlyLifePass();
     }
 
     private void monthly() {
@@ -238,65 +252,83 @@ public final class CourtSim {
 
     private void yearly() {
         if (reg.size() > 0) {
-            lifeCycle();
+            if (yearlyLifePass == null) {
+                populationLifecycleInitialized = false;
+                reg.prepareKinIndex(day);
+                yearlyLifePass = new YearlyLifePass(reg.all(), reg.size(), year());
+            }
+            advanceYearlyLifePass();
+        } else if (ed != null) {
+            Courts.ensure(d, ed, reg, defs, names, seed + day, year());
+        }
+    }
+
+    private void advanceYearlyLifePass() {
+        YearlyLifePass pass = yearlyLifePass;
+        if (pass == null) return;
+        int budget = YEARLY_LIFE_BUDGET_PER_TICK;
+        while (budget > 0 && pass.phase < 2) {
+            if (pass.cursor >= pass.populationSize) {
+                pass.phase++;
+                pass.cursor = 0;
+                continue;
+            }
+            Character character = pass.people.get(pass.cursor++);
+            budget--;
+            if (!character.alive) continue;
+            if (pass.phase == 0) {
+                int age = pass.year - character.birthYear;
+                if (age <= 16) CharacterDevelopment.upbringingTick(character,
+                        character.father.isEmpty() ? null : reg.get(character.father),
+                        character.mother.isEmpty() ? null : reg.get(character.mother), pass.year);
+                double probability = age < 50 ? 0.003
+                        : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
+                if (character.traits.contains("craven") || CharacterStats.traits(character).contains("lazy"))
+                    probability *= 1.05;
+                if (rnd("death", character.id.hashCode() + day).nextDouble() < probability)
+                    die(character, "умер от старости или болезни");
+                continue;
+            }
+            if (!character.gender.equals("f")) continue;
+            Object dueValue = character.props.get("family.pregnancy.due_day");
+            long dueDay = dueValue instanceof Number number ? number.longValue() : -1L;
+            if (dueDay >= 0L) {
+                if (day < dueDay) continue;
+                String fatherId = FamilyPlanning.dueFatherId(character, day);
+                Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
+                if (biologicalFather == null)
+                    FamilyPlanning.cancel(character, biologicalFather, "father-unavailable", pass.year);
+                else
+                    bear(biologicalFather, character, pass.year, day);
+                continue;
+            }
+            if (character.spouse.isEmpty()) continue;
+            Character spouse = reg.get(character.spouse);
+            int age = pass.year - character.birthYear;
+            if (spouse == null || !spouse.alive || age < 18 || age > 45) continue;
+            FamilyPlanning.tryConceive(character, spouse, pass.year, day, seed);
+        }
+        if (pass.phase >= 2) {
+            yearlyLifePass = null;
             Marriages.aiYear(this);
             populationLifecycleInitialized = true;
+            if (ed != null) Courts.ensure(d, ed, reg, defs, names, seed + day, year());
         }
-        if (ed != null) Courts.ensure(d, ed, reg, defs, names, seed + day, year());
     }
 
     // ------------------------------------------------------------------ жизнь и смерть
 
-    private void lifeCycle() {
-        int y = year();
-        // Prepare the world-wide family index once per annual pass, not once per death.
-        // This keeps estate succession exact while avoiding population-wide scans for each heir.
-        reg.prepareKinIndex(day);
-        List<Character> all = new ArrayList<>(reg.all());
-        for (Character c : all) {
-            if (!c.alive) continue;
-            int age = y - c.birthYear;
-            if (age <= 16) CharacterDevelopment.upbringingTick(c,
-                    c.father.isEmpty() ? null : reg.get(c.father),
-                    c.mother.isEmpty() ? null : reg.get(c.mother), y);
-            double p = age < 50 ? 0.003 : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
-            if (c.traits.contains("craven") || CharacterStats.traits(c).contains("lazy")) p *= 1.05;
-            if (rnd("death", c.id.hashCode() + day).nextDouble() < p) die(c, "умер от старости или болезни");
-        }
-        for (Character c : all) {
-            if (!c.alive || !c.gender.equals("f")) continue;
-            Object dueValue = c.props.get("family.pregnancy.due_day");
-            long dueDay = dueValue instanceof Number n ? n.longValue() : -1L;
-            if (dueDay >= 0L) {
-                if (day < dueDay) continue;
-                String fatherId = FamilyPlanning.dueFatherId(c, day);
-                Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
-                if (biologicalFather == null) {
-                    FamilyPlanning.cancel(c, biologicalFather, "father-unavailable", y);
-                } else {
-                    bear(biologicalFather, c);
-                }
-                continue;
-            }
-            if (c.spouse.isEmpty()) continue;
-            Character f = reg.get(c.spouse);
-            int age = y - c.birthYear;
-            if (f == null || !f.alive || age < 18 || age > 45) continue;
-            FamilyPlanning.tryConceive(c, f, y, day, seed);
-        }
-    }
-
-    private void bear(Character father, Character mother) {
-        Random r = rnd("child", father.id.hashCode() + mother.id.hashCode() + day);
+    private void bear(Character father, Character mother, int eventYear, long eventDay) {
+        Random r = rnd("child", father.id.hashCode() + mother.id.hashCode() + eventDay);
         NameBank.Pool pool = names.pool(names.culture(father.culture));
         boolean m = r.nextBoolean();
         List<String> l = pool == null ? List.of() : (m ? pool.male : pool.female);
         String childName = l.isEmpty() ? "Child of " + mother.name + " and " + father.name
                 : l.get(r.nextInt(l.size()));
-        Character kid = reg.addChild(father, mother, childName, m ? "m" : "f", year());
+        Character kid = reg.addChild(father, mother, childName, m ? "m" : "f", eventYear);
         // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
         // Character lifecycle event, regardless of which domain clock reaches the year first.
-        FamilyPlanning.complete(mother, father, year(), kid.id);
+        FamilyPlanning.complete(mother, father, eventYear, kid.id);
         String realm = realmOf(father);
         hooks.news("MAQAN_AUTONOMOUS_BIRTH realm=" + realm + " father=" + father.globalId
                 + " mother=" + mother.globalId + " child=" + kid.globalId);
@@ -340,11 +372,23 @@ public final class CourtSim {
     public Regency regency(String realm) { return regencies.get(realm); }
 
     /** Adult members of the realm court who can legally serve as regent. */
+    private void rebuildRegencyCandidateIndex() {
+        Map<String, List<Character>> byPlace = new HashMap<>();
+        for (Character candidate : reg.all()) {
+            if (!candidate.alive || year() - candidate.birthYear < 16) continue;
+            for (Character.Post post : candidate.posts)
+                byPlace.computeIfAbsent(post.place, ignored -> new ArrayList<>()).add(candidate);
+        }
+        regencyCandidateIndex = byPlace;
+        regencyCandidateIndexBuilt = true;
+    }
+
     public List<Character> regencyCandidates(String realm) {
+        if (!regencyCandidateIndexBuilt) rebuildRegencyCandidateIndex();
         String place = Courts.realmPlace(realm);
         Character sovereign = ruler(realm);
         List<Character> candidates = new ArrayList<>();
-        for (Character candidate : reg.all()) {
+        for (Character candidate : regencyCandidateIndex.getOrDefault(place, List.of())) {
             if (!candidate.alive || candidate == sovereign || year() - candidate.birthYear < 16
                     || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) continue;
             candidates.add(candidate);
@@ -451,6 +495,7 @@ public final class CourtSim {
     }
 
     private void updateRegencies() {
+        rebuildRegencyCandidateIndex();
         for (String realm : new ArrayList<>(regencies.keySet())) ensureRegency(realm);
         for (TitleData.Realm realm : d.realmList()) {
             Character sovereign = ruler(realm.id);

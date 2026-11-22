@@ -236,6 +236,8 @@ public final class WorldSimMod {
         final Map<String, EmergentMapProgress> maps = new HashMap<>();
         final Map<String, String> workerColonyByPerson = new HashMap<>();
         final Map<String, Integer> settlementNameCounts = new HashMap<>();
+        final Set<String> dirtySettlementSources = new HashSet<>();
+        final Set<String> dirtyBindingSources = new HashSet<>();
         dev.worldforge.mod.api.DomainMutationRevisions.Snapshot settlementRevision;
         boolean settlementProjectionBuilt;
         EmergentPeopleProgress(JsonObject state, int year) { this.state = state; this.year = year; }
@@ -2543,7 +2545,6 @@ public final class WorldSimMod {
             // Each dimension/map has an independent checkpoint. A stalled source must not
             // suppress durable progress for another source in the same server pass.
             boolean sourceComplete = true;
-            boolean settlementBindingsChanged = false;
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
             // Establish a provisional, deterministic racial composition before the
@@ -2567,7 +2568,6 @@ public final class WorldSimMod {
             String progressPartition = source.id;
             EmergentMapProgress sourceProgress = emergentPeopleProgress.maps.computeIfAbsent(
                     progressPartition, ignored -> new EmergentMapProgress(registry));
-            boolean hasSettledBands = false;
             for (var element : state.getAsJsonArray("bands")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
@@ -2655,7 +2655,7 @@ public final class WorldSimMod {
                         if (colony != null) {
                             settlementId = colony.s.id;
                             bindPhysicalSettlement(bandId, settlementId);
-                            settlementBindingsChanged = true;
+                            emergentPeopleProgress.dirtyBindingSources.add(source.id);
                         } else {
                             settlementId = "emg_" + bandId;
                             display = emergentSettlementName(source, bandId, residents);
@@ -2742,7 +2742,7 @@ public final class WorldSimMod {
                         break;
                     }
                     bandProgress.settlementReconciled = true;
-                    hasSettledBands = true;
+                    emergentPeopleProgress.dirtySettlementSources.add(source.id);
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
                     sourceComplete = false;
@@ -2751,6 +2751,10 @@ public final class WorldSimMod {
                 if (budget == 0) break;
             }
 
+            if (budget == 0) {
+                sourceComplete = false;
+                complete = false;
+            }
             if (sourceComplete) {
                 List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
                 boolean peopleDurable = emergentResidents.isEmpty()
@@ -2759,13 +2763,19 @@ public final class WorldSimMod {
                     LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
                     return false;
                 }
-                if (hasSettledBands && !SettleMod.saveDurably(server)) {
-                    LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
-                    return false;
+                if (emergentPeopleProgress.dirtySettlementSources.contains(source.id)) {
+                    if (!SettleMod.saveDurably(server)) {
+                        LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
+                        return false;
+                    }
+                    emergentPeopleProgress.dirtySettlementSources.remove(source.id);
                 }
-                if (settlementBindingsChanged && !saveState(server)) {
-                    LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
-                    return false;
+                if (emergentPeopleProgress.dirtyBindingSources.contains(source.id)) {
+                    if (!saveState(server)) {
+                        LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
+                        return false;
+                    }
+                    emergentPeopleProgress.dirtyBindingSources.remove(source.id);
                 }
             } else {
                 // Genesis progress is staged in-memory. Avoid rewriting the growing canonical

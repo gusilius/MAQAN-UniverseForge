@@ -119,6 +119,11 @@ public class SettleMod {
         return rep;
     }
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
+    private static final Map<String, String> WORKER_COLONY_BY_PERSON = new HashMap<>();
+    private static dev.worldforge.mod.api.DomainMutationRevisions.Snapshot workerOwnershipRevision;
+    private static boolean workerOwnershipIndexBuilt;
+    private static final Map<String, Set<String>> MILITARY_DEPARTURE_COLONIES = new HashMap<>();
+    private static boolean militaryDepartureIndexBuilt;
     /** A map blueprint is imported once per dimension/map after the durable settlement snapshot succeeds. */
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
@@ -1383,6 +1388,7 @@ public class SettleMod {
 
     @SuppressWarnings("unchecked")
     static void load(MinecraftServer server) {
+        resetWorkerIndexes();
         COLONIES.clear();
         NETWORK = new dev.worldforge.settle.TradeNetwork();
         Path f = file(server);
@@ -1483,6 +1489,7 @@ public class SettleMod {
 
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
+        resetWorkerIndexes();
         COLONIES.clear();
         LAST_SIMULATED_WORLD_MINUTE.clear();
         COLONY_SIMULATION_PHASES = Map.of();
@@ -1908,14 +1915,70 @@ public class SettleMod {
         worker.lifeActionUntil = 0;
     }
 
+    private static void resetWorkerIndexes() {
+        WORKER_COLONY_BY_PERSON.clear();
+        workerOwnershipRevision = null;
+        workerOwnershipIndexBuilt = false;
+        MILITARY_DEPARTURE_COLONIES.clear();
+        militaryDepartureIndexBuilt = false;
+    }
+
+    private static void refreshWorkerOwnershipIndex() {
+        var revisions = dev.worldforge.mod.api.WorldForgeApi.revisions();
+        var current = revisions.snapshot(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        if (workerOwnershipIndexBuilt && workerOwnershipRevision != null && current.isPresent()
+                && revisions.isCurrent(workerOwnershipRevision,
+                        dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)) return;
+        WORKER_COLONY_BY_PERSON.clear();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || colony.s == null) continue;
+            for (dev.worldforge.settle.Worker worker : colony.s.workers)
+                if (worker.person != null && !worker.person.isBlank())
+                    WORKER_COLONY_BY_PERSON.putIfAbsent(worker.person, colony.s.id);
+        }
+        workerOwnershipRevision = current.orElse(null);
+        workerOwnershipIndexBuilt = current.isPresent();
+    }
+
+    private static void captureWorkerOwnershipRevision() {
+        if (!workerOwnershipIndexBuilt) return;
+        var current = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        workerOwnershipRevision = current.orElse(null);
+        workerOwnershipIndexBuilt = current.isPresent();
+    }
+
+    private static void refreshMilitaryDepartureIndex() {
+        if (militaryDepartureIndexBuilt) return;
+        MILITARY_DEPARTURE_COLONIES.clear();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || colony.s == null) continue;
+            for (dev.worldforge.settle.Settlement.WorkerDeparture departure : colony.s.pendingDepartures()) {
+                if (!"transfer:military".equals(departure.reason()) || departure.personId().isBlank()) continue;
+                MILITARY_DEPARTURE_COLONIES.computeIfAbsent(departure.personId(), ignored -> new HashSet<>())
+                        .add(colony.s.id);
+            }
+        }
+        militaryDepartureIndexBuilt = true;
+    }
+
     /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
     public static boolean detachWorkerForMilitary(String characterId) {
         if (characterId == null || characterId.isBlank()) return false;
-        for (Colony colony : COLONIES.values()) {
-            if (colony != null && colony.s != null
-                    && colony.s.removeWorkerByPerson(characterId, "transfer:military")) return true;
+        refreshWorkerOwnershipIndex();
+        refreshMilitaryDepartureIndex();
+        String colonyId = WORKER_COLONY_BY_PERSON.get(characterId);
+        Colony colony = colonyId == null ? null : COLONIES.get(colonyId);
+        if (colony == null || colony.s == null
+                || !colony.s.removeWorkerByPerson(characterId, "transfer:military")) {
+            WORKER_COLONY_BY_PERSON.remove(characterId);
+            captureWorkerOwnershipRevision();
+            return false;
         }
-        return false;
+        WORKER_COLONY_BY_PERSON.remove(characterId);
+        MILITARY_DEPARTURE_COLONIES.computeIfAbsent(characterId, ignored -> new HashSet<>()).add(colonyId);
+        captureWorkerOwnershipRevision();
+        return true;
     }
 
     /** Compatibility entry point for callers without a batch ownership projection. */
@@ -1935,14 +1998,9 @@ public class SettleMod {
             String assignedColony = workerColonyByPerson.get(characterId);
             if (assignedColony != null) return colonyId.equals(assignedColony);
         } else {
-            // Compatibility path for isolated callers without a prebuilt ownership projection.
-            for (Colony other : COLONIES.values()) {
-                if (other == null || other.s == null) continue;
-                for (dev.worldforge.settle.Worker worker : other.s.workers) {
-                    if (!characterId.equals(worker.person)) continue;
-                    return other == colony;
-                }
-            }
+            refreshWorkerOwnershipIndex();
+            String assignedColony = WORKER_COLONY_BY_PERSON.get(characterId);
+            if (assignedColony != null) return colonyId.equals(assignedColony);
         }
         CharacterRegistry registry = null;
         Character person = PeopleMod.authority().getGlobal(characterId);
@@ -1976,13 +2034,19 @@ public class SettleMod {
         person.props.put("population.location", colony.s.id);
         person.props.put("population.employer", place);
         if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
-        // Reattachment supersedes the queued transfer departure in the old settlement.
-        // A later sync must not interpret that stale event as a second firing.
-        for (Colony other : COLONIES.values()) {
-            if (other != null && other.s != null)
-                other.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
-        }
         if (workerColonyByPerson != null) workerColonyByPerson.put(characterId, colonyId);
+        if (workerOwnershipIndexBuilt) {
+            WORKER_COLONY_BY_PERSON.put(person.globalId, colonyId);
+            captureWorkerOwnershipRevision();
+        }
+        // Only settlements with a queued military departure for this Character are visited.
+        refreshMilitaryDepartureIndex();
+        Set<String> departureColonies = MILITARY_DEPARTURE_COLONIES.remove(person.globalId);
+        if (departureColonies != null) for (String departureColonyId : departureColonies) {
+            Colony formerColony = COLONIES.get(departureColonyId);
+            if (formerColony != null && formerColony.s != null)
+                formerColony.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
+        }
         return true;
     }
 

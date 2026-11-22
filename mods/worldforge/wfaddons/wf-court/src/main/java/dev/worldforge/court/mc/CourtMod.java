@@ -38,7 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod("wf_court")
 public class CourtMod {
     public static final Logger LOGGER = LogUtils.getLogger();
-    public static final int COURT_STEP = 100, SAVE_EVERY = 6000;
+    public static final int COURT_STEP = 1, SAVE_EVERY = 6000;
     private static final Map<MapData, CourtSim> COURTS = new ConcurrentHashMap<>();
     /** Autonomous courts for vanilla/non-map dimensions, backed by the same canonical CharacterRegistry. */
     private static final Map<String, CourtSim> VIRTUAL_COURTS = new ConcurrentHashMap<>();
@@ -284,27 +284,19 @@ public class CourtMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            if (ticks % COURT_STEP == 0) {
-                int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_court", 1);
-                if (days > 0) {
-                    for (MapData m : WorldForgeMod.loadedMaps().values()) {
-                        CourtSim cs = m.titles == null ? null : court(m);
-                        if (cs != null) cs.tick(days);
-                    }
-                    // Vanilla and other non-map dimensions previously had no CourtSim:
-                    // their NPCs received offices, but autonomous marriage, births,
-                    // succession pressure and court AI never advanced. Attach the same
-                    // CourtSim engine to each canonical dimension registry.
-                    // Overworld retains its durable legacy Character partition and is
-                    // therefore not present in dimensionRegistries(). Attach it explicitly.
-                    CourtSim overworldCourt = virtualCourt(e.getServer(), "minecraft:overworld",
-                            PeopleMod.worldRegistry());
-                    if (overworldCourt != null) overworldCourt.tick(days);
-                    for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
-                        CourtSim cs = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
-                        if (cs != null) cs.tick(days);
-                    }
-                }
+            int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_court", 1);
+            for (MapData map : WorldForgeMod.loadedMaps().values()) {
+                CourtSim sim = map.titles == null ? null : court(map);
+                if (sim != null) sim.tick(days);
+            }
+            // tick(0) advances only resumable annual population work; daily court decisions
+            // still run only when the shared world clock yields a complete day.
+            CourtSim overworldCourt = virtualCourt(e.getServer(), "minecraft:overworld",
+                    PeopleMod.worldRegistry());
+            if (overworldCourt != null) overworldCourt.tick(days);
+            for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
+                CourtSim sim = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
+                if (sim != null) sim.tick(days);
             }
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_court: ошибка тика: {}", ex.toString()); }
