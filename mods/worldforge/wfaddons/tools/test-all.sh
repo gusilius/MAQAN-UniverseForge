@@ -98,7 +98,7 @@ for source in tests/*.java; do
   fi
 done
 
-if [ -n "$ACTUAL_PACK" ]; then
+if [ -n "$ACTUAL_PACK" ] && { [ "$GROUP" = "all" ] || [ "$GROUP" = "worldgen" ]; }; then
   echo "== ImageWorldIdentityTest (actual image-generated map)"
   if python3 tools/run-java-test.py 120 "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
     passed=$((passed + 1))
