@@ -381,8 +381,9 @@ public final class CharacterAuthority {
      * The index is rebuilt transactionally with registry membership changes, not per death.
      */
     public synchronized List<Character> kinCandidates(Character person) {
-        // Do not rebuild world-wide indexes here. A succession lookup is a hot path inside
-        // the yearly life pass; registry appends are already indexed incrementally.
+        // Membership-generation checks are O(partitions): ordinary appends are already
+        // indexed, while wholesale restore safely triggers one transactional rebuild.
+        refreshIndex();
         if (person == null) return List.of();
         LinkedHashSet<CharacterIdentity> matches = new LinkedHashSet<>();
         addFamilyMatches(matches, familyByParentLegacy, person.father);
