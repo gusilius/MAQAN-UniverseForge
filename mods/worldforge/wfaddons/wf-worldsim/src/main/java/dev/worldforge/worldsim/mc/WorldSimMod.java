@@ -105,6 +105,13 @@ public final class WorldSimMod {
         final List<dev.worldforge.people.Character> residents;
         final EmergentParents parents;
         int originCursor;
+        int residentIndexCursor;
+        final List<String> residentIds = new ArrayList<>();
+        final Set<String> residentIdSet = new HashSet<>();
+        boolean canonicalResidentsReplaced;
+        List<Worker> workerSnapshot;
+        int workerCleanupCursor;
+        int residentWorkerCursor;
         boolean settlementReconciled;
         EmergentBandProgress(List<dev.worldforge.people.Character> residents, int year) {
             this.residents = residents;
@@ -227,6 +234,10 @@ public final class WorldSimMod {
         final JsonObject state;
         final int year;
         final Map<String, EmergentMapProgress> maps = new HashMap<>();
+        final Map<String, String> workerColonyByPerson = new HashMap<>();
+        final Map<String, Integer> settlementNameCounts = new HashMap<>();
+        dev.worldforge.mod.api.DomainMutationRevisions.Snapshot settlementRevision;
+        boolean settlementProjectionBuilt;
         EmergentPeopleProgress(JsonObject state, int year) { this.state = state; this.year = year; }
     }
 
@@ -2475,6 +2486,36 @@ public final class WorldSimMod {
         return true;
     }
 
+    private static void refreshSettlementProjections(EmergentPeopleProgress progress) {
+        var revisions = WorldForgeApi.revisions();
+        var current = revisions.snapshot(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        if (progress.settlementProjectionBuilt && progress.settlementRevision != null && current.isPresent()
+                && revisions.isCurrent(progress.settlementRevision,
+                        dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)) return;
+
+        progress.workerColonyByPerson.clear();
+        progress.settlementNameCounts.clear();
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            if (colony == null || colony.s == null) continue;
+            for (Worker worker : colony.s.workers)
+                if (worker.person != null && !worker.person.isBlank())
+                    progress.workerColonyByPerson.putIfAbsent(worker.person, colony.s.id);
+            if (colony.s.name != null) {
+                String normalized = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                if (!normalized.isBlank()) progress.settlementNameCounts.merge(normalized, 1, Integer::sum);
+            }
+        }
+        progress.settlementRevision = current.orElse(null);
+        progress.settlementProjectionBuilt = current.isPresent();
+    }
+
+    private static void captureSettlementProjectionRevision(EmergentPeopleProgress progress) {
+        var current = WorldForgeApi.revisions().snapshot(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        progress.settlementRevision = current.orElse(null);
+        progress.settlementProjectionBuilt = current.isPresent();
+    }
+
     private static boolean syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return true;
         if (emergentPeopleProgress == null || emergentPeopleProgress.state != state || emergentPeopleProgress.year != year)
@@ -2482,30 +2523,13 @@ public final class WorldSimMod {
 
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
-        boolean settlementBindingsChanged = false;
-        // A source partition is checkpointed only after its resident/settlement batches finish.
-        // Persisting the entire Character registry every 256 residents was quadratic I/O.
+        // These projections are reused across ticks and rebuilt only after a committed
+        // settlement-domain mutation invalidates their revision.
+        refreshSettlementProjections(emergentPeopleProgress);
+        Map<String, String> workerColonyByPerson = emergentPeopleProgress.workerColonyByPerson;
+        Map<String, Integer> settlementNameCounts = emergentPeopleProgress.settlementNameCounts;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
-        // Build the worker ownership projection once per bounded materialization pass.
-        // attachExistingCharacter then performs O(1) idempotency checks per resident
-        // instead of rescanning all colonies and worker lists for every person.
-        Map<String, String> workerColonyByPerson = new HashMap<>();
-        for (Colony existing : SettleMod.COLONIES.values()) {
-            if (existing == null || existing.s == null) continue;
-            for (Worker worker : existing.s.workers) {
-                if (worker.person != null && !worker.person.isBlank())
-                    workerColonyByPerson.putIfAbsent(worker.person, existing.s.id);
-            }
-        }
-        // Name uniqueness is checked for every newly materialized band. Build one
-        // frequency index per batch instead of rescanning every Colony for every band.
-        Map<String, Integer> settlementNameCounts = new HashMap<>();
-        for (Colony existing : SettleMod.COLONIES.values()) {
-            if (existing == null || existing.s == null || existing.s.name == null) continue;
-            String normalized = existing.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
-            if (!normalized.isBlank()) settlementNameCounts.merge(normalized, 1, Integer::sum);
-        }
         if (state.has("polities") && state.get("polities").isJsonArray()) {
             for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
                 JsonObject polity = item.getAsJsonObject();
@@ -2519,6 +2543,7 @@ public final class WorldSimMod {
             // Each dimension/map has an independent checkpoint. A stalled source must not
             // suppress durable progress for another source in the same server pass.
             boolean sourceComplete = true;
+            boolean settlementBindingsChanged = false;
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
             // Establish a provisional, deterministic racial composition before the
@@ -2588,11 +2613,28 @@ public final class WorldSimMod {
                 }
                 if (bandProgress.settlementReconciled) continue;
 
+                // Build canonical resident membership in bounded slices. Previously the
+                // whole population was collected in one tick after the creation budget ended.
+                while (bandProgress.residentIndexCursor < residents.size() && budget > 0) {
+                    dev.worldforge.people.Character resident = residents.get(bandProgress.residentIndexCursor++);
+                    if (resident.alive) {
+                        bandProgress.residentIds.add(resident.globalId);
+                        bandProgress.residentIdSet.add(resident.globalId);
+                    }
+                    budget--;
+                }
+                if (bandProgress.residentIndexCursor < residents.size() || budget == 0) {
+                    sourceComplete = false;
+                    complete = false;
+                    break;
+                }
+
                 String settlementId = settlementIdForBand(band);
                 try {
                     int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
                     int x = position[0], z = position[1];
                     String display = "";
+                    boolean newlyCreatedSettlement = false;
                     String settlementDimension = source.settlementDimension(server);
                     if (settlementDimension == null || settlementDimension.isBlank())
                         throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
@@ -2619,9 +2661,14 @@ public final class WorldSimMod {
                             display = emergentSettlementName(source, bandId, residents);
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                            newlyCreatedSettlement = colony != null;
                             bindPhysicalSettlement(bandId, settlementId);
                             settlementBindingsChanged = true;
                         }
+                    }
+                    if (newlyCreatedSettlement && colony != null && colony.s != null && colony.s.name != null) {
+                        String createdName = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                        if (!createdName.isBlank()) settlementNameCounts.merge(createdName, 1, Integer::sum);
                     }
                     if (colony != null && colony.sourceMapId.isBlank() && colony.s != null) {
                         String currentSettlementName = colony.s.name == null ? "" : colony.s.name.trim();
@@ -2638,38 +2685,61 @@ public final class WorldSimMod {
                             if (!replacementName.isBlank()) settlementNameCounts.merge(replacementName, 1, Integer::sum);
                         }
                     }
-                    List<String> residentIds = residents.stream().filter(person -> person.alive)
-                            .map(person -> person.globalId).toList();
-                    if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
-                        throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
-                    colony.s.setCanonicalPopulation(residentIds.size());
-                    // Classify only after canonical residents are attached. This avoids
-                    // zero-population camp placeholders and uses local terrain plus the
-                    // actual race mix of this settlement's residents.
-                    colony.s.types = SettleMod.TYPES;
-                    colony.s.refreshType(residentIds.size(), emergentSettlementTerrain(source, band),
-                            emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
-                    Set<String> residentIdSet = new HashSet<>(residentIds);
-                    for (Worker worker : new ArrayList<>(colony.s.workers)) {
-                        if (worker.person == null || worker.person.isBlank() || residentIdSet.contains(worker.person)) continue;
-                        dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
-                        if (former == null) continue;
-                        String reason = !former.alive ? "death:emergence" : "transfer:emergence";
-                        colony.s.removeWorkerByPerson(worker.person, reason);
-                        workerColonyByPerson.remove(worker.person, colony.s.id);
+                    if (!bandProgress.canonicalResidentsReplaced) {
+                        if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, bandProgress.residentIds))
+                            throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
+                        colony.s.setCanonicalPopulation(bandProgress.residentIds.size());
+                        colony.s.types = SettleMod.TYPES;
+                        colony.s.refreshType(bandProgress.residentIds.size(), emergentSettlementTerrain(source, band),
+                                emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
+                        bandProgress.canonicalResidentsReplaced = true;
+                        bandProgress.workerSnapshot = new ArrayList<>(colony.s.workers);
                     }
-                    for (String residentId : residentIds) {
-                        dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
-                        if (resident == null) continue;
-                        boolean workingAge = PopulationSimulation.age(resident, year) >= 18
-                                && PopulationSimulation.canWork(resident, year);
-                        if (!workingAge) {
-                            colony.s.removeWorkerByPerson(residentId, "transfer:underage");
-                            continue;
+
+                    while (bandProgress.workerCleanupCursor < bandProgress.workerSnapshot.size() && budget > 0) {
+                        Worker worker = bandProgress.workerSnapshot.get(bandProgress.workerCleanupCursor);
+                        if (worker.person != null && !worker.person.isBlank()
+                                && !bandProgress.residentIdSet.contains(worker.person)) {
+                            dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
+                            if (former != null) {
+                                String reason = !former.alive ? "death:emergence" : "transfer:emergence";
+                                colony.s.removeWorkerByPerson(worker.person, reason);
+                                workerColonyByPerson.remove(worker.person, colony.s.id);
+                            }
                         }
-                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId, workerColonyByPerson))
-                            throw new IllegalStateException("Canonical resident " + residentId
-                                    + " could not be attached to settlement " + settlementId);
+                        bandProgress.workerCleanupCursor++;
+                        budget--;
+                    }
+                    if (bandProgress.workerCleanupCursor < bandProgress.workerSnapshot.size()) {
+                        sourceComplete = false;
+                        complete = false;
+                        break;
+                    }
+
+                    while (bandProgress.residentWorkerCursor < bandProgress.residentIds.size() && budget > 0) {
+                        String residentId = bandProgress.residentIds.get(bandProgress.residentWorkerCursor);
+                        dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
+                        if (resident != null && !resident.alive) {
+                            colony.s.removeWorkerByPerson(residentId, "death:emergence");
+                            workerColonyByPerson.remove(residentId, colony.s.id);
+                        } else if (resident != null) {
+                            boolean workingAge = PopulationSimulation.age(resident, year) >= 18
+                                    && PopulationSimulation.canWork(resident, year);
+                            if (!workingAge) {
+                                colony.s.removeWorkerByPerson(residentId, "transfer:underage");
+                                workerColonyByPerson.remove(residentId, colony.s.id);
+                            } else if (!SettleMod.attachExistingCharacter(colony.s.id, residentId, workerColonyByPerson)) {
+                                throw new IllegalStateException("Canonical resident " + residentId
+                                        + " could not be attached to settlement " + settlementId);
+                            }
+                        }
+                        bandProgress.residentWorkerCursor++;
+                        budget--;
+                    }
+                    if (bandProgress.residentWorkerCursor < bandProgress.residentIds.size()) {
+                        sourceComplete = false;
+                        complete = false;
+                        break;
                     }
                     bandProgress.settlementReconciled = true;
                     hasSettledBands = true;
@@ -2703,6 +2773,7 @@ public final class WorldSimMod {
                 complete = false;
             }
             if (budget == 0) complete = false;
+            captureSettlementProjectionRevision(emergentPeopleProgress);
         }
         if (complete) emergentPeopleProgress = null;
         return complete;
