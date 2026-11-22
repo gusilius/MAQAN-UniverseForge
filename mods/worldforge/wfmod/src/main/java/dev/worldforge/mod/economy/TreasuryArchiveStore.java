@@ -143,6 +143,52 @@ public final class TreasuryArchiveStore {
             throw new IOException("Legacy treasury does not contain the complete overlapping archive range");
     }
 
+    /**
+     * Durably appends only new journal rows. This is the small write required before a
+     * domain action may report success; account snapshots and archive-prefix verification
+     * are deliberately deferred to the background checkpoint.
+     */
+    public synchronized long appendPending(TreasuryLedger ledger) throws IOException {
+        if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
+        synchronized (ledger) {
+            long archiveNext = archive.nextSequence();
+            if (archiveNext > ledger.nextSequence())
+                throw new IOException("Treasury archive is ahead of the live ledger");
+            if (archiveNext < ledger.nextSequence())
+                archive.appendAll(ledger.entriesFromSequence(archiveNext));
+            if (archive.nextSequence() != ledger.nextSequence())
+                throw new IOException("Treasury archive did not reach the live ledger sequence");
+            ledger.acknowledgeArchivedThrough(archive, archive.nextSequence());
+            return ledger.mutationVersion();
+        }
+    }
+
+    /**
+     * Publishes a compact checkpoint from an immutable account snapshot. The journal is
+     * appended first under the ledger lock; JSON encoding, hashing and filesystem work
+     * then run without holding that lock, so economic writers are not blocked by disk I/O.
+     */
+    public synchronized long checkpoint(TreasuryLedger ledger) throws IOException {
+        if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
+        TreasuryLedgerSnapshot.State state;
+        synchronized (ledger) {
+            long archiveNext = archive.nextSequence();
+            if (archiveNext > ledger.nextSequence())
+                throw new IOException("Treasury archive is ahead of the live ledger");
+            if (archiveNext < ledger.nextSequence())
+                archive.appendAll(ledger.entriesFromSequence(archiveNext));
+            if (archive.nextSequence() != ledger.nextSequence())
+                throw new IOException("Treasury archive did not reach the live ledger sequence");
+            state = ledger.checkpointState();
+        }
+        String snapshot = TreasuryLedgerSnapshot.encode(state);
+        TreasuryCheckpointStore.Checkpoint published = checkpoints.publish(snapshot, archive);
+        synchronized (ledger) {
+            ledger.acknowledgeArchivedThrough(archive, state.nextSequence());
+        }
+        return state.mutationVersion();
+    }
+
     /** Appends only the not-yet-archived suffix and publishes CURRENT last. */
     public synchronized long save(TreasuryLedger ledger) throws IOException {
         if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
