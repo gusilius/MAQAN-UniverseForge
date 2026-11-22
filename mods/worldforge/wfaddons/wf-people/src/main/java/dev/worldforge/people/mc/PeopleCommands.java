@@ -157,9 +157,8 @@ final class PeopleCommands {
         long simulationMs = (System.nanoTime() - started) / 1_000_000L;
         int bodies = 0;
         for (var level : source.getServer().getAllLevels())
-            bodies += level.getEntitiesOfClass(WFNpc.class, new net.minecraft.world.phys.AABB(
-                    -30_000_000, level.getMinBuildHeight(), -30_000_000,
-                    30_000_000, level.getMaxBuildHeight(), 30_000_000)).size();
+            for (var entity : level.getAllEntities())
+                if (entity instanceof WFNpc) bodies++;
         boolean persisted = PeopleMod.persistAllNow(source.getServer());
         String result = "MAQAN_POPULATION_STRESS_RESULT requested=" + count
                 + " created=" + created + " canonical_total=" + registry.size()
