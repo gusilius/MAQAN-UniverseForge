@@ -991,6 +991,40 @@ public final class TreasuryLedgerTest {
             ok(false, "canonical treasury archive store lifecycle: " + ex.getMessage());
         }
 
+        try {
+            java.nio.file.Path incrementalRoot = java.nio.file.Files.createTempDirectory("maqan-treasury-incremental-");
+            TreasuryArchiveStore incrementalStore = new TreasuryArchiveStore(incrementalRoot);
+            TreasuryLedger incrementalLedger = incrementalStore.loadOrMigrate(null);
+            incrementalLedger.open("incremental:realm", "realm:incremental", "silver", 100);
+            incrementalStore.appendPending(incrementalLedger);
+            incrementalLedger.deposit("incremental:realm", 25, TreasuryLedger.Kind.TAX,
+                    "tax", "incremental-tax-1", 60, "incremental durable journal");
+            long appendedVersion = incrementalStore.appendPending(incrementalLedger);
+            boolean journalOnly = incrementalLedger.pendingJournalSize() == 0
+                    && !java.nio.file.Files.exists(incrementalRoot.resolve("checkpoints/CURRENT.json"));
+            TreasuryLedger recoveredIncremental = new TreasuryArchiveStore(incrementalRoot)
+                    .loadOrMigrate(null);
+            ok(journalOnly && appendedVersion == incrementalLedger.mutationVersion()
+                            && close(recoveredIncremental.balance("incremental:realm"), 125)
+                            && recoveredIncremental.entriesForReference("incremental:realm",
+                                    TreasuryLedger.Kind.TAX, "incremental-tax-1").size() == 1,
+                    "durable journal append is independently recoverable without a synchronous full checkpoint");
+            long checkpointVersion = incrementalStore.checkpoint(incrementalLedger);
+            TreasuryLedger checkpointedIncremental = new TreasuryArchiveStore(incrementalRoot)
+                    .loadOrMigrate(null);
+            ok(checkpointVersion == incrementalLedger.mutationVersion()
+                            && checkpointedIncremental.pendingJournalSize() == 0
+                            && close(checkpointedIncremental.balance("incremental:realm"), 125),
+                    "background-style checkpoint compacts only after publishing a verified snapshot");
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(incrementalRoot)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(file -> {
+                    try { java.nio.file.Files.deleteIfExists(file); } catch (java.io.IOException ignored) { }
+                });
+            }
+        } catch (java.io.IOException ex) {
+            ok(false, "incremental treasury journal/checkpoint lifecycle: " + ex.getMessage());
+        }
+
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
     }
