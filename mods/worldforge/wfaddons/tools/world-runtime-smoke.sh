@@ -228,6 +228,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
       pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/core-jcmd-$stamp.txt")"
       if [ -n "$pid" ]; then
         jcmd "$pid" GC.heap_info > "$OUTPUT/core-heap-$stamp.txt" 2>&1 || true
+        WF_METRIC_PID="$pid" powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/core-process-$stamp.json" 2>&1 || true
       fi
     fi
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during core observation"; exit 15; }
@@ -237,7 +238,10 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   # First shutdown must be graceful and return exit code 0 before the same save
   # is opened again. A forced kill is a failed core-contour result.
   CURRENT_STAGE="server_core_first_shutdown"
-  printf '%s\n' "save-all flush" "stop" >> in.txt
+  printf '%s\n' "save-all flush" >> in.txt
+  sleep 3
+  grep -Fq 'Saved the game' server.log || { echo "ERROR: server did not acknowledge the first save-all flush"; exit 22; }
+  printf '%s\n' "stop" >> in.txt
   for _ in $(seq 1 45); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
   if kill -0 "$SERVER_PID" 2>/dev/null; then
     echo "ERROR: first server shutdown exceeded 45 seconds"
