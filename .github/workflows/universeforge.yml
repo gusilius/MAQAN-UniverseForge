@@ -73,6 +73,13 @@ jobs:
           cargo build --release --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "WorldSim native build failed" }
 
+      - name: Run CK3-scale population and political stress gates
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        shell: pwsh
+        run: |
+          cargo test --release --target x86_64-pc-windows-msvc scale -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "100k/500k/1m population or 10k-realm political stress gate failed" }
+
       - name: Stage native engine into the WorldSim mod
         shell: pwsh
         run: |
