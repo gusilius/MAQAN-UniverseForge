@@ -357,14 +357,10 @@ for key in sorted(expected):
 print("SAME_SERVER_DUAL_WORLD_GENESIS=PASS")
 for key in sorted(expected): print("WORLD_GENESIS=" + json.dumps(rows[key], ensure_ascii=False, sort_keys=True))
 PY
-  printf '%s\n' "stop" >> in.txt
-  for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
-  if kill -0 "$SERVER_PID" 2>/dev/null; then taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true; fi
-  if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
-  SERVER_PID=""
-  cp server.log "$OUTPUT/server.log"
-  echo "SMOKE_SERVER_SHUTDOWN_CODE=$SERVER_EXIT_CODE"
-  echo "SAME_SERVER_DUAL_WORLD_GENESIS=PASS"
+  # Leave process ownership and shutdown verification to runtime_exit.
+  # Manually waiting here used to clear SERVER_PID before the EXIT trap could
+  # record the JVM exit status, making the new PASS contract self-contradictory.
+  echo "SAME_SERVER_DUAL_WORLD_GENESIS=PASS_PENDING_GRACEFUL_SHUTDOWN"
   echo "NO_CAMPAIGN_OR_SCENARIO=1"
   CURRENT_STAGE="dual_world_genesis_complete"
   exit 0
