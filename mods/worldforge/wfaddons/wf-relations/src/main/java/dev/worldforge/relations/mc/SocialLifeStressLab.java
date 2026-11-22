@@ -3,6 +3,7 @@ package dev.worldforge.relations.mc;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.relations.NpcSocialSimulation;
 import dev.worldforge.relations.Relations;
@@ -44,6 +45,8 @@ public final class SocialLifeStressLab {
         int created;
         int daysCompleted;
         long interactions;
+        int conceptions;
+        int births;
         long maxDayNanos;
         String status = "RUNNING";
         String failure = "";
@@ -146,14 +149,16 @@ public final class SocialLifeStressLab {
     }
 
     private static void finish(Run run) {
+        processFamilyLife(run);
         long bonds = npcBondCount(RelationsMc.REL);
         long reciprocal = reciprocalNpcBonds(RelationsMc.REL);
         long married = marriedNpcBonds(RelationsMc.REL);
         boolean passed = run.created == run.target && run.registry.size() >= run.initialSize + run.target
                 && run.daysCompleted == run.daysTarget && run.interactions > 0
-                && bonds > 0 && reciprocal == bonds;
+                && bonds > 0 && reciprocal == bonds && married > 0
+                && run.conceptions == run.births;
         run.status = passed ? "PASS" : "FAILED";
-        if (!passed) run.failure = "social_lifecycle_invariants_not_satisfied";
+        if (!passed) run.failure = "social_and_family_lifecycle_invariants_not_satisfied";
         RelationsMc.save(run.server);
         boolean saveLoadVerified = false;
         try {
@@ -171,6 +176,46 @@ public final class SocialLifeStressLab {
             run.failure = "relations_save_load_verification_failed";
         }
         writeReport(run);
+    }
+
+    /** Resolve autonomous marriages into real pregnancies and canonical births. */
+    private static void processFamilyLife(Run run) {
+        int baseDay = run.startDay + run.daysCompleted;
+        int baseYear = run.startYear + Math.floorDiv(baseDay, 365);
+        long seed = 0x4D4151414E5F3033L;
+        for (Character mother : run.registry.all()) {
+            if (!mother.alive || !"f".equalsIgnoreCase(mother.gender)
+                    || mother.spouse == null || mother.spouse.isBlank()) continue;
+            Character father = run.registry.get(mother.spouse);
+            if (father == null || !"m".equalsIgnoreCase(father.gender)
+                    || !mother.id.equals(father.spouse)) continue;
+            mother.props.put("family.fertility", 250);
+            mother.props.put("family.conception_modifier", 250);
+            father.props.put("family.wants_children", true);
+            mother.props.put("family.wants_children", true);
+            boolean conceived = false;
+            int conceptionYear = baseYear;
+            long conceptionDay = baseDay;
+            for (int attempt = 0; attempt < 5 && !conceived; attempt++) {
+                conceptionYear = baseYear + attempt;
+                conceptionDay = baseDay + attempt * 365L;
+                conceived = FamilyPlanning.tryConceive(mother, father, conceptionYear,
+                        conceptionDay, seed + mother.globalId.hashCode());
+            }
+            if (!conceived) continue;
+            run.conceptions++;
+            long dueDay = conceptionDay + 270L;
+            if (!father.id.equals(FamilyPlanning.dueFatherId(mother, dueDay)))
+                throw new IllegalStateException("Pregnancy due-father identity mismatch for " + mother.globalId);
+            Character child = run.registry.addChild(father, mother,
+                    "Social Stress Child " + run.births, (run.births & 1) == 0 ? "f" : "m",
+                    conceptionYear + 1);
+            FamilyPlanning.complete(mother, father, conceptionYear + 1, child.id);
+            if (!mother.children.contains(child.id) || !father.children.contains(child.id)
+                    || !father.id.equals(child.father) || !mother.id.equals(child.mother))
+                throw new IllegalStateException("Canonical family links failed for " + child.globalId);
+            run.births++;
+        }
     }
 
     private static long npcBondCount(Relations relations) {
@@ -229,7 +274,7 @@ public final class SocialLifeStressLab {
                     + "\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
                     run.status, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
                     groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
-                    bonds, reciprocal, married, percentile(samples, .50) / 1_000_000.0,
+                    run.conceptions, run.births, bonds, reciprocal, married, percentile(samples, .50) / 1_000_000.0,
                     percentile(samples, .95) / 1_000_000.0, percentile(samples, .99) / 1_000_000.0,
                     run.maxDayNanos / 1_000_000.0, heap, runtime.totalMemory(), cpu,
                     (System.nanoTime() - run.startedNanos) / 1_000_000_000.0);
