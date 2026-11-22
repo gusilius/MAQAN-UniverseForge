@@ -142,8 +142,8 @@ public final class NpcSocialSimulation {
                     // starving marriage simulation merely because random slots keep pairing
                     // same-gender neighbours in a small settlement.
                     if (a.gender.equals(b.gender)) {
-                        for (int offset = 1; offset < members.size(); offset++) {
-                            Character candidate = members.get((second + offset) % members.size());
+                        for (int candidateOffset = 1; candidateOffset < members.size(); candidateOffset++) {
+                            Character candidate = members.get((second + candidateOffset) % members.size());
                             if (!candidate.gender.equals(a.gender) && candidate.alive
                                     && year - candidate.birthYear >= 18) {
                                 b = candidate;
