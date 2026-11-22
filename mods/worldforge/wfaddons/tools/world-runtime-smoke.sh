@@ -280,7 +280,10 @@ checks = {
     "interactions": report.get("autonomous_interactions", 0) > 0,
     "bonds": report.get("npc_directed_bonds", 0) > 0,
     "reciprocal": report.get("reciprocal_bonds") == report.get("npc_directed_bonds"),
-    "registry": report.get("final_registry_size", 0) >= report.get("initial_registry_size", 0) + target,
+    "marriages": report.get("married_directed_bonds", 0) > 0,
+    "conceptions": report.get("conceptions", 0) > 0,
+    "births": report.get("births", 0) == report.get("conceptions", -1),
+    "registry": report.get("final_registry_size", 0) >= report.get("initial_registry_size", 0) + target + report.get("births", 0),
 }
 for key, passed in checks.items():
     print(f"SOCIAL_STRESS_CHECK_{key.upper()}={'PASS' if passed else 'FAIL'}")
