@@ -147,6 +147,31 @@ jobs:
             throw "Contour 00 Server Core failed; inspect the contour artifact."
           }
 
+      - name: Contour 02 — real canonical population, production tick scheduler and durable Character writes
+        id: population_stress
+        continue-on-error: true
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: "population-stress"
+          WF_STRESS_ENABLED: "true"
+          WF_STRESS_TARGET: "1000000"
+          WF_STRESS_BATCH: "128"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
+        run: |
+          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-02-population"
+
+      - name: Aggregate Population contour result
+        if: always()
+        shell: pwsh
+        env:
+          POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
+        run: |
+          "CONTOUR_02_POPULATION_OUTCOME=$env:POPULATION_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:POPULATION_OUTCOME -ne "success") {
+            throw "Contour 02 Population failed; inspect the in-game stress report and server evidence."
+          }
+
       - name: Start one server with normal vanilla Overworld and image-derived dimension
         id: dual_world_smoke
         continue-on-error: true
@@ -177,7 +202,7 @@ jobs:
           name: maqan-world-runtime-server-acceptance
           path: |
             ${{ runner.temp }}/maqan-dual-world-runtime/
-            ${{ runner.temp }}/maqan-contour-00-server-core/
+            ${{ runner.temp }}/maqan-contour-00-server-core/\n            ${{ runner.temp }}/maqan-contour-02-population/
             ${{ runner.temp }}/maqan-contour-01-population/
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn

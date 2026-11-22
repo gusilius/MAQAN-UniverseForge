@@ -192,7 +192,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
+java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -213,6 +213,61 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
+  CURRENT_STAGE="population_stress"
+  TARGET="${WF_STRESS_TARGET:-1000000}"
+  BATCH="${WF_STRESS_BATCH:-128}"
+  REPORT="world/worldforge/stresslab/contour-02-population.json"
+  echo "POPULATION_STRESS_CONTOUR=02"
+  echo "POPULATION_STRESS_TARGET=$TARGET"
+  echo "POPULATION_STRESS_BATCH_PER_TICK=$BATCH"
+  printf 'wfstress population start %s %s\n' "$TARGET" "$BATCH" >> in.txt
+  STRESS_REPORT_READY=0
+  for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
+    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if [ -f "$REPORT" ]; then
+      cp "$REPORT" "$OUTPUT/contour-02-population.json"
+      STRESS_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","INVALID"))' "$REPORT")"
+      echo "POPULATION_STRESS_REPORTED_STATUS=$STRESS_STATUS"
+      STRESS_REPORT_READY=1
+      break
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: Forge server exited during in-game population stress"; exit 31; }
+    sleep 1
+  done
+  if [ "$STRESS_REPORT_READY" -ne 1 ]; then
+    printf '%s\n' "wfstress population stop" >> in.txt
+    echo "ERROR: in-game population stress did not produce its evidence report within $MAX_RUNTIME_SECONDS seconds"
+    exit 32
+  fi
+  if [ "$STRESS_STATUS" != "PASS" ]; then
+    echo "ERROR: production population simulation receipts did not all reach the verification world day (status=$STRESS_STATUS)"
+    exit 33
+  fi
+  python3 - "$REPORT" "$OUTPUT/contour-02-population.json" "$TARGET" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+target = int(sys.argv[3])
+if report.get("status") != "PASS":
+    raise SystemExit("Population contour did not pass: " + str(report.get("status")))
+if report.get("created") != target or report.get("final_registry_size", 0) < report.get("initial_registry_size", 0) + target:
+    raise SystemExit("Canonical Character count does not match the requested workload")
+if report.get("durable_character_writes") != target:
+    raise SystemExit("Not every created Character reached the production durable write API")
+if report.get("simulation_processed") != target or report.get("simulation_pending") != 0:
+    raise SystemExit("Normal population tick simulation did not process every generated Character")
+print("POPULATION_STRESS_EVIDENCE=PASS")
+print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+PY
+  if [ "$?" -ne 0 ]; then exit 34; fi
+  printf '%s\n' "save-all flush" >> in.txt
+  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
+  grep -Fq 'Saved the game' server.log || { echo "ERROR: population stress save-all flush was not acknowledged"; exit 35; }
+  echo "POPULATION_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
+  CURRENT_STAGE="population_stress_complete"
+  exit 0
+fi
+
 if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   CURRENT_STAGE="server_core_first_run"
   echo "SERVER_CORE_CONTOUR=00"

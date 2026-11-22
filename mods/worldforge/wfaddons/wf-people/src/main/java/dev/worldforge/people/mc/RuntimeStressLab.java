@@ -123,7 +123,7 @@ public final class RuntimeStressLab {
 
     private static int stop(net.minecraft.commands.CommandSourceStack source) {
         Run run = activeRun;
-        if (run == null || !"RUNNING".equals(run.status)) {
+        if (run == null || "REPORT_WRITTEN".equals(run.status) || "REPORT_FAILED".equals(run.status)) {
             source.sendFailure(Component.literal("Активного Population stress нет."));
             return 0;
         }
@@ -159,7 +159,7 @@ public final class RuntimeStressLab {
                     PeopleMod.LOGGER.warn("WF_STRESS contour=02_population creation_complete={} creation_day={}; waiting for the normal world calendar and tick scheduler",
                             run.created, run.creationFinishedDay);
                 }
-            } catch (Throwable failure) {
+            } catch (Exception failure) {
                 run.status = "FAILED";
                 run.failure = failure.getClass().getName();
                 PeopleMod.LOGGER.error("WF_STRESS contour=02_population failed after {} canonical creations",
