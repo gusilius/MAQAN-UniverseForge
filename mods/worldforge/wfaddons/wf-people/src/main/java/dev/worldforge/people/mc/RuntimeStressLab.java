@@ -37,6 +37,12 @@ public final class RuntimeStressLab {
     private static final int[] MILESTONES = {100, 1_000, 10_000, 100_000, 500_000, 1_000_000};
     private static final int MAX_SAMPLES = 60_000;
     private static volatile Run activeRun;
+    /** Stable acceptance target: one world-day of production scheduling, not a moving calendar. */
+    private static volatile long frozenPopulationTargetDay = -1L;
+    public static long populationTargetDay(long liveWorldDay) {
+        long frozen = frozenPopulationTargetDay;
+        return frozen >= 0L ? frozen : liveWorldDay;
+    }
     private static volatile long tickStartNanos;
 
     private static final class Run {
@@ -108,6 +114,7 @@ public final class RuntimeStressLab {
             source.sendFailure(Component.literal("World Character registry недоступен."));
             return 0;
         }
+        frozenPopulationTargetDay = -1L;
         activeRun = new Run(server, registry, target, batchPerTick);
         PeopleMod.LOGGER.warn("WF_STRESS contour=02_population status=STARTED target={} batchPerTick={} initialPopulation={} save={}",
                 target, batchPerTick, registry.size(),
@@ -141,6 +148,7 @@ public final class RuntimeStressLab {
             return 0;
         }
         if (!"PASS".equals(run.status) && !"DEGRADED".equals(run.status)) run.status = "STOPPED";
+        frozenPopulationTargetDay = -1L;
         writeReport(run);
         source.sendSuccess(() -> Component.literal("Population stress остановлен на " + run.created
                 + "/" + run.target + ". Отчёт записан в worldforge/stresslab."), true);
@@ -179,16 +187,12 @@ public final class RuntimeStressLab {
             if ("WAITING_FOR_WAL_DURABILITY".equals(run.status)
                     && run.durableWrites == run.created && run.pendingWalWrites.isEmpty()) {
                 run.creationFinishedDay = WorldForgeApi.clock().dayNumber();
-                run.status = "WAITING_FOR_REAL_SIMULATION";
-                PeopleMod.LOGGER.warn("WF_STRESS contour=02_population wal_durable={} creation_day={}; waiting for normal world calendar and tick scheduler",
-                        run.durableWrites, run.creationFinishedDay);
-            } else if ("WAITING_FOR_REAL_SIMULATION".equals(run.status)) {
-                if (WorldForgeApi.clock().dayNumber() > run.creationFinishedDay) {
-                    run.verificationTargetDay = WorldForgeApi.clock().dayNumber();
-                    run.status = "WAITING_FOR_SCHEDULER_ACK";
-                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population waiting_for_production_scheduler targetWorldDay={}",
-                            run.verificationTargetDay);
-                }
+                run.verificationTargetDay = run.creationFinishedDay == Long.MAX_VALUE
+                        ? Long.MAX_VALUE : run.creationFinishedDay + 1L;
+                frozenPopulationTargetDay = run.verificationTargetDay;
+                run.status = "WAITING_FOR_SCHEDULER_ACK";
+                PeopleMod.LOGGER.warn("WF_STRESS contour=02_population wal_durable={} creation_day={} frozen_simulation_target={}; waiting for production scheduler",
+                        run.durableWrites, run.creationFinishedDay, run.verificationTargetDay);
             } else if ("WAITING_FOR_SCHEDULER_ACK".equals(run.status)) {
                 // Do not race the verifier against the bounded production scheduler.
                 // The durable process cursor is advanced only after every registry slice
@@ -261,6 +265,7 @@ public final class RuntimeStressLab {
         if (run.verificationIndex >= run.target) {
             run.status = run.simulationPending == 0 ? "PASS" : "DEGRADED";
             if (run.simulationPending > 0) run.failure = "population_simulation_backlog";
+            frozenPopulationTargetDay = -1L;
             PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_receipts targetDay={} processed={} pending={} result={}",
                     run.verificationTargetDay, run.simulationProcessed, run.simulationPending, run.status);
         }

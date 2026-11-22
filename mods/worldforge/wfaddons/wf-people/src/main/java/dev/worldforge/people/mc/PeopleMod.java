@@ -1003,7 +1003,7 @@ public class PeopleMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            long currentWorldDay = WorldForgeApi.clock().dayNumber();
+            long currentWorldDay = RuntimeStressLab.populationTargetDay(WorldForgeApi.clock().dayNumber());
             YEAR = WorldForgeApi.clock().year();
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
             long registryGeneration = populationRegistryGeneration;
