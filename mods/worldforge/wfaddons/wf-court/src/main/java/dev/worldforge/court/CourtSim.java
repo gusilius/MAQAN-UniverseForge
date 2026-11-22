@@ -318,6 +318,10 @@ public final class CourtSim {
 
     // ------------------------------------------------------------------ жизнь и смерть
 
+    private void bear(Character father, Character mother) {
+        bear(father, mother, year(), day);
+    }
+
     private void bear(Character father, Character mother, int eventYear, long eventDay) {
         Random r = rnd("child", father.id.hashCode() + mother.id.hashCode() + eventDay);
         NameBank.Pool pool = names.pool(names.culture(father.culture));
