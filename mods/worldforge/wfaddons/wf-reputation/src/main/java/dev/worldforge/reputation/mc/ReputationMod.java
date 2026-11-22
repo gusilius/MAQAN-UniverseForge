@@ -89,7 +89,9 @@ public class ReputationMod {
         current.add(characterGlobalId, scope, scopeId, delta,
                 reason == null || reason.isBlank() ? "autonomous_npc_event" : reason);
         long eventCount = ++autonomousEvents;
-        if (eventCount % 10 == 0)
+        // Emit the first event so runtime acceptance can distinguish an active bridge
+        // from a quiet interval; thereafter keep diagnostics bounded to every tenth event.
+        if (eventCount == 1 || eventCount % 10 == 0)
             LOGGER.info("wf_reputation: autonomous NPC reputation events={} last_subject={} scope={} reason={}",
                     eventCount, characterGlobalId, target, reason);
         if (scope == ReputationStore.Scope.POLITY)
