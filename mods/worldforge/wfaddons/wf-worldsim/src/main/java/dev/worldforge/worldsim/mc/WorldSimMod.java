@@ -80,6 +80,8 @@ public final class WorldSimMod {
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     /** Avoid repeating unchanged world-census lines on every native compute frame. */
     private static final Map<String, String> LAST_GENESIS_DIAGNOSTIC_FINGERPRINT = new HashMap<>();
+    private static long LAST_GENESIS_DIAGNOSTIC_TICK = Long.MIN_VALUE;
+    private static final int GENESIS_DIAGNOSTIC_INTERVAL_TICKS = 200;
     private static final Deque<String> journal = new ArrayDeque<>();
     private static JsonObject emergenceState;
     private static JsonObject emergenceBindings = new JsonObject();
@@ -690,6 +692,12 @@ public final class WorldSimMod {
     private static void logWorldGenesisDiagnostics(MinecraftServer server, JsonObject state) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()
                 || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        // Diagnostics are observational: full-world census is deliberately throttled.
+        // Never let logging repeatedly traverse every resident/title/settlement per frame.
+        long diagnosticTick = server.getTickCount();
+        if (LAST_GENESIS_DIAGNOSTIC_TICK != Long.MIN_VALUE
+                && diagnosticTick - LAST_GENESIS_DIAGNOSTIC_TICK < GENESIS_DIAGNOSTIC_INTERVAL_TICKS) return;
+        LAST_GENESIS_DIAGNOSTIC_TICK = diagnosticTick;
         // snapshot() deep-copies persisted geography; do it once per diagnostic pass,
         // not once per dimension.
         JsonArray vanillaGeography = VanillaWorldGeography.snapshot();
@@ -804,7 +812,7 @@ public final class WorldSimMod {
                     .collect(java.util.stream.Collectors.groupingBy(contract -> contract.subjectType.name(),
                             TreeMap::new, java.util.stream.Collectors.counting()));
             Map<String, Long> titleRanks = RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId)))
+                    .filter(title -> sourceRealmIds.contains(title.realmId))
                     .collect(java.util.stream.Collectors.groupingBy(title -> title.rank.name(), TreeMap::new,
                             java.util.stream.Collectors.counting()));
             long titles = RealmsMod.POLITICS.titles().stream()
