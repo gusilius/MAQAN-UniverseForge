@@ -94,5 +94,28 @@ pub fn advance(r:Request)->Result<Frame,String>{
   let actual=advance(fixture.request).unwrap();
   assert_eq!(actual,fixture.expected);
  }
+ #[test]
+ #[ignore = "explicit 100k/500k/1m population capacity gate; run in release mode"]
+ fn population_scale_100k_500k_1m() {
+  use std::time::Instant;
+  for count in [100_000usize, 500_000, 1_000_000] {
+   let started = Instant::now();
+   let mut people = Vec::with_capacity(count);
+   for i in 0..count {
+    people.push(Person {
+     id: format!("resident-{i:07}"), birth_year: 250 + (i % 500) as i32,
+     alive: true, elapsed_days: 1, ..Default::default()
+    });
+   }
+   let frame = advance(Request {
+    schema_version: 1, world_id: format!("population-scale-{count}"),
+    year: 750, elapsed_days: 1, world_day: 182_500, characters: people,
+   }).expect("population-scale frame must complete");
+   assert_eq!(frame.characters.len(), count);
+   assert!(frame.characters.windows(2).all(|pair| pair[0].id < pair[1].id));
+   println!("POPULATION_SCALE count={} elapsed_ms={}", count, started.elapsed().as_millis());
+   drop(frame);
+  }
+ }
  #[test]fn invalid_schema_and_duplicate_ids_fail_closed(){let a=p("same");let r=Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![a.clone(),a]};assert!(advance(r).unwrap_err().contains("duplicate"));let r=Request{schema_version:2,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![]};assert!(advance(r).unwrap_err().contains("schema"));}
 }
