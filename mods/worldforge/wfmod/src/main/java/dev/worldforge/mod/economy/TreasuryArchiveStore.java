@@ -171,18 +171,25 @@ public final class TreasuryArchiveStore {
     public synchronized long checkpoint(TreasuryLedger ledger) throws IOException {
         if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
         TreasuryLedgerSnapshot.State state;
+        List<TreasuryLedger.Entry> pending;
+        long archiveNext;
         synchronized (ledger) {
-            long archiveNext = archive.nextSequence();
+            archiveNext = archive.nextSequence();
             if (archiveNext > ledger.nextSequence())
                 throw new IOException("Treasury archive is ahead of the live ledger");
-            if (archiveNext < ledger.nextSequence())
-                archive.appendAll(ledger.entriesFromSequence(archiveNext));
-            if (archive.nextSequence() != ledger.nextSequence())
-                throw new IOException("Treasury archive did not reach the live ledger sequence");
+            pending = archiveNext < ledger.nextSequence()
+                    ? ledger.entriesFromSequence(archiveNext) : List.of();
             state = ledger.checkpointState();
+            if (pending.size() != state.nextSequence() - archiveNext)
+                throw new IOException("Treasury checkpoint snapshot and journal tail have different sequence boundaries");
         }
+        // The immutable journal page and account snapshot are now pinned. File encoding,
+        // fsync, archive hashing and checkpoint publication do not hold the live ledger lock.
+        if (!pending.isEmpty()) archive.appendAll(pending);
+        if (archive.nextSequence() != state.nextSequence())
+            throw new IOException("Treasury archive did not reach the captured checkpoint sequence");
         String snapshot = TreasuryLedgerSnapshot.encode(state);
-        TreasuryCheckpointStore.Checkpoint published = checkpoints.publish(snapshot, archive);
+        checkpoints.publish(snapshot, archive);
         synchronized (ledger) {
             ledger.acknowledgeArchivedThrough(archive, state.nextSequence());
         }
