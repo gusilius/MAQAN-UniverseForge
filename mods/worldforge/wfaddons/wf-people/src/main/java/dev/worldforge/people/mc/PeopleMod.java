@@ -536,30 +536,83 @@ public class PeopleMod {
     }
 
     /** Persist only the registry that owns this Character; unrelated map failures must not block a safe death snapshot. */
+    private record EstateWalTransfer(Character deceased, Character heir, String transferId) { }
+
+    /** Finds only an active, not-yet-WAL-committed succession involving this Character. */
+    private static EstateWalTransfer estateWalTransfer(Character character) {
+        Object pending = character.props.get("estate.transfer_pending");
+        Object receipt = character.props.get("estate.transfer_receipt");
+        Object recipient = character.props.get("estate.recipient_global_id");
+        if ((pending instanceof String || receipt instanceof String) && recipient instanceof String recipientId) {
+            String transferId = pending instanceof String value ? value : (String) receipt;
+            if (!transferId.equals(character.props.get("estate.transfer_wal_committed"))) {
+                Character heir = AUTHORITY.getGlobal(recipientId);
+                if (heir != null && character.globalId.equals(heir.props.get("estate.incoming." + transferId)))
+                    return new EstateWalTransfer(character, heir, transferId);
+            }
+        }
+        for (Map.Entry<String, Object> property : character.props.entrySet()) {
+            if (!property.getKey().startsWith("estate.incoming.")
+                    || !(property.getValue() instanceof String sourceGlobalId)) continue;
+            String transferId = property.getKey().substring("estate.incoming.".length());
+            Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
+            if (deceased == null || !character.globalId.equals(deceased.props.get("estate.recipient_global_id"))
+                    || !transferId.equals(deceased.props.getOrDefault("estate.transfer_pending",
+                            deceased.props.get("estate.transfer_receipt")))
+                    || transferId.equals(deceased.props.get("estate.transfer_wal_committed"))) continue;
+            return new EstateWalTransfer(deceased, character, transferId);
+        }
+        return null;
+    }
+
+    /**
+     * Succession is a two-partition transaction, not a reason to serialize every population
+     * registry. Force the heir's commit marker and inherited state first, then the emptied
+     * deceased record, and finally its durable receipt. WAL replay plus reconcileEstates()
+     * completes a crash between any two appends without duplicating the estate.
+     */
+    private static boolean persistEstateWalTransfer(EstateWalTransfer transfer) {
+        Character deceased = transfer.deceased();
+        Character heir = transfer.heir();
+        CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(deceased.globalId);
+        CharacterRegistry heirRegistry = AUTHORITY.registryForGlobal(heir.globalId);
+        CharacterWal sourceWal = sourceRegistry == null ? null : CHARACTER_WALS.get(sourceRegistry);
+        CharacterWal heirWal = heirRegistry == null ? null : CHARACTER_WALS.get(heirRegistry);
+        if (sourceWal == null || heirWal == null) return false;
+        Object previousPending = deceased.props.get("estate.transfer_pending");
+        Object previousReceipt = deceased.props.get("estate.transfer_receipt");
+        try {
+            heirWal.append(heir.globalId, heirRegistry.toJsonRecord(heir).getBytes(StandardCharsets.UTF_8));
+            sourceWal.append(deceased.globalId,
+                    sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8));
+            deceased.props.put("estate.transfer_receipt", transfer.transferId());
+            deceased.props.remove("estate.transfer_pending");
+            deceased.props.put("estate.transfer_wal_committed", transfer.transferId());
+            sourceWal.append(deceased.globalId,
+                    sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8));
+            return true;
+        } catch (Exception failure) {
+            // If the recipient frame reached stable storage, leave a pending source marker:
+            // startup reconciliation will clear it from the already committed heir record.
+            if (heirWal != null) deceased.props.put("estate.transfer_pending", transfer.transferId());
+            if (previousReceipt instanceof String value) deceased.props.put("estate.transfer_receipt", value);
+            else deceased.props.remove("estate.transfer_receipt");
+            deceased.props.remove("estate.transfer_wal_committed");
+            LOGGER.error("wf_people: estate WAL transaction failed deceased={} heir={}; recovery marker retained",
+                    deceased.globalId, heir.globalId, failure);
+            return false;
+        }
+    }
+
     public static boolean persistCharacter(Character character, MinecraftServer server) {
         if (character == null || server == null) return false;
         CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
         if (owner == null) return false;
-        // Full cross-partition snapshots are reserved for transactions touching this Character.
-        // Scanning every Character for a pending marker here made ordinary Genesis writes
-        // trigger population-wide JSON snapshots repeatedly, causing multi-GiB heap spikes.
-        boolean transactionTouchesCharacter = character.props.containsKey("estate.transfer_pending")
-                || CharacterInventory.hasPendingTransfer(character);
-        if (!transactionTouchesCharacter) {
-            for (Map.Entry<String, Object> property : character.props.entrySet()) {
-                if (!property.getKey().startsWith("estate.incoming.")
-                        || !(property.getValue() instanceof String sourceGlobalId)) continue;
-                String transferId = property.getKey().substring("estate.incoming.".length());
-                Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
-                if (deceased != null
-                        && transferId.equals(deceased.props.get("estate.transfer_pending"))
-                        && character.globalId.equals(deceased.props.get("estate.recipient_global_id"))) {
-                    transactionTouchesCharacter = true;
-                    break;
-                }
-            }
-        }
-        if (transactionTouchesCharacter) return persistAllRegistries(server);
+        EstateWalTransfer estateTransfer = estateWalTransfer(character);
+        if (estateTransfer != null) return persistEstateWalTransfer(estateTransfer);
+        // Inventory transfers still use the existing cross-registry commit path. Estate
+        // succession is handled above with endpoint-only WAL records, never a world snapshot.
+        if (CharacterInventory.hasPendingTransfer(character)) return persistAllRegistries(server);
         // A durable per-character record is enough for routine transactional writes.
         // Full registry snapshots are reserved for bounded checkpoints and legacy compatibility.
         CharacterWal wal = CHARACTER_WALS.get(owner);
