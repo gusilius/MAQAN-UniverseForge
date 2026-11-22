@@ -629,7 +629,11 @@ public final class CourtSim {
                 faction.power = totalWeight <= 0 ? 0 : factionWeight / totalWeight;
                 faction.progress = Math.min(100, faction.progress + 2 + faction.power * 25
                         + (faction.members.size() >= 2 ? 2 : 0));
-                if (faction.progress >= 100 && faction.power >= 0.2) strike(faction);
+                // Contractual demands are a political negotiation, not a military secession.
+                // They must reach the political-domain adapter even when the coalition is too
+                // small to win an independence war; the adapter decides whether obligations change.
+                if (faction.progress >= 100
+                        && ("demands".equals(faction.type) || faction.power >= 0.2)) strike(faction);
             }
         }
         factions.values().removeIf(faction -> faction.members.isEmpty());
