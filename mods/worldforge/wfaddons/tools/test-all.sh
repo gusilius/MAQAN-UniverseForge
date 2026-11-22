@@ -8,7 +8,7 @@ trap 'rm -rf "$OUT"' EXIT
 
 ACTUAL_PACK="${2:-}"
 GROUP="${3:-all}"
-case "$GROUP" in all|npc|worldgen|politics|life|integration) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
+case "$GROUP" in all|suite|npc|worldgen|politics|life|integration) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
 
 test_group() {
   local name="$1"
@@ -76,36 +76,48 @@ if [ "${3:-}" = "--image-identity-only" ]; then
   exit $?
 fi
 
-passed=0
-failed=0
-skipped=0
-for source in tests/*.java; do
-  test_name="$(basename "$source" .java)"
-  assigned_group="$(test_group "$test_name")"
-  if [ "$GROUP" != "all" ] && [ "$GROUP" != "$assigned_group" ]; then
-    continue
+groups_to_run=("$GROUP")
+if [ "$GROUP" = "suite" ]; then groups_to_run=(npc worldgen politics life integration); fi
+total_passed=0
+total_failed=0
+total_skipped=0
+for active_group in "${groups_to_run[@]}"; do
+  echo "===== WORLD_FORGE_TEST_GROUP=$active_group ====="
+  passed=0
+  failed=0
+  skipped=0
+  for source in tests/*.java; do
+    test_name="$(basename "$source" .java)"
+    assigned_group="$(test_group "$test_name")"
+    if [ "$active_group" != "all" ] && [ "$active_group" != "$assigned_group" ]; then
+      continue
+    fi
+    if [ "$test_name" = "ImageWorldIdentityTest" ]; then
+      echo "== $test_name (skipped: requires the actual image-generated .worldmap)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    echo "== $test_name"
+    if python3 tools/run-java-test.py 120 "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
+      passed=$((passed + 1))
+    else
+      failed=$((failed + 1))
+    fi
+  done
+
+  if [ -n "$ACTUAL_PACK" ] && { [ "$active_group" = "all" ] || [ "$active_group" = "worldgen" ]; }; then
+    echo "== ImageWorldIdentityTest (actual image-generated map)"
+    if python3 tools/run-java-test.py 120 "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
+      passed=$((passed + 1))
+    else
+      failed=$((failed + 1))
+    fi
   fi
-  if [ "$test_name" = "ImageWorldIdentityTest" ]; then
-    echo "== $test_name (skipped: requires the actual image-generated .worldmap)"
-    skipped=$((skipped + 1))
-    continue
-  fi
-  echo "== $test_name"
-  if python3 tools/run-java-test.py 120 "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
-    passed=$((passed + 1))
-  else
-    failed=$((failed + 1))
-  fi
+  echo "WORLD_FORGE_GROUP_RESULT=$active_group passed=$passed skipped=$skipped failed=$failed"
+  total_passed=$((total_passed + passed))
+  total_failed=$((total_failed + failed))
+  total_skipped=$((total_skipped + skipped))
 done
 
-if [ -n "$ACTUAL_PACK" ] && { [ "$GROUP" = "all" ] || [ "$GROUP" = "worldgen" ]; }; then
-  echo "== ImageWorldIdentityTest (actual image-generated map)"
-  if python3 tools/run-java-test.py 120 "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
-    passed=$((passed + 1))
-  else
-    failed=$((failed + 1))
-  fi
-fi
-
-echo "WorldForge $GROUP logic tests: passed=$passed skipped=$skipped failed=$failed"
-[ "$failed" -eq 0 ]
+echo "WorldForge $GROUP logic tests: passed=$total_passed skipped=$total_skipped failed=$total_failed"
+[ "$total_failed" -eq 0 ]
