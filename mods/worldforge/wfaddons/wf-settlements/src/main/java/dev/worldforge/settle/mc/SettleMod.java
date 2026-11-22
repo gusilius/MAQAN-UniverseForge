@@ -1327,13 +1327,7 @@ public class SettleMod {
         Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
         try {
             Files.createDirectories(target.getParent());
-            List<Object> colonies = new ArrayList<>();
-            for (Colony colony : COLONIES.values()) colonies.add(colony.toMap());
-            Map<String, Object> root = new java.util.LinkedHashMap<>();
-            root.put("format", "wf-settle-world/1");
-            root.put("colonies", colonies);
-            root.put("trade", NETWORK.toJson());
-            Files.writeString(temporary, Json.write(root), StandardCharsets.UTF_8);
+            writeSnapshot(temporary);
             try {
                 Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                         java.nio.file.StandardCopyOption.ATOMIC_MOVE);
@@ -1386,6 +1380,20 @@ public class SettleMod {
 
     private static Path file(MinecraftServer server) { return server.getWorldPath(LevelResource.ROOT).resolve("wf_settle.json"); }
 
+    /** Writes one colony projection at a time; never retains a world-sized JSON object/string. */
+    private static void writeSnapshot(Path destination) throws java.io.IOException {
+        try (java.io.BufferedWriter writer = Files.newBufferedWriter(destination, StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                java.nio.file.StandardOpenOption.WRITE)) {
+            Iterator<Colony> source = COLONIES.values().iterator();
+            Iterator<Map<String, Object>> projections = new Iterator<>() {
+                @Override public boolean hasNext() { return source.hasNext(); }
+                @Override public Map<String, Object> next() { return source.next().toMap(); }
+            };
+            dev.worldforge.settle.SettlementSnapshotWriter.write(writer, projections, NETWORK.toJson());
+        }
+    }
+
     @SuppressWarnings("unchecked")
     static void load(MinecraftServer server) {
         resetWorkerIndexes();
@@ -1416,17 +1424,7 @@ public class SettleMod {
             LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable settlement checkpoint");
             return;
         }
-        try {
-            List<Object> l = new ArrayList<>();
-            for (Colony c : COLONIES.values()) l.add(c.toMap());
-            Map<String, Object> root = new java.util.LinkedHashMap<>();
-            root.put("format", "wf-settle-world/1");
-            root.put("colonies", l);
-            root.put("trade", NETWORK.toJson());
-            Files.writeString(file(server), Json.write(root));
-        } catch (Exception ex) {
-            LOGGER.error("wf_settle: не удалось сохранить поселения: {}", ex.toString());
-        }
+        saveDurably(server);
     }
 
     /** True while any settlement has an uncommitted mutation; all settlement writers must then fail closed. */

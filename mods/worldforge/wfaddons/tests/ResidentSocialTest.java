@@ -68,6 +68,18 @@ public final class ResidentSocialTest {
         check(CharacterDevelopment.memories(aggressive, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind")))
                         && CharacterDevelopment.memories(resident, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind"))),
                 "both participants remember the concrete negative social encounter");
+        Character receiptOwner = registry.create("Receipt Owner", "", "north", "f", 1);
+        Character receiptPeer = registry.create("Receipt Peer", "", "north", "m", 1);
+        for (int i = 0; i < 200; i++)
+            ResidentSocial.socializeOnce(receiptOwner, receiptPeer, 1, "life:bounded-receipt:" + i);
+        Object receiptRaw = receiptOwner.props.get("social.interaction_receipts");
+        check(receiptRaw instanceof Map<?, ?> receipts && receipts.size() == 64,
+                "completed social replay receipts stay within a fixed per-character memory bound");
+        int scoreBeforeReplay = ResidentSocial.score(receiptOwner, receiptPeer.globalId);
+        ResidentSocial.socializeOnce(receiptOwner, receiptPeer, 1, "life:bounded-receipt:199");
+        check(ResidentSocial.score(receiptOwner, receiptPeer.globalId) == scoreBeforeReplay,
+                "the newest receipt remains idempotent after receipt-window compaction");
+
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);
     }

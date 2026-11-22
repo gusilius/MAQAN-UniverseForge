@@ -9,6 +9,8 @@ import java.util.Map;
 /** Persistent, bounded social relationship scores stored on the canonical Character. */
 public final class ResidentSocial {
     private static final String KEY = "social.relationships";
+    // A resident has only one live pending social action; retain a bounded replay window.
+    private static final int MAX_INTERACTION_RECEIPTS = 64;
     /** A bounded neighbourhood keeps every social event's fan-out and per-NPC memory bounded. */
     public static final int MAX_RELATIONSHIPS_PER_CHARACTER = 256;
     private ResidentSocial() {}
@@ -106,9 +108,13 @@ public final class ResidentSocial {
         Map<String, Object> receipts = new LinkedHashMap<>();
         Object raw = person.props.get(receiptKey);
         if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet())
-                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
-                    receipts.put(key, value);
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key)
+                        || !(entry.getValue() instanceof String value)) continue;
+                if (receipts.size() >= MAX_INTERACTION_RECEIPTS)
+                    receipts.remove(receipts.keySet().iterator().next());
+                receipts.put(key, value);
+            }
         }
         String counterpartId = globalId(other);
         String payload = counterpartId + "|" + delta;
@@ -118,8 +124,8 @@ public final class ResidentSocial {
                 throw new IllegalStateException("Social interaction ID collision: " + operationId);
             return;
         }
-        if (receipts.size() >= 10000)
-            throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
+        while (receipts.size() >= MAX_INTERACTION_RECEIPTS)
+            receipts.remove(receipts.keySet().iterator().next());
         adjust(person, counterpartId, delta);
         updateBond(person, counterpartId, score(person, counterpartId));
         CharacterDevelopment.remember(person, "social:" + operationId,
