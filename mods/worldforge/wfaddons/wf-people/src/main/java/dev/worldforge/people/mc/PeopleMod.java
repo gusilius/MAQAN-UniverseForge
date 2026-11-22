@@ -540,12 +540,26 @@ public class PeopleMod {
         if (character == null || server == null) return false;
         CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
         if (owner == null) return false;
-        // A source-side write must never get ahead of a recipient commit marker in another file.
-        for (Character candidate : owner.all()) {
-            if (candidate.props.containsKey("estate.transfer_pending")
-                    || CharacterInventory.hasPendingTransfer(candidate))
-                return persistAllRegistries(server);
+        // Full cross-partition snapshots are reserved for transactions touching this Character.
+        // Scanning every Character for a pending marker here made ordinary Genesis writes
+        // trigger population-wide JSON snapshots repeatedly, causing multi-GiB heap spikes.
+        boolean transactionTouchesCharacter = character.props.containsKey("estate.transfer_pending")
+                || CharacterInventory.hasPendingTransfer(character);
+        if (!transactionTouchesCharacter) {
+            for (Map.Entry<String, Object> property : character.props.entrySet()) {
+                if (!property.getKey().startsWith("estate.incoming.")
+                        || !(property.getValue() instanceof String sourceGlobalId)) continue;
+                String transferId = property.getKey().substring("estate.incoming.".length());
+                Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
+                if (deceased != null
+                        && transferId.equals(deceased.props.get("estate.transfer_pending"))
+                        && character.globalId.equals(deceased.props.get("estate.recipient_global_id"))) {
+                    transactionTouchesCharacter = true;
+                    break;
+                }
+            }
         }
+        if (transactionTouchesCharacter) return persistAllRegistries(server);
         // A durable per-character record is enough for routine transactional writes.
         // Full registry snapshots are reserved for bounded checkpoints and legacy compatibility.
         CharacterWal wal = CHARACTER_WALS.get(owner);
