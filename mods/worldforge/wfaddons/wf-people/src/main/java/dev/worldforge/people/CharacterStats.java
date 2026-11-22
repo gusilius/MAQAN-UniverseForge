@@ -177,7 +177,7 @@ public final class CharacterStats {
 
     private static long hash(String s) {
         long h = 0xCBF29CE484222325L;
-        for (char c : s.toCharArray()) h = (h ^ c) * 0x100000001B3L;
+        for (int i = 0; i < s.length(); i++) h = (h ^ s.charAt(i)) * 0x100000001B3L;
         h ^= h >>> 29; h *= 0xBF58476D1CE4E5B9L; h ^= h >>> 32;
         return h;
     }
@@ -200,6 +200,8 @@ public final class CharacterStats {
         if (!SKILLS.containsKey(id)) throw new IllegalArgumentException("Unknown skill: " + id);
         return PopulationSimulation.train(c, id, xp);
     }
+
+    private record TraitCandidate(String id, long score) { }
 
     private static final Set<Set<String>> TRAIT_CONFLICTS = Set.of(
             Set.of("brave", "craven"), Set.of("just", "cruel"), Set.of("greedy", "generous"),
@@ -266,14 +268,20 @@ public final class CharacterStats {
             for (Object value : values) if (value instanceof String id && TRAITS.containsKey(id) && restored.size() < 5) restored.add(id);
             if (restored.size() >= 3 && compatibleTraits(restored)) return List.copyOf(restored);
         }
-        List<String> candidates = new ArrayList<>(TRAITS.keySet());
-        candidates.remove("usurper");
-        candidates.remove("fecund"); // rare inherited/life trait; never part of the ordinary trait lottery
-        candidates.sort(Comparator.comparingLong(id -> hash(c.id + "|trait|" + id)));
+        // Score each catalog entry exactly once. The old comparator re-hashed the same
+        // identity/trait string hundreds of times per character during TimSort comparisons.
+        // List.sort is stable, so equal scores retain the original LinkedHashMap catalog order.
+        List<TraitCandidate> candidates = new ArrayList<>(TRAITS.size() - 2);
+        for (String id : TRAITS.keySet()) {
+            if (!id.equals("usurper") && !id.equals("fecund"))
+                candidates.add(new TraitCandidate(id, hash(c.id + "|trait|" + id)));
+        }
+        candidates.sort(Comparator.comparingLong(TraitCandidate::score));
         List<String> out = new ArrayList<>();
         Set<String> groups = new HashSet<>();
         int target = 3 + (int) Math.floorMod(hash(c.id + "|trait-count"), 3L);
-        for (String id : candidates) {
+        for (TraitCandidate candidate : candidates) {
+            String id = candidate.id();
             String group = traitGroup(id);
             if (groups.contains(group)) continue;
             List<String> attempt = new ArrayList<>(out);
