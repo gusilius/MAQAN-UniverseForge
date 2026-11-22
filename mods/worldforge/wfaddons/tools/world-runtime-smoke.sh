@@ -248,8 +248,10 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     fi
     sleep 1
   done
-  if ! grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
-    && ! grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log; then
+  if ! (grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
+    && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
+    && grep -Fq 'wf_relations: autonomous NPC interactions=' server.log \
+    && grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log); then
     RUNTIME_TIMEOUT_REACHED=1
     echo "RUNTIME_SCENARIO_TIMEOUT_SECONDS=$MAX_RUNTIME_SECONDS"
     echo "ERROR: dual-world runtime did not reach acceptance evidence within its configured timeout"
