@@ -63,6 +63,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * WorldForge planetary surface adapter. Image-backed and procedural planet sources
@@ -87,6 +90,8 @@ public class WorldForgeMod {
     private static long treasuryTicks;
     private static volatile long persistedTreasuryVersion = -1L;
     private static TreasuryArchiveStore treasuryStore;
+    private static volatile ExecutorService treasuryCheckpointExecutor;
+    private static volatile boolean treasuryCheckpointQueued;
     private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
     private static volatile Path planetActivationFile;
     private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
@@ -186,35 +191,103 @@ public class WorldForgeMod {
         }
     }
 
-    /** Flushes the canonical archive/checkpoint after addons have migrated their balances. */
-    public static boolean saveTreasuryNow(MinecraftServer server) { return saveTreasury(server); }
-
-    private static synchronized boolean saveTreasury(MinecraftServer server) {
+    /**
+     * Critical domain actions synchronously append only their new immutable journal rows.
+     * Full account snapshots are serialized and published by one bounded background writer.
+     */
+    public static boolean saveTreasuryNow(MinecraftServer server) {
         if (server == null || treasuryLoadFailed || treasuryStore == null) {
-            LOGGER.error("WorldForge treasury save skipped because its canonical store is unavailable");
+            LOGGER.error("WorldForge treasury append skipped because its canonical store is unavailable");
             return false;
         }
         TreasuryLedger ledger = TreasuryService.current();
-        synchronized (ledger) {
-            long currentVersion = ledger.mutationVersion();
-            if (currentVersion == persistedTreasuryVersion) return true;
-            long startedNanos = System.nanoTime();
-            try {
-                long writtenVersion = treasuryStore.save(ledger);
-                if (writtenVersion != currentVersion)
-                    throw new IOException("Treasury changed while its canonical checkpoint was being published");
-                persistedTreasuryVersion = writtenVersion;
-                long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-                LOGGER.info("WorldForge treasury: durable archive/checkpoint accounts={} journalEntries={} nextSequence={} mutationVersion={} elapsedMs={}",
-                        ledger.accountCount(), ledger.journalSize(), ledger.nextSequence(), writtenVersion, elapsedMillis);
-                if (elapsedMillis >= 1000)
-                    LOGGER.warn("WorldForge treasury archive/checkpoint save exceeded 1s; journalEntries={} elapsedMs={}",
-                            ledger.journalSize(), elapsedMillis);
-                return true;
-            } catch (IOException | RuntimeException ex) {
-                LOGGER.error("WorldForge treasury canonical save failed; ledger remains dirty for retry: {}", ex.toString());
-                return false;
+        long startedNanos = System.nanoTime();
+        try {
+            long durableVersion = treasuryStore.appendPending(ledger);
+            persistedTreasuryVersion = Math.max(persistedTreasuryVersion, durableVersion);
+            scheduleTreasuryCheckpoint(server);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+            if (elapsedMillis >= 250)
+                LOGGER.warn("WorldForge treasury journal append took {}ms accounts={} nextSequence={}",
+                        elapsedMillis, ledger.accountCount(), ledger.nextSequence());
+            return true;
+        } catch (IOException | RuntimeException ex) {
+            LOGGER.error("WorldForge treasury journal append failed; ledger remains available for retry: {}", ex.toString());
+            return false;
+        }
+    }
+
+    private static ExecutorService treasuryCheckpointExecutor() {
+        ExecutorService current = treasuryCheckpointExecutor;
+        if (current != null && !current.isShutdown()) return current;
+        synchronized (WorldForgeMod.class) {
+            current = treasuryCheckpointExecutor;
+            if (current == null || current.isShutdown()) {
+                current = Executors.newSingleThreadExecutor(task -> {
+                    Thread thread = new Thread(task, "WorldForge-Treasury-Checkpoint");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+                treasuryCheckpointExecutor = current;
             }
+            return current;
+        }
+    }
+
+    private static void scheduleTreasuryCheckpoint(MinecraftServer server) {
+        if (server == null || treasuryLoadFailed || treasuryStore == null) return;
+        synchronized (WorldForgeMod.class) {
+            if (treasuryCheckpointQueued) return;
+            treasuryCheckpointQueued = true;
+            TreasuryLedger ledger = TreasuryService.current();
+            treasuryCheckpointExecutor().execute(() -> {
+                long startedNanos = System.nanoTime();
+                try {
+                    long checkpointVersion = treasuryStore.checkpoint(ledger);
+                    persistedTreasuryVersion = Math.max(persistedTreasuryVersion, checkpointVersion);
+                    long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                    LOGGER.info("WorldForge treasury: background checkpoint accounts={} journalEntries={} nextSequence={} mutationVersion={} elapsedMs={}",
+                            ledger.accountCount(), ledger.journalSize(), ledger.nextSequence(), checkpointVersion, elapsedMillis);
+                } catch (IOException | RuntimeException ex) {
+                    LOGGER.error("WorldForge treasury background checkpoint failed; durable journal remains authoritative and checkpoint will retry: {}",
+                            ex.toString());
+                } finally {
+                    synchronized (WorldForgeMod.class) {
+                        treasuryCheckpointQueued = false;
+                    }
+                }
+            });
+        }
+    }
+
+    /** Periodic autosave never performs full archive verification or snapshot encoding on the server tick. */
+    private static boolean saveTreasury(MinecraftServer server) {
+        return saveTreasuryNow(server);
+    }
+
+    /** Final flush is allowed to wait during shutdown; it must not abandon queued durable work. */
+    private static void flushTreasuryOnShutdown(MinecraftServer server) {
+        ExecutorService executor = treasuryCheckpointExecutor;
+        if (executor != null) {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                    LOGGER.error("WorldForge treasury checkpoint worker did not stop within 60s; preserving durable journal and skipping concurrent checkpoint");
+                    return;
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                LOGGER.error("Interrupted while waiting for WorldForge treasury checkpoint; durable journal remains authoritative");
+                return;
+            }
+        }
+        if (server == null || treasuryLoadFailed || treasuryStore == null) return;
+        try {
+            long version = treasuryStore.checkpoint(TreasuryService.current());
+            persistedTreasuryVersion = Math.max(persistedTreasuryVersion, version);
+            LOGGER.info("WorldForge treasury: shutdown checkpoint committed mutationVersion={}", version);
+        } catch (IOException | RuntimeException ex) {
+            LOGGER.error("WorldForge treasury shutdown checkpoint failed; durable journal remains available for recovery: {}", ex.toString());
         }
     }
 
@@ -357,7 +430,7 @@ public class WorldForgeMod {
     }
 
     @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); saveActionExecution(e.getServer()); ContentCommands.save(e.getServer()); }
+    public void onServerStopping(ServerStoppingEvent e) { flushTreasuryOnShutdown(e.getServer()); saveActionExecution(e.getServer()); ContentCommands.save(e.getServer()); }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
@@ -365,6 +438,10 @@ public class WorldForgeMod {
         treasuryTicks = 0;
         persistedTreasuryVersion = -1L;
         treasuryStore = null;
+        ExecutorService checkpointExecutor = treasuryCheckpointExecutor;
+        treasuryCheckpointExecutor = null;
+        treasuryCheckpointQueued = false;
+        if (checkpointExecutor != null && !checkpointExecutor.isTerminated()) checkpointExecutor.shutdown();
         worldId = null;
         dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
         actionExecutionLoadFailed = false;
