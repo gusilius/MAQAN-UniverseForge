@@ -260,9 +260,11 @@ public class WorldForgeMod {
         }
     }
 
-    /** Periodic autosave never performs full archive verification or snapshot encoding on the server tick. */
+    /** Periodic autosave queues both journal flush and checkpoint work away from the server tick. */
     private static boolean saveTreasury(MinecraftServer server) {
-        return saveTreasuryNow(server);
+        if (server == null || treasuryLoadFailed || treasuryStore == null) return false;
+        scheduleTreasuryCheckpoint(server);
+        return true;
     }
 
     /** Final flush is allowed to wait during shutdown; it must not abandon queued durable work. */
