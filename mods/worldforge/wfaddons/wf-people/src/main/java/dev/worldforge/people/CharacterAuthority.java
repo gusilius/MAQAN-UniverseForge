@@ -194,9 +194,24 @@ public final class CharacterAuthority {
     }
 
     public synchronized Character getGlobal(String globalCharacterId) {
-        refreshIndex();
+        if (globalCharacterId == null || globalCharacterId.isBlank()) return null;
+        // The world index is a batch projection. During Genesis, characters are appended
+        // in bounded batches and immediately attached to settlements. Rebuilding every
+        // world-wide identity/family index for each newly appended resident turns that
+        // materialization loop into quadratic work and can stall the server for minutes.
+        // Existing indexed IDs are verified against their owning append-only partition;
+        // newly appended IDs use the registry's O(1) local UUID map.
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
-        return identity == null ? null : byIdentity.get(identity);
+        if (identity != null) {
+            CharacterRegistry owner = registries.get(identity.mapId());
+            Character indexed = owner == null ? null : owner.getByGlobalId(globalCharacterId);
+            if (indexed != null) return indexed;
+        }
+        for (CharacterRegistry registry : registries.values()) {
+            Character person = registry.getByGlobalId(globalCharacterId);
+            if (person != null) return person;
+        }
+        return null;
     }
 
     public synchronized CharacterIdentity identityOf(String globalCharacterId) {
@@ -205,9 +220,18 @@ public final class CharacterAuthority {
     }
 
     public synchronized CharacterRegistry registryForGlobal(String globalCharacterId) {
-        refreshIndex();
+        if (globalCharacterId == null || globalCharacterId.isBlank()) return null;
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
-        return identity == null ? null : registries.get(identity.mapId());
+        if (identity != null) {
+            CharacterRegistry owner = registries.get(identity.mapId());
+            if (owner != null && owner.getByGlobalId(globalCharacterId) != null) return owner;
+        }
+        // Do not force a global index rebuild for an ID that may have been appended
+        // moments ago by the same bounded Genesis materialization batch.
+        for (CharacterRegistry registry : registries.values()) {
+            if (registry.getByGlobalId(globalCharacterId) != null) return registry;
+        }
+        return null;
     }
 
     /**
