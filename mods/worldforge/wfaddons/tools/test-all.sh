@@ -8,7 +8,7 @@ trap 'rm -rf "$OUT"' EXIT
 
 ACTUAL_PACK="${2:-}"
 GROUP="${3:-all}"
-case "$GROUP" in all|suite|npc|worldgen|politics|life|integration) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
+case "$GROUP" in all|suite|npc|worldgen|politics|life|integration|stress) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
 
 test_group() {
   local name="$1"
@@ -16,7 +16,7 @@ test_group() {
     Character*|PeopleTest|PlayerTest|NameBankTest|MarriageTest|FamilyPlanningTest|EmergentHouseholdPlanTest|EmergentPopulationIndexTest|NpcSpawnSpatialIndexTest|MilitaryDeathLedgerTest) echo npc ;;
     Genesis*|ImageWorldIdentityTest|MapGeographyTest|MapSyncSafetyTest|PlanetActivationStateTest|ProceduralPlanetGenerationTest|ProvinceContourTest|RasterTileLayerTest|SettlementMapTest) echo worldgen ;;
     Army*|CityTaxTest|CourtTest|EconomyTest|HistoricalChronicleTest|LedgerTest|OperationalSupplyPersistenceTest|OrdersTest|PoliticalIdentitySynchronizerTest|RealmEconomyTest|RealmsTest|StatecraftTest|ThreatTest|Trade*|Treasury*|TroopsTest|WarTest) echo politics ;;
-    PopulationSimulationTest|RelationsTest|ReputationTest|Resident*|SeasonTest|Settle*|ColonySimulationCadenceTest|ShopsTest) echo life ;;
+    PopulationSimulationTest|PopulationLifeStressTest|RelationsTest|ReputationTest|Resident*|SeasonTest|Settle*|ColonySimulationCadenceTest|ShopsTest) echo life ;;
     *) echo integration ;;
   esac
 }
@@ -98,7 +98,7 @@ for active_group in "${groups_to_run[@]}"; do
       continue
     fi
     echo "== $test_name"
-    if python3 tools/run-java-test.py 120 "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
+    if python3 tools/run-java-test.py "${WF_TEST_TIMEOUT_SECONDS:-120}" "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
       passed=$((passed + 1))
     else
       failed=$((failed + 1))

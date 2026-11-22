@@ -165,6 +165,15 @@ jobs:
         run: |
           bash tools/test-all.sh ../wfmod "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" suite
 
+      - name: Contours 02+03 — combined population, family and social-life stress gate
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_LIFE_STRESS_COUPLES: "42000"
+          WF_TEST_TIMEOUT_SECONDS: "300"
+        run: |
+          bash tools/test-all.sh ../wfmod "" stress
+
       - name: Contour 01 — isolated vanilla Server Core lifecycle and same-world recovery
         id: server_core
         continue-on-error: true
