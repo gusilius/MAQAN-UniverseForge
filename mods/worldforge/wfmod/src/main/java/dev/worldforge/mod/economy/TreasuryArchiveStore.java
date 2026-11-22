@@ -196,27 +196,9 @@ public final class TreasuryArchiveStore {
         return state.mutationVersion();
     }
 
-    /** Appends only the not-yet-archived suffix and publishes CURRENT last. */
+    /** Compatibility entry point; all saves use the bounded snapshot/checkpoint path. */
     public synchronized long save(TreasuryLedger ledger) throws IOException {
-        if (ledger == null) throw new IllegalArgumentException("Treasury ledger is required");
-        synchronized (ledger) {
-            long archiveNext = archive.nextSequence();
-            if (archiveNext > ledger.nextSequence())
-                throw new IOException("Treasury archive is ahead of the live ledger");
-            if (archiveNext < ledger.nextSequence())
-                archive.appendAll(ledger.entriesFromSequence(archiveNext));
-            if (archive.nextSequence() != ledger.nextSequence())
-                throw new IOException("Treasury archive did not reach the live ledger sequence");
-
-            String snapshot = TreasuryLedgerSnapshot.capture(ledger);
-            // publish() validates the snapshot and archive prefix, and atomically commits CURRENT.
-            // Reloading it immediately performs a second full archive-prefix verification and
-            // snapshot decode on the tick thread; the just-published immutable checkpoint
-            // is already the validated commit result.
-            TreasuryCheckpointStore.Checkpoint published = checkpoints.publish(snapshot, archive);
-            ledger.acknowledgeArchivedThrough(archive, archive.nextSequence());
-            return ledger.mutationVersion();
-        }
+        return checkpoint(ledger);
     }
 
     public long nextSequence() { return archive.nextSequence(); }
