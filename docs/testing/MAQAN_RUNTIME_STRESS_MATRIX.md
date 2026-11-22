@@ -29,7 +29,7 @@ Actual Forge Dedicated Server lifecycle, MinecraftServer tick, ServerLevel/Chunk
 Actual CharacterRegistry creation and UUID ownership, PeopleMod normal server tick, PopulationSimulation, durable CharacterWal writes/replay, and physical WFNpc spawning as a separate player-connected workload. Canonical scale to 1m; physical entity scale separately to 10k. Verify all IDs, receipts, needs/duties, WAL durability/replay and no starvation. Driver exists but is not validated. Latest run showed synchronous FileChannel.force on Server Thread through CharacterWal.appendBatch → CharacterWal.append → PeopleMod.persistCharacter → RuntimeStressLab.createOne. Pending change routes only dedicated stress writes through bounded CharacterWalWriter; ordinary transactional writes remain synchronous. Server thread must never wait on writer futures.
 
 ### 03 — Families / Social
-Real family planning, life-stage transitions, births/deaths, marriage/separation, kinship, inheritance, social contacts, witness/reputation propagation. Scale 1k→1m canonical people; verify no orphaned kin links, duplicate events or unbounded fan-out.
+Real family planning, life-stage transitions, births/deaths, marriage/separation, kinship, inheritance, social contacts, witness/reputation propagation. Scale 1k→1m canonical people; verify no orphaned kin links, duplicate events or unbounded fan-out. An opt-in driver now exists: it creates canonical residents in bounded batches, establishes marriages through CharacterRegistry, advances the production NpcSocialSimulation entrypoint on an isolated Relations graph, and processes pregnancies/births/deaths in bounded lifecycle batches. Its relationship checkpoint is separate from the live wf_relations.json. Driver is present but not runtime-validated; full same-save server restart/recovery and joint 02+03 scheduler acceptance remain outstanding.
 
 ### 04 — Settlements / Labor
 Real Settlement/Colony, resident life/task graph, worker roles, job assignment, construction blueprints, resource hauling, storage, routes and path replanning. Scale 1→1k settlements, 100→100k canonical workers and physical workers separately. Faults: blocked paths, missing materials, unloaded chunks, death/role change and interrupted builds.
@@ -60,5 +60,5 @@ All previously accepted production domains running simultaneously: worldgen, pop
 
 ## Current honest implementation state
 - 01 and 02 have runtime drivers, but neither has a completed maximum-load stress PASS.
-- 03–12 are mapped to real production systems but do not yet have independent server drivers. CI reports them as NOT_IMPLEMENTED instead of faking test execution.
-- The workflow contour matrix is a coverage report, not a substitute for the missing stress drivers.
+- 03 now has an opt-in in-game social/family lifecycle driver, but it is DRIVER_PRESENT_UNVERIFIED. It is not a completed server-lifecycle/restart acceptance harness and has no stress PASS. 04–12 remain mapped but have no independent server drivers.
+- The workflow contour matrix is a coverage report, not a substitute for dedicated-server load, soak, save/restart and recovery evidence.
