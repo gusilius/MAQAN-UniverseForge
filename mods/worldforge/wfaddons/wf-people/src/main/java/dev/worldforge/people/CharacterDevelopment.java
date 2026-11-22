@@ -220,14 +220,20 @@ public final class CharacterDevelopment {
             throw new IllegalArgumentException("invalid memory event ID");
         if (kind == null || kind.isBlank() || kind.length() > 64 || worldMinute < 0)
             throw new IllegalArgumentException("invalid memory");
-        List<Object> history = new ArrayList<>();
         Object raw = observer.props.get("character.memory.events");
-        if (raw instanceof List<?> list) for (Object item : list) if (item instanceof Map<?,?> map) {
-            if (eventId.equals(map.get("id"))) return false;
-            Map<String,Object> copy = new LinkedHashMap<>();
-            map.forEach((k,v) -> { if (k instanceof String key) copy.put(key,v); });
-            history.add(copy);
+        List<Object> history;
+        if (raw instanceof ArrayList<?> existing) {
+            // The canonical Character owns this mutable list. Mutate it in place:
+            // copying up to 96 maps on every conversation caused massive allocation churn.
+            @SuppressWarnings("unchecked")
+            List<Object> mutable = (List<Object>) existing;
+            history = mutable;
+        } else {
+            history = new ArrayList<>();
+            if (raw instanceof List<?> list) history.addAll(list);
         }
+        for (Object item : history)
+            if (item instanceof Map<?, ?> map && eventId.equals(map.get("id"))) return false;
         Map<String,Object> event = new LinkedHashMap<>();
         event.put("id", eventId); event.put("kind", kind);
         event.put("subject", subjectGlobalId == null ? "" : subjectGlobalId);

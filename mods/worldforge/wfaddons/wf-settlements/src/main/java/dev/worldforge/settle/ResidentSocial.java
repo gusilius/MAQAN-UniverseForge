@@ -28,9 +28,17 @@ public final class ResidentSocial {
         if (otherCharacterOrPlayerId == null || otherCharacterOrPlayerId.isBlank())
             throw new IllegalArgumentException("relationship target is required");
         Object raw = person.props.get(KEY);
-        Map<String, Object> relationships = new LinkedHashMap<>();
-        if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
+        Map<String, Object> relationships;
+        if (raw instanceof LinkedHashMap<?, ?> existing) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mutable = (Map<String, Object>) existing;
+            relationships = mutable;
+            relationships.entrySet().removeIf(entry -> entry.getKey() == null || entry.getValue() == null
+                    || !(entry.getValue() instanceof Number));
+            relationships.replaceAll((key, value) -> clamp(((Number) value).intValue()));
+        } else {
+            relationships = new LinkedHashMap<>();
+            if (raw instanceof Map<?, ?> map) for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (relationships.size() >= MAX_RELATIONSHIPS_PER_CHARACTER) break;
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
                     relationships.put(key, clamp(n.intValue()));
@@ -105,16 +113,18 @@ public final class ResidentSocial {
     @SuppressWarnings("unchecked")
     private static void applyInteractionOnce(Character person, Character other, int delta, String operationId) {
         final String receiptKey = "social.interaction_receipts";
-        Map<String, Object> receipts = new LinkedHashMap<>();
         Object raw = person.props.get(receiptKey);
-        if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (!(entry.getKey() instanceof String key)
-                        || !(entry.getValue() instanceof String value)) continue;
-                if (receipts.size() >= MAX_INTERACTION_RECEIPTS)
-                    receipts.remove(receipts.keySet().iterator().next());
-                receipts.put(key, value);
-            }
+        Map<String, Object> receipts;
+        if (raw instanceof LinkedHashMap<?, ?> existing) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mutable = (Map<String, Object>) existing;
+            receipts = mutable;
+            receipts.entrySet().removeIf(entry -> entry.getKey() == null || !(entry.getValue() instanceof String));
+        } else {
+            receipts = new LinkedHashMap<>();
+            if (raw instanceof Map<?, ?> map) for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
+                    receipts.put(key, value);
         }
         String counterpartId = globalId(other);
         String payload = counterpartId + "|" + delta;

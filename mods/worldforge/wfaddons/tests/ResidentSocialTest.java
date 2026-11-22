@@ -68,6 +68,19 @@ public final class ResidentSocialTest {
         check(CharacterDevelopment.memories(aggressive, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind")))
                         && CharacterDevelopment.memories(resident, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind"))),
                 "both participants remember the concrete negative social encounter");
+        Character memoryOwner = registry.create("Memory Owner", "", "north", "f", 1);
+        for (int i = 0; i < 200; i++)
+            CharacterDevelopment.remember(memoryOwner, "memory:event:" + i, "social_positive",
+                    "", "interaction", 1, i);
+        Object memoryRaw = memoryOwner.props.get("character.memory.events");
+        check(memoryRaw instanceof java.util.List<?> memories && memories.size() == 96,
+                "personal memory retains its bounded recent history");
+        int memoryCount = ((java.util.List<?>) memoryRaw).size();
+        check(!CharacterDevelopment.remember(memoryOwner, "memory:event:199", "social_positive",
+                        "", "duplicate", 1, 201)
+                        && ((java.util.List<?>) memoryRaw).size() == memoryCount,
+                "recent memory event IDs remain idempotent after in-place updates");
+
         Character receiptOwner = registry.create("Receipt Owner", "", "north", "f", 1);
         Character receiptPeer = registry.create("Receipt Peer", "", "north", "m", 1);
         for (int i = 0; i < 200; i++)
