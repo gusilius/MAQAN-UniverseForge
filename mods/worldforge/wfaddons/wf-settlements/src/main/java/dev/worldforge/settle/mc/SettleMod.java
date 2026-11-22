@@ -145,7 +145,9 @@ public class SettleMod {
                 anchors.put(colony.s.id,
                         new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
             }
-            cachedTradeViews = new TradeViews(Map.copyOf(settlements), Map.copyOf(anchors));
+            cachedTradeViews = new TradeViews(
+                    Collections.unmodifiableMap(new LinkedHashMap<>(settlements)),
+                    Collections.unmodifiableMap(new LinkedHashMap<>(anchors)));
             tradeViewsRevision = revision;
             return cachedTradeViews;
         }
