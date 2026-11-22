@@ -2,7 +2,6 @@ package dev.worldforge.mod;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.WorldGenRegion;
@@ -99,7 +98,7 @@ public class MapChunkGenerator extends ChunkGenerator {
         return CompletableFuture.supplyAsync(() -> {
             fill(chunk);
             return chunk;
-        }, Util.backgroundExecutor());
+        }, executor);
     }
 
     private void fill(ChunkAccess chunk) {
