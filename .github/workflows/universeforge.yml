@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap, fix/worldgen-fragmented-polities-and-diverse-genesis, integration/worldgen-rts-unification]
+    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap, fix/worldgen-fragmented-polities-and-diverse-genesis, integration/worldgen-rts-unification, fix/runtime-fair-social-scheduling]
     paths:
       - "mods/worldforge/**"
       - "map.png"
@@ -13,7 +13,7 @@ on:
       - "gradle/**"
       - ".github/workflows/universeforge.yml"
   pull_request:
-    branches: [main]
+    branches: [main, integration/worldgen-rts-unification]
     paths:
       - "mods/worldforge/**"
       - "map.png"
