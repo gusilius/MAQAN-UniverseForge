@@ -207,19 +207,29 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   # Load real chunks in the ordinary Overworld and the image-backed dimension.
   # These are normal Minecraft world-generation requests, not a campaign or a
   # synthetic data fixture; the mods observe the generated terrain themselves.
-  # Sample a bounded 9x9 chunk window (81 chunks) in each dimension.
-  # This is enough terrain to test initial civilization bootstrap without
-  # pre-generating the planet or force-loading an unbounded world.
-  printf '%s\n' "execute in minecraft:overworld run forceload add 0 0 128 128" >> in.txt
-  printf 'execute in worldforge:%s run forceload add 0 0 128 128\n' "$MAP_ID" >> in.txt
+  # Touch only one chunk in each dimension. The previous 9x9 tickets caused
+  # hundreds of chunks to remain active in a test whose purpose is lazy activation.
+  printf '%s\n' "execute in minecraft:overworld run forceload add 0 0 0 0" >> in.txt
+  printf 'execute in worldforge:%s run forceload add 0 0 0 0\n' "$MAP_ID" >> in.txt
   printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
 
+  FORCELoad_RELEASED=0
   for second in $(seq 1 900); do
     # Preserve periodic JVM snapshots while the server is healthy. The watchdog's
     # own crash report did not contain the main Server thread in the last run, so
     # a time series is required to identify the last live call stack before a stall.
     if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    # Release both one-chunk tickets as soon as the target chunks have been generated.
+    # The rest of the world must remain dormant and must not be simulated by this test.
+    if (( FORCELoad_RELEASED == 0 )) \
+      && grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log \
+      && grep -Fq 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld' server.log; then
+      printf '%s\\n' "execute in minecraft:overworld run forceload remove 0 0 0 0" >> in.txt
+      printf 'execute in worldforge:%s run forceload remove 0 0 0 0\\n' "$MAP_ID" >> in.txt
+      FORCELoad_RELEASED=1
+      echo "RUNTIME_TEST_CHUNK_TICKETS_RELEASED=1"
+    fi
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \

@@ -929,7 +929,10 @@ public class PeopleMod {
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
-            if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
+            // Routine Character mutations are already committed to the per-partition WAL
+            // by persistCharacter(). A population-wide JSON checkpoint here serialized every
+            // Character on the server thread and stalled the tick loop at scale. Keep full
+            // coordinated snapshots for explicit cross-partition transactions and shutdown.
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
         }
