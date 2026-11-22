@@ -43,6 +43,15 @@ public class CourtMod {
     /** Autonomous courts for vanilla/non-map dimensions, backed by the same canonical CharacterRegistry. */
     private static final Map<String, CourtSim> VIRTUAL_COURTS = new ConcurrentHashMap<>();
     private static final Map<String, TitleData> VIRTUAL_DATA = new ConcurrentHashMap<>();
+    /** Bounded cursor for projecting canonical ruler offices; never scan the whole population in one tick. */
+    private static final Map<String, VirtualCourtRefresh> VIRTUAL_REFRESH = new ConcurrentHashMap<>();
+    private static final int VIRTUAL_COURT_SCAN_BUDGET = 256;
+    private static final class VirtualCourtRefresh {
+        CharacterRegistry registry;
+        long membershipGeneration = Long.MIN_VALUE;
+        int cursor;
+        long completedPasses;
+    }
     /** Исходные JSON событий: уходят клиенту вместе со срезом двора. */
     private static volatile List<String> EVENT_JSON = List.of();
     private static long ticks;
@@ -60,6 +69,7 @@ public class CourtMod {
         COURTS.clear();
         VIRTUAL_COURTS.clear();
         VIRTUAL_DATA.clear();
+        VIRTUAL_REFRESH.clear();
         ticks = 0;
         List<String> evs = new ArrayList<>();
         Map<ResourceLocation, Resource> found = new TreeMap<>(e.getServer().getResourceManager().listResources("wf_events", rl -> rl.getPath().endsWith(".json")));
@@ -211,8 +221,17 @@ public class CourtMod {
     private static CourtSim virtualCourt(MinecraftServer server, String dimension, CharacterRegistry registry) {
         if (server == null || registry == null) return null;
         TitleData data = virtualTitleData(dimension);
-        int added = 0;
-        for (Character person : registry.all()) {
+        VirtualCourtRefresh refresh = VIRTUAL_REFRESH.computeIfAbsent(dimension, ignored -> new VirtualCourtRefresh());
+        long generation = registry.membershipGeneration();
+        if (refresh.registry != registry || refresh.membershipGeneration != generation) {
+            refresh.registry = registry;
+            refresh.membershipGeneration = generation;
+            refresh.cursor = 0;
+        }
+        List<Character> people = registry.all();
+        int end = Math.min(people.size(), refresh.cursor + VIRTUAL_COURT_SCAN_BUDGET);
+        for (int index = refresh.cursor; index < end; index++) {
+            Character person = people.get(index);
             if (!person.alive || !person.props.containsKey("emergence.polity_id")) continue;
             for (Character.Post post : person.posts) {
                 if (!post.place.startsWith("realm:")) continue;
@@ -232,14 +251,23 @@ public class CourtMod {
                 realm.ruler = person.globalId;
                 Object name = person.props.get("emergence.polity_name");
                 if (name instanceof String text && !text.isBlank()) realm.name = text;
-                added++;
             }
         }
-        // Preserve the real Statecraft vassal/suzerain contracts, subject types and realm names.
-        // The court keeps a lightweight view; Statecraft remains the sole authority.
-        syncVirtualStatecraftRealms(data, dimension);
-        data.refreshRealmIndex();
-        if (data.realmList().isEmpty()) return null;
+        refresh.cursor = end;
+        boolean scanComplete = end >= people.size();
+        if (scanComplete) {
+            // Re-scan continuously in bounded slices. This also observes role changes and deaths
+            // that do not alter registry membership, without an O(population) pass per server tick.
+            refresh.cursor = 0;
+            refresh.completedPasses++;
+            // Preserve Statecraft contracts only after a complete canonical-office pass.
+            syncVirtualStatecraftRealms(data, dimension);
+            data.refreshRealmIndex();
+            if (refresh.completedPasses == 1 || refresh.completedPasses % 100 == 0)
+                LOGGER.info("wf_court: virtual realm projection dimension={} people={} passes={} budget={}",
+                        dimension, people.size(), refresh.completedPasses, VIRTUAL_COURT_SCAN_BUDGET);
+        }
+        if (data.realmList().isEmpty()) return VIRTUAL_COURTS.get(dimension);
         CourtSim sim = VIRTUAL_COURTS.computeIfAbsent(dimension, key -> {
             long seed = WorldForgeMod.worldId() == null ? key.hashCode()
                     : WorldForgeMod.worldId().toString().hashCode() ^ key.hashCode();
@@ -277,6 +305,7 @@ public class CourtMod {
         COURTS.clear();
         VIRTUAL_COURTS.clear();
         VIRTUAL_DATA.clear();
+        VIRTUAL_REFRESH.clear();
     }
 
     @SubscribeEvent

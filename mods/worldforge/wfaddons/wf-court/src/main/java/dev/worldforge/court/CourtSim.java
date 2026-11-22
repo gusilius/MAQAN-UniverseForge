@@ -90,7 +90,7 @@ public final class CourtSim {
     private int nextId = 1;
 
     private boolean populationLifecycleInitialized;
-    private static final int YEARLY_LIFE_BUDGET_PER_TICK = 512;
+    private static final int YEARLY_LIFE_BUDGET_PER_TICK = 128;
     private static final class YearlyLifePass {
         final List<Character> people;
         final int populationSize;
