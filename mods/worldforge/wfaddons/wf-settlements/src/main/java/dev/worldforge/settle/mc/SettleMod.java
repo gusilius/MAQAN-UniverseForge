@@ -1961,7 +1961,7 @@ public class SettleMod {
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
         String restoredPersonId = person.globalId;
         String restoredProfession = profession;
-        colony.s.updateWorker(worker, current -> {
+        colony.s.updateWorkerKnownMember(worker, current -> {
             current.person = restoredPersonId;
             current.profession = restoredProfession;
         });

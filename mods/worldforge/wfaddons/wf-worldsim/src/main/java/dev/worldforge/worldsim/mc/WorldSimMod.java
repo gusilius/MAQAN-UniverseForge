@@ -2793,6 +2793,125 @@ public final class WorldSimMod {
         return cells.size();
     }
 
+    /**
+     * Immutable per-source geography projection. Each band is indexed once; polity projections
+     * then touch only their own band IDs and nearby spatial buckets, not the entire world array.
+     */
+    private static final class EmergentGeographyIndex {
+        private record Point(String polityId, int x, int z) { }
+        private final int provinceBlocks;
+        private final int regionBlocks;
+        private final int bucketBlocks;
+        private final long maxDistanceSquared;
+        private final Map<String, String> provinceByBand = new HashMap<>();
+        private final Map<String, String> regionByBand = new HashMap<>();
+        private final Map<String, String> biomeByBand = new HashMap<>();
+        private final Map<String, List<Point>> pointsByPolity = new HashMap<>();
+        private final Map<Long, List<Point>> spatial = new HashMap<>();
+
+        EmergentGeographyIndex(JsonObject state, EmergenceSource source) {
+            provinceBlocks = emergentProvinceScale(source);
+            regionBlocks = provinceBlocks * 2;
+            double radius = source.map == null ? 64.0
+                    : Math.max(64.0, Math.min(source.width, source.height) * source.blocksPerPixel / 4.0);
+            bucketBlocks = Math.max(1, (int) Math.ceil(radius));
+            maxDistanceSquared = (long) Math.ceil(radius * radius);
+
+            Map<String, String> polityByBand = new HashMap<>();
+            if (state.has("polities") && state.get("polities").isJsonArray()) {
+                for (var element : state.getAsJsonArray("polities")) {
+                    if (!element.isJsonObject()) continue;
+                    JsonObject polity = element.getAsJsonObject();
+                    if (!source.id.equals(polity.get("map_id").getAsString())
+                            || !polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
+                    String polityId = polity.get("id").getAsString();
+                    for (var band : polity.getAsJsonArray("settlement_ids"))
+                        polityByBand.putIfAbsent(band.getAsString(), polityId);
+                }
+            }
+
+            if (!state.has("bands") || !state.get("bands").isJsonArray()) return;
+            for (var element : state.getAsJsonArray("bands")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!source.id.equals(band.get("map_id").getAsString())) continue;
+                String bandId = band.get("id").getAsString();
+                int px = band.get("x").getAsInt(), pz = band.get("z").getAsInt();
+                int[] position = source.blockPosition(px, pz);
+                provinceByBand.put(bandId, cellKey(position[0], position[1], provinceBlocks));
+                regionByBand.put(bandId, cellKey(position[0], position[1], regionBlocks));
+
+                String biome = "unknown";
+                if (source.map != null) {
+                    int x = Math.max(0, Math.min(source.map.w - 1, px));
+                    int z = Math.max(0, Math.min(source.map.h - 1, pz));
+                    String key = source.map.biomeKey(source.map.biomeAtPx(x, z));
+                    if (key != null && !key.isBlank()) biome = key;
+                } else {
+                    String key = VanillaWorldGeography.biomeAtWorldPosition(source.id, position[0], position[1]);
+                    if (key != null && !key.isBlank()) biome = key;
+                }
+                biomeByBand.put(bandId, biome);
+
+                String polityId = polityByBand.get(bandId);
+                if (polityId != null && !polityId.isBlank()) {
+                    Point point = new Point(polityId, position[0], position[1]);
+                    pointsByPolity.computeIfAbsent(polityId, ignored -> new ArrayList<>()).add(point);
+                    spatial.computeIfAbsent(bucketKey(position[0], position[1], bucketBlocks),
+                            ignored -> new ArrayList<>()).add(point);
+                }
+            }
+        }
+
+        private static String cellKey(int x, int z, int size) {
+            return Math.floorDiv(x, size) + ":" + Math.floorDiv(z, size);
+        }
+
+        private static long bucketKey(int x, int z, int size) {
+            long bx = Math.floorDiv(x, size), bz = Math.floorDiv(z, size);
+            return (bx << 32) ^ (bz & 0xffffffffL);
+        }
+
+        Set<String> neighbors(String polityId) {
+            Set<String> result = new TreeSet<>();
+            for (Point point : pointsByPolity.getOrDefault(polityId, List.of())) {
+                int bx = Math.floorDiv(point.x(), bucketBlocks);
+                int bz = Math.floorDiv(point.z(), bucketBlocks);
+                for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                    long key = ((long) (bx + dx) << 32) ^ ((bz + dz) & 0xffffffffL);
+                    for (Point other : spatial.getOrDefault(key, List.of())) {
+                        if (polityId.equals(other.polityId())) continue;
+                        long x = (long) point.x() - other.x();
+                        long z = (long) point.z() - other.z();
+                        if (x * x + z * z <= maxDistanceSquared)
+                            result.add("emergent-" + other.polityId());
+                    }
+                }
+            }
+            return result;
+        }
+
+        int provinceCount(Set<String> bandIds) { return countCells(bandIds, provinceByBand); }
+        int regionCount(Set<String> bandIds) { return countCells(bandIds, regionByBand); }
+
+        private static int countCells(Set<String> bandIds, Map<String, String> index) {
+            Set<String> cells = new HashSet<>();
+            for (String bandId : bandIds) {
+                String cell = index.get(bandId);
+                if (cell != null) cells.add(cell);
+            }
+            return cells.size();
+        }
+
+        String biomeSummary(Set<String> bandIds) {
+            Map<String, Integer> counts = new TreeMap<>();
+            for (String bandId : bandIds)
+                counts.merge(biomeByBand.getOrDefault(bandId, "unknown"), 1, Integer::sum);
+            return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
+                    .collect(java.util.stream.Collectors.joining(","));
+        }
+    }
+
     /** Neighbours come from physical proximity, never imported political borders. */
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
         Set<String> own = new HashSet<>();
@@ -3297,6 +3416,7 @@ public final class WorldSimMod {
             boolean settlementMapMarkersChanged = false;
             EmergentPopulationIndex populationIndex = populationIndexes.computeIfAbsent(
                     registry, ignored -> new EmergentPopulationIndex(registry.all()));
+            EmergentGeographyIndex geographyIndex = new EmergentGeographyIndex(state, source);
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
@@ -3311,19 +3431,16 @@ public final class WorldSimMod {
                     for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
                 List<dev.worldforge.people.Character> members = new ArrayList<>();
                 for (String bandId : bandIds) members.addAll(populationIndex.livingResidents(bandId));
-                Set<String> neighbors = emergentNeighbors(polity, state.getAsJsonArray("polities"),
-                        state.getAsJsonArray("bands"), source);
-                String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), source);
+                Set<String> neighbors = geographyIndex.neighbors(polityId);
+                String biomes = geographyIndex.biomeSummary(bandIds);
                 String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
                         ? polity.get("ruler_global_id").getAsString() : "";
                 TitleData.Realm initialProjection = RealmsMod.registerEmergentRealm(realmId,
                         polity.get("name").getAsString(), source.id, currentRuler,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
-                initialProjection.props.put("emergence.province_count", emergentProvinceCount(
-                        bandIds, state.getAsJsonArray("bands"), source));
-                initialProjection.props.put("emergence.region_count", emergentRegionCount(
-                        bandIds, state.getAsJsonArray("bands"), source));
+                initialProjection.props.put("emergence.province_count", geographyIndex.provinceCount(bandIds));
+                initialProjection.props.put("emergence.region_count", geographyIndex.regionCount(bandIds));
                 int territoryProvinceScale = emergentProvinceScale(source);
                 initialProjection.props.put("emergence.territory_grid", territoryProvinceScale
                         + "-block-provinces/" + (territoryProvinceScale * 2) + "-block-regions");

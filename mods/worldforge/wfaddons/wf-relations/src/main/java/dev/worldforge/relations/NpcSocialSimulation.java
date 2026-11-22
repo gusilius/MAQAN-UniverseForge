@@ -91,10 +91,11 @@ public final class NpcSocialSimulation {
             List<Character> adults = new ArrayList<>();
             for (Map.Entry<String, List<Character>> indexed : indexedGroups
                     .getOrDefault(registry, Map.of()).entrySet()) {
-                List<Character> eligible = indexed.getValue().stream()
-                        .filter(person -> person.alive && year - person.birthYear >= 18
-                                && person.props.containsKey("emergence.polity_id"))
-                        .toList();
+                List<Character> eligible = new ArrayList<>();
+                for (Character person : indexed.getValue())
+                    if (person.alive && year - person.birthYear >= 18
+                            && person.props.containsKey("emergence.polity_id"))
+                        eligible.add(person);
                 if (eligible.isEmpty()) continue;
                 groups.put(indexed.getKey(), eligible);
                 adults.addAll(eligible);

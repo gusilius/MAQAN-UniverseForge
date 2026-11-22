@@ -347,16 +347,51 @@ public final class VanillaWorldGeography {
      * remote frontier cells remain neutral. The same owner IDs feed Rust snapshots,
      * save data and later map/UI projections.
      */
+    private static final int POLITICAL_BUCKET_BLOCKS = 512;
+    private static long politicalBucketKey(int x, int z) {
+        long bx = Math.floorDiv(x, POLITICAL_BUCKET_BLOCKS);
+        long bz = Math.floorDiv(z, POLITICAL_BUCKET_BLOCKS);
+        return (bx << 32) ^ (bz & 0xffffffffL);
+    }
+
+    private static Map<Long, List<PoliticalSeed>> politicalSeedIndex(List<PoliticalSeed> seeds) {
+        Map<Long, List<PoliticalSeed>> index = new java.util.HashMap<>();
+        if (seeds != null) for (PoliticalSeed seed : seeds) {
+            if (seed == null || seed.realmId.isBlank()) continue;
+            index.computeIfAbsent(politicalBucketKey(seed.x, seed.z), ignored -> new ArrayList<>()).add(seed);
+        }
+        return index;
+    }
+
+    private static String nearestPoliticalOwner(int x, int z, Map<Long, List<PoliticalSeed>> index) {
+        long bestDistance = Long.MAX_VALUE;
+        String owner = "";
+        int bx = Math.floorDiv(x, POLITICAL_BUCKET_BLOCKS);
+        int bz = Math.floorDiv(z, POLITICAL_BUCKET_BLOCKS);
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            long key = ((long) (bx + dx) << 32) ^ ((bz + dz) & 0xffffffffL);
+            for (PoliticalSeed seed : index.getOrDefault(key, List.of())) {
+                long ox = (long) x - seed.x, oz = (long) z - seed.z;
+                long distance = ox * ox + oz * oz;
+                if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
+            }
+        }
+        return bestDistance <= (long) POLITICAL_BUCKET_BLOCKS * POLITICAL_BUCKET_BLOCKS ? owner : "";
+    }
+
     public static synchronized int applyPoliticalOwnership(
             Map<String, List<PoliticalSeed>> seedsByWorld) {
         int owned = 0;
         boolean changed = false;
-        long maxDistanceSquared = 512L * 512L;
+        Map<String, Map<Long, List<PoliticalSeed>>> seedIndexes = new java.util.HashMap<>();
+        if (seedsByWorld != null) seedsByWorld.forEach((world, seeds) -> {
+            Map<Long, List<PoliticalSeed>> index = politicalSeedIndex(seeds);
+            if (!index.isEmpty()) seedIndexes.put(world, index);
+        });
         for (Region region : REGIONS.values()) {
             RegionAddress address = regionAddress(region.id);
             if (address == null || isImageMapDimension(address.dimension())) continue;
-            List<PoliticalSeed> seeds = seedsByWorld == null ? List.of()
-                    : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
+            Map<Long, List<PoliticalSeed>> seeds = seedIndexes.get("vanilla-world:" + address.dimension);
             for (JsonObject cell : region.cells.values()) {
                 String previous = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
                 // Existing sovereignty is immutable during ordinary simulation ticks.
@@ -364,22 +399,16 @@ public final class VanillaWorldGeography {
                 // recomputed from moving settlement centres or a changing seed list.
                 String owner = previous;
                 boolean land = cell.has("land") && cell.get("land").getAsBoolean();
-                if (!seeds.isEmpty() && !land) {
+                if (seeds != null && !land) {
                     // One-time sanitation of legacy invalid water ownership.
                     owner = "";
-                } else if (land && previous.isBlank() && !seeds.isEmpty()) {
+                } else if (land && previous.isBlank() && seeds != null) {
                     // PoliticalSeed positions are Minecraft block coordinates, not
-                    // unsigned WorldSim snapshot coordinates.
+                    // unsigned WorldSim snapshot coordinates. Only nearby spatial buckets
+                    // can contain a seed within the 512-block ownership radius.
                     int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
                     int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
-                    long bestDistance = Long.MAX_VALUE;
-                    for (PoliticalSeed seed : seeds) {
-                        if (seed.realmId.isBlank()) continue;
-                        long dx = (long) x - seed.x, dz = (long) z - seed.z;
-                        long distance = dx * dx + dz * dz;
-                        if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
-                    }
-                    if (bestDistance > maxDistanceSquared) owner = "";
+                    owner = nearestPoliticalOwner(x, z, seeds);
                 }
                 if (!previous.equals(owner)) { cell.addProperty("owner_realm_id", owner); changed = true; }
                 if (!owner.isBlank()) owned++;
