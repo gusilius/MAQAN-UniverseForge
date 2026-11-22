@@ -26,7 +26,7 @@ WORK="$(mktemp -d)"
 JAVA_WORK="$(cygpath -m "$WORK")"
 SERVER_PID=""
 BOT_PID=""
-SERVER_EXIT_CODE="not_observed"
+SERVER_EXIT_CODE="not_observed"\nTERMINATION_EVIDENCE="script_exit"
 CURRENT_STAGE="preflight"
 THREAD_DUMP_COUNT=0
 capture_server_threads() {
@@ -61,7 +61,7 @@ runtime_exit() {
     if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
   fi
-  python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
+  python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --server-exit-code "$SERVER_EXIT_CODE" --termination "$TERMINATION_EVIDENCE" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
   exit "$exit_code"
 }
