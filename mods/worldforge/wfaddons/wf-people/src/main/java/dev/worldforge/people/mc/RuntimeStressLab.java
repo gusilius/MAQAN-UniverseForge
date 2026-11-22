@@ -179,8 +179,17 @@ public final class RuntimeStressLab {
             } else if ("WAITING_FOR_REAL_SIMULATION".equals(run.status)) {
                 if (WorldForgeApi.clock().dayNumber() > run.creationFinishedDay) {
                     run.verificationTargetDay = WorldForgeApi.clock().dayNumber();
+                    run.status = "WAITING_FOR_SCHEDULER_ACK";
+                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population waiting_for_production_scheduler targetWorldDay={}",
+                            run.verificationTargetDay);
+                }
+            } else if ("WAITING_FOR_SCHEDULER_ACK".equals(run.status)) {
+                // Do not race the verifier against the bounded production scheduler.
+                // The durable process cursor is advanced only after every registry slice
+                // has completed the target day; receipts are checked after that acknowledgement.
+                if (PeopleMod.populationProcessedDay() >= run.verificationTargetDay) {
                     run.status = "VERIFYING_SIMULATION_RECEIPTS";
-                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_verification_started targetWorldDay={}",
+                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population production_scheduler_acknowledged targetWorldDay={}",
                             run.verificationTargetDay);
                 }
             } else if ("VERIFYING_SIMULATION_RECEIPTS".equals(run.status)) {
