@@ -766,6 +766,8 @@ public final class CharacterRegistry {
         c.props.put("family.mother_global_id", mother.globalId);
         addGlobalChild(father, c.globalId);
         addGlobalChild(mother, c.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.familyChanged(c);
         CharacterDevelopment.inheritPsychology(c, father, mother, Math.max(0L, year * 525600L));
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;

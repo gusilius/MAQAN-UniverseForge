@@ -113,6 +113,17 @@ public final class CharacterAuthority {
         sortedIdentityCache = null;
     }
 
+    /** Updates the reverse parent indexes after a canonical birth without a world scan. */
+    synchronized void familyChanged(Character person) {
+        if (person == null) return;
+        CharacterIdentity identity = byGlobalId.get(person.globalId);
+        if (identity == null || byIdentity.get(identity) != person) return;
+        addFamilyIndex(familyByParentLegacy, person.father, identity);
+        addFamilyIndex(familyByParentLegacy, person.mother, identity);
+        addFamilyIndex(familyByParentGlobal, familyId(person, "family.father_global_id"), identity);
+        addFamilyIndex(familyByParentGlobal, familyId(person, "family.mother_global_id"), identity);
+    }
+
     /**
      * Rebuild into temporary indexes and publish them only after every partition validates.
      * This is deliberately transactional: a late collision must never leave a half-empty
