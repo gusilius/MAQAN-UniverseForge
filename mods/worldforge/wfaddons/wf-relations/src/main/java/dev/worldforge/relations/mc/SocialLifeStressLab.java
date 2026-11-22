@@ -61,6 +61,7 @@ public final class SocialLifeStressLab {
     }
 
     public static synchronized boolean start(MinecraftServer server, int target, int days) {
+        if (!Boolean.getBoolean("wf.social.stress.enabled")) throw new IllegalStateException("Start a disposable server with -Dwf.social.stress.enabled=true");
         if (active != null && "RUNNING".equals(active.status)) return false;
         if (!PeopleMod.identityPartitionsReady()) throw new IllegalStateException("Character identity partitions are not ready");
         CharacterRegistry registry = PeopleMod.worldRegistry();
@@ -153,6 +154,22 @@ public final class SocialLifeStressLab {
                 && bonds > 0 && reciprocal == bonds;
         run.status = passed ? "PASS" : "FAILED";
         if (!passed) run.failure = "social_lifecycle_invariants_not_satisfied";
+        RelationsMc.save(run.server);
+        boolean saveLoadVerified = false;
+        try {
+            Path saved = run.server.getWorldPath(LevelResource.ROOT).resolve("wf_relations.json");
+            if (Files.isRegularFile(saved)) {
+                Relations restored = new Relations();
+                restored.fromJson(Files.readString(saved, StandardCharsets.UTF_8));
+                saveLoadVerified = npcBondCount(restored) == bonds;
+            }
+        } catch (Exception saveFailure) {
+            RelationsMod.LOGGER.error("WF_STRESS contour=03_social save/load verification failed", saveFailure);
+        }
+        if (!saveLoadVerified) {
+            run.status = "FAILED";
+            run.failure = "relations_save_load_verification_failed";
+        }
         writeReport(run);
     }
 
