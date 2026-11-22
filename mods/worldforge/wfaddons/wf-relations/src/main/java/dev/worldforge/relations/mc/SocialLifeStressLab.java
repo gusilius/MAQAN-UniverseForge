@@ -277,7 +277,7 @@ public final class SocialLifeStressLab {
                     "{\"contour\":\"03_families_social\",\"status\":\"%s\",\"failure\":\"%s\","
                     + "\"target\":%d,\"created\":%d,\"initial_registry_size\":%d,\"final_registry_size\":%d,"
                     + "\"groups\":%d,\"group_size\":%d,\"days_target\":%d,\"days_completed\":%d,"
-                    + "\"autonomous_interactions\":%d,\"npc_directed_bonds\":%d,\"reciprocal_bonds\":%d,"
+                    + "\"autonomous_interactions\":%d,\"conceptions\":%d,\"births\":%d,\"npc_directed_bonds\":%d,\"reciprocal_bonds\":%d,"
                     + "\"married_directed_bonds\":%d,\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
                     + "\"day_ms_p99\":%.3f,\"day_ms_max\":%.3f,\"heap_used_bytes\":%d,"
                     + "\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
