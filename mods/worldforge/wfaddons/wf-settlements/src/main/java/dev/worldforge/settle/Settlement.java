@@ -339,9 +339,9 @@ public final class Settlement {
         TreasuryLedger.Account account = resourceAccount(resource);
         Double legacyMirror = stock.get(resource);
         // The journal is append-only; TreasuryLedger maintains this predicate as an index.
-        // Never scan the full world-wide journal on every resource read/tick.
-        boolean committedArmyFoodTransfer = ledger.hasArmyFieldRationDebit(sourceAccountId);
-        if (reconcileStockMirror && !committedArmyFoodTransfer
+        // It is needed only for one-time legacy mirror reconciliation. Querying it on every
+        // resource read made every settlement tick contend on the world-wide ledger monitor.
+        if (reconcileStockMirror && !ledger.hasArmyFieldRationDebit(sourceAccountId)
                 && legacyMirror != null && Double.isFinite(legacyMirror)
                 && Math.abs(legacyMirror - account.balance) > 1e-9) {
             double delta = legacyMirror - account.balance;
