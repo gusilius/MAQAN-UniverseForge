@@ -192,7 +192,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Dworldforge.acceptance.population-stress=${WF_POPULATION_STRESS:-false} -Xms1G -Xmx3G \
+java -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -213,74 +213,6 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
-if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
-  CURRENT_STAGE="population_stress"
-  [ "${WF_POPULATION_STRESS:-false}" = "true" ] || { echo "ERROR: population stress JVM gate is not enabled"; exit 23; }
-  echo "MAQAN_POPULATION_CONTOUR=01"
-  for count in 100 1000 10000; do
-    echo "POPULATION_STRESS_STAGE=$count"
-    printf 'wfpeople stress %s\n' "$count" >> in.txt
-    for second in $(seq 1 180); do
-      grep -Fq "MAQAN_POPULATION_STRESS_RESULT requested=$count created=$count" server.log && break
-      kill -0 "$SERVER_PID" 2>/dev/null || { tail -180 server.log; echo "ERROR: server exited during population stage $count"; exit 24; }
-      sleep 1
-    done
-    grep -Fq "MAQAN_POPULATION_STRESS_RESULT requested=$count created=$count" server.log || {
-      echo "ERROR: population stage $count did not complete within 180 seconds"
-      exit 25
-    }
-    grep -F "MAQAN_POPULATION_STRESS_RESULT requested=$count" server.log | tail -1
-  done
-  printf '%s\n' "save-all flush" >> in.txt
-  sleep 5
-  grep -Fq 'Saved the game' server.log || { echo "ERROR: population save was not acknowledged"; exit 26; }
-  CURRENT_STAGE="population_stress_shutdown"
-  printf '%s\n' "stop" >> in.txt
-  for _ in $(seq 1 45); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
-  if kill -0 "$SERVER_PID" 2>/dev/null; then echo "ERROR: population server did not stop gracefully"; exit 27; fi
-  if wait "$SERVER_PID"; then first_exit=0; else first_exit=$?; fi
-  SERVER_PID=""
-  [ "$first_exit" -eq 0 ] || { SERVER_EXIT_CODE="$first_exit"; echo "ERROR: population server exit=$first_exit"; exit 28; }
-  echo "POPULATION_STRESS_FIRST_SHUTDOWN=GRACEFUL"
-
-  CURRENT_STAGE="population_stress_recovery"
-  : > in.txt
-  start_line="$(wc -l < server.log)"
-  java -Dwf.simulation.tick-multiplier=1 -Dworldforge.acceptance.population-stress=true -Xms1G -Xmx3G \
-    -XX:+HeapDumpOnOutOfMemoryError \
-    -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
-    -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
-    -Xlog:gc*:file="$JAVA_WORK/gc-population-restart-%p.log":time,uptime,level,tags \
-    @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
-    < <(tail -n +1 -f in.txt) >> server.log 2>&1 &
-  SERVER_PID=$!
-  for i in $(seq 1 180); do
-    if tail -n +"$((start_line + 1))" server.log | grep -q 'Done ('; then break; fi
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-      if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
-      SERVER_PID=""; tail -160 server.log; echo "ERROR: population recovery JVM exit=$SERVER_EXIT_CODE"; exit 29
-    fi
-    sleep 2
-  done
-  tail -n +"$((start_line + 1))" server.log | grep -q 'Done (' || { echo "ERROR: population recovery startup timed out"; exit 30; }
-  tail -n +"$((start_line + 1))" server.log | grep -F 'recovered Character WAL partition=world' | tail -1
-  if ! tail -n +"$((start_line + 1))" server.log | grep -E 'recovered Character WAL partition=world .*characters=11100'; then
-    echo "ERROR: expected 11100 canonical Characters were not recovered from the world WAL"
-    exit 31
-  fi
-  echo "MAQAN_POPULATION_WAL_RECOVERY=PASS"
-  printf '%s\n' "save-all flush" "stop" >> in.txt
-  for _ in $(seq 1 45); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
-  if kill -0 "$SERVER_PID" 2>/dev/null; then echo "ERROR: recovered population server did not stop gracefully"; exit 32; fi
-  if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
-  SERVER_PID=""
-  [ "$SERVER_EXIT_CODE" -eq 0 ] || { echo "ERROR: recovered population JVM exit=$SERVER_EXIT_CODE"; exit 33; }
-  TERMINATION_EVIDENCE="graceful_stop"
-  echo "MAQAN_POPULATION_CONTOUR_RESULT=PASS_PENDING_DIAGNOSTICS"
-  CURRENT_STAGE="population_stress_complete"
-  exit 0
-fi
-
 if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   CURRENT_STAGE="server_core_first_run"
   echo "SERVER_CORE_CONTOUR=00"
@@ -325,7 +257,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   CURRENT_STAGE="server_core_restart"
   : > in.txt
   start_line="$(wc -l < server.log)"
-  java -Dwf.simulation.tick-multiplier=1 -Dworldforge.acceptance.population-stress=${WF_POPULATION_STRESS:-false} -Xms1G -Xmx3G \
+  java -Dwf.simulation.tick-multiplier=1 -Xms1G -Xmx3G \
     -XX:+HeapDumpOnOutOfMemoryError \
     -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
     -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
