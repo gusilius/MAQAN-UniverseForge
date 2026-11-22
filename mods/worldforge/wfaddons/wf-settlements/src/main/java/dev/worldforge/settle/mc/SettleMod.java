@@ -1918,18 +1918,30 @@ public class SettleMod {
         return false;
     }
 
-    /** Reinstates an existing living Character as a settlement worker; no new Character is allocated. */
+    /** Compatibility entry point for callers without a batch ownership projection. */
     public static boolean attachExistingCharacter(String colonyId, String characterId) {
+        return attachExistingCharacter(colonyId, characterId, null);
+    }
+
+    /** Reinstates an existing living Character as a settlement worker; no new Character is allocated. */
+    public static boolean attachExistingCharacter(String colonyId, String characterId,
+                                                   Map<String, String> workerColonyByPerson) {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
-        // Recovery may replay a transition after the destination settlement was already saved.
-        // Treat the exact existing assignment as success; never create a duplicate worker.
-        for (Colony other : COLONIES.values()) {
-            if (other == null || other.s == null) continue;
-            for (dev.worldforge.settle.Worker worker : other.s.workers) {
-                if (!characterId.equals(worker.person)) continue;
-                return other == colony;
+        // Batch callers provide a projection built once for the whole materialization pass.
+        // This keeps per-resident idempotency checks O(1), rather than rescanning all workers.
+        if (workerColonyByPerson != null) {
+            String assignedColony = workerColonyByPerson.get(characterId);
+            if (assignedColony != null) return colonyId.equals(assignedColony);
+        } else {
+            // Compatibility path for isolated callers without a prebuilt ownership projection.
+            for (Colony other : COLONIES.values()) {
+                if (other == null || other.s == null) continue;
+                for (dev.worldforge.settle.Worker worker : other.s.workers) {
+                    if (!characterId.equals(worker.person)) continue;
+                    return other == colony;
+                }
             }
         }
         CharacterRegistry registry = null;
@@ -1970,6 +1982,7 @@ public class SettleMod {
             if (other != null && other.s != null)
                 other.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
         }
+        if (workerColonyByPerson != null) workerColonyByPerson.put(characterId, colonyId);
         return true;
     }
 
