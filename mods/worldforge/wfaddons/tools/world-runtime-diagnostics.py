@@ -28,16 +28,21 @@ rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be cra
 detected=[n for n,pat in rules if re.search(pat,content,re.I)]
 client_incompatible=bool(re.search(r"requires Forge to be installed on the client|Forge.*installed on the client",survey_content,re.I))
 client_failed=bool(re.search(r"SURVEY_BOT_(?:ERROR|KICKED|DISCONNECTED)|survey player client exited before joining",survey_content,re.I))
-if a.exit_code==0: outcome="passed"
-elif client_incompatible: outcome="failed_client_incompatible"
-elif client_failed: outcome="failed_client_connection"
-elif "watchdog" in detected: outcome="failed_watchdog"
-elif "out_of_memory" in detected: outcome="failed_out_of_memory"
-elif "native_failure" in detected: outcome="failed_native"
+if a.exit_code==0 and a.server_exit_code=="0": outcome="passed"
+elif a.exit_code==0 and a.server_exit_code=="not_observed": outcome="inconclusive_server_exit_unobserved"
+elif client_incompatible: outcome="failed_test_client_incompatible"
+elif client_failed: outcome="failed_test_client_connection"
+elif "watchdog" in detected: outcome="failed_server_watchdog"
+elif "out_of_memory" in detected: outcome="failed_server_oom"
+elif "native_failure" in detected: outcome="failed_server_native"
 elif "timeout" in detected: outcome="failed_timeout"
-elif "startup_failure" in detected: outcome="failed_startup"
-elif "preflight_failure" in detected: outcome="failed_preflight"
-else: outcome="failed_unclassified"
+elif "startup_failure" in detected: outcome="failed_server_startup"
+elif "preflight_failure" in detected: outcome="failed_test_preflight"
+elif a.termination.lower() in ("runner_killed","process_killed","external_termination"): outcome="failed_infrastructure_termination"
+elif a.exit_code != 0 and re.search(r"curl:|Could not resolve host|connection reset|Forge installer download|installer.jar", (installer.read_text(encoding="utf-8",errors="replace") if installer.exists() else ""), re.I): outcome="failed_infrastructure"
+elif a.exit_code != 0 and detected: outcome="failed_server_exception"
+elif a.exit_code != 0: outcome="failed_test_or_unclassified"
+else: outcome="inconclusive"
 rejected_matches = re.findall(r"proposal\s+([^\s]+)\s+rejected:\s*(.+)", content, re.I)
 rejected_reasons = {}
 for _proposal_id, reason in rejected_matches:
