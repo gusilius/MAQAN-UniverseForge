@@ -13,7 +13,7 @@ case "$GROUP" in all|suite|npc|worldgen|politics|life|integration|stress) ;; *) 
 test_group() {
   local name="$1"
   case "$name" in
-    Character*|PeopleTest|PlayerTest|NameBankTest|MarriageTest|FamilyPlanningTest|EmergentHouseholdPlanTest|EmergentPopulationIndexTest|NpcSpawnSpatialIndexTest|MilitaryDeathLedgerTest) echo npc ;;
+    Character*|PeopleTest|PlayerTest|NameBankTest|MarriageTest|FamilyPlanningTest|EmergentHouseholdPlanTest|EmergentPopulationIndexTest|NpcSpawnSpatialIndexTest|MilitaryDeathLedgerTest) echo npc ;;\n    PopulationLifeStressTest) echo stress ;;
     Genesis*|ImageWorldIdentityTest|MapGeographyTest|MapSyncSafetyTest|PlanetActivationStateTest|ProceduralPlanetGenerationTest|ProvinceContourTest|RasterTileLayerTest|SettlementMapTest) echo worldgen ;;
     Army*|CityTaxTest|CourtTest|EconomyTest|HistoricalChronicleTest|LedgerTest|OperationalSupplyPersistenceTest|OrdersTest|PoliticalIdentitySynchronizerTest|RealmEconomyTest|RealmsTest|StatecraftTest|ThreatTest|Trade*|Treasury*|TroopsTest|WarTest) echo politics ;;
     PopulationSimulationTest|PopulationLifeStressTest|RelationsTest|ReputationTest|Resident*|SeasonTest|Settle*|ColonySimulationCadenceTest|ShopsTest) echo life ;;
