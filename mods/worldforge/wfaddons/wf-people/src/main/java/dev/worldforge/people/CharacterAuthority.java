@@ -172,8 +172,10 @@ public final class CharacterAuthority {
         byGlobalId.clear();
         byGlobalId.putAll(nextByGlobalId);
         byLegacyId.clear();
-        for (Map.Entry<String, Set<CharacterIdentity>> entry : nextByLegacyId.entrySet())
-            byLegacyId.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        // nextByLegacyId is a private build graph that is never exposed elsewhere.
+        // Transfer its sets directly instead of cloning every legacy-ID bucket during
+        // publication; the old copy doubled peak bucket memory and allocation pressure.
+        byLegacyId.putAll(nextByLegacyId);
         familyByParentGlobal = nextFamilyByParentGlobal;
         familyByParentLegacy = nextFamilyByParentLegacy;
         familyByChildGlobal = nextFamilyByChildGlobal;
