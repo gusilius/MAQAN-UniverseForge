@@ -713,13 +713,10 @@ public class SettleMod {
             if (amount <= 1e-9) continue;
             String referenceStem = referencePrefix + ":" + colony.s.id;
             String sourceAccount = colony.s.ledgerAccountId("food");
-            long previousLegs = TreasuryService.current().entriesForAccount(sourceAccount).stream()
-                    .filter(entry -> !entry.credit()
-                            && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                            && entry.category().equals("army-field-rations")
-                            && entry.reference().startsWith(referenceStem + ":"))
-                    .map(TreasuryLedger.Entry::reference).distinct().count();
-            String reference = referenceStem + ":" + previousLegs;
+            // The caller's army/day operation ID plus the source settlement is already
+            // globally unique. Keep it stable for retries instead of scanning this account's
+            // entire archived journal to manufacture a monotonically increasing suffix.
+            String reference = referenceStem;
             boolean moved = colony.s.transferResourceToAccount("food", targetAccountId, targetOwnerId,
                     amount, TreasuryLedger.Kind.LOGISTICS, "army-field-rations", reference);
             if (!moved) continue;
