@@ -28,7 +28,8 @@ rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be cra
 detected=[n for n,pat in rules if re.search(pat,content,re.I)]
 client_incompatible=bool(re.search(r"requires Forge to be installed on the client|Forge.*installed on the client",survey_content,re.I))
 client_failed=bool(re.search(r"SURVEY_BOT_(?:ERROR|KICKED|DISCONNECTED)|survey player client exited before joining",survey_content,re.I))
-if a.exit_code==0 and a.server_exit_code=="0": outcome="passed"
+if a.exit_code==0 and a.server_exit_code=="0" and a.termination=="graceful_stop": outcome="passed"
+elif a.exit_code==0 and (a.server_exit_code!="0" or a.termination!="graceful_stop"): outcome="failed_server_shutdown"
 elif a.exit_code==0 and a.server_exit_code=="not_observed": outcome="inconclusive_server_exit_unobserved"
 elif client_incompatible: outcome="failed_test_client_incompatible"
 elif client_failed: outcome="failed_test_client_connection"
