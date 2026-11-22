@@ -61,7 +61,7 @@ public class RelationsMod {
                     int year = WorldForgeApi.clock().startYear + day / 365;
                     RelationsMc.REL.tick(day);
                     int totalInteractions = NpcSocialSimulation.advance(RelationsMc.REL, day, year);
-                    if (totalInteractions > 0 && day % 30 == 0)
+                    if (totalInteractions > 0)
                         LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, day);
                 }
             }
