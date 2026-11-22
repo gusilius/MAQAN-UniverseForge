@@ -225,8 +225,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     if (( FORCELoad_RELEASED == 0 )) \
       && grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log \
       && grep -Fq 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld' server.log; then
-      printf '%s\\n' "execute in minecraft:overworld run forceload remove 0 0 0 0" >> in.txt
-      printf 'execute in worldforge:%s run forceload remove 0 0 0 0\\n' "$MAP_ID" >> in.txt
+      printf '%s\n' "execute in minecraft:overworld run forceload remove 0 0 0 0" >> in.txt
+      printf 'execute in worldforge:%s run forceload remove 0 0 0 0\n' "$MAP_ID" >> in.txt
       FORCELoad_RELEASED=1
       echo "RUNTIME_TEST_CHUNK_TICKETS_RELEASED=1"
     fi
