@@ -38,11 +38,17 @@ capture_server_threads() {
   jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || true
   THREAD_DUMP_COUNT=$((THREAD_DUMP_COUNT + 1))
   echo "RUNTIME_THREAD_DUMP=$stamp PID=$pid"
+  # Preserve the full dump as an artifact and surface the server plus chunk/IO
+  # workers in the Actions log. A server-thread-only excerpt cannot diagnose a
+  # CompletableFuture.join() that is waiting on a stalled storage worker.
   awk '
-    /^"Server thread"/ { printing=1; lines=0 }
+    /^"/ {
+      printing = ($0 ~ /Server thread|IO-Worker|Worker-Main|Chunk|ForkJoinPool|Worker-[0-9]+/);
+      lines = 0
+    }
     printing { print; lines++ }
-    printing && (lines >= 42 || (lines > 1 && /^$/)) { exit }
-  ' "$OUTPUT/thread-dump-$stamp.txt" | sed 's/^/SERVER_THREAD_STACK: /' || true
+    printing && (lines >= 55 || (lines > 1 && /^$/)) { printing = 0 }
+  ' "$OUTPUT/thread-dump-$stamp.txt" | sed 's/^/JVM_THREAD_STACK: /' || true
 }
 runtime_exit() {
   local exit_code="$1"
