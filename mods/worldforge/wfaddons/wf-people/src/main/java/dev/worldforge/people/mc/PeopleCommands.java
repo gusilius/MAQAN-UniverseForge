@@ -30,7 +30,7 @@ final class PeopleCommands {
                 .then(Commands.literal("court").then(Commands.argument("realm", StringArgumentType.greedyString()).executes(c -> court(c.getSource(), StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("org").then(Commands.argument("id", StringArgumentType.word()).then(Commands.argument("org", StringArgumentType.word()).executes(c -> setOrg(c.getSource(), StringArgumentType.getString(c, "id"), StringArgumentType.getString(c, "org"))))))
                 .then(Commands.literal("who").executes(c -> who(c.getSource())))
-                .then(Commands.literal("stress").then(Commands.argument("count", IntegerArgumentType.integer(1, 100000)).executes(c -> populationStress(c.getSource(), IntegerArgumentType.getInteger(c, "count")))))
+                .then(Commands.literal("stress").then(Commands.argument("count", IntegerArgumentType.integer(1, 1000000)).executes(c -> populationStress(c.getSource(), IntegerArgumentType.getInteger(c, "count")))))
                 .then(Commands.literal("kill").then(Commands.argument("id", StringArgumentType.word()).executes(c -> kill(c.getSource(), StringArgumentType.getString(c, "id"))))));
     }
 
