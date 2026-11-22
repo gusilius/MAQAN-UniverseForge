@@ -202,8 +202,8 @@ jobs:
           name: maqan-world-runtime-server-acceptance
           path: |
             ${{ runner.temp }}/maqan-dual-world-runtime/
-            ${{ runner.temp }}/maqan-contour-01-server-core/\n            ${{ runner.temp }}/maqan-contour-02-population/
-            ${{ runner.temp }}/maqan-contour-01-population/
+            ${{ runner.temp }}/maqan-contour-01-server-core/
+            ${{ runner.temp }}/maqan-contour-02-population/
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
