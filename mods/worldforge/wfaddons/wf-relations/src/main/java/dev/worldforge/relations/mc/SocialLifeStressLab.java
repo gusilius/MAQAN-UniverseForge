@@ -106,6 +106,7 @@ public final class SocialLifeStressLab {
             long started = System.nanoTime();
             int day = run.startDay + run.daysCompleted;
             int year = run.startYear + Math.floorDiv(day, 365);
+            RelationsMc.REL.tick(day);
             int processed = NpcSocialSimulation.advance(RelationsMc.REL, day, year);
             long elapsed = System.nanoTime() - started;
             run.dayNanos[run.daysCompleted] = elapsed;
@@ -183,7 +184,7 @@ public final class SocialLifeStressLab {
         int baseDay = run.startDay + run.daysCompleted;
         int baseYear = run.startYear + Math.floorDiv(baseDay, 365);
         long seed = 0x4D4151414E5F3033L;
-        for (Character mother : run.registry.all()) {
+        for (Character mother : new ArrayList<>(run.registry.all())) {
             if (!mother.alive || !"f".equalsIgnoreCase(mother.gender)
                     || mother.spouse == null || mother.spouse.isBlank()) continue;
             Character father = run.registry.get(mother.spouse);
@@ -211,6 +212,14 @@ public final class SocialLifeStressLab {
                     "Social Stress Child " + run.births, (run.births & 1) == 0 ? "f" : "m",
                     conceptionYear + 1);
             FamilyPlanning.complete(mother, father, conceptionYear + 1, child.id);
+            Relations.Bond parentChild = RelationsMc.REL.bond("npc:" + father.globalId, "npc:" + child.globalId);
+            Relations.Bond childParent = RelationsMc.REL.bond("npc:" + child.globalId, "npc:" + father.globalId);
+            parentChild.affinity = childParent.affinity = 35;
+            parentChild.met = childParent.met = 1;
+            Relations.Bond motherChild = RelationsMc.REL.bond("npc:" + mother.globalId, "npc:" + child.globalId);
+            Relations.Bond childMother = RelationsMc.REL.bond("npc:" + child.globalId, "npc:" + mother.globalId);
+            motherChild.affinity = childMother.affinity = 35;
+            motherChild.met = childMother.met = 1;
             if (!mother.children.contains(child.id) || !father.children.contains(child.id)
                     || !father.id.equals(child.father) || !mother.id.equals(child.mother))
                 throw new IllegalStateException("Canonical family links failed for " + child.globalId);
