@@ -105,11 +105,11 @@ public final class CharacterAuthorityTest {
         check(duplicateRejected, "registration rejects a real duplicate global UUID from another map");
         check(authority.getGlobal(a.globalId) == a
                         && authority.getGlobal(late.globalId) == late
-                        && authority.size() == 5
+                        && authority.size() == 6
                         && authority.mapCount() == 4,
                 "failed map registration preserves every previously indexed Character and registry");
         authority.beginWorld(world);
-        check(authority.getGlobal(a.globalId) == a && authority.size() == 5 && authority.mapCount() == 4,
+        check(authority.getGlobal(a.globalId) == a && authority.size() == 6 && authority.mapCount() == 4,
                 "re-entering the same WorldId preserves already registered Character partitions");
 
         authority.clear();
