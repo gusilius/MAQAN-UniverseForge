@@ -25,6 +25,31 @@ public class MarriageTest {
         String A = rs.get(0), B = rs.get(1);
         Character son = kid(s, A, "m", 20), daughter = kid(s, B, "f", 19), son2 = kid(s, B, "m", 20), young = kid(s, B, "f", 10);
         ok(Marriages.family(s, son).equals(A), "дом ребёнка определяется по отцу");
+
+        // Full ancestry must be resolved beyond four generations and across both parents.
+        Character dynastyRoot = s.reg.create("Дальний предок", "", "", "m", s.year() - 90);
+        dynastyRoot.posts.add(new Character.Post("ruler", "realm:" + A));
+        Character lineage = dynastyRoot;
+        for (int generation = 0; generation < 7; generation++) {
+            Character next = s.reg.create("Поколение " + generation, "", "", "m", s.year() - 70 + generation * 5);
+            next.father = lineage.id;
+            lineage.children.add(next.id);
+            lineage = next;
+        }
+        ok(Marriages.family(s, lineage).equals(A), "дом определяется через семь поколений");
+
+        Character maternalRoot = s.reg.create("Материнский предок", "", "", "f", s.year() - 80);
+        maternalRoot.posts.add(new Character.Post("ruler", "realm:" + B));
+        Character maternalChild = s.reg.create("Потомок по матери", "", "", "m", s.year() - 20);
+        maternalChild.mother = maternalRoot.id;
+        maternalRoot.children.add(maternalChild.id);
+        ok(Marriages.family(s, maternalChild).equals(B), "дом определяется по материнской линии");
+
+        Character cycleA = s.reg.create("Цикл A", "", "", "m", s.year() - 30);
+        Character cycleB = s.reg.create("Цикл B", "", "", "f", s.year() - 28);
+        cycleA.father = cycleB.id;
+        cycleB.mother = cycleA.id;
+        ok(Marriages.family(s, cycleA).isEmpty(), "циклическая родословная безопасно завершается");
         ok(!Marriages.evaluate(s, son.id, son2.id).ok, "однополый брак отклонён");
         ok(!Marriages.evaluate(s, son.id, young.id).ok, "несовершеннолетняя отклонена");
         Character sis = kid(s, A, "f", 21);
