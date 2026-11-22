@@ -68,6 +68,10 @@ runtime_exit() {
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
     echo "RUNTIME_TERMINATION_EVIDENCE=$TERMINATION_EVIDENCE"
   fi
+  if [ "$exit_code" -eq 0 ] && { [ "$SERVER_EXIT_CODE" != "0" ] || [ "$TERMINATION_EVIDENCE" != "graceful_stop" ]; }; then
+    echo "ERROR: runtime scenario cannot PASS without observed JVM exit 0 and graceful shutdown"
+    exit_code=14
+  fi
   python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --server-exit-code "$SERVER_EXIT_CODE" --termination "$TERMINATION_EVIDENCE" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
   exit "$exit_code"
