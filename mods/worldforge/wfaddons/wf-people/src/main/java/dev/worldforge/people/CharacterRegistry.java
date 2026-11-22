@@ -156,6 +156,8 @@ public final class CharacterRegistry {
         byId.put(c.id, c);
         byGlobalId.put(c.globalId, c);
         ordered.add(c);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.characterCreated(this, c);
         markMembershipMutation();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));

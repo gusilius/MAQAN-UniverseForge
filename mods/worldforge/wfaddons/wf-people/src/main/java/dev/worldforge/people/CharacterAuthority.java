@@ -18,7 +18,8 @@ public final class CharacterAuthority {
     private Map<String, Set<CharacterIdentity>> familyBySpouseGlobal = new HashMap<>();
     private Map<String, Set<CharacterIdentity>> familyBySpouseLegacy = new HashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
-    private final Map<String, Long> indexedRevisions = new HashMap<>();
+    private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
+    private final Map<CharacterRegistry, String> registryMapIds = new IdentityHashMap<>();
     /** Immutable sorted identity snapshot reused by estate/succession queries until membership changes. */
     private List<CharacterIdentity> sortedIdentityCache;
     private long familyIndexDay = Long.MIN_VALUE;
@@ -38,6 +39,7 @@ public final class CharacterAuthority {
         // A registry may be reused by a newly created authority after server/world shutdown.
         for (CharacterRegistry registry : registries.values()) registry.unbindAuthority(this);
         registries.clear();
+        registryMapIds.clear();
         byIdentity.clear();
         byGlobalId.clear();
         byLegacyId.clear();
@@ -47,7 +49,7 @@ public final class CharacterAuthority {
         familyByChildLegacy.clear();
         familyBySpouseGlobal.clear();
         familyBySpouseLegacy.clear();
-        indexedRevisions.clear();
+        indexedMembershipGenerations.clear();
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
         worldId = null;
@@ -76,14 +78,39 @@ public final class CharacterAuthority {
         // bindAuthority fails without leaving a rejected partition in this authority.
         registry.bindAuthority(this);
         registries.put(key, registry);
+        registryMapIds.put(registry, key);
         try {
             refreshIndex();
         } catch (RuntimeException ex) {
             // A rejected partition must not poison the live authority or discard its last valid index.
             registries.remove(key, registry);
+            registryMapIds.remove(registry);
             registry.unbindAuthority(this);
             throw ex;
         }
+    }
+
+    /**
+     * Incrementally publishes one append-only Character. Registry revision changes on every
+     * append, but rebuilding every global/family index for each append made a population
+     * creation run quadratic. Full rebuilds are now reserved for wholesale registry restore.
+     */
+    synchronized void characterCreated(CharacterRegistry registry, Character character) {
+        String mapId = registryMapIds.get(registry);
+        WorldId currentWorld = worldId;
+        if (mapId == null || currentWorld == null) return;
+        CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, character.id, character.globalId);
+        CharacterIdentity existingGlobal = byGlobalId.putIfAbsent(character.globalId, identity);
+        if (existingGlobal != null && !existingGlobal.equals(identity))
+            throw new IllegalStateException("Global Character UUID collision " + character.globalId
+                    + " between " + existingGlobal.mapId() + "/" + existingGlobal.characterId()
+                    + " and " + mapId + "/" + character.id);
+        Character existing = byIdentity.putIfAbsent(identity, character);
+        if (existing != null && existing != character)
+            throw new IllegalStateException("Duplicate Character identity " + identity);
+        byLegacyId.computeIfAbsent(character.id, ignored -> new LinkedHashSet<>()).add(identity);
+        indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
+        sortedIdentityCache = null;
     }
 
     /**
@@ -94,9 +121,12 @@ public final class CharacterAuthority {
     private void refreshIndex() {
         WorldId currentWorld = worldId;
         if (currentWorld == null) return;
-        boolean changed = indexedRevisions.size() != registries.size();
+        boolean changed = indexedMembershipGenerations.size() != registries.size();
         if (!changed) for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            if (!Objects.equals(indexedRevisions.get(entry.getKey()), entry.getValue().revision())) {
+            // Appends are indexed incrementally by characterCreated(). Only a wholesale
+            // registry replacement invalidates the complete identity projection.
+            if (!Objects.equals(indexedMembershipGenerations.get(entry.getKey()),
+                    entry.getValue().membershipGeneration())) {
                 changed = true;
                 break;
             }
@@ -106,7 +136,7 @@ public final class CharacterAuthority {
         Map<CharacterIdentity, Character> nextByIdentity = new HashMap<>();
         Map<String, CharacterIdentity> nextByGlobalId = new HashMap<>();
         Map<String, Set<CharacterIdentity>> nextByLegacyId = new HashMap<>();
-        Map<String, Long> nextRevisions = new HashMap<>();
+        Map<String, Long> nextMembershipGenerations = new HashMap<>();
         Map<String, Set<CharacterIdentity>> nextFamilyByParentGlobal = new HashMap<>();
         Map<String, Set<CharacterIdentity>> nextFamilyByParentLegacy = new HashMap<>();
         Map<String, Set<CharacterIdentity>> nextFamilyByChildGlobal = new HashMap<>();
@@ -117,7 +147,7 @@ public final class CharacterAuthority {
         for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
             String mapId = entry.getKey();
             CharacterRegistry registry = entry.getValue();
-            nextRevisions.put(mapId, registry.revision());
+            nextMembershipGenerations.put(mapId, registry.membershipGeneration());
             for (Character character : registry.all()) {
                 CharacterIdentity identity = new CharacterIdentity(
                         currentWorld, mapId, character.id, character.globalId);
@@ -182,8 +212,8 @@ public final class CharacterAuthority {
         familyByChildLegacy = nextFamilyByChildLegacy;
         familyBySpouseGlobal = nextFamilyBySpouseGlobal;
         familyBySpouseLegacy = nextFamilyBySpouseLegacy;
-        indexedRevisions.clear();
-        indexedRevisions.putAll(nextRevisions);
+        indexedMembershipGenerations.clear();
+        indexedMembershipGenerations.putAll(nextMembershipGenerations);
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
     }
@@ -351,7 +381,8 @@ public final class CharacterAuthority {
      * The index is rebuilt transactionally with registry membership changes, not per death.
      */
     public synchronized List<Character> kinCandidates(Character person) {
-        refreshIndex();
+        // Do not rebuild world-wide indexes here. A succession lookup is a hot path inside
+        // the yearly life pass; registry appends are already indexed incrementally.
         if (person == null) return List.of();
         LinkedHashSet<CharacterIdentity> matches = new LinkedHashSet<>();
         addFamilyMatches(matches, familyByParentLegacy, person.father);
@@ -364,6 +395,14 @@ public final class CharacterAuthority {
         addFamilyMatches(matches, familyByChildGlobal, person.globalId);
         addFamilyMatches(matches, familyBySpouseLegacy, person.id);
         addFamilyMatches(matches, familyBySpouseGlobal, person.globalId);
+        // Resolve direct parent/spouse pointers against the O(1) identity indexes as well.
+        // This keeps newly-born relatives visible before the next annual family-index rebuild.
+        addLegacyIdentityMatches(matches, person.father);
+        addLegacyIdentityMatches(matches, person.mother);
+        addLegacyIdentityMatches(matches, person.spouse);
+        addGlobalIdentityMatch(matches, familyId(person, "family.father_global_id"));
+        addGlobalIdentityMatch(matches, familyId(person, "family.mother_global_id"));
+        addGlobalIdentityMatch(matches, familyId(person, "family.spouse_global_id"));
         Object globalChildren = person.props.get("family.children_global_ids");
         if (globalChildren instanceof List<?> ids) for (Object rawId : ids)
             if (rawId instanceof String id) {
@@ -390,6 +429,18 @@ public final class CharacterAuthority {
             if (candidate != null) result.add(candidate);
         }
         return Collections.unmodifiableList(result);
+    }
+
+    private void addLegacyIdentityMatches(Set<CharacterIdentity> target, String legacyId) {
+        if (legacyId == null || legacyId.isBlank()) return;
+        Set<CharacterIdentity> found = byLegacyId.get(legacyId);
+        if (found != null) target.addAll(found);
+    }
+
+    private void addGlobalIdentityMatch(Set<CharacterIdentity> target, String globalId) {
+        if (globalId == null || globalId.isBlank()) return;
+        CharacterIdentity identity = byGlobalId.get(globalId);
+        if (identity != null) target.add(identity);
     }
 
     private static int legacySequence(String id) {

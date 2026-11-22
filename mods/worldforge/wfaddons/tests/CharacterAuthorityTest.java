@@ -61,6 +61,11 @@ public final class CharacterAuthorityTest {
                 "characters created after map registration are indexed without a second registration");
         check(firstIdentitySnapshot != authority.identities() && authority.identities().size() == 3,
                 "identity snapshot cache is invalidated when a registered partition gains a Character");
+        Character lateChild = north.addChild(a, a, "Late descendant", "m", 2);
+        check(authority.getGlobal(lateChild.globalId) == lateChild
+                        && authority.kinCandidates(lateChild).contains(a)
+                        && authority.kinCandidates(a).contains(lateChild),
+                "append-only births update global identity and succession candidates without rebuilding the world index");
 
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);
