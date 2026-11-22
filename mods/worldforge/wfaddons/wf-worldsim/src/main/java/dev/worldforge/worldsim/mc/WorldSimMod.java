@@ -2488,6 +2488,14 @@ public final class WorldSimMod {
         boolean sourceComplete = true;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
+        // Name uniqueness is checked for every newly materialized band. Build one
+        // frequency index per batch instead of rescanning every Colony for every band.
+        Map<String, Integer> settlementNameCounts = new HashMap<>();
+        for (Colony existing : SettleMod.COLONIES.values()) {
+            if (existing == null || existing.s == null || existing.s.name == null) continue;
+            String normalized = existing.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+            if (!normalized.isBlank()) settlementNameCounts.merge(normalized, 1, Integer::sum);
+        }
         if (state.has("polities") && state.get("polities").isJsonArray()) {
             for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
                 JsonObject polity = item.getAsJsonObject();
@@ -2606,15 +2614,15 @@ public final class WorldSimMod {
                         String currentSettlementName = colony.s.name == null ? "" : colony.s.name.trim();
                         String normalizedSettlementName = currentSettlementName.replaceAll("\\s+", " ")
                                 .toLowerCase(Locale.ROOT);
-                        Colony adoptedColony = colony;
-                        boolean duplicateSettlementName = SettleMod.COLONIES.values().stream()
-                                .anyMatch(other -> other != null && other != adoptedColony && other.s != null
-                                        && other.s.name != null
-                                        && other.s.name.trim().replaceAll("\\s+", " ")
-                                                .equalsIgnoreCase(normalizedSettlementName));
+                        boolean duplicateSettlementName = settlementNameCounts.getOrDefault(normalizedSettlementName, 0) > 1;
                         if (currentSettlementName.isBlank() || currentSettlementName.equals(colony.s.id)
                                 || duplicateSettlementName) {
+                            if (!normalizedSettlementName.isBlank())
+                                settlementNameCounts.computeIfPresent(normalizedSettlementName,
+                                        (ignored, count) -> count <= 1 ? null : count - 1);
                             colony.s.name = emergentSettlementName(source, bandId, residents);
+                            String replacementName = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                            if (!replacementName.isBlank()) settlementNameCounts.merge(replacementName, 1, Integer::sum);
                         }
                     }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)
@@ -2628,8 +2636,9 @@ public final class WorldSimMod {
                     colony.s.types = SettleMod.TYPES;
                     colony.s.refreshType(residentIds.size(), emergentSettlementTerrain(source, band),
                             emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
+                    Set<String> residentIdSet = new HashSet<>(residentIds);
                     for (Worker worker : new ArrayList<>(colony.s.workers)) {
-                        if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
+                        if (worker.person == null || worker.person.isBlank() || residentIdSet.contains(worker.person)) continue;
                         dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
                         if (former == null) continue;
                         String reason = !former.alive ? "death:emergence" : "transfer:emergence";
