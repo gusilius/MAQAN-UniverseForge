@@ -2485,7 +2485,6 @@ public final class WorldSimMod {
         boolean settlementBindingsChanged = false;
         // A source partition is checkpointed only after its resident/settlement batches finish.
         // Persisting the entire Character registry every 256 residents was quadratic I/O.
-        boolean sourceComplete = true;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
         // Build the worker ownership projection once per bounded materialization pass.
@@ -2517,6 +2516,9 @@ public final class WorldSimMod {
             }
         }
         for (EmergenceSource source : emergenceSources()) {
+            // Each dimension/map has an independent checkpoint. A stalled source must not
+            // suppress durable progress for another source in the same server pass.
+            boolean sourceComplete = true;
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
             // Establish a provisional, deterministic racial composition before the

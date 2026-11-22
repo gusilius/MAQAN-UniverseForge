@@ -101,17 +101,40 @@ public final class Marriages {
     /** Раз в год ИИ женит наследников: ищет подходящую пару в государстве с лучшим мнением правителей. */
     public static void aiYear(CourtSim s) {
         List<String> realms = new ArrayList<>();
-        for (var r : s.d.realmList()) if (!s.humans.contains(r.id)) realms.add(r.id);
+        for (var realm : s.d.realmList()) if (!s.humans.contains(realm.id)) realms.add(realm.id);
+
+        // One registry pass builds all eligible marriage pools. Previously candidates()
+        // rescanned the full population for every realm from inside a nested realm loop.
+        Map<String, List<Character>> candidatesByRealm = new HashMap<>();
+        Map<String, Character> rulers = new HashMap<>();
+        for (Character character : s.reg.all()) {
+            if (!single(s, character)) continue;
+            String realm = family(s, character);
+            if (realm.isEmpty()) continue;
+            Character ruler = rulers.computeIfAbsent(realm, s::ruler);
+            if (character == ruler) continue;
+            candidatesByRealm.computeIfAbsent(realm, ignored -> new ArrayList<>()).add(character);
+        }
+        Comparator<Character> order = Comparator
+                .comparingInt((Character character) -> character.birthYear)
+                .thenComparing(character -> character.id);
+        candidatesByRealm.values().forEach(pool -> pool.sort(order));
+
         for (String ra : realms) {
             if (s.rnd("marry", ra.hashCode() + s.day).nextDouble() > 0.35) continue;
-            Character best = null, bestB = null; int bestScore = Integer.MIN_VALUE;
-            for (Character a : candidates(s, ra)) {
+            Character best = null, bestB = null;
+            int bestScore = Integer.MIN_VALUE;
+            for (Character a : candidatesByRealm.getOrDefault(ra, List.of())) {
                 for (String rb : realms) {
                     if (rb.equals(ra)) continue;
-                    for (Character b : candidates(s, rb)) {
+                    for (Character b : candidatesByRealm.getOrDefault(rb, List.of())) {
                         if (a.gender.equals(b.gender)) continue;
-                        Offer o = evaluate(s, a.id, b.id);
-                        if (o.ok && o.score > bestScore) { bestScore = o.score; best = a; bestB = b; }
+                        Offer offer = evaluate(s, a.id, b.id);
+                        if (offer.ok && offer.score > bestScore) {
+                            bestScore = offer.score;
+                            best = a;
+                            bestB = b;
+                        }
                     }
                 }
                 if (best != null) break;

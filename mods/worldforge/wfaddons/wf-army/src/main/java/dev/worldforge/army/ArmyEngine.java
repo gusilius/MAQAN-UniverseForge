@@ -709,11 +709,15 @@ public final class ArmyEngine {
         pactsDaily();
         Set<String> realms = new LinkedHashSet<>();
         for (TitleData.Realm r : d().realmList()) if (!r.titleKeys.isEmpty()) realms.add(r.id);
+        Map<String, List<Army>> armiesByRealm = new HashMap<>();
+        for (Army army : armies.values())
+            armiesByRealm.computeIfAbsent(army.realm, ignored -> new ArrayList<>()).add(army);
         for (String r : realms) {
-            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
-            gold(r); // initialize or migrate the canonical opening balance before the first daily posting
+            List<Army> realmArmies = armiesByRealm.getOrDefault(r, List.of());
+            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && realmArmies.isEmpty() && !isAtWar(r)) continue;
+            gold(r);
             double inc = eco.net(r), cost = 0;
-            for (Army a : armiesOf(r)) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
+            for (Army a : realmArmies) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
                 UnitType u = types.get(e.getKey());
                 if (u != null) cost += e.getValue() * u.upkeep * (a.mercenary ? 2 : 1) / 10.0;
             }
@@ -722,9 +726,12 @@ public final class ArmyEngine {
             if (!treasuryPosted) say("Казна " + realmName(r) + " достигла кредитного лимита; армейские расходы не оплачены");
             double cap = levyCap(r);
             pool.put(r, Math.min(cap, pool(r) + cap * POOL_REGEN));
-            if (g < 0) for (Army a : armiesOf(r)) {
+            if (g < 0) for (Army a : realmArmies) {
                 a.morale = Math.max(0.1, a.morale - 0.03);
-                for (String k : new ArrayList<>(a.units.keySet())) { int left = (int) Math.floor(a.units.get(k) * 0.98); if (left <= 0) a.units.remove(k); else a.units.put(k, left); }
+                for (String k : new ArrayList<>(a.units.keySet())) {
+                    int left = (int) Math.floor(a.units.get(k) * 0.98);
+                    if (left <= 0) a.units.remove(k); else a.units.put(k, left);
+                }
             }
         }
     }
@@ -732,14 +739,26 @@ public final class ArmyEngine {
     private boolean isAtWar(String r) { for (War w : war.wars.values()) if (w.active && w.sides.containsKey(r)) return true; return false; }
 
     private void movement() {
+        Map<Integer, List<Army>> byLocation = new HashMap<>();
+        for (Army army : armies.values())
+            byLocation.computeIfAbsent(army.location, ignored -> new ArrayList<>()).add(army);
         for (Army a : armies.values()) {
             if (a.moving()) {
                 a.moveAcc += a.speed(types);
                 while (a.moveAcc >= 1 && a.moving()) {
                     a.moveAcc -= 1;
+                    List<Army> oldLocation = byLocation.get(a.location);
+                    if (oldLocation != null) {
+                        oldLocation.remove(a);
+                        if (oldLocation.isEmpty()) byLocation.remove(a.location);
+                    }
                     a.location = a.path.remove(0);
-                    // вошли в землю, где стоит армия врага - остановка: сражение
-                    if (hostileArmyAt(a)) { a.path.clear(); a.lastEvent = "встретила врага в " + title(a.location); break; }
+                    byLocation.computeIfAbsent(a.location, ignored -> new ArrayList<>()).add(a);
+                    if (hostileArmyAt(a, byLocation)) {
+                        a.path.clear();
+                        a.lastEvent = "встретила врага в " + title(a.location);
+                        break;
+                    }
                 }
                 if (!a.moving()) { a.moveAcc = 0; if (a.lastEvent.startsWith("идёт")) a.lastEvent = "прибыла в " + title(a.location); }
             } else a.morale = Math.min(1.0, a.morale + 0.02);
@@ -748,6 +767,12 @@ public final class ArmyEngine {
 
     private boolean hostileArmyAt(Army a) {
         for (Army b : armies.values()) if (b != a && b.location == a.location && enemyWar(a.realm, b.realm) != null) return true;
+        return false;
+    }
+
+    private boolean hostileArmyAt(Army army, Map<Integer, List<Army>> byLocation) {
+        for (Army other : byLocation.getOrDefault(army.location, List.of()))
+            if (other != army && enemyWar(army.realm, other.realm) != null) return true;
         return false;
     }
 

@@ -47,7 +47,10 @@ public final class NpcSocialSimulation {
                 for (Character person : registry.all()) {
                     if (!person.alive) continue;
                     String polity = polityOf(person);
-                    if (!polity.isBlank()) byPolity.computeIfAbsent(polity, ignored -> new ArrayList<>()).add(person);
+                    if (polity.isBlank()) continue;
+                    String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
+                    if (band.isBlank()) band = polity;
+                    byPolity.computeIfAbsent(band, ignored -> new ArrayList<>()).add(person);
                 }
             }
         }
@@ -77,6 +80,7 @@ public final class NpcSocialSimulation {
             CharacterRegistry registry = PeopleMod.authority().registry(mapId);
             if (registry != null) registries.put(mapId, registry);
         }
+        Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day);
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
         int interactions = 0, groupsVisited = 0;
         // Family trees are stable during this daily pass; cache ancestry to avoid repeated traversal.
@@ -84,12 +88,16 @@ public final class NpcSocialSimulation {
         for (Map.Entry<String, CharacterRegistry> partition : registries.entrySet()) {
             CharacterRegistry registry = partition.getValue();
             Map<String, List<Character>> groups = new TreeMap<>();
-            for (Character person : registry.all()) {
-                if (!person.alive || year - person.birthYear < 18
-                        || !person.props.containsKey("emergence.polity_id")) continue;
-                String group = String.valueOf(person.props.getOrDefault("emergence.band_id",
-                        person.props.getOrDefault("emergence.polity_id", "")));
-                if (!group.isBlank()) groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(person);
+            List<Character> adults = new ArrayList<>();
+            for (Map.Entry<String, List<Character>> indexed : indexedGroups
+                    .getOrDefault(registry, Map.of()).entrySet()) {
+                List<Character> eligible = indexed.getValue().stream()
+                        .filter(person -> person.alive && year - person.birthYear >= 18
+                                && person.props.containsKey("emergence.polity_id"))
+                        .toList();
+                if (eligible.isEmpty()) continue;
+                groups.put(indexed.getKey(), eligible);
+                adults.addAll(eligible);
             }
             for (Map.Entry<String, List<Character>> group : groups.entrySet()) {
                 if (groupsVisited++ >= MAX_GROUPS_PER_DAY) return interactions;
@@ -128,10 +136,7 @@ public final class NpcSocialSimulation {
 
             // Traders and diplomatic envoys can establish ties beyond their home settlement.
             // Keep this bounded and deterministic; ordinary residents never receive this bypass.
-            List<Character> adults = registry.all().stream()
-                    .filter(person -> person.alive && year - person.birthYear >= 18
-                            && person.props.containsKey("emergence.polity_id"))
-                    .sorted(Comparator.comparing(person -> person.globalId)).toList();
+            adults.sort(Comparator.comparing(person -> person.globalId));
             Map<String, List<Character>> adultsByBand = new TreeMap<>();
             for (Character adult : adults) {
                 String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
