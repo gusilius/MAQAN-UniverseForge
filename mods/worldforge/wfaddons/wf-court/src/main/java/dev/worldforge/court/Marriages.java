@@ -179,7 +179,6 @@ public final class Marriages {
                         }
                     }
                 }
-                if (best != null) break;
             }
             if (best != null) propose(s, best.id, bestB.id);
         }
