@@ -56,9 +56,27 @@ runtime_exit() {
   trap - EXIT
   if [ -n "$BOT_PID" ]; then kill "$BOT_PID" 2>/dev/null || true; wait "$BOT_PID" 2>/dev/null || true; fi
   if [ -f "$WORK/in.txt" ] && [ -n "$SERVER_PID" ]; then
+    CURRENT_STAGE="server_shutdown"
+    echo "RUNTIME_SHUTDOWN_BEGIN_STAGE=$CURRENT_STAGE"
     printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
-    for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+    for second in $(seq 1 30); do
+      kill -0 "$SERVER_PID" 2>/dev/null || break
+      if (( second % 5 == 0 )); then
+        echo "RUNTIME_SHUTDOWN_DIAGNOSTIC_SECONDS=$second"
+        capture_server_threads
+        local stamp pid
+        stamp="$(date +%s)"
+        jcmd -l > "$OUTPUT/jcmd-processes-shutdown-$stamp.txt" 2>&1 || true
+        pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-shutdown-$stamp.txt")"
+        if [ -n "$pid" ]; then
+          jcmd "$pid" GC.heap_info > "$OUTPUT/shutdown-heap-$stamp.txt" 2>&1 || true
+        fi
+      fi
+      sleep 1
+    done
     if kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo "RUNTIME_SHUTDOWN_GRACE_TIMEOUT=30"
+      capture_server_threads
       TERMINATION_EVIDENCE="forced_kill_after_grace_timeout"
       taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
     else
@@ -67,6 +85,7 @@ runtime_exit() {
     if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
     echo "RUNTIME_TERMINATION_EVIDENCE=$TERMINATION_EVIDENCE"
+  fi
   fi
   if [ "$exit_code" -eq 0 ] && { [ "$SERVER_EXIT_CODE" != "0" ] || [ "$TERMINATION_EVIDENCE" != "graceful_stop" ]; }; then
     echo "ERROR: runtime scenario cannot PASS without observed JVM exit 0 and graceful shutdown"
