@@ -997,11 +997,13 @@ public final class TreasuryLedgerTest {
             TreasuryLedger incrementalLedger = incrementalStore.loadOrMigrate(null);
             incrementalLedger.open("incremental:realm", "realm:incremental", "silver", 100);
             incrementalStore.appendPending(incrementalLedger);
+            java.nio.file.Path checkpointManifest = incrementalRoot.resolve("checkpoints/CURRENT.json");
+            String checkpointBeforePosting = java.nio.file.Files.readString(checkpointManifest);
             incrementalLedger.deposit("incremental:realm", 25, TreasuryLedger.Kind.TAX,
                     "tax", "incremental-tax-1", 60, "incremental durable journal");
             long appendedVersion = incrementalStore.appendPending(incrementalLedger);
             boolean journalOnly = incrementalLedger.pendingJournalSize() == 0
-                    && !java.nio.file.Files.exists(incrementalRoot.resolve("checkpoints/CURRENT.json"));
+                    && checkpointBeforePosting.equals(java.nio.file.Files.readString(checkpointManifest));
             TreasuryLedger recoveredIncremental = new TreasuryArchiveStore(incrementalRoot)
                     .loadOrMigrate(null);
             ok(journalOnly && appendedVersion == incrementalLedger.mutationVersion()
