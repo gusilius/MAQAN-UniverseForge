@@ -75,7 +75,30 @@
       "staged_maximum_load": true,
       "soak": true,
       "restart_recovery": true,
-      "pass_requires_evidence": true
+      "pass_requires_evidence": true,
+      "staged_targets": [
+        10000,
+        20000,
+        50000,
+        100000,
+        500000
+      ],
+      "stage_isolation": "one fresh dedicated Forge server and save per target",
+      "model_days_per_stage": 635,
+      "next_gate": {
+        "name": "joint_02_03",
+        "requires": [
+          "02:PASS",
+          "03:PASS"
+        ],
+        "targets": [
+          1000000,
+          2000000,
+          5000000,
+          10000000
+        ],
+        "status": "NOT_STARTED"
+      }
     },
     {
       "id": "04",
