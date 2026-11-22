@@ -216,7 +216,7 @@ public final class TradeNetwork {
             destination.refreshResourceMirror(shipment.res);
             destination.amount(shipment.res);
             if (!goodsPosted) {
-                subtractIncoming(incoming, shipment, ledger);
+                incoming.merge(new IncomingKey(shipment.to, shipment.res), -shipment.quantity, Double::sum);
                 destination.recordTradeFlow(shipment.res, shipment.quantity, true);
                 destination.shiftDemand(shipment.res,-shipment.quantity);
             }
