@@ -156,13 +156,13 @@ public final class TreasuryArchiveStore {
                 throw new IOException("Treasury archive did not reach the live ledger sequence");
 
             String snapshot = TreasuryLedgerSnapshot.capture(ledger);
+            // publish() validates the snapshot and archive prefix, and atomically commits CURRENT.
+            // Reloading it immediately performs a second full archive-prefix verification and
+            // snapshot decode on the tick thread; the just-published immutable checkpoint
+            // is already the validated commit result.
             TreasuryCheckpointStore.Checkpoint published = checkpoints.publish(snapshot, archive);
-            TreasuryCheckpointStore.Checkpoint verified = checkpoints.load(archive);
-            if (!published.checksum().equals(verified.checksum())
-                    || published.nextSequence() != verified.nextSequence())
-                throw new IOException("Treasury checkpoint publication did not round-trip");
             ledger.acknowledgeArchivedThrough(archive, archive.nextSequence());
-            return TreasuryLedgerSnapshot.decode(verified.snapshotJson()).mutationVersion();
+            return ledger.mutationVersion();
         }
     }
 

@@ -700,7 +700,11 @@ public class RealmsMod {
     }
 
     private static void save(MinecraftServer s) {
-        if (!persistNow(s)) LOGGER.error("wf_realms: coordinated identity checkpoint remains dirty");
+        // Routine cadence is not a cross-domain transaction: Character WAL and settlement
+        // durability are managed by their own stores. Coordinating a full identity snapshot
+        // every 6000 ticks serialized every population partition on the server thread.
+        if (s == null || !persistPoliticalOnly(s)
+            LOGGER.error("wf_realms: periodic political checkpoint remains dirty");
     }
 
     @SubscribeEvent
