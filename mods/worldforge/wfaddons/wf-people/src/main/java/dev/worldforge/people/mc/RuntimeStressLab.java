@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.mod.api.WorldForgeApi;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -46,6 +47,11 @@ public final class RuntimeStressLab {
         int sampleCursor;
         int created;
         int nextMilestone;
+        long creationFinishedDay = -1L;
+        long verificationTargetDay = -1L;
+        int verificationIndex;
+        int simulationProcessed;
+        int simulationPending;
         long maxTickNanos;
         String status = "RUNNING";
         String failure = "";
@@ -121,7 +127,7 @@ public final class RuntimeStressLab {
             source.sendFailure(Component.literal("Активного Population stress нет."));
             return 0;
         }
-        run.status = "STOPPED";
+        if (!"PASS".equals(run.status) && !"DEGRADED".equals(run.status)) run.status = "STOPPED";
         writeReport(run);
         source.sendSuccess(() -> Component.literal("Population stress остановлен на " + run.created
                 + "/" + run.target + ". Отчёт записан в worldforge/stresslab."), true);
@@ -147,13 +153,27 @@ public final class RuntimeStressLab {
                     PeopleMod.LOGGER.info("WF_STRESS contour=02_population milestone={} created={} registrySize={}",
                             milestone, run.created, run.registry.size());
                 }
-                if (run.created >= run.target) run.status = "COMPLETED";
+                if (run.created >= run.target) {
+                    run.creationFinishedDay = WorldForgeApi.clock().dayNumber();
+                    run.status = "WAITING_FOR_REAL_SIMULATION";
+                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population creation_complete={} creation_day={}; waiting for the normal world calendar and tick scheduler",
+                            run.created, run.creationFinishedDay);
+                }
             } catch (Throwable failure) {
                 run.status = "FAILED";
                 run.failure = failure.getClass().getName();
                 PeopleMod.LOGGER.error("WF_STRESS contour=02_population failed after {} canonical creations",
                         run.created, failure);
             }
+        } else if ("WAITING_FOR_REAL_SIMULATION".equals(run.status)) {
+            if (WorldForgeApi.clock().dayNumber() > run.creationFinishedDay) {
+                run.verificationTargetDay = WorldForgeApi.clock().dayNumber();
+                run.status = "VERIFYING_SIMULATION_RECEIPTS";
+                PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_verification_started targetWorldDay={}",
+                        run.verificationTargetDay);
+            }
+        } else if ("VERIFYING_SIMULATION_RECEIPTS".equals(run.status)) {
+            verifySimulationReceipts(run, 512);
         }
 
         long elapsed = Math.max(0L, System.nanoTime() - tickStartNanos);
@@ -161,7 +181,31 @@ public final class RuntimeStressLab {
         run.sampleCursor = (run.sampleCursor + 1) % MAX_SAMPLES;
         if (run.sampleCount < MAX_SAMPLES) run.sampleCount++;
         run.maxTickNanos = Math.max(run.maxTickNanos, elapsed);
-        if (!"RUNNING".equals(run.status)) writeReport(run);
+        if ("PASS".equals(run.status) || "DEGRADED".equals(run.status)
+                || "FAILED".equals(run.status) || "STOPPED".equals(run.status)) writeReport(run);
+    }
+
+    private static void verifySimulationReceipts(Run run, int budget) {
+        int end = Math.min(run.target, run.verificationIndex + budget);
+        for (int i = run.verificationIndex; i < end; i++) {
+            Character character = run.registry.all().get(run.initialPopulation + i);
+            Object raw = character.props.get("population.last_simulated_world_day");
+            long receipt;
+            try {
+                receipt = raw instanceof String value ? Long.parseLong(value) : -1L;
+            } catch (NumberFormatException malformed) {
+                receipt = -1L;
+            }
+            if (receipt >= run.verificationTargetDay) run.simulationProcessed++;
+            else run.simulationPending++;
+        }
+        run.verificationIndex = end;
+        if (run.verificationIndex >= run.target) {
+            run.status = run.simulationPending == 0 ? "PASS" : "DEGRADED";
+            if (run.simulationPending > 0) run.failure = "population_simulation_backlog";
+            PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_receipts targetDay={} processed={} pending={} result={}",
+                    run.verificationTargetDay, run.simulationProcessed, run.simulationPending, run.status);
+        }
     }
 
     private static void createOne(Run run) throws Exception {
@@ -206,12 +250,13 @@ public final class RuntimeStressLab {
                     + "\"durable_character_writes\":%d,\"batch_per_tick\":%d,\"elapsed_seconds\":%.3f,"
                     + "\"tick_ms_p50\":%.3f,\"tick_ms_p95\":%.3f,\"tick_ms_p99\":%.3f,\"tick_ms_max\":%.3f,"
                     + "\"heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,"
-                    + "\"population_processed_world_day\":%d,\"sample_count\":%d}\n",
+                    + "\"population_processed_world_day\":%d,\"creation_finished_day\":%d,\"simulation_target_day\":%d,\"simulation_processed\":%d,\"simulation_pending\":%d,\"sample_count\":%d}\n",
                     finalStatus, run.failure, run.target, run.created, run.initialPopulation, run.registry.size(),
                     run.created, run.batchPerTick, elapsedNanos / 1_000_000_000.0,
                     percentile(samples, 0.50) / 1_000_000.0, percentile(samples, 0.95) / 1_000_000.0,
                     percentile(samples, 0.99) / 1_000_000.0, run.maxTickNanos / 1_000_000.0,
-                    usedHeap, runtime.totalMemory(), cpuNanos, PeopleMod.populationProcessedDay(), run.sampleCount);
+                    usedHeap, runtime.totalMemory(), cpuNanos, PeopleMod.populationProcessedDay(), run.creationFinishedDay,
+                    run.verificationTargetDay, run.simulationProcessed, run.simulationPending, run.sampleCount);
             Files.writeString(report, json, StandardCharsets.UTF_8);
             run.status = "REPORT_WRITTEN";
             PeopleMod.LOGGER.warn("WF_STRESS contour=02_population status={} created={} registrySize={} report={}",
