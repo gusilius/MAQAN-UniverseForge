@@ -205,6 +205,10 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
 
   for second in $(seq 1 900); do
+    # Preserve periodic JVM snapshots while the server is healthy. The watchdog's
+    # own crash report did not contain the main Server thread in the last run, so
+    # a time series is required to identify the last live call stack before a stall.
+    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
