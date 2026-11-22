@@ -221,8 +221,8 @@ jobs:
         env:
           WF_ACCEPTANCE_MODE: "social-stress"
           WF_SOCIAL_STRESS_TARGET: "100000"
-          WF_SOCIAL_STRESS_DAYS: "30"
-          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
+          WF_SOCIAL_STRESS_DAYS: "635"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
         run: |
           bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-03-social"
 

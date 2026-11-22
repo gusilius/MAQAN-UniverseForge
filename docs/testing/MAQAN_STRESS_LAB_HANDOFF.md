@@ -39,7 +39,7 @@ Workflow run #45015494608 completed FAILURE on commit f5b109c3952235db5fae124945
 ## Current honest status
 - 01: isolated lifecycle/restart driver; not maximum-load stress PASS.
 - 02: canonical population driver; async stress WAL change pending; physical WFNpc stress and crash/recovery remain missing.
-- 03: opt-in `SocialLifeStressLab` driver now exists; it uses canonical CharacterRegistry family mutations, production `NpcSocialSimulation`, FamilyPlanning pregnancies/births and PopulationSimulation deaths in bounded batches. It stores relationships in a separate stress-only Relations graph/checkpoint to avoid mutating live `wf_relations.json`. Status remains DRIVER_PRESENT_UNVERIFIED; no max-load PASS or same-save server restart/recovery evidence yet.
+- 03: opt-in `SocialLifeStressLab` driver now exists; it uses canonical CharacterRegistry family mutations, production `NpcSocialSimulation`, FamilyPlanning pregnancies/births and PopulationSimulation deaths in bounded batches. It stores relationships in a separate stress-only Relations graph/checkpoint to avoid mutating live `wf_relations.json`; it runs 635 model days and requires actual births and deaths rather than treating an empty lifecycle as success. Status remains DRIVER_PRESENT_UNVERIFIED; no max-load PASS or same-save server restart/recovery evidence yet.
 - 04–12: mapped to real production systems; no independent server drivers yet.
 - Native scale gates and test-all are supplementary; they do not replace Forge Dedicated Server gameplay stress.
 

@@ -235,7 +235,7 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 if [ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]; then
   CURRENT_STAGE="social_life_stress"
   TARGET="${WF_SOCIAL_STRESS_TARGET:-100000}"
-  DAYS="${WF_SOCIAL_STRESS_DAYS:-30}"
+  DAYS="${WF_SOCIAL_STRESS_DAYS:-635}"
   REPORT="world/worldforge/stresslab/contour-03-social.json"
   echo "SOCIAL_STRESS_CONTOUR=03"
   echo "SOCIAL_STRESS_TARGET=$TARGET"
@@ -282,7 +282,9 @@ checks = {
     "reciprocal": report.get("reciprocal_bonds") == report.get("npc_directed_bonds"),
     "marriages": report.get("married_directed_bonds", 0) > 0,
     "conceptions": report.get("conceptions", 0) > 0,
-    "births": report.get("births", 0) == report.get("conceptions", -1),
+    "births": report.get("births", 0) > 0 and report.get("births") == report.get("conceptions"),
+    "deaths": report.get("deaths", 0) > 0,
+    "pregnancies_drained": report.get("pending_pregnancies", -1) == 0,
     "registry": report.get("final_registry_size", 0) >= report.get("initial_registry_size", 0) + target + report.get("births", 0),
 }
 for key, passed in checks.items():

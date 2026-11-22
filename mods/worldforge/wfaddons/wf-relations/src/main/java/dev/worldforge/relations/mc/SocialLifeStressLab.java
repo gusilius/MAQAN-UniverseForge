@@ -84,7 +84,7 @@ public final class SocialLifeStressLab {
             this.target = target;
             this.daysTarget = days;
             this.initialSize = registry.size();
-            this.startDay = Math.max(0, RelationsMc.dayNumber()) + 1_000_000;
+            this.startDay = Math.max(0, RelationsMc.dayNumber()) + 1;
             this.startYear = WorldForgeApi.clock().startYear;
             this.dayNanos = new long[days];
         }
@@ -175,10 +175,12 @@ public final class SocialLifeStressLab {
                 if ((ordinal & 1) == 1) {
                     Character wife = run.population.get(run.initialSize + ordinal - 1);
                     run.registry.marry(wife.id, person.id, year);
-                    wife.props.put("family.fertility", 250);
-                    wife.props.put("family.conception_modifier", 250);
-                    wife.props.put("family.wants_children", true);
-                    person.props.put("family.wants_children", true);
+                    // Keep the demographic fixture representative: only one in ten
+                    // adult couples actively plans children; the production fertility
+                    // and conception modifiers remain at their normal defaults.
+                    boolean plansChildren = age < 80 && pair % 10 == 0;
+                    wife.props.put("family.wants_children", plansChildren);
+                    person.props.put("family.wants_children", plansChildren);
                     addReciprocalBond(wife, person, true);
                     run.marriedCouples++;
                 }
@@ -321,6 +323,7 @@ public final class SocialLifeStressLab {
         boolean passed = run.created == run.target && run.registry.size() >= run.initialSize + run.target
                 && run.daysCompleted == run.daysTarget && run.interactions > 0
                 && run.marriedCouples > 0 && bonds > 0 && reciprocal == bonds && married > 0
+                && run.conceptions > 0 && run.births > 0 && run.deaths > 0
                 && run.conceptions == run.births && run.pregnancies.isEmpty();
         run.status = passed ? "PASS" : "FAILED";
         if (!passed) run.failure = "social_and_family_lifecycle_invariants_not_satisfied";

@@ -55,7 +55,9 @@ public class RelationsMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            if (ticks % STEP == 0) {
+            // The isolated stress driver owns NpcSocialSimulation's shared cursors
+            // while it advances its separate Relations graph on accelerated test days.
+            if (ticks % STEP == 0 && !SocialLifeStressLab.isRunning()) {
                 // A single bounded calendar step per cadence; backlog remains queued.
                 int elapsedDays = WorldForgeApi.clock().pullLimited("wf_relations", 1);
                 if (elapsedDays > 0) {
