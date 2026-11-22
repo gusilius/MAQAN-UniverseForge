@@ -122,6 +122,7 @@ public class PeopleMod {
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new PlayerInventoryBridge());
         MinecraftForge.EVENT_BUS.register(new CharacterInventoryEvents());
+        MinecraftForge.EVENT_BUS.register(new RuntimeStressLab());
     }
 
     private static void onAttributes(EntityAttributeCreationEvent e) {
