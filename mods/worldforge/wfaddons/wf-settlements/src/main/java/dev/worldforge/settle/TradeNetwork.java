@@ -184,11 +184,20 @@ public final class TradeNetwork {
     private void tickInternal(Map<String, Settlement> cities, double dt, Map<String, Location> locations, RoutePlanner planner) {
         Map<String,Location> anchors = locations == null ? Map.of() : locations;
         TreasuryLedger ledger = TreasuryService.current();
+        Map<IncomingKey, Double> incoming = new HashMap<>();
+        for (Shipment shipment : shipments.values()) {
+            if (activeShipment(shipment) && ledger.balance(cargoEscrow(shipment.id)) > 1e-9)
+                incoming.merge(new IncomingKey(shipment.to, shipment.res), shipment.quantity, Double::sum);
+        }
         for (Shipment shipment : shipments.values()) {
             if (!shipment.status.equals("в пути") && !shipment.status.equals("ожидает места")
                     && !shipment.status.equals("ожидает расчёта")) continue;
             Settlement destination = cities.get(shipment.to), source = cities.get(shipment.from);
-            if (destination == null || source == null) { shipment.status = "нет поселения"; continue; }
+            if (destination == null || source == null) {
+                shipment.status = "нет поселения";
+                subtractIncoming(incoming, shipment, ledger);
+                continue;
+            }
             shipment.elapsed = Math.min(shipment.travelSeconds, shipment.elapsed + dt);
             if (shipment.elapsed + 1e-9 < shipment.travelSeconds) continue;
             destination.amount(shipment.res);
@@ -196,8 +205,10 @@ public final class TradeNetwork {
             String goodsRef = shipmentReference(shipment.id,"arrival-goods");
             String destAccount = destination.ledgerAccountId(shipment.res);
             boolean goodsPosted = ledger.hasTransaction(destAccount,TreasuryLedger.Kind.TRADE,goodsRef);
+            double reservedForOthers = incoming.getOrDefault(new IncomingKey(shipment.to, shipment.res), 0.0)
+                    - (ledger.balance(cargoEscrow) > 1e-9 ? shipment.quantity : 0.0);
             if (!goodsPosted && destination.capacity(shipment.res)-destination.amount(shipment.res)
-                    - reservedIncoming(shipment.to, shipment.res, shipment.id) + 1e-9 < shipment.quantity) {
+                    - Math.max(0.0, reservedForOthers) + 1e-9 < shipment.quantity) {
                 shipment.status = "ожидает места"; continue;
             }
             if (!ledger.transferOnce(cargoEscrow,destAccount,shipment.quantity,TreasuryLedger.Kind.TRADE,
@@ -205,6 +216,7 @@ public final class TradeNetwork {
             destination.refreshResourceMirror(shipment.res);
             destination.amount(shipment.res);
             if (!goodsPosted) {
+                subtractIncoming(incoming, shipment, ledger);
                 destination.recordTradeFlow(shipment.res, shipment.quantity, true);
                 destination.shiftDemand(shipment.res,-shipment.quantity);
             }
@@ -240,7 +252,8 @@ public final class TradeNetwork {
             double dutyPerUnit=mid*route.dutyRate,buyerCostPerUnit=pay+dutyPerUnit;
             double reserve=exportReserve(a,route.res);
             n=(int)Math.min(n,a.amount(route.res)-reserve);
-            n=(int)Math.min(n,b.capacity(route.res)-b.amount(route.res)-reservedIncoming(route.to,route.res,-1));
+            n=(int)Math.min(n,b.capacity(route.res)-b.amount(route.res)
+                    -incoming.getOrDefault(new IncomingKey(route.to, route.res), 0.0));
             n=(int)Math.min(n,Math.min(a.tradeLeft,b.tradeLeft));
             if(buyerCostPerUnit>0)n=(int)Math.min(n,Math.floor(b.amount(Defs.SILVER)/buyerCostPerUnit));
             if(n<=0){route.status=a.amount(route.res)-reserve<1?"защита резерва":b.amount(Defs.SILVER)<pay?"нет серебра":"нет места";continue;}
@@ -270,7 +283,9 @@ public final class TradeNetwork {
             double expectedProfit=n*(give-pa)+n*(pb-pay)-duty;
             Shipment shipment=new Shipment(id,route.id,route.from,route.to,route.res,n,seller,fee,duty,
                     route.dutyRealm,from,to,travel,expectedProfit,path);
-            shipments.put(id,shipment);route.status="в пути";
+            shipments.put(id,shipment);
+            incoming.merge(new IncomingKey(route.to, route.res), shipment.quantity, Double::sum);
+            route.status="в пути";
             events.add("Караван #"+id+" отправлен: "+n+" "+route.res+" из "+route.from+" в "+route.to);
         }
         if(shipments.size()>600){
@@ -282,17 +297,17 @@ public final class TradeNetwork {
         }
     }
 
-    /** Cargo already committed to this destination but not yet posted to its stock account. */
-    private double reservedIncoming(String city, String resource, long exceptShipment) {
-        double reserved = 0;
-        for (Shipment shipment : shipments.values()) {
-            if (shipment.id == exceptShipment || !shipment.to.equals(city) || !shipment.res.equals(resource)) continue;
-            if ((shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
-                    || shipment.status.equals("ожидает расчёта"))
-                    && TreasuryService.current().balance(cargoEscrow(shipment.id)) > 1e-9)
-                reserved += shipment.quantity;
-        }
-        return reserved;
+    private record IncomingKey(String city, String resource) { }
+
+    private static boolean activeShipment(Shipment shipment) {
+        return shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                || shipment.status.equals("ожидает расчёта");
+    }
+
+    private static void subtractIncoming(Map<IncomingKey, Double> incoming, Shipment shipment,
+                                         TreasuryLedger ledger) {
+        if (ledger.balance(cargoEscrow(shipment.id)) > 1e-9)
+            incoming.merge(new IncomingKey(shipment.to, shipment.res), -shipment.quantity, Double::sum);
     }
 
     public static String cargoEscrow(long id){return "shipment:cargo:"+id;}

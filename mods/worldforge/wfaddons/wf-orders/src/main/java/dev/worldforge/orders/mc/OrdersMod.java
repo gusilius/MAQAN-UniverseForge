@@ -186,9 +186,12 @@ public class OrdersMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int days = WorldForgeApi.clock().pull("wf_orders");
-                int today = day();
-                for (int i = days - 1; i >= 0; i--) ORDERS.tick(today - i, RNG);
+                var clock = WorldForgeApi.clock();
+                int days = clock.pullLimited("wf_orders", 4);
+                long lastConsumedDay = clock.consumedDay("wf_orders");
+                long firstDay = lastConsumedDay - days + 1L;
+                for (int i = 0; i < days; i++)
+                    ORDERS.tick(Math.toIntExact(firstDay + i), RNG);
             }
             if (ticks % SAVE_EVERY == 0) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_orders: ошибка тика: {}", ex.toString()); }

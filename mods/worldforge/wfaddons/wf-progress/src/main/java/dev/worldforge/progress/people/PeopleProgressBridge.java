@@ -33,8 +33,20 @@ public final class PeopleProgressBridge {
         Objects.requireNonNull(character, "character");
         Objects.requireNonNull(worldRegistries, "worldRegistries");
         String owner = owner(character, populationScopeId);
+        return profile(progress, character, populationScopeId, worldRegistries, null, null);
+    }
+
+    private static Profile profile(Progress progress, Character character, String populationScopeId,
+                                   java.util.Collection<CharacterRegistry> worldRegistries,
+                                   java.util.Set<String> uniqueCharacterIds,
+                                   java.util.Map<String, java.util.List<Profile>> legacyProfilesByLocalId) {
+        Objects.requireNonNull(progress, "progress");
+        Objects.requireNonNull(character, "character");
+        Objects.requireNonNull(worldRegistries, "worldRegistries");
+        String owner = owner(character, populationScopeId);
         Profile profile = progress.profile(owner);
-        migrateLegacyProfile(progress, character, populationScopeId, profile, worldRegistries);
+        migrateLegacyProfile(progress, character, populationScopeId, profile, worldRegistries,
+                uniqueCharacterIds, legacyProfilesByLocalId);
         syncFromCharacter(character, profile);
         return profile;
     }
@@ -60,6 +72,14 @@ public final class PeopleProgressBridge {
     private static void migrateLegacyProfile(Progress progress, Character character, String scope,
                                               Profile target,
                                               java.util.Collection<CharacterRegistry> worldRegistries) {
+        migrateLegacyProfile(progress, character, scope, target, worldRegistries, null, null);
+    }
+
+    private static void migrateLegacyProfile(Progress progress, Character character, String scope,
+                                              Profile target,
+                                              java.util.Collection<CharacterRegistry> worldRegistries,
+                                              java.util.Set<String> uniqueCharacterIds,
+                                              java.util.Map<String, java.util.List<Profile>> legacyProfilesByLocalId) {
         if (!isFresh(target)) return;
 
         // Same-scope legacy data is unambiguous: map scope + local cN identifies its old partition.
@@ -73,14 +93,18 @@ public final class PeopleProgressBridge {
 
         // A Character may have moved since its old profile was written. Search all old
         // n:<scope>:<cN> keys only if cN resolves to one Character in the live world snapshot.
-        if (isUniqueCharacterId(character.id, worldRegistries)) {
-            String suffix = ":" + character.id;
-            java.util.List<Profile> candidates = new java.util.ArrayList<>();
-            for (Profile candidate : progress.all()) {
-                String legacyOwner = candidate.owner;
-                if (candidate != target && legacyOwner.startsWith("n:")
-                        && legacyOwner.indexOf(':', 2) >= 0 && legacyOwner.endsWith(suffix)) {
-                    candidates.add(candidate);
+        if (isUniqueCharacterId(character.id, worldRegistries, uniqueCharacterIds)) {
+            java.util.List<Profile> candidates;
+            if (legacyProfilesByLocalId != null) {
+                candidates = legacyProfilesByLocalId.getOrDefault(character.id, java.util.List.of());
+            } else {
+                String suffix = ":" + character.id;
+                candidates = new java.util.ArrayList<>();
+                for (Profile candidate : progress.all()) {
+                    String legacyOwner = candidate.owner;
+                    if (candidate != target && legacyOwner.startsWith("n:")
+                            && legacyOwner.indexOf(':', 2) >= 0 && legacyOwner.endsWith(suffix))
+                        candidates.add(candidate);
                 }
             }
             if (candidates.size() == 1) {
@@ -96,7 +120,7 @@ public final class PeopleProgressBridge {
         String unscopedOwner = "n:" + character.id;
         Profile unscopedLegacy = progress.peek(unscopedOwner);
         if (unscopedLegacy != null && unscopedLegacy != target
-                && isUniqueCharacterId(character.id, worldRegistries)) {
+                && isUniqueCharacterId(character.id, worldRegistries, uniqueCharacterIds)) {
             copyProfile(unscopedLegacy, target);
             progress.removeProfile(unscopedOwner);
         }
@@ -104,6 +128,13 @@ public final class PeopleProgressBridge {
 
     private static boolean isUniqueCharacterId(String id,
                                                java.util.Collection<CharacterRegistry> registries) {
+        return isUniqueCharacterId(id, registries, null);
+    }
+
+    private static boolean isUniqueCharacterId(String id,
+                                               java.util.Collection<CharacterRegistry> registries,
+                                               java.util.Set<String> uniqueCharacterIds) {
+        if (uniqueCharacterIds != null) return uniqueCharacterIds.contains(id);
         int matches = 0;
         for (CharacterRegistry registry : registries) {
             if (registry == null) continue;
@@ -171,6 +202,23 @@ public final class PeopleProgressBridge {
             java.util.List<CharacterRegistry> registrySnapshot = new java.util.ArrayList<>();
             for (Object value : registries.values())
                 if (value instanceof CharacterRegistry registry) registrySnapshot.add(registry);
+
+            Map<String, Integer> idCounts = new java.util.HashMap<>();
+            for (CharacterRegistry registry : registrySnapshot)
+                for (Character character : registry.all())
+                    idCounts.merge(character.id, 1, Integer::sum);
+            java.util.Set<String> uniqueCharacterIds = new java.util.HashSet<>();
+            idCounts.forEach((id, count) -> { if (count == 1) uniqueCharacterIds.add(id); });
+
+            Map<String, java.util.List<Profile>> legacyProfilesByLocalId = new java.util.HashMap<>();
+            for (Profile candidate : progress.all()) {
+                String legacyOwner = candidate.owner;
+                int separator = legacyOwner.lastIndexOf(':');
+                if (legacyOwner.startsWith("n:") && separator > 1 && separator < legacyOwner.length() - 1)
+                    legacyProfilesByLocalId.computeIfAbsent(legacyOwner.substring(separator + 1),
+                            ignored -> new java.util.ArrayList<>()).add(candidate);
+            }
+
             for (Map.Entry<?, ?> entry : registries.entrySet()) {
                 Object mapData = entry.getKey();
                 Object rawRegistry = entry.getValue();
@@ -183,7 +231,8 @@ public final class PeopleProgressBridge {
                     if (profile == null && ranks.isEmpty()
                             && progress.peek(PopulationSimulation.legacyProgressOwner(character, scope)) == null
                             && progress.peek("n:" + character.id) == null) continue;
-                    profile = profile(progress, character, scope, registrySnapshot);
+                    profile = profile(progress, character, scope, registrySnapshot,
+                            uniqueCharacterIds, legacyProfilesByLocalId);
                     if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
                     else syncFromCharacter(character, profile);
                 }
