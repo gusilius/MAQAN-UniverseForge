@@ -106,6 +106,7 @@ public final class Marriages {
         // One registry pass builds all eligible marriage pools. Previously candidates()
         // rescanned the full population for every realm from inside a nested realm loop.
         Map<String, List<Character>> candidatesByRealm = new HashMap<>();
+        Map<String, Map<String, List<Character>>> candidatesByRealmGender = new HashMap<>();
         Map<String, Character> rulers = new HashMap<>();
         for (Character character : s.reg.all()) {
             if (!single(s, character)) continue;
@@ -114,11 +115,15 @@ public final class Marriages {
             Character ruler = rulers.computeIfAbsent(realm, s::ruler);
             if (character == ruler) continue;
             candidatesByRealm.computeIfAbsent(realm, ignored -> new ArrayList<>()).add(character);
+            candidatesByRealmGender.computeIfAbsent(realm, ignored -> new TreeMap<>())
+                    .computeIfAbsent(character.gender, ignored -> new ArrayList<>()).add(character);
         }
         Comparator<Character> order = Comparator
                 .comparingInt((Character character) -> character.birthYear)
                 .thenComparing(character -> character.id);
         candidatesByRealm.values().forEach(pool -> pool.sort(order));
+        candidatesByRealmGender.values().forEach(byGender ->
+                byGender.values().forEach(pool -> pool.sort(order)));
 
         final int maxSourceCandidates = 4;
         final int maxPartnerRealms = 16;
@@ -137,17 +142,21 @@ public final class Marriages {
                 for (int attempt = 0; attempt < attempts; attempt++) {
                     String rb = realms.get((start + attempt) % realms.size());
                     if (rb.equals(ra)) continue;
-                    List<Character> partnerPool = candidatesByRealm.getOrDefault(rb, List.of());
-                    for (int candidateIndex = 0;
-                         candidateIndex < Math.min(maxCandidatesPerPartnerRealm, partnerPool.size());
-                         candidateIndex++) {
-                        Character b = partnerPool.get(candidateIndex);
-                        if (a.gender.equals(b.gender)) continue;
-                        Offer offer = evaluate(s, a.id, b.id);
-                        if (offer.ok && offer.score > bestScore) {
-                            bestScore = offer.score;
-                            best = a;
-                            bestB = b;
+                    Map<String, List<Character>> partnerPools =
+                            candidatesByRealmGender.getOrDefault(rb, Map.of());
+                    for (Map.Entry<String, List<Character>> genderPool : partnerPools.entrySet()) {
+                        if (a.gender.equals(genderPool.getKey())) continue;
+                        List<Character> partnerPool = genderPool.getValue();
+                        for (int candidateIndex = 0;
+                             candidateIndex < Math.min(maxCandidatesPerPartnerRealm, partnerPool.size());
+                             candidateIndex++) {
+                            Character b = partnerPool.get(candidateIndex);
+                            Offer offer = evaluate(s, a.id, b.id);
+                            if (offer.ok && offer.score > bestScore) {
+                                bestScore = offer.score;
+                                best = a;
+                                bestB = b;
+                            }
                         }
                     }
                 }

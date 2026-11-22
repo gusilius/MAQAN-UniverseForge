@@ -2663,7 +2663,7 @@ public final class WorldSimMod {
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
                             newlyCreatedSettlement = colony != null;
                             bindPhysicalSettlement(bandId, settlementId);
-                            settlementBindingsChanged = true;
+                            emergentPeopleProgress.dirtyBindingSources.add(source.id);
                         }
                     }
                     if (newlyCreatedSettlement && colony != null && colony.s != null && colony.s.name != null) {
