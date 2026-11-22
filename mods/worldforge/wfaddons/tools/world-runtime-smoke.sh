@@ -213,6 +213,88 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
+  CURRENT_STAGE="server_core_first_run"
+  echo "SERVER_CORE_CONTOUR=00"
+  echo "SERVER_CORE_PHASE=first_start"
+  # Exercise the ordinary server lifecycle without loading an image dimension,
+  # forcing chunks, or invoking population/worldgen acceptance scenarios.
+  printf '%s\n' "list" "save-all flush" >> in.txt
+  for second in $(seq 1 "${WF_CORE_OBSERVE_SECONDS:-120}"); do
+    if (( second == 1 || second % 15 == 0 )); then
+      capture_server_threads
+      stamp="$(date +%s)"
+      jcmd -l > "$OUTPUT/core-jcmd-$stamp.txt" 2>&1 || true
+      pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/core-jcmd-$stamp.txt")"
+      if [ -n "$pid" ]; then
+        jcmd "$pid" GC.heap_info > "$OUTPUT/core-heap-$stamp.txt" 2>&1 || true
+      fi
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during core observation"; exit 15; }
+    sleep 1
+  done
+
+  # First shutdown must be graceful and return exit code 0 before the same save
+  # is opened again. A forced kill is a failed core-contour result.
+  CURRENT_STAGE="server_core_first_shutdown"
+  printf '%s\n' "save-all flush" "stop" >> in.txt
+  for _ in $(seq 1 45); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "ERROR: first server shutdown exceeded 45 seconds"
+    exit 16
+  fi
+  if wait "$SERVER_PID"; then first_exit=0; else first_exit=$?; fi
+  SERVER_PID=""
+  echo "SERVER_CORE_FIRST_JVM_EXIT_CODE=$first_exit"
+  [ "$first_exit" -eq 0 ] || { SERVER_EXIT_CODE="$first_exit"; echo "ERROR: first JVM did not exit cleanly"; exit 17; }
+  echo "SERVER_CORE_FIRST_SHUTDOWN=GRACEFUL"
+
+  # Reopen the exact same world directory. Do not delete, regenerate, or copy it.
+  CURRENT_STAGE="server_core_restart"
+  : > in.txt
+  start_line="$(wc -l < server.log)"
+  java -Dwf.simulation.tick-multiplier=1 -Xms1G -Xmx3G \
+    -XX:+HeapDumpOnOutOfMemoryError \
+    -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
+    -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
+    -Xlog:gc*:file="$JAVA_WORK/gc-restart-%p.log":time,uptime,level,tags \
+    @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
+    < <(tail -n +1 -f in.txt) >> server.log 2>&1 &
+  SERVER_PID=$!
+  echo "SERVER_CORE_RESTART_PID=$SERVER_PID"
+  for i in $(seq 1 180); do
+    if tail -n +"$((start_line + 1))" server.log | grep -q 'Done ('; then break; fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+      SERVER_PID=""
+      tail -160 server.log
+      echo "ERROR: JVM exited during same-world restart (code=$SERVER_EXIT_CODE)"
+      exit 18
+    fi
+    sleep 2
+  done
+  tail -n +"$((start_line + 1))" server.log | grep -q 'Done (' || { echo "ERROR: same-world restart timed out"; exit 19; }
+  echo "SERVER_CORE_SAME_WORLD_RESTART=PASS"
+  printf '%s\n' "list" "save-all flush" >> in.txt
+  sleep 10
+  CURRENT_STAGE="server_core_final_shutdown"
+  printf '%s\n' "save-all flush" "stop" >> in.txt
+  for _ in $(seq 1 45); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "ERROR: restarted server shutdown exceeded 45 seconds"
+    exit 20
+  fi
+  if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+  SERVER_PID=""
+  echo "SERVER_CORE_FINAL_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
+  [ "$SERVER_EXIT_CODE" -eq 0 ] || { echo "ERROR: restarted JVM did not exit cleanly"; exit 21; }
+  TERMINATION_EVIDENCE="graceful_stop"
+  echo "SERVER_CORE_FINAL_SHUTDOWN=GRACEFUL"
+  echo "SERVER_CORE_CONTOUR_RESULT=PASS_PENDING_DIAGNOSTICS"
+  CURRENT_STAGE="server_core_complete"
+  exit 0
+fi
+
 if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   CURRENT_STAGE="same_server_dual_world_genesis"
   # Load real chunks in the ordinary Overworld and the image-backed dimension.
