@@ -7,6 +7,20 @@ OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 ACTUAL_PACK="${2:-}"
+GROUP="${3:-all}"
+case "$GROUP" in all|npc|worldgen|politics|life|integration) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
+
+test_group() {
+  local name="$1"
+  case "$name" in
+    Character*|PeopleTest|PlayerTest|NameBankTest|MarriageTest|FamilyPlanningTest|EmergentHouseholdPlanTest|EmergentPopulationIndexTest|NpcSpawnSpatialIndexTest|MilitaryDeathLedgerTest) echo npc ;;
+    Genesis*|ImageWorldIdentityTest|MapGeographyTest|MapSyncSafetyTest|PlanetActivationStateTest|ProceduralPlanetGenerationTest|ProvinceContourTest|RasterTileLayerTest|SettlementMapTest) echo worldgen ;;
+    Army*|CityTaxTest|CourtTest|EconomyTest|HistoricalChronicleTest|LedgerTest|OperationalSupplyPersistenceTest|OrdersTest|PoliticalIdentitySynchronizerTest|RealmEconomyTest|RealmsTest|StatecraftTest|ThreatTest|Trade*|Treasury*|TroopsTest|WarTest) echo politics ;;
+    PopulationSimulationTest|RelationsTest|ReputationTest|Resident*|SeasonTest|Settle*|ColonySimulationCadenceTest|ShopsTest) echo life ;;
+    *) echo integration ;;
+  esac
+}
+echo "WORLD_FORGE_TEST_GROUP=$GROUP"
 if [ -n "$ACTUAL_PACK" ] && [ ! -f "$ACTUAL_PACK" ]; then
   echo "ERROR: supplied actual worldmap not found: $ACTUAL_PACK"
   exit 2
@@ -67,6 +81,10 @@ failed=0
 skipped=0
 for source in tests/*.java; do
   test_name="$(basename "$source" .java)"
+  assigned_group="$(test_group "$test_name")"
+  if [ "$GROUP" != "all" ] && [ "$GROUP" != "$assigned_group" ]; then
+    continue
+  fi
   if [ "$test_name" = "ImageWorldIdentityTest" ]; then
     echo "== $test_name (skipped: requires the actual image-generated .worldmap)"
     skipped=$((skipped + 1))
@@ -89,5 +107,5 @@ if [ -n "$ACTUAL_PACK" ]; then
   fi
 fi
 
-echo "WorldForge logic tests: passed=$passed skipped=$skipped failed=$failed"
+echo "WorldForge $GROUP logic tests: passed=$passed skipped=$skipped failed=$failed"
 [ "$failed" -eq 0 ]

@@ -255,9 +255,9 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     echo "ERROR: vanilla Overworld has no autonomous virtual court"
     exit 10
   }
-  grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log || {
+  grep -Fq 'wf_relations: autonomous NPC interactions=' server.log || {
     tail -200 server.log
-    echo "ERROR: autonomous NPC friendship produced no events"
+    echo "ERROR: autonomous NPC social simulation produced no interactions"
     exit 11
   }
   grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log || {
