@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.storage.CharacterWal;
 import dev.worldforge.mod.api.WorldForgeApi;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -19,6 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CompletionException;
 import java.util.Locale;
 
 /**
@@ -46,6 +50,9 @@ public final class RuntimeStressLab {
         int sampleCount;
         int sampleCursor;
         int created;
+        long durableWrites;
+        int walQueueHighWater;
+        final ConcurrentLinkedQueue<CompletableFuture<CharacterWal.Record>> pendingWalWrites = new ConcurrentLinkedQueue<>();
         int nextMilestone;
         long creationFinishedDay = -1L;
         long verificationTargetDay = -1L;
@@ -142,40 +149,49 @@ public final class RuntimeStressLab {
         }
         Run run = activeRun;
         if (run == null || run.server != event.getServer()) return;
-
-        if ("RUNNING".equals(run.status)) {
-            try {
-                int count = Math.min(run.batchPerTick, run.target - run.created);
+        try {
+            drainWalCompletions(run);
+            if ("RUNNING".equals(run.status)) {
+                int queueDepth = PeopleMod.characterWalQueueDepth(run.registry);
+                if (queueDepth < 0) throw new IllegalStateException("Production Character WAL writer is unavailable");
+                run.walQueueHighWater = Math.max(run.walQueueHighWater, queueDepth);
+                // Bound accepted-but-not-yet-durable records. Never wait for disk on Server Thread.
+                int count = queueDepth < 4096 ? Math.min(run.batchPerTick, run.target - run.created) : 0;
                 for (int i = 0; i < count; i++) createOne(run);
                 while (run.nextMilestone < MILESTONES.length
                         && run.created >= MILESTONES[run.nextMilestone]) {
                     int milestone = MILESTONES[run.nextMilestone++];
-                    PeopleMod.LOGGER.info("WF_STRESS contour=02_population milestone={} created={} registrySize={}",
-                            milestone, run.created, run.registry.size());
+                    PeopleMod.LOGGER.info("WF_STRESS contour=02_population milestone={} created={} registrySize={} walQueue={}",
+                            milestone, run.created, run.registry.size(), queueDepth);
                 }
                 if (run.created >= run.target) {
-                    run.creationFinishedDay = WorldForgeApi.clock().dayNumber();
-                    run.status = "WAITING_FOR_REAL_SIMULATION";
-                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population creation_complete={} creation_day={}; waiting for the normal world calendar and tick scheduler",
-                            run.created, run.creationFinishedDay);
+                    run.status = "WAITING_FOR_WAL_DURABILITY";
+                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population creation_complete={} awaiting_durable_writes={}",
+                            run.created, run.pendingWalWrites.size());
                 }
-            } catch (Exception failure) {
-                run.status = "FAILED";
-                run.failure = failure.getClass().getName();
-                PeopleMod.LOGGER.error("WF_STRESS contour=02_population failed after {} canonical creations",
-                        run.created, failure);
             }
-        } else if ("WAITING_FOR_REAL_SIMULATION".equals(run.status)) {
-            if (WorldForgeApi.clock().dayNumber() > run.creationFinishedDay) {
-                run.verificationTargetDay = WorldForgeApi.clock().dayNumber();
-                run.status = "VERIFYING_SIMULATION_RECEIPTS";
-                PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_verification_started targetWorldDay={}",
-                        run.verificationTargetDay);
+            if ("WAITING_FOR_WAL_DURABILITY".equals(run.status)
+                    && run.durableWrites == run.created && run.pendingWalWrites.isEmpty()) {
+                run.creationFinishedDay = WorldForgeApi.clock().dayNumber();
+                run.status = "WAITING_FOR_REAL_SIMULATION";
+                PeopleMod.LOGGER.warn("WF_STRESS contour=02_population wal_durable={} creation_day={}; waiting for normal world calendar and tick scheduler",
+                        run.durableWrites, run.creationFinishedDay);
+            } else if ("WAITING_FOR_REAL_SIMULATION".equals(run.status)) {
+                if (WorldForgeApi.clock().dayNumber() > run.creationFinishedDay) {
+                    run.verificationTargetDay = WorldForgeApi.clock().dayNumber();
+                    run.status = "VERIFYING_SIMULATION_RECEIPTS";
+                    PeopleMod.LOGGER.warn("WF_STRESS contour=02_population simulation_verification_started targetWorldDay={}",
+                            run.verificationTargetDay);
+                }
+            } else if ("VERIFYING_SIMULATION_RECEIPTS".equals(run.status)) {
+                verifySimulationReceipts(run, 512);
             }
-        } else if ("VERIFYING_SIMULATION_RECEIPTS".equals(run.status)) {
-            verifySimulationReceipts(run, 512);
+        } catch (Exception failure) {
+            run.status = "FAILED";
+            run.failure = failure.getClass().getName() + ": " + String.valueOf(failure.getMessage());
+            PeopleMod.LOGGER.error("WF_STRESS contour=02_population failed after {} canonical creations (durable={})",
+                    run.created, run.durableWrites, failure);
         }
-
         long elapsed = Math.max(0L, System.nanoTime() - tickStartNanos);
         run.tickNanos[run.sampleCursor] = elapsed;
         run.sampleCursor = (run.sampleCursor + 1) % MAX_SAMPLES;
@@ -183,6 +199,20 @@ public final class RuntimeStressLab {
         run.maxTickNanos = Math.max(run.maxTickNanos, elapsed);
         if ("PASS".equals(run.status) || "DEGRADED".equals(run.status)
                 || "FAILED".equals(run.status) || "STOPPED".equals(run.status)) writeReport(run);
+    }
+
+    private static void drainWalCompletions(Run run) {
+        while (true) {
+            CompletableFuture<CharacterWal.Record> next = run.pendingWalWrites.peek();
+            if (next == null || !next.isDone()) return;
+            run.pendingWalWrites.poll();
+            try {
+                next.join();
+                run.durableWrites++;
+            } catch (CompletionException failure) {
+                throw new IllegalStateException("Character WAL durability failed", failure.getCause());
+            }
+        }
     }
 
     private static void verifySimulationReceipts(Run run, int budget) {
@@ -218,10 +248,12 @@ public final class RuntimeStressLab {
             int deficit = Math.floorMod(ordinal * (need.ordinal() + 17), PopulationSimulation.MAX_NEED + 1);
             PopulationSimulation.setNeed(character, need, deficit);
         }
-        if (!PeopleMod.persistCharacter(character, run.server))
-            throw new IllegalStateException("Production Character persistence rejected " + character.globalId);
         if (run.registry.getByGlobalId(character.globalId) != character)
             throw new IllegalStateException("Canonical global identity lookup failed for " + character.globalId);
+        CompletableFuture<CharacterWal.Record> durable = new CompletableFuture<>();
+        if (!PeopleMod.enqueueStressCharacterWrite(character, run.server, durable))
+            throw new IllegalStateException("Production Character WAL queue rejected " + character.globalId);
+        run.pendingWalWrites.add(durable);
         run.created++;
     }
 
@@ -250,12 +282,12 @@ public final class RuntimeStressLab {
                     + "\"durable_character_writes\":%d,\"batch_per_tick\":%d,\"elapsed_seconds\":%.3f,"
                     + "\"tick_ms_p50\":%.3f,\"tick_ms_p95\":%.3f,\"tick_ms_p99\":%.3f,\"tick_ms_max\":%.3f,"
                     + "\"heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,"
-                    + "\"population_processed_world_day\":%d,\"creation_finished_day\":%d,\"simulation_target_day\":%d,\"simulation_processed\":%d,\"simulation_pending\":%d,\"sample_count\":%d}\n",
+                    + "\"wal_queue_high_water\":%d,\"population_processed_world_day\":%d,\"creation_finished_day\":%d,\"simulation_target_day\":%d,\"simulation_processed\":%d,\"simulation_pending\":%d,\"sample_count\":%d}\n",
                     finalStatus, run.failure, run.target, run.created, run.initialPopulation, run.registry.size(),
-                    run.created, run.batchPerTick, elapsedNanos / 1_000_000_000.0,
+                    run.durableWrites, run.batchPerTick, elapsedNanos / 1_000_000_000.0,
                     percentile(samples, 0.50) / 1_000_000.0, percentile(samples, 0.95) / 1_000_000.0,
                     percentile(samples, 0.99) / 1_000_000.0, run.maxTickNanos / 1_000_000.0,
-                    usedHeap, runtime.totalMemory(), cpuNanos, PeopleMod.populationProcessedDay(), run.creationFinishedDay,
+                    usedHeap, runtime.totalMemory(), cpuNanos, run.walQueueHighWater, PeopleMod.populationProcessedDay(), run.creationFinishedDay,
                     run.verificationTargetDay, run.simulationProcessed, run.simulationPending, run.sampleCount);
             Files.writeString(report, json, StandardCharsets.UTF_8);
             run.status = "REPORT_WRITTEN";

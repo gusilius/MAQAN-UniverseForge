@@ -13,6 +13,7 @@ import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.people.CharacterInventoryTransactions;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.storage.CharacterWal;
+import dev.worldforge.people.storage.CharacterWalWriter;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
@@ -65,6 +66,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 /** Склейка wf-people с Minecraft: загрузка ролей и имён из датапаков, реестр людей по картам, сохранение, сущность, спавнер, команды. */
 @Mod(PeopleMod.ID)
@@ -87,6 +89,8 @@ public class PeopleMod {
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
     /** Durable per-partition incremental journal; snapshots remain the compatibility checkpoint format. */
     private static final Map<CharacterRegistry, CharacterWal> CHARACTER_WALS = new java.util.IdentityHashMap<>();
+    /** Bounded asynchronous writers for explicit bulk workloads; transactional writes remain synchronous. */
+    private static final Map<CharacterRegistry, CharacterWalWriter> CHARACTER_WAL_WRITERS = new java.util.IdentityHashMap<>();
     /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
     private static final CharacterRegistry WORLD_REGISTRY = new CharacterRegistry();
     private static final String WORLD_PARTITION_ID = "__world__";
@@ -485,6 +489,8 @@ public class PeopleMod {
                 registry.applyJsonRecord(payload, identityNamespace);
             }
             CHARACTER_WALS.put(registry, wal);
+            String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
+            CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken));
             LOGGER.info("wf_people: recovered Character WAL partition={} records={} characters={}",
                     partition, records.size(), registry.size());
         } catch (Exception failure) {
@@ -495,10 +501,27 @@ public class PeopleMod {
 
     private static synchronized void checkpointCharacterWal(CharacterRegistry registry) throws java.io.IOException {
         CharacterWal wal = CHARACTER_WALS.get(registry);
-        if (wal != null) wal.checkpoint();
+        if (wal == null) return;
+        CharacterWalWriter writer = CHARACTER_WAL_WRITERS.get(registry);
+        // A forced append batch is already durable. Defer checkpointing while the
+        // asynchronous writer has queued or in-flight records; never stall the tick.
+        if (writer != null && writer.pending() > 0) return;
+        writer = CHARACTER_WAL_WRITERS.remove(registry);
+        if (writer != null) writer.close();
+        try {
+            wal.checkpoint();
+        } finally {
+            CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192,
+                    "wf-character-wal-checkpoint-" + Integer.toHexString(System.identityHashCode(registry))));
+        }
     }
 
     private static synchronized void closeCharacterWals() {
+        for (CharacterWalWriter writer : CHARACTER_WAL_WRITERS.values()) {
+            try { writer.close(); }
+            catch (Exception failure) { LOGGER.error("wf_people: failed to drain Character WAL writer", failure); }
+        }
+        CHARACTER_WAL_WRITERS.clear();
         for (CharacterWal wal : CHARACTER_WALS.values()) {
             try { wal.close(); }
             catch (Exception failure) { LOGGER.error("wf_people: failed to close Character WAL cleanly", failure); }
@@ -603,6 +626,28 @@ public class PeopleMod {
                     deceased.globalId, heir.globalId, failure);
             return false;
         }
+    }
+
+    /**
+     * Enqueues a canonical Character record on its partition's bounded WAL writer.
+     * The returned future completes only after appendBatch has forced the frame to stable storage.
+     * Queue saturation is explicit backpressure; callers must not treat enqueue as durable.
+     */
+    public static boolean enqueueStressCharacterWrite(Character character, MinecraftServer server,
+                                                        CompletableFuture<CharacterWal.Record> durable) {
+        if (character == null || server == null || durable == null) return false;
+        CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
+        if (owner == null || estateWalTransfer(character) != null
+                || CharacterInventory.hasPendingTransfer(character)) return false;
+        CharacterWalWriter writer = CHARACTER_WAL_WRITERS.get(owner);
+        if (writer == null) return false;
+        return writer.submit(character.globalId,
+                owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8), durable);
+    }
+
+    public static int characterWalQueueDepth(CharacterRegistry registry) {
+        CharacterWalWriter writer = CHARACTER_WAL_WRITERS.get(registry);
+        return writer == null ? -1 : writer.pending();
     }
 
     public static boolean persistCharacter(Character character, MinecraftServer server) {

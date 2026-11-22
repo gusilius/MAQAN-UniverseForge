@@ -22,6 +22,7 @@ public final class CharacterWalWriter implements AutoCloseable {
     private final AtomicBoolean accepting = new AtomicBoolean(true);
     private final Thread worker;
     private volatile IOException failure;
+    private volatile int inFlight;
 
     public CharacterWalWriter(CharacterWal wal, int capacity, String threadName) {
         this.wal = Objects.requireNonNull(wal, "wal");
@@ -52,6 +53,7 @@ public final class CharacterWalWriter implements AutoCloseable {
     }
 
     public int queued() { return queue.size(); }
+    public int pending() { return queue.size() + inFlight; }
     public int capacity() { return queue.size() + queue.remainingCapacity(); }
     public IOException failure() { return failure; }
 
@@ -63,6 +65,7 @@ public final class CharacterWalWriter implements AutoCloseable {
                 List<Pending> batch = new ArrayList<>(MAX_BATCH);
                 batch.add(first);
                 queue.drainTo(batch, MAX_BATCH - 1);
+                inFlight = batch.size();
                 try {
                     List<CharacterWal.Write> writes = batch.stream()
                             .map(item -> new CharacterWal.Write(item.globalId, item.payload)).toList();
@@ -77,6 +80,8 @@ public final class CharacterWalWriter implements AutoCloseable {
                     Pending queued;
                     while ((queued = queue.poll()) != null) queued.durable.completeExceptionally(io);
                     break;
+                } finally {
+                    inFlight = 0;
                 }
             }
         } catch (InterruptedException ex) {

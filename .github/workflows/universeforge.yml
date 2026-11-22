@@ -32,6 +32,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  stress-contour-coverage:
+    name: "Contour ${{ matrix.id }} — ${{ matrix.name }} (driver inventory)"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: "01", name: "Server Core", driver: "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh" }
+          - { id: "02", name: "Character / Population", driver: "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java" }
+          - { id: "03", name: "Families / Social", driver: "" }
+          - { id: "04", name: "Settlements / Labor", driver: "" }
+          - { id: "05", name: "Economy / Trade / Treasury", driver: "" }
+          - { id: "06", name: "Politics / States", driver: "" }
+          - { id: "07", name: "Army / RTS", driver: "" }
+          - { id: "08", name: "World Generation", driver: "" }
+          - { id: "09", name: "Dimensions / Planets", driver: "" }
+          - { id: "10", name: "Persistence / Recovery", driver: "" }
+          - { id: "11", name: "Long-term Autonomous Life", driver: "" }
+          - { id: "12", name: "Full Integration", driver: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report contour driver coverage (not a stress pass)
+        shell: pwsh
+        env:
+          CONTOUR_ID: ${{ matrix.id }}
+          CONTOUR_NAME: ${{ matrix.name }}
+          DRIVER_PATH: ${{ matrix.driver }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DRIVER_PATH)) {
+            $state = "NOT_IMPLEMENTED"
+          } elseif (Test-Path $env:DRIVER_PATH) {
+            $state = "DRIVER_PRESENT_UNVERIFIED"
+          } else {
+            $state = "DRIVER_MISSING"
+          }
+          "CONTOUR_$($env:CONTOUR_ID)_$state" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "### Contour $($env:CONTOUR_ID) — $($env:CONTOUR_NAME)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Driver: $($env:DRIVER_PATH)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Status: **$state**" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($state -eq "DRIVER_MISSING") { throw "Declared contour driver path does not exist." }
+
   world-runtime-acceptance:
     name: Build once; test vanilla Overworld and image dimension in one server
     runs-on: windows-latest

@@ -1,61 +1,64 @@
-# MAQAN Runtime Stress Lab — 12 Contours
+# MAQAN Runtime Stress Matrix — 12 production contours
 
-Status: acceptance contract. A contour is NOT PASSED until its real Forge Dedicated Server driver, staged workload, measurements, persistence/recovery, and uploaded evidence all succeed on Windows.
+This is the acceptance contract for the real Forge Dedicated Server stress lab. A contour is not PASS because it compiles, starts, logs a marker, or completes a smoke test. PASS requires the real production mechanism to survive its declared maximum sustainable workload, soak, save, stop, same-save restart and recovery with intact domain invariants.
 
-## Execution rules
-- Every load driver must enter through existing production commands, domain services, registries, schedulers, entity lifecycle, persistence APIs, and world tick hooks. The driver may pace and observe work; it must not implement a parallel simulation or directly fabricate success markers.
-- A driver-only helper is allowed only as an adapter to existing production APIs, with the exact production entry point and side effects documented. Any bypassed subsystem makes the affected stage NOT_IMPLEMENTED, not PASS.
-- Validate that workload actually happened from authoritative domain state and durable records, not log markers emitted by the driver itself.
-- Build once; each contour gets a separate Forge Dedicated Server process, save, and output directory. Reuse a save only inside that contour's restart/recovery phases.
-- Java/Rust unit tests are supplementary and never substitute for server stress.
-- Record commit, Java/Forge, runner, JVM args, native backend, seed, mod set, driver version.
-- Track canonical records, loaded Minecraft entities, active chunks, and processed records independently.
-- Each stage includes cold start, steady state, burst, save, graceful stop, restart, and recovery. Crash fault injection is separate.
-- Preserve logs, thread dumps, GC, heap/process samples, save, WAL/checkpoints, and failure classification. Never lower load or hide failures to get PASS.
+## Non-negotiable execution rules
+- Each contour runs in a separate Forge Dedicated Server JVM with its own save, seed and evidence folder. Restart/recovery reuses only that contour's save.
+- The driver only paces work, invokes production entrypoints and observes. The game scheduler, registries, entities, chunk system, domain services and production persistence perform the actual work.
+- No direct private-state writes, fake records, parallel toy simulation, fabricated receipts, or driver-generated PASS markers.
+- Build once in dependency order. Run isolated contour servers sequentially on one runner by default to avoid resource contention.
+- Canonical Characters and physical Minecraft entities are separate scales. 1m canonical Characters is not 1m ticking entities.
+- Each contour: cold start → baseline → staged growth → saturation → maximum sustainable steady state → burst → save/flush → graceful stop → same-save restart → recovery. Add fault injection where applicable.
+- Capture MSPT/TPS p50/p95/p99/max, CPU, RSS/native, heap, GC pauses, thread count, queue depth/backlog, disk and WAL latency, chunks, levels, entities, throughput and domain invariants.
+- Result classes: PASS, DEGRADED, SERVER_FAILURE, TEST_FAILURE, INFRA_FAILURE, INCONCLUSIVE, NOT_IMPLEMENTED. Never hide a system failure behind a timeout increase or runner classification.
 
-## Shared workload ladders
-- Canonical population/social/economy: 100 → 1k → 10k → 100k → 500k → 1m records where supported.
-- Physical agents/entities/pathing/combat: 10 → 100 → 1k → 5k → 10k. Never equate one million canonical records with one million ticking entities.
-- Worldgen: 1 → 4 → 16 → 64 → 256 region/chunk batches, then large continuous traversal.
-- Soak: 30 min → 2 h → 8 h → overnight after calibration.
+## Load ladders
+- Canonical Characters/social/economy: 100 → 1k → 10k → 100k → 500k → 1m.
+- Physical NPC/worker/troop entities: 10 → 100 → 1k → 5k → 10k, bounded by actual chunk/entity behavior.
+- Settlements: 1 → 10 → 100 → 1k; canonical workers 100 → 100k, physical workers separately.
+- Worldgen: 1 → 4 → 16 → 64 → 256 chunk/region batches, then continuous exploration.
+- Dimensions: 1 → 2 → 8 → 32 → 128 registered; 1 → 2 → 4 → 8 actually loaded.
+- Soak: 30m → 2h → 8h → overnight after preceding stages pass.
 
-## Contours
+## Contour definitions
 
-### 01 — Server Core (foundation)
-Forge cold start, idle baseline, command/event bursts, bounded server-thread work, tick loop, save/flush, graceful stop, same-world restart; 30 min / 2 h / 8 h soak. Measure TPS/MSPT p50/p95/p99/max, overruns, queues, CPU, RSS/private bytes, heap, GC pauses, threads/handles, save latency. Fail on crash, unbounded growth, missing save acknowledgement, forced termination or failed restart. Current lifecycle/restart and process/heap/thread sampling is partial; no verified Windows pass. 120 seconds is smoke baseline, not Core stress.
+### 01 — Server Core
+Actual Forge Dedicated Server lifecycle, MinecraftServer tick, ServerLevel/ChunkSource, event/command dispatch, entity/chunk activity, save/flush and restart. Stress active chunks/entities, command/event bursts, bounded scheduled work and save pressure. Current driver is a lifecycle acceptance harness, not a maximum-load PASS.
 
 ### 02 — Character / Population
-Canonical Character creation, UUID uniqueness, registry, lifecycle, needs/intent simulation, bounded processing, WAL append/replay, checkpoint/migration; separate physical WFNpc spawn/despawn. Canonical stages 100 → 1k → 10k → 100k → 500k → 1m; physical bodies independently 10 → 100 → 1k → 5k. Measure throughput, server-thread time/batch, lookup latency, heap/object growth, WAL bytes/force latency, replay throughput, checkpoint time, duplicate/missing IDs and active bodies. Interrupt during creation, partial WAL tail, clean restart, replay/resume without duplicates/skips. Current synthetic synchronous driver was removed because it bypassed the normal tick path and used a broad checkpoint as a proxy for normal per-character WAL writes. No independent Population stress contour is currently implemented or passed. Next implementation must pace creation through existing domain entry points, let the existing server tick/scheduler process it, and verify the actual persistence contract. Do not enable million-scale stages until those paths are proven.
+Actual CharacterRegistry creation and UUID ownership, PeopleMod normal server tick, PopulationSimulation, durable CharacterWal writes/replay, and physical WFNpc spawning as a separate player-connected workload. Canonical scale to 1m; physical entity scale separately to 10k. Verify all IDs, receipts, needs/duties, WAL durability/replay and no starvation. Driver exists but is not validated. Latest run showed synchronous FileChannel.force on Server Thread through CharacterWal.appendBatch → CharacterWal.append → PeopleMod.persistCharacter → RuntimeStressLab.createOne. Pending change routes only dedicated stress writes through bounded CharacterWalWriter; ordinary transactional writes remain synchronous. Server thread must never wait on writer futures.
 
 ### 03 — Families / Social
-Births, aging, death, marriages, kinship, opinions, social memory, events, witness propagation. 1k → 10k → 100k → 500k → 1m canonical people; interaction density 1/10/100 per character per simulated period. Measure event throughput, graph traversal, backlog, per-tick budget, memory/relationship, duplicate delivery, orphan references, graph integrity. Burst births/deaths/marriages; verify idempotency/replay.
+Real family planning, life-stage transitions, births/deaths, marriage/separation, kinship, inheritance, social contacts, witness/reputation propagation. Scale 1k→1m canonical people; verify no orphaned kin links, duplicate events or unbounded fan-out.
 
 ### 04 — Settlements / Labor
-Workers, professions, job queues, work zones, construction, warehouses, production, route planning/replanning/failures. 1 → 10 → 100 → 1k settlements; 100 → 1k → 10k → 100k canonical workers; 10 → 100 → 1k → 5k physical active workers. Measure jobs/sec, route requests/sec, path expansions, failures, replans, stuck time, chunk tickets, block updates, contention, MSPT. Test blocked paths, inaccessible zones, missing materials, death/reassignment and in-flight task recovery.
+Real Settlement/Colony, resident life/task graph, worker roles, job assignment, construction blueprints, resource hauling, storage, routes and path replanning. Scale 1→1k settlements, 100→100k canonical workers and physical workers separately. Faults: blocked paths, missing materials, unloaded chunks, death/role change and interrupted builds.
 
 ### 05 — Economy / Trade / Treasury
-Production, consumption, inventory transfers, markets, caravans, routes, taxes, treasury ledgers, WAL/checkpoints. 10 → 100 → 1k → 10k markets/settlements where supported; 1k → 10k → 100k → 1m ledger entries/transactions. Measure transactions/sec, append/force latency, clearing time, backlog, contention, memory, balance invariants. Fault between transaction endpoints; no duplicated/lost goods or money.
+Real production/consumption, Market, Trade, caravans, TradeNetwork, taxes, treasury and transaction coordinators. Stress 1k→1m transactions and increasing markets/settlements. Faults: duplicate requests, interrupted transfers, partial WAL frame and unavailable destination; verify no lost/duplicated currency or goods.
 
 ### 06 — Politics / States
-Realms, titles, rulers, dynasties, vassal graphs, councils, diplomacy, succession, laws, revolts, decisions. 100 → 1k → 10k → 100k → 1m actors/titles where supported; vary graph density/cadence. Measure decision throughput, graph traversal, proposal backlog, succession latency, event fan-out, memory/tick impact. Burst ruler death, succession, revolt, treaty, council changes; verify references and deterministic recovery.
+Real Realm/Statecraft, CourtSim/Council, title/dynasty succession, diplomacy, treaties, laws and revolt. Stress actor and realm graph size plus decision bursts. Verify stable identity, succession, proposal delivery and no graph corruption.
 
 ### 07 — Army / RTS
-Building recruitment/summons, commanders, armies/corps/units, orders, formations, supply, morale, combat, wounds/losses. 10 → 100 → 1k → 5k → 10k physical units; 100 → 1k → 10k → 100k canonical military Characters. Measure order latency, pathfinding, formation convergence, target acquisition, combat/sec, supply, entity tracking, packet volume, MSPT. Stress mass recruitment, simultaneous orders, commander loss, supply cutoff, retreat and battle save/reload.
+Real recruitment through building/catalog entrypoints, ArmyEngine, TroopController/TroopEntity, formations, orders, pathfinding, combat, commander hierarchy, operational supply and morale. Canonical military people to 100k; physical units to 10k. Verify orders, movement, combat outcomes, supply, wounds, retreat and save/reload.
 
 ### 08 — World Generation
-Biomes, terrain, hydrology, chunks, region maps, settlements, borders, deterministic seeds, generation queues. Concurrent chunk/region batches 1 → 4 → 16 → 64 → 256; large exploration, multiple seeds. Measure chunks/sec, latency p50/p95/p99, executor queue, CPU, allocation/GC, disk, cache hit/miss, peak memory, determinism. Test cancellation, restart during generation, reload, seam continuity, no duplicate/omitted work.
+Actual Forge chunk generator and WorldGenRegion, terrain/biome/hydrology/province/settlement generation, generation executor and world save. Multiple seeds, chunk/region saturation, concurrent exploration, cancellation/restart and deterministic seam checks. Measure chunks/sec, tail latency, queues, memory/GC and disk.
 
 ### 09 — Dimensions / Planets
-Lazy activation, first visit, unload/reload, dimension-local registries, isolation, travel, resource lifecycle. 1 → 2 → 8 → 32 → 128 registered dimensions; 1 → 2 → 4 → 8 active dimensions. Measure startup, loaded levels, chunks/entities per level, memory/dimension, activation/unload latency, cross-dimension references, tick cost. Prove unvisited dimensions do not load/simulate; test repeat visit/unload/restart and identity isolation.
+Actual ServerLevel registration, lazy activation, first visit, travel, unload/reload, per-dimension Character partitions and cleanup. Registered dimensions scale to 128; loaded dimensions separately to 8. Verify unvisited dimensions do not load/simulate and revisits preserve state.
 
 ### 10 — Persistence / Recovery
-Character/Treasury WAL, checkpoints, snapshots, migrations, cross-partition transfers, world saves. 10k → 100k → 500k → 1m records and increasing transaction rates; vary checkpoint intervals/shards. Measure append/force, bytes/sec, replay records/sec, checkpoint duration, peak memory, disk amplification, recovery time, loss/duplication. Fault inject at transaction boundaries, partial frame, bad checksum, disk full, migration interruption.
+Actual CharacterWal, production writers, treasury/settlement ledgers, snapshots, checkpoints, migrations and cross-partition coordinators. Stress 10k→1m records and transaction rates. Inject process interruption, partial tail, checksum corruption, interrupted checkpoint/migration and disk pressure; verify replay and no duplicate/lost transactions.
 
 ### 11 — Long-term Autonomous Life
-Player-free population, families, labor, economy, politics, settlements, army, autonomous events. 10k → 100k → 500k → 1m canonical people; 30 min → 2 h → 8 h → overnight. Measure simulation lag, backlog growth, memory/GC slope, WAL growth, event rates, population invariants, birth/death/starvation trends, responsiveness. Fail on unbounded backlog, unexplained memory growth, skipped days, duplicate events, failed save/recovery.
+Actual WorldSimMod server tick, native/fallback population compute scheduler, PopulationComputeCoordinator and domain cadences with no player. 10k→1m canonical people, 30m→overnight. Measure simulation lag/backlog slope, memory/GC/WAL growth, life events and recovery.
 
 ### 12 — Full Integration
-All enabled systems simultaneously, shared Character identity, real cross-system interactions. 10% → 25% → 50% → 75% → 100% of individually accepted capacities; 30 min → 2 h → 8 h soak. Concurrent bursts: worldgen + population growth + construction + trade + diplomacy + army combat. Measure total/per-subsystem tick budget, queues, contention, CPU, heap/RSS, GC, disk/WAL, active chunks/entities, domain invariants. PASS only when all invariants and persistence/recovery pass together.
+All previously accepted production domains running simultaneously: worldgen, population, social, labor, economy, politics, recruitment, movement and combat. Scale to 100% of each independently accepted capacity. Integration cannot hide an individually failing subsystem.
 
-## Result contract
-Each contour emits JSON: contour ID, stage, workload totals, elapsed time, throughput, latency percentiles, CPU/memory/GC, threads/queues, persistence/recovery evidence, loaded entities/chunks, warnings, failure class, commit/environment metadata. Failure classes: SERVER, TEST, INFRA, DEGRADED, INCONCLUSIVE, NOT_IMPLEMENTED. Only fully evidenced success is PASS; missing/timed-out stages are never PASS.
+## Current honest implementation state
+- 01 and 02 have runtime drivers, but neither has a completed maximum-load stress PASS.
+- 03–12 are mapped to real production systems but do not yet have independent server drivers. CI reports them as NOT_IMPLEMENTED instead of faking test execution.
+- The workflow contour matrix is a coverage report, not a substitute for the missing stress drivers.

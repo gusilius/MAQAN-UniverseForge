@@ -779,6 +779,29 @@ public final class PopulationSimulationTest {
             ok(false, "shared Java/Rust population parity fixture loads and matches");
         }
 
+        CharacterRegistry rolloverRegistry = new CharacterRegistry();
+        java.util.List<Character> rolloverPeople = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            Character person = rolloverRegistry.create("Rollover " + i, "", "north", "n", 270);
+            PopulationSimulation.setNeed(person, Need.HUNGER, 5);
+            rolloverPeople.add(person);
+        }
+        boolean rolloverDayOne = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 1, 0, 301, 2);
+        boolean rolloverDayTwoA = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean rolloverDayTwoB = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean rolloverComplete = false;
+        int rolloverGuard = 0;
+        while (!rolloverComplete && rolloverGuard++ < 10)
+            rolloverComplete = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean allAtNewestDay = rolloverPeople.stream().allMatch(person ->
+                "2".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))
+                        && "2".equals(String.valueOf(person.props.get("population.simulated_days")))
+                        && PopulationSimulation.need(person, Need.HUNGER) == 25);
+        ok(!rolloverDayOne && !rolloverDayTwoA && !rolloverDayTwoB
+                        && rolloverComplete && rolloverGuard <= 10 && allAtNewestDay,
+                "world-day rollover preserves unfinished population cursor and catches every Character up without starvation"
+                        + " (complete=" + rolloverComplete + ", guard=" + rolloverGuard + ", allAtNewestDay=" + allAtNewestDay + ")");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

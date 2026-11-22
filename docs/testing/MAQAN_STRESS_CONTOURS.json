@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "repository": "gusilius/MAQAN-UniverseForge",
+  "branch": "integration/worldgen-rts-unification",
+  "required_order": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12"
+  ],
+  "contours": [
+    {
+      "id": "01",
+      "name": "Server Core",
+      "status": "DRIVER_PRESENT_UNVERIFIED",
+      "driver": "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh",
+      "systems": [
+        "MinecraftServer tick loop",
+        "Forge lifecycle/events",
+        "ServerLevel and chunks",
+        "save/flush/restart"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "02",
+      "name": "Character / Population",
+      "status": "DRIVER_PRESENT_UNVERIFIED",
+      "driver": "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java",
+      "systems": [
+        "CharacterRegistry lifecycle and global UUID",
+        "PopulationSimulation through PeopleMod server tick",
+        "CharacterWal and bounded asynchronous writer",
+        "WFNpc physical entity path"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "03",
+      "name": "Families / Social",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "FamilyPlanning",
+        "LifeSimulation",
+        "NpcSocialSimulation",
+        "Relations and witness reputation"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "04",
+      "name": "Settlements / Labor",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "Settlement and Colony",
+        "ResidentLifeBatch",
+        "ResidentTaskGraph",
+        "WFWorker and BuildingSite"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "05",
+      "name": "Economy / Trade / Treasury",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "Trade and Market",
+        "Caravan and TradeNetwork",
+        "Treasury ledger and transfers"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "06",
+      "name": "Politics / States",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "Realms and Statecraft",
+        "CourtSim and Council",
+        "succession and diplomacy"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "07",
+      "name": "Army / RTS",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "ArmyEngine recruitment and movement",
+        "TroopController and TroopEntity",
+        "formations, supply, morale, combat"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "08",
+      "name": "World Generation",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "Forge chunk generator",
+        "WorldGenRegion",
+        "biome, terrain, hydrology, settlement generation"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "09",
+      "name": "Dimensions / Planets",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "ServerLevel lifecycle",
+        "lazy dimension activation/unload",
+        "dimension-local identity partitions"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "10",
+      "name": "Persistence / Recovery",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "CharacterWal replay/checkpoint",
+        "production ledgers and snapshots",
+        "crash-tail and migration recovery"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "11",
+      "name": "Long-term Autonomous Life",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "WorldSimMod tick scheduler",
+        "PopulationComputeCoordinator",
+        "player-free life/economy/social cadence"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    },
+    {
+      "id": "12",
+      "name": "Full Integration",
+      "status": "NOT_IMPLEMENTED",
+      "driver": null,
+      "systems": [
+        "all accepted production domains simultaneously",
+        "cross-system Character lifecycle",
+        "integrated save/restart/recovery"
+      ],
+      "isolated_forge_server": true,
+      "unique_save": true,
+      "staged_maximum_load": true,
+      "soak": true,
+      "restart_recovery": true,
+      "pass_requires_evidence": true
+    }
+  ]
+}

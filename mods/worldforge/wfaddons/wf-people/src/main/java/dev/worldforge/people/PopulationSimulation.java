@@ -12,7 +12,7 @@ import java.util.*;
 public final class PopulationSimulation {
     private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
     private record WorldDayCursor(long targetDay, long fallbackDay, int year,
-                                   long membershipGeneration, int nextIndex) { }
+                                   long membershipGeneration, int nextIndex, boolean catchUpPass) { }
     private static final Map<CharacterRegistry, WorldDayCursor> WORLD_DAY_CURSORS = new WeakHashMap<>();
     public static final int MAX_NEED = 100;
     public static final int SKILL_XP_PER_RANK = 100;
@@ -531,14 +531,20 @@ public final class PopulationSimulation {
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
-            if (cursor == null || cursor.targetDay() != targetWorldDay
-                    || cursor.fallbackDay() != fallbackStartDay || cursor.year() != year
-                    || cursor.membershipGeneration() != generation) {
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0);
-            }
             List<Character> members = registry.all();
             // Capture membership once; a batch never expands during this server tick.
             int memberCount = members.size();
+            if (cursor == null || cursor.fallbackDay() != fallbackStartDay || cursor.year() != year
+                    || cursor.membershipGeneration() != generation) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false);
+            } else if (cursor.targetDay() != targetWorldDay) {
+                // Preserve the unfinished suffix when the world-day target rolls over.
+                // Then make a full pass so the already-visited prefix also reaches the
+                // newest target before the scheduler acknowledges completion.
+                int next = cursor.nextIndex() >= memberCount ? 0 : cursor.nextIndex();
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                        next, next > 0);
+            }
             int start = Math.min(cursor.nextIndex(), memberCount);
             if (start >= memberCount) {
                 WORLD_DAY_CURSORS.put(registry, cursor);
@@ -560,8 +566,13 @@ public final class PopulationSimulation {
                     }
                 }
             }
+            if (end >= memberCount && cursor.catchUpPass()) {
+                WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
+                        year, generation, 0, false));
+                return false;
+            }
             WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
-                    year, generation, end));
+                    year, generation, end, cursor.catchUpPass()));
             return end >= memberCount;
         }
     }
