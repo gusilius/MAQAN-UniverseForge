@@ -92,6 +92,7 @@ public class WorldForgeMod {
     private static TreasuryArchiveStore treasuryStore;
     private static volatile ExecutorService treasuryCheckpointExecutor;
     private static volatile boolean treasuryCheckpointQueued;
+    private static volatile boolean treasuryStopping;
     private static volatile PlanetActivationState planetActivation = PlanetActivationState.empty();
     private static volatile Path planetActivationFile;
     private static final BlockPos DORMANT_PLANET_SPAWN = new BlockPos(0, 64, 0);
@@ -235,7 +236,7 @@ public class WorldForgeMod {
     }
 
     private static void scheduleTreasuryCheckpoint(MinecraftServer server) {
-        if (server == null || treasuryLoadFailed || treasuryStore == null) return;
+        if (server == null || treasuryLoadFailed || treasuryStore == null || treasuryStopping) return;
         synchronized (WorldForgeMod.class) {
             if (treasuryCheckpointQueued) return;
             treasuryCheckpointQueued = true;
@@ -269,6 +270,7 @@ public class WorldForgeMod {
 
     /** Final flush is allowed to wait during shutdown; it must not abandon queued durable work. */
     private static void flushTreasuryOnShutdown(MinecraftServer server) {
+        treasuryStopping = true;
         ExecutorService executor = treasuryCheckpointExecutor;
         if (executor != null) {
             executor.shutdown();
@@ -405,6 +407,7 @@ public class WorldForgeMod {
     public void onServerAboutToStart(ServerAboutToStartEvent e) {
         biomes = e.getServer().registryAccess().registryOrThrow(Registries.BIOME);
         treasuryTicks = 0;
+        treasuryStopping = false;
         persistedTreasuryVersion = -1L;
         MAPS.clear();
         try {
@@ -443,6 +446,7 @@ public class WorldForgeMod {
         ExecutorService checkpointExecutor = treasuryCheckpointExecutor;
         treasuryCheckpointExecutor = null;
         treasuryCheckpointQueued = false;
+        treasuryStopping = false;
         if (checkpointExecutor != null && !checkpointExecutor.isTerminated()) checkpointExecutor.shutdown();
         worldId = null;
         dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
