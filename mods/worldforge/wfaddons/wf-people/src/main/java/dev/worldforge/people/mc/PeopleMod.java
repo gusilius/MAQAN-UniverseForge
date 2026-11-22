@@ -1027,7 +1027,8 @@ public class PeopleMod {
                 }
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
-            if (ticks % 20 == 0) socialInitiatives(e.getServer());
+            if (ticks % 20 == 0 && !Boolean.getBoolean("wf.acceptance.contour02"))
+                socialInitiatives(e.getServer());
             // Routine Character mutations are already committed to the per-partition WAL
             // by persistCharacter(). A population-wide JSON checkpoint here serialized every
             // Character on the server thread and stalled the tick loop at scale. Keep full
@@ -1038,6 +1039,9 @@ public class PeopleMod {
     }
 
     private static boolean tryRustPopulationCompute(MinecraftServer server,long worldDay,int year) {
+        // Contour 02 tests PeopleMod production scheduling with its bounded Java fallback.
+        // Native WorldSim compute is covered separately and in full integration.
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return false;
         if (!ModList.get().isLoaded("wf_worldsim")) return false;
         try {
             Class<?> coordinator = Class.forName("dev.worldforge.worldsim.mc.PopulationComputeCoordinator");

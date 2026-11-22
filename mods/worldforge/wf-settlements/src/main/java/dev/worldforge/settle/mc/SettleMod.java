@@ -2196,6 +2196,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return;
         advanceCanonicalResidentLife();
         if (DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();

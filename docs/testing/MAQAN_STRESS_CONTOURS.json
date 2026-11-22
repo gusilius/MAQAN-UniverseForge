@@ -42,9 +42,15 @@
       "driver": "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java",
       "systems": [
         "CharacterRegistry lifecycle and global UUID",
-        "PopulationSimulation through PeopleMod server tick",
+        "PopulationSimulation through PeopleMod production server tick (bounded Java fallback)",
         "CharacterWal and bounded asynchronous writer",
         "WFNpc physical entity path"
+      ],
+      "excluded_domains": [
+        "Court annual lifecycle and succession (contour 03/06)",
+        "Settlement resident life and colony simulation (contour 04)",
+        "WorldSim Genesis and strategic decisions (contour 11)",
+        "Native WorldSim population compute (contour 11)"
       ],
       "isolated_forge_server": true,
       "unique_save": true,

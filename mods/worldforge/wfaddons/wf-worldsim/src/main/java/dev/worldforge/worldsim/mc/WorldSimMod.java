@@ -392,6 +392,9 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        // Contour 02 isolates canonical people/population. WorldSim Genesis and strategic
+        // domains have dedicated contours; PeopleMod still invokes population scheduling.
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return;
         try (WorldSimProfiler.Scope ignored = PROFILER.begin("worldsim.server_tick_handler")) {
             processServerTick(event);
         }

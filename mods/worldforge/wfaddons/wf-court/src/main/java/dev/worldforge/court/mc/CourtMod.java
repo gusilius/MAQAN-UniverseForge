@@ -311,6 +311,7 @@ public class CourtMod {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return;
         ticks++;
         try {
             int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_court", 1);
