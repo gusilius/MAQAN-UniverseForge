@@ -1916,16 +1916,31 @@ public class SettleMod {
 
     /** Reinstates an existing living Character as a settlement worker; no new Character is allocated. */
     public static boolean attachExistingCharacter(String colonyId, String characterId) {
+        return attachExistingCharacter(colonyId, characterId, null);
+    }
+
+    /**
+     * Reinstates an existing living Character as a settlement worker.
+     * The optional per-reconciliation assignment index avoids rescanning every
+     * settlement's worker list for every resident in a large Genesis batch.
+     */
+    public static boolean attachExistingCharacter(String colonyId, String characterId,
+                                                   Map<String, String> workerColonyByPerson) {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
         // Recovery may replay a transition after the destination settlement was already saved.
         // Treat the exact existing assignment as success; never create a duplicate worker.
-        for (Colony other : COLONIES.values()) {
-            if (other == null || other.s == null) continue;
-            for (dev.worldforge.settle.Worker worker : other.s.workers) {
-                if (!characterId.equals(worker.person)) continue;
-                return other == colony;
+        if (workerColonyByPerson != null) {
+            String existingColony = workerColonyByPerson.get(characterId);
+            if (existingColony != null) return existingColony.equals(colonyId);
+        } else {
+            for (Colony other : COLONIES.values()) {
+                if (other == null || other.s == null) continue;
+                for (dev.worldforge.settle.Worker worker : other.s.workers) {
+                    if (!characterId.equals(worker.person)) continue;
+                    return other == colony;
+                }
             }
         }
         CharacterRegistry registry = null;
@@ -1949,6 +1964,7 @@ public class SettleMod {
             current.person = restoredPersonId;
             current.profession = restoredProfession;
         });
+        if (workerColonyByPerson != null) workerColonyByPerson.put(restoredPersonId, colonyId);
         // Keep the canonical Character's active profession in sync with the restored worker assignment.
         // This records the military service interval in the normal profession history.
         if (!profession.equals(PopulationSimulation.profession(person)))
