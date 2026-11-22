@@ -2,7 +2,6 @@ package dev.worldforge.people.mc;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
@@ -30,7 +29,6 @@ final class PeopleCommands {
                 .then(Commands.literal("court").then(Commands.argument("realm", StringArgumentType.greedyString()).executes(c -> court(c.getSource(), StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("org").then(Commands.argument("id", StringArgumentType.word()).then(Commands.argument("org", StringArgumentType.word()).executes(c -> setOrg(c.getSource(), StringArgumentType.getString(c, "id"), StringArgumentType.getString(c, "org"))))))
                 .then(Commands.literal("who").executes(c -> who(c.getSource())))
-                .then(Commands.literal("stress").then(Commands.argument("count", IntegerArgumentType.integer(1, 1000000)).executes(c -> populationStress(c.getSource(), IntegerArgumentType.getInteger(c, "count")))))
                 .then(Commands.literal("kill").then(Commands.argument("id", StringArgumentType.word()).executes(c -> kill(c.getSource(), StringArgumentType.getString(c, "id"))))));
     }
 
@@ -123,50 +121,6 @@ final class PeopleCommands {
             }
         } catch (NumberFormatException ignored) { }
         return place;
-    }
-
-    /**
-     * Disposable Dedicated Server population load driver. Disabled in normal game sessions.
-     * Adds canonical Character records to the ordinary Overworld partition, exercises
-     * population decisions, and reports physical WFNpc bodies separately.
-     */
-    private static int populationStress(CommandSourceStack source, int count) {
-        if (!Boolean.getBoolean("worldforge.acceptance.population-stress")) {
-            source.sendFailure(Component.literal("Population stress driver is disabled outside acceptance runs"));
-            return 0;
-        }
-        if (source.getServer() == null || source.getLevel().isClientSide) return 0;
-        CharacterRegistry registry = PeopleMod.worldRegistry();
-        long started = System.nanoTime();
-        int before = registry.size();
-        int created = 0;
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-            for (int i = 0; i < count; i++) {
-                int ordinal = before + i + 1;
-                Character person = registry.create("WFStress-" + ordinal, "StressLab",
-                        "acceptance", (ordinal & 1) == 0 ? "m" : "f", PeopleMod.YEAR - 20 - (ordinal % 50));
-                dev.worldforge.people.PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
-                created++;
-            }
-        } catch (RuntimeException failure) {
-            PeopleMod.LOGGER.error("MAQAN_POPULATION_STRESS_ERROR before={} requested={} created={}",
-                    before, count, created, failure);
-            source.sendFailure(Component.literal("Population stress failed after " + created + " records: " + failure.getMessage()));
-            return 0;
-        }
-        long simulationMs = (System.nanoTime() - started) / 1_000_000L;
-        int bodies = 0;
-        for (var level : source.getServer().getAllLevels())
-            for (var entity : level.getAllEntities())
-                if (entity instanceof WFNpc) bodies++;
-        boolean persisted = PeopleMod.persistAllNow(source.getServer());
-        String result = "MAQAN_POPULATION_STRESS_RESULT requested=" + count
-                + " created=" + created + " canonical_total=" + registry.size()
-                + " loaded_wfnpc_bodies=" + bodies + " create_and_decide_ms=" + simulationMs
-                + " persist=" + persisted;
-        PeopleMod.LOGGER.info(result);
-        source.sendSuccess(() -> Component.literal(result), false);
-        return persisted && created == count ? created : 0;
     }
 
     private static int kill(CommandSourceStack s, String id) {
