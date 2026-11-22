@@ -2654,6 +2654,7 @@ public final class WorldSimMod {
                         if (former == null) continue;
                         String reason = !former.alive ? "death:emergence" : "transfer:emergence";
                         colony.s.removeWorkerByPerson(worker.person, reason);
+                        workerColonyByPerson.remove(worker.person, colony.s.id);
                     }
                     for (String residentId : residentIds) {
                         dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
