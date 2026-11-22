@@ -86,7 +86,6 @@ runtime_exit() {
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
     echo "RUNTIME_TERMINATION_EVIDENCE=$TERMINATION_EVIDENCE"
   fi
-  fi
   if [ "$exit_code" -eq 0 ] && { [ "$SERVER_EXIT_CODE" != "0" ] || [ "$TERMINATION_EVIDENCE" != "graceful_stop" ]; }; then
     echo "ERROR: runtime scenario cannot PASS without observed JVM exit 0 and graceful shutdown"
     exit_code=14
