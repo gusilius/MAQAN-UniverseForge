@@ -48,6 +48,8 @@ public final class PopulationLifeStressTest {
         Relations relations = new Relations();
         int conceptions = 0;
         int births = 0;
+        int prematurePregnancyResolutions = 0;
+        int incorrectDueFatherResolutions = 0;
         String sampleFatherId = "";
         String sampleMotherId = "";
         String sampleChildId = "";
@@ -71,7 +73,10 @@ public final class PopulationLifeStressTest {
 
             if (FamilyPlanning.tryConceive(mother, father, year, conceptionDay, seed + i)) {
                 conceptions++;
-                checkDueOnlyAtBirth(mother, father, conceptionDay);
+                if (!FamilyPlanning.dueFatherId(mother, conceptionDay + 269L).isEmpty())
+                    prematurePregnancyResolutions++;
+                if (!FamilyPlanning.dueFatherId(mother, conceptionDay + 270L).equals(father.id))
+                    incorrectDueFatherResolutions++;
                 Character child = registry.addChild(father, mother, "Stress Child " + i,
                         (i & 1) == 0 ? "f" : "m", year + 1);
                 FamilyPlanning.complete(mother, father, year + 1, child.id);
@@ -99,6 +104,8 @@ public final class PopulationLifeStressTest {
         check(registry.size() == couples * 2 + births,
                 "canonical registry contains every parent and born child: " + registry.size());
         check(conceptions == births, "every due conception resolves into exactly one canonical birth");
+        check(prematurePregnancyResolutions == 0 && incorrectDueFatherResolutions == 0,
+                "all " + conceptions + " pregnancies respect gestation and canonical father identity");
         check(relations.keys().size() == couples * 2L + births * 4L,
                 "directed spouse and parent-child social bonds are present: " + relations.keys().size());
 
@@ -160,13 +167,6 @@ public final class PopulationLifeStressTest {
                 + " elapsed_ms=" + elapsedMillis + " heap_used_bytes=" + usedHeap());
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
-    }
-
-    private static void checkDueOnlyAtBirth(Character mother, Character father, long startDay) {
-        check(FamilyPlanning.dueFatherId(mother, startDay + 269L).isEmpty(),
-                "pregnancy does not resolve before full gestation");
-        check(FamilyPlanning.dueFatherId(mother, startDay + 270L).equals(father.id),
-                "pregnancy resolves to its canonical father at the due day");
     }
 
     private static void link(Relations relations, Character first, Character second) {
