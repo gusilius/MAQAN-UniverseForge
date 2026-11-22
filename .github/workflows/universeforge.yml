@@ -222,6 +222,30 @@ jobs:
             throw "Contour 02 Population failed; inspect the in-game stress report and server evidence."
           }
 
+      - name: Contour 03 — independent autonomous family and social-life stress
+        id: social_stress
+        continue-on-error: true
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: "social-stress"
+          WF_SOCIAL_STRESS_TARGET: "100000"
+          WF_SOCIAL_STRESS_DAYS: "30"
+          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
+        run: |
+          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-03-social"
+
+      - name: Aggregate Families / Social contour result
+        if: always()
+        shell: pwsh
+        env:
+          SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
+        run: |
+          "CONTOUR_03_SOCIAL_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:SOCIAL_OUTCOME -ne "success") {
+            throw "Contour 03 Families / Social failed; inspect the isolated social-life stress artifact."
+          }
+
       - name: Start one server with normal vanilla Overworld and image-derived dimension
         id: dual_world_smoke
         continue-on-error: true

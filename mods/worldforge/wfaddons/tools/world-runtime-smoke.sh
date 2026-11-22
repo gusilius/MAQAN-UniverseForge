@@ -211,7 +211,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
+java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.social.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]] && echo true || echo false) -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -232,6 +232,71 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]; then
+  CURRENT_STAGE="social_life_stress"
+  TARGET="${WF_SOCIAL_STRESS_TARGET:-100000}"
+  DAYS="${WF_SOCIAL_STRESS_DAYS:-30}"
+  REPORT="world/worldforge/stresslab/contour-03-social.json"
+  echo "SOCIAL_STRESS_CONTOUR=03"
+  echo "SOCIAL_STRESS_TARGET=$TARGET"
+  echo "SOCIAL_STRESS_DAYS=$DAYS"
+  printf 'wfrelstress start %s %s\n' "$TARGET" "$DAYS" >> in.txt
+  SOCIAL_REPORT_READY=0
+  for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
+    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second % 60 == 0 )); then
+      echo "SOCIAL_STRESS_ELAPSED_SECONDS=$second"
+      grep 'WF_STRESS contour=03_social' server.log | tail -4 || true
+    fi
+    if [ -f "$REPORT" ]; then
+      cp "$REPORT" "$OUTPUT/contour-03-social.json"
+      SOCIAL_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","INVALID"))' "$REPORT")"
+      echo "SOCIAL_STRESS_REPORTED_STATUS=$SOCIAL_STATUS"
+      SOCIAL_REPORT_READY=1
+      break
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: Forge server exited during social-life stress"; exit 41; }
+    sleep 1
+  done
+  if [ "$SOCIAL_REPORT_READY" -ne 1 ]; then
+    echo "SOCIAL_STRESS_TIMEOUT_STAGE=$CURRENT_STAGE"
+    grep 'WF_STRESS contour=03_social' server.log | tail -60 || true
+    printf '%s\n' "wfrelstress status" "stop" >> in.txt
+    exit 42
+  fi
+  if [ "$SOCIAL_STATUS" != "PASS" ]; then
+    cat "$REPORT"
+    echo "ERROR: contour 03 autonomous social simulation did not satisfy lifecycle invariants (status=$SOCIAL_STATUS)"
+    exit 43
+  fi
+  python3 - "$REPORT" "$TARGET" "$DAYS" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+target, days = int(sys.argv[2]), int(sys.argv[3])
+checks = {
+    "status": report.get("status") == "PASS",
+    "created": report.get("created") == target,
+    "days": report.get("days_completed") == days,
+    "interactions": report.get("autonomous_interactions", 0) > 0,
+    "bonds": report.get("npc_directed_bonds", 0) > 0,
+    "reciprocal": report.get("reciprocal_bonds") == report.get("npc_directed_bonds"),
+    "registry": report.get("final_registry_size", 0) >= report.get("initial_registry_size", 0) + target,
+}
+for key, passed in checks.items():
+    print(f"SOCIAL_STRESS_CHECK_{key.upper()}={'PASS' if passed else 'FAIL'}")
+if not all(checks.values()):
+    raise SystemExit("Contour 03 evidence failed: " + repr(report))
+print("SOCIAL_STRESS_EVIDENCE=PASS")
+print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+PY
+  printf '%s\n' "save-all flush" >> in.txt
+  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
+  grep -Fq 'Saved the game' server.log || { echo "ERROR: contour 03 save-all flush was not acknowledged"; exit 44; }
+  echo "SOCIAL_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
+  CURRENT_STAGE="social_life_stress_complete"
+  exit 0
+fi
+
 if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
   CURRENT_STAGE="population_stress"
   TARGET="${WF_STRESS_TARGET:-1000000}"

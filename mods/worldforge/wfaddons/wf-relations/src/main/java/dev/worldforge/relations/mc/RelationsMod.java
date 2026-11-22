@@ -1,5 +1,6 @@
 package dev.worldforge.relations.mc;
 
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.WFNet;
@@ -40,6 +41,7 @@ public class RelationsMod {
             if (ModList.get().isLoaded("wf_dialogue")) { DialogueLink.register(); LOGGER.info("wf_relations: мост к wf_dialogue подключён"); }
         }));
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(new SocialLifeStressLab());
     }
 
     @SubscribeEvent
@@ -74,6 +76,34 @@ public class RelationsMod {
         e.getDispatcher().register(Commands.literal("wfrel")
                 .executes(c -> open(c.getSource()))
                 .then(Commands.literal("dismiss").then(Commands.argument("id", StringArgumentType.word()).executes(c -> dismiss(c.getSource(), StringArgumentType.getString(c, "id"))))));
+        e.getDispatcher().register(Commands.literal("wfrelstress")
+                .requires(source -> source.hasPermission(4))
+                .then(Commands.literal("start")
+                        .then(Commands.argument("target", IntegerArgumentType.integer(2, 1_000_000))
+                                .then(Commands.argument("days", IntegerArgumentType.integer(1, 3650))
+                                        .executes(c -> startSocialStress(c.getSource(),
+                                                IntegerArgumentType.getInteger(c, "target"),
+                                                IntegerArgumentType.getInteger(c, "days"))))))
+                .then(Commands.literal("status").executes(c -> {
+                    c.getSource().sendSuccess(() -> Component.literal("Social stress: " + SocialLifeStressLab.status()), false);
+                    return 1;
+                })));
+    }
+
+
+    private static int startSocialStress(CommandSourceStack source, int target, int days) {
+        try {
+            if (!SocialLifeStressLab.start(source.getServer(), target, days)) {
+                source.sendFailure(Component.literal("Social stress уже выполняется."));
+                return 0;
+            }
+            source.sendSuccess(() -> Component.literal("Contour 03 social stress запущен: " + target
+                    + " жителей, " + days + " модельных дней."), true);
+            return 1;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось запустить contour 03: " + ex.getMessage()));
+            return 0;
+        }
     }
 
     private static int open(CommandSourceStack s) {
