@@ -2488,6 +2488,17 @@ public final class WorldSimMod {
         boolean sourceComplete = true;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
+        // Build the worker ownership projection once per bounded materialization pass.
+        // attachExistingCharacter then performs O(1) idempotency checks per resident
+        // instead of rescanning all colonies and worker lists for every person.
+        Map<String, String> workerColonyByPerson = new HashMap<>();
+        for (Colony existing : SettleMod.COLONIES.values()) {
+            if (existing == null || existing.s == null) continue;
+            for (Worker worker : existing.s.workers) {
+                if (worker.person != null && !worker.person.isBlank())
+                    workerColonyByPerson.putIfAbsent(worker.person, existing.s.id);
+            }
+        }
         // Name uniqueness is checked for every newly materialized band. Build one
         // frequency index per batch instead of rescanning every Colony for every band.
         Map<String, Integer> settlementNameCounts = new HashMap<>();
@@ -2653,7 +2664,7 @@ public final class WorldSimMod {
                             colony.s.removeWorkerByPerson(residentId, "transfer:underage");
                             continue;
                         }
-                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId))
+                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId, workerColonyByPerson))
                             throw new IllegalStateException("Canonical resident " + residentId
                                     + " could not be attached to settlement " + settlementId);
                     }
