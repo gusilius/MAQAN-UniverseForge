@@ -26,7 +26,8 @@ WORK="$(mktemp -d)"
 JAVA_WORK="$(cygpath -m "$WORK")"
 SERVER_PID=""
 BOT_PID=""
-SERVER_EXIT_CODE="not_observed"\nTERMINATION_EVIDENCE="not_observed"
+SERVER_EXIT_CODE="not_observed"
+TERMINATION_EVIDENCE="not_observed"
 CURRENT_STAGE="preflight"
 THREAD_DUMP_COUNT=0
 capture_server_threads() {
