@@ -376,14 +376,20 @@ public final class TreasuryLedger {
 
     /** Drop the in-memory tail only after its complete sequence has been durably archived and checkpointed. */
     public synchronized void acknowledgeArchivedThrough(TreasuryJournalArchive archive, long exclusiveNextSequence) {
-        if (archive == null || archive.nextSequence() != exclusiveNextSequence)
+        if (archive == null || archive.nextSequence() < exclusiveNextSequence)
             throw new IllegalArgumentException("Verified treasury archive is required at the acknowledged boundary");
-        if (exclusiveNextSequence != sequence || exclusiveNextSequence < archivedThroughSequence + 1
-                || journal.size() != sequence - archivedThroughSequence - 1)
+        long firstPending = archivedThroughSequence + 1;
+        if (exclusiveNextSequence < firstPending || exclusiveNextSequence > sequence
+                || journal.size() != sequence - firstPending)
             throw new IllegalStateException("Cannot acknowledge an incomplete treasury archive boundary");
+        int acknowledged = Math.toIntExact(exclusiveNextSequence - firstPending);
+        for (int i = 0; i < acknowledged; i++) {
+            if (journal.get(i).sequence() != firstPending + i)
+                throw new IllegalStateException("Treasury journal prefix is not contiguous at acknowledgement");
+        }
         historyArchive = archive;
         archivedThroughSequence = exclusiveNextSequence - 1;
-        journal.clear();
+        if (acknowledged > 0) journal.subList(0, acknowledged).clear();
     }
     public synchronized Account account(String id) { return accounts.get(id); }
     public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
