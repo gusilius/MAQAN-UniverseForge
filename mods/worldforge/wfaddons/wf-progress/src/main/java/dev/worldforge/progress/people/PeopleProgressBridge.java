@@ -199,14 +199,24 @@ public final class PeopleProgressBridge {
             Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
             Object raw = peopleMod.getMethod("registries").invoke(null);
             if (!(raw instanceof Map<?, ?> registries)) return;
+            record RegistryCharacter(String scope, CharacterRegistry registry, Character character) { }
             java.util.List<CharacterRegistry> registrySnapshot = new java.util.ArrayList<>();
-            for (Object value : registries.values())
-                if (value instanceof CharacterRegistry registry) registrySnapshot.add(registry);
-
+            java.util.List<RegistryCharacter> characterSnapshot = new java.util.ArrayList<>();
             Map<String, Integer> idCounts = new java.util.HashMap<>();
-            for (CharacterRegistry registry : registrySnapshot)
-                for (Character character : registry.all())
+            // Take one stable world snapshot. The previous implementation traversed every
+            // registry once to count legacy IDs and again to sync profiles, doubling the
+            // largest population-wide pass on every sync cycle.
+            for (Map.Entry<?, ?> entry : registries.entrySet()) {
+                Object mapData = entry.getKey();
+                Object rawRegistry = entry.getValue();
+                if (!(rawRegistry instanceof CharacterRegistry registry)) continue;
+                String scope = String.valueOf(mapData.getClass().getField("name").get(mapData));
+                registrySnapshot.add(registry);
+                for (Character character : registry.all()) {
+                    characterSnapshot.add(new RegistryCharacter(scope, registry, character));
                     idCounts.merge(character.id, 1, Integer::sum);
+                }
+            }
             java.util.Set<String> uniqueCharacterIds = new java.util.HashSet<>();
             idCounts.forEach((id, count) -> { if (count == 1) uniqueCharacterIds.add(id); });
 
@@ -219,23 +229,19 @@ public final class PeopleProgressBridge {
                             ignored -> new java.util.ArrayList<>()).add(candidate);
             }
 
-            for (Map.Entry<?, ?> entry : registries.entrySet()) {
-                Object mapData = entry.getKey();
-                Object rawRegistry = entry.getValue();
-                if (!(rawRegistry instanceof dev.worldforge.people.CharacterRegistry registry)) continue;
-                String scope = String.valueOf(mapData.getClass().getField("name").get(mapData));
-                for (Character character : registry.all()) {
-                    String owner = owner(character, scope);
-                    Profile profile = progress.peek(owner);
-                    Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
-                    if (profile == null && ranks.isEmpty()
-                            && progress.peek(PopulationSimulation.legacyProgressOwner(character, scope)) == null
-                            && progress.peek("n:" + character.id) == null) continue;
-                    profile = profile(progress, character, scope, registrySnapshot,
-                            uniqueCharacterIds, legacyProfilesByLocalId);
-                    if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
-                    else syncFromCharacter(character, profile);
-                }
+            for (RegistryCharacter snapshot : characterSnapshot) {
+                Character character = snapshot.character();
+                String scope = snapshot.scope();
+                String owner = owner(character, scope);
+                Profile profile = progress.peek(owner);
+                Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
+                if (profile == null && ranks.isEmpty()
+                        && progress.peek(PopulationSimulation.legacyProgressOwner(character, scope)) == null
+                        && progress.peek("n:" + character.id) == null) continue;
+                profile = profile(progress, character, scope, registrySnapshot,
+                        uniqueCharacterIds, legacyProfilesByLocalId);
+                if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
+                else syncFromCharacter(character, profile);
             }
         } catch (ReflectiveOperationException ex) {
             throw new IllegalStateException("wf_people registry bridge failed", ex);

@@ -23,11 +23,23 @@ public final class Marriages {
 
     /** Государство, к чьему дому относится персонаж: свой пост, иначе государство отца или матери. */
     public static String family(CourtSim s, Character c) {
-        for (int i = 0; i < 4 && c != null; i++) {
-            String r = s.realmOf(c);
-            if (!r.isEmpty()) return r;
-            Character p = !c.father.isEmpty() ? s.reg.get(c.father) : !c.mother.isEmpty() ? s.reg.get(c.mother) : null;
-            c = p;
+        // Follow the complete known lineage. A fixed four-generation limit made older
+        // dynasties silently lose their realm affiliation. The visited set also protects
+        // imported or corrupted family graphs from cycles.
+        Set<String> visited = new HashSet<>();
+        ArrayDeque<Character> pending = new ArrayDeque<>();
+        if (c != null) pending.add(c);
+        while (!pending.isEmpty()) {
+            Character current = pending.removeFirst();
+            if (current == null || !visited.add(current.globalId)) continue;
+            String realm = s.realmOf(current);
+            if (!realm.isEmpty()) return realm;
+            // Preserve the established paternal-first preference, but do not discard
+            // the maternal branch when the father link is absent or unresolved.
+            Character father = current.father.isEmpty() ? null : s.reg.get(current.father);
+            Character mother = current.mother.isEmpty() ? null : s.reg.get(current.mother);
+            if (father != null) pending.addLast(father);
+            if (mother != null) pending.addLast(mother);
         }
         return "";
     }
@@ -131,11 +143,16 @@ public final class Marriages {
         for (String ra : realms) {
             if (s.rnd("marry", ra.hashCode() + s.day).nextDouble() > 0.35) continue;
             List<Character> sourcePool = candidatesByRealm.getOrDefault(ra, List.of());
-            if (sourcePool.isEmpty()) continue;
+            if (sourcePool.isEmpty() || realms.size() < 2) continue;
             Character best = null, bestB = null;
             int bestScore = Integer.MIN_VALUE;
-            for (int sourceIndex = 0; sourceIndex < Math.min(maxSourceCandidates, sourcePool.size()); sourceIndex++) {
-                Character a = sourcePool.get(sourceIndex);
+            // Keep a bounded amount of work per realm, but rotate every window. The old
+            // implementation always inspected the first four source and partner candidates,
+            // permanently excluding later members of large dynasties.
+            int sourceStart = s.rnd("marry:sources:" + ra, s.day).nextInt(sourcePool.size());
+            int sourceCount = Math.min(maxSourceCandidates, sourcePool.size());
+            for (int sourceOffset = 0; sourceOffset < sourceCount; sourceOffset++) {
+                Character a = sourcePool.get((sourceStart + sourceOffset) % sourcePool.size());
                 Random partnerOrder = s.rnd("marry:partners:" + a.id, ra.hashCode() + s.day);
                 int start = partnerOrder.nextInt(realms.size());
                 int attempts = Math.min(realms.size(), maxPartnerRealms + 1);
@@ -147,10 +164,12 @@ public final class Marriages {
                     for (Map.Entry<String, List<Character>> genderPool : partnerPools.entrySet()) {
                         if (a.gender.equals(genderPool.getKey())) continue;
                         List<Character> partnerPool = genderPool.getValue();
-                        for (int candidateIndex = 0;
-                             candidateIndex < Math.min(maxCandidatesPerPartnerRealm, partnerPool.size());
-                             candidateIndex++) {
-                            Character b = partnerPool.get(candidateIndex);
+                        if (partnerPool.isEmpty()) continue;
+                        int candidateStart = s.rnd("marry:candidates:" + a.globalId + ":" + rb
+                                + ":" + genderPool.getKey(), s.day).nextInt(partnerPool.size());
+                        int candidateCount = Math.min(maxCandidatesPerPartnerRealm, partnerPool.size());
+                        for (int candidateOffset = 0; candidateOffset < candidateCount; candidateOffset++) {
+                            Character b = partnerPool.get((candidateStart + candidateOffset) % partnerPool.size());
                             Offer offer = evaluate(s, a.id, b.id);
                             if (offer.ok && offer.score > bestScore) {
                                 bestScore = offer.score;
@@ -160,7 +179,6 @@ public final class Marriages {
                         }
                     }
                 }
-                if (best != null) break;
             }
             if (best != null) propose(s, best.id, bestB.id);
         }
