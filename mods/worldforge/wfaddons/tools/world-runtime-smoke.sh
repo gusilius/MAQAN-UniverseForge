@@ -222,7 +222,9 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
 
   FORCELoad_RELEASED=0
-  for second in $(seq 1 900); do
+  RUNTIME_START_EPOCH="$(date +%s)"
+  RUNTIME_TIMEOUT_REACHED=0
+  for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
     # Preserve periodic JVM snapshots while the server is healthy. The watchdog's
     # own crash report did not contain the main Server thread in the last run, so
     # a time series is required to identify the last live call stack before a stall.
@@ -246,6 +248,13 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     fi
     sleep 1
   done
+  if ! grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
+    && ! grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log; then
+    RUNTIME_TIMEOUT_REACHED=1
+    echo "RUNTIME_SCENARIO_TIMEOUT_SECONDS=$MAX_RUNTIME_SECONDS"
+    echo "ERROR: dual-world runtime did not reach acceptance evidence within its configured timeout"
+    exit 13
+  fi
 
   grep -Fq "MAQAN_MAPPED_DIMENSION_PRESENT=$MAP_ID" server.log || {
     tail -200 server.log
