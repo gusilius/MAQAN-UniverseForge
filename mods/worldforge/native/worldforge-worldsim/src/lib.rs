@@ -1759,6 +1759,47 @@ mod tests {
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
             characters:vec![],workforce:vec![],capabilities:vec![],catalog_entries:vec![],diplomatic_relations:vec![],vassal_contracts:vec![],wars:vec![],armies:vec![],social_relations:vec![],named_entities:vec![],geography:vec![] }
     }
+    #[test]
+    #[ignore = "explicit CK3-scale political stress gate; run in release mode"]
+    fn political_scale_10k_minor_realms_and_titles() {
+        use std::time::Instant;
+        let started = Instant::now();
+        let mut snapshot = base();
+        snapshot.realms.clear();
+        snapshot.titles.clear();
+        snapshot.borders.clear();
+        snapshot.settlements.clear();
+        snapshot.workforce.clear();
+        for i in 0..10_000usize {
+            let id = format!("minor-realm-{i:05}");
+            snapshot.realms.push(realm(&id, 100));
+            snapshot.titles.push(PoliticalTitle {
+                id: format!("province-title-{i:05}"), map_id: "main-world".into(),
+                key: format!("province-{i:05}"), name: format!("Province {i}"),
+                realm_id: id.clone(), tier_index: 0, tier_key: "province".into(),
+                parent_title_id: String::new(), liege_title_id: String::new(),
+                holder_character_id: String::new(), claims: vec![], area_blocks: 100,
+                neighbors: vec![],
+            });
+            let next = format!("minor-realm-{:05}", (i + 1) % 10_000);
+            snapshot.borders.push(Border {
+                a: id, b: next, contested_claim: false, strategic_value: 1, distance_cost: 1,
+            });
+        }
+        snapshot.settlements = (0..10_000usize).map(|i| Settlement {
+            id: format!("settlement-{i:05}"), realm_id: format!("minor-realm-{i:05}"),
+            population: 100, food: 100, food_capacity: 200, wood: 50, stone: 50,
+            housing: 100, housing_used: 80, farms: 1, foresters: 0, quarries: 0,
+            workshops: 0, barracks: 0, watch_posts: 0, threatened: false,
+            roads: 1, local_pressure: 0, last_project_day: 0,
+        }).collect();
+        snapshot.validate().expect("10k realm/title/settlement graph must validate");
+        let frame = decide(&snapshot).expect("10k realm/title/settlement decision pass must complete");
+        println!("POLITICAL_SCALE realms={} titles={} settlements={} borders={} elapsed_ms={} proposals={}",
+            snapshot.realms.len(), snapshot.titles.len(), snapshot.settlements.len(),
+            snapshot.borders.len(), started.elapsed().as_millis(), frame.proposals.len());
+    }
+
     #[test] fn decisions_are_invariant_to_snapshot_collection_and_border_order() {
         let mut original = base();
         let mut south = original.settlements[0].clone();
