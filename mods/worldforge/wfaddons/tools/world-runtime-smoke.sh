@@ -26,7 +26,7 @@ WORK="$(mktemp -d)"
 JAVA_WORK="$(cygpath -m "$WORK")"
 SERVER_PID=""
 BOT_PID=""
-SERVER_EXIT_CODE="not_observed"\nTERMINATION_EVIDENCE="script_exit"
+SERVER_EXIT_CODE="not_observed"\nTERMINATION_EVIDENCE="not_observed"
 CURRENT_STAGE="preflight"
 THREAD_DUMP_COUNT=0
 capture_server_threads() {
@@ -56,10 +56,16 @@ runtime_exit() {
   if [ -n "$BOT_PID" ]; then kill "$BOT_PID" 2>/dev/null || true; wait "$BOT_PID" 2>/dev/null || true; fi
   if [ -f "$WORK/in.txt" ] && [ -n "$SERVER_PID" ]; then
     printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
-    for _ in $(seq 1 10); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
-    taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
+    for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$SERVER_PID" 2>/dev/null; then
+      TERMINATION_EVIDENCE="forced_kill_after_grace_timeout"
+      taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
+    else
+      TERMINATION_EVIDENCE="graceful_stop"
+    fi
     if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
+    echo "RUNTIME_TERMINATION_EVIDENCE=$TERMINATION_EVIDENCE"
   fi
   python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --server-exit-code "$SERVER_EXIT_CODE" --termination "$TERMINATION_EVIDENCE" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
