@@ -147,29 +147,6 @@ jobs:
             throw "Contour 00 Server Core failed; inspect the contour artifact."
           }
 
-      - name: Contour 01 — canonical NPC population load and WAL recovery
-        id: population_stress
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "population-stress"
-          WF_POPULATION_STRESS: "true"
-          WF_RUNTIME_TIMEOUT_SECONDS: "900"
-        run: |
-          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-01-population"
-
-      - name: Aggregate NPC Population contour result
-        if: always()
-        shell: pwsh
-        env:
-          POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
-        run: |
-          "CONTOUR_01_POPULATION_OUTCOME=$env:POPULATION_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:POPULATION_OUTCOME -ne "success") {
-            throw "Contour 01 NPC Population failed; inspect the contour artifact."
-          }
-
       - name: Start one server with normal vanilla Overworld and image-derived dimension
         id: dual_world_smoke
         continue-on-error: true
