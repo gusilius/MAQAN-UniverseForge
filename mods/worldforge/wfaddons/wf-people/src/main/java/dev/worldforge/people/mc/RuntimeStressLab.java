@@ -60,6 +60,7 @@ public final class RuntimeStressLab {
         int simulationProcessed;
         int simulationPending;
         long maxTickNanos;
+        long lastProgressLogNanos;
         String status = "RUNNING";
         String failure = "";
 
@@ -122,7 +123,12 @@ public final class RuntimeStressLab {
             source.sendSuccess(() -> Component.literal("Population stress не запускался в этом процессе."), false);
             return 1;
         }
+        PopulationSimulation.WorldDayProgress cursor = PopulationSimulation.worldDayProgress(run.registry);
         String line = "Population stress: " + run.status + ", created=" + run.created + "/" + run.target
+                + ", durable=" + run.durableWrites + ", pendingWal=" + run.pendingWalWrites.size()
+                + ", worldDay=" + WorldForgeApi.clock().dayNumber()
+                + ", processedDay=" + PeopleMod.populationProcessedDay()
+                + ", schedulerCursor=" + (cursor == null ? "none" : cursor.nextIndex())
                 + ", registry=" + run.registry.size() + ", failure=" + run.failure;
         source.sendSuccess(() -> Component.literal(line), false);
         return 1;
@@ -201,7 +207,20 @@ public final class RuntimeStressLab {
             PeopleMod.LOGGER.error("WF_STRESS contour=02_population failed after {} canonical creations (durable={})",
                     run.created, run.durableWrites, failure);
         }
-        long elapsed = Math.max(0L, System.nanoTime() - tickStartNanos);
+        long now = System.nanoTime();
+        if (now - run.lastProgressLogNanos >= 15_000_000_000L) {
+            run.lastProgressLogNanos = now;
+            PopulationSimulation.WorldDayProgress cursor = PopulationSimulation.worldDayProgress(run.registry);
+            int queueDepth = PeopleMod.characterWalQueueDepth(run.registry);
+            PeopleMod.LOGGER.warn("WF_STRESS contour=02_population progress status={} elapsedSeconds={} created={}/{} durable={} pendingWal={} walQueue={} worldDay={} processedDay={} schedulerTargetDay={} schedulerCursor={} schedulerCatchUp={} verificationIndex={}/{} receiptsProcessed={} receiptsPending={} registrySize={}",
+                    run.status, (now - run.startedNanos) / 1_000_000_000L, run.created, run.target,
+                    run.durableWrites, run.pendingWalWrites.size(), queueDepth,
+                    WorldForgeApi.clock().dayNumber(), PeopleMod.populationProcessedDay(),
+                    cursor == null ? -1L : cursor.targetDay(), cursor == null ? -1 : cursor.nextIndex(),
+                    cursor != null && cursor.catchUpPass(), run.verificationIndex, run.target,
+                    run.simulationProcessed, run.simulationPending, run.registry.size());
+        }
+        long elapsed = Math.max(0L, now - tickStartNanos);
         run.tickNanos[run.sampleCursor] = elapsed;
         run.sampleCursor = (run.sampleCursor + 1) % MAX_SAMPLES;
         if (run.sampleCount < MAX_SAMPLES) run.sampleCount++;

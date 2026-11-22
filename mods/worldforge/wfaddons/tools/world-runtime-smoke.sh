@@ -225,6 +225,10 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
   STRESS_REPORT_READY=0
   for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
     if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second % 60 == 0 )); then
+      echo "POPULATION_STRESS_ELAPSED_SECONDS=$second"
+      grep 'WF_STRESS contour=02_population progress' server.log | tail -3 || true
+    fi
     if [ -f "$REPORT" ]; then
       cp "$REPORT" "$OUTPUT/contour-02-population.json"
       STRESS_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","INVALID"))' "$REPORT")"
@@ -236,7 +240,18 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
     sleep 1
   done
   if [ "$STRESS_REPORT_READY" -ne 1 ]; then
-    printf '%s\n' "wfstress population stop" >> in.txt
+    echo "POPULATION_STRESS_TIMEOUT_STAGE=$CURRENT_STAGE"
+    grep 'WF_STRESS contour=02_population' server.log | tail -40 || true
+    printf '%s\n' "wfstress population status" "wfstress population stop" >> in.txt
+    for _ in $(seq 1 20); do
+      if [ -f "$REPORT" ]; then
+        cp "$REPORT" "$OUTPUT/contour-02-population-timeout.json"
+        echo "POPULATION_STRESS_TIMEOUT_REPORT_CAPTURED=1"
+        cat "$REPORT"
+        break
+      fi
+      sleep 1
+    done
     echo "ERROR: in-game population stress did not produce its evidence report within $MAX_RUNTIME_SECONDS seconds"
     exit 32
   fi

@@ -26,7 +26,7 @@ profile_src=work/"performance-profile.json"
 if profile_src.is_file() and profile_src.resolve() != (out/"performance-profile.json").resolve():
     shutil.copy2(profile_src,out/"performance-profile.json")
 content=log.read_text(encoding="utf-8",errors="replace") if log.exists() else ""
-rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be crashed"),("out_of_memory",r"(?m)^\s*(?:Exception in thread [^\n]*\s+)?(?:java\.)?lang\.OutOfMemoryError(?:\s|:|$)|^\s*Caused by:\s*(?:java\.)?lang\.OutOfMemoryError(?:\s|:|$)|^\s*GC overhead limit exceeded\s*$"),("native_failure",r"UnsatisfiedLinkError|EXCEPTION_ACCESS_VIOLATION|EXCEPTION_ILLEGAL_INSTRUCTION|SIGSEGV|SIGBUS"),("timeout",r"wall-clock timeout|did not reach stable four-generation acceptance"),("startup_failure",r"Mod loading has failed|Failed to start|Exception in thread \"main\""),("preflight_failure",r"Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command"),("exception",r"Caused by:|Exception")]
+rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be crashed"),("out_of_memory",r"(?m)^\s*(?:Exception in thread [^\n]*\s+)?(?:java\.)?lang\.OutOfMemoryError(?:\s|:|$)|^\s*Caused by:\s*(?:java\.)?lang\.OutOfMemoryError(?:\s|:|$)|^\s*GC overhead limit exceeded\s*$"),("native_failure",r"UnsatisfiedLinkError|EXCEPTION_ACCESS_VIOLATION|EXCEPTION_ILLEGAL_INSTRUCTION|SIGSEGV|SIGBUS"),("timeout",r"wall-clock timeout|did not reach stable four-generation acceptance|did not produce its evidence report within [0-9]+ seconds"),("startup_failure",r"Mod loading has failed|Failed to start|Exception in thread \"main\""),("preflight_failure",r"Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command"),("exception",r"Caused by:|Exception")]
 detected=[n for n,pat in rules if re.search(pat,content,re.I)]
 client_incompatible=bool(re.search(r"requires Forge to be installed on the client|Forge.*installed on the client",survey_content,re.I))
 client_failed=bool(re.search(r"SURVEY_BOT_(?:ERROR|KICKED|DISCONNECTED)|survey player client exited before joining",survey_content,re.I))
@@ -38,7 +38,7 @@ elif client_failed: outcome="failed_test_client_connection"
 elif "watchdog" in detected: outcome="failed_server_watchdog"
 elif "out_of_memory" in detected: outcome="failed_server_oom"
 elif "native_failure" in detected: outcome="failed_server_native"
-elif "timeout" in detected: outcome="failed_timeout"
+elif "timeout" in detected or a.exit_code == 32: outcome="failed_test_timeout"
 elif "startup_failure" in detected: outcome="failed_server_startup"
 elif "preflight_failure" in detected: outcome="failed_test_preflight"
 elif a.termination.lower() in ("runner_killed","process_killed","external_termination"): outcome="failed_infrastructure_termination"

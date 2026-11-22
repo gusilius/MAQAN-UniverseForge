@@ -13,6 +13,9 @@ public final class PopulationSimulation {
     private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
     private record WorldDayCursor(long targetDay, long fallbackDay, int year,
                                    long membershipGeneration, int nextIndex, boolean catchUpPass) { }
+    /** Read-only scheduler progress for diagnostics; does not advance or mutate the cursor. */
+    public record WorldDayProgress(long targetDay, long membershipGeneration,
+                                   int nextIndex, boolean catchUpPass) { }
     private static final Map<CharacterRegistry, WorldDayCursor> WORLD_DAY_CURSORS = new WeakHashMap<>();
     public static final int MAX_NEED = 100;
     public static final int SKILL_XP_PER_RANK = 100;
@@ -522,6 +525,16 @@ public final class PopulationSimulation {
      * and preserves each Character's durable receipt, so interruption/restart safely resumes.
      * Returns true only when the complete current registry membership has been visited.
      */
+    /** Returns the current bounded-scheduler cursor for diagnostics, or null before first work. */
+    public static WorldDayProgress worldDayProgress(CharacterRegistry registry) {
+        Objects.requireNonNull(registry, "registry");
+        synchronized (WORLD_DAY_CURSORS) {
+            WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            return cursor == null ? null : new WorldDayProgress(cursor.targetDay(),
+                    cursor.membershipGeneration(), cursor.nextIndex(), cursor.catchUpPass());
+        }
+    }
+
     public static boolean advanceToWorldDayBatch(CharacterRegistry registry, long targetWorldDay,
                                                   long fallbackStartDay, int year, int maxCharacters) {
         Objects.requireNonNull(registry, "registry");
