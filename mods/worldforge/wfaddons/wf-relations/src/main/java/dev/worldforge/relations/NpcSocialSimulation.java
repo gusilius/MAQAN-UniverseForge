@@ -27,6 +27,8 @@ public final class NpcSocialSimulation {
 
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
+    private static final Map<String, Integer> GROUP_CURSORS = new HashMap<>();
+    private static String groupCursorWorld = "";
 
     private static volatile long contactIndexDay = Long.MIN_VALUE;
     private static volatile String contactIndexWorld = "";
@@ -82,9 +84,16 @@ public final class NpcSocialSimulation {
         }
         Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day);
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
-        int interactions = 0, groupsVisited = 0;
+        int interactions = 0;
         // Family trees are stable during this daily pass; cache ancestry to avoid repeated traversal.
         Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
+        String cursorWorld = String.valueOf(WorldForgeMod.worldId());
+        synchronized (GROUP_CURSORS) {
+            if (!cursorWorld.equals(groupCursorWorld)) {
+                GROUP_CURSORS.clear();
+                groupCursorWorld = cursorWorld;
+            }
+        }
         for (Map.Entry<String, CharacterRegistry> partition : registries.entrySet()) {
             CharacterRegistry registry = partition.getValue();
             Map<String, List<Character>> groups = new TreeMap<>();
@@ -100,9 +109,21 @@ public final class NpcSocialSimulation {
                 groups.put(indexed.getKey(), eligible);
                 adults.addAll(eligible);
             }
-            for (Map.Entry<String, List<Character>> group : groups.entrySet()) {
-                if (groupsVisited++ >= MAX_GROUPS_PER_DAY) return interactions;
-                List<Character> members = group.getValue();
+            // Rotate a bounded window per partition. A fixed first-N cutoff starved
+            // every later group indefinitely in large worlds.
+            List<Map.Entry<String, List<Character>>> orderedGroups = new ArrayList<>(groups.entrySet());
+            if (!orderedGroups.isEmpty()) {
+                String cursorKey = cursorWorld + "|" + partition.getKey();
+                int visitCount = Math.min(MAX_GROUPS_PER_DAY, orderedGroups.size());
+                int start;
+                synchronized (GROUP_CURSORS) {
+                    start = Math.floorMod(GROUP_CURSORS.getOrDefault(cursorKey, 0), orderedGroups.size());
+                    GROUP_CURSORS.put(cursorKey, (start + visitCount) % orderedGroups.size());
+                }
+                for (int groupOffset = 0; groupOffset < visitCount; groupOffset++) {
+                    Map.Entry<String, List<Character>> group =
+                            orderedGroups.get((start + groupOffset) % orderedGroups.size());
+                    List<Character> members = group.getValue();
                 if (members.size() < 2) continue;
                 members.sort(Comparator.comparing(person -> person.globalId));
                 for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
@@ -120,8 +141,8 @@ public final class NpcSocialSimulation {
                     // starving marriage simulation merely because random slots keep pairing
                     // same-gender neighbours in a small settlement.
                     if (a.gender.equals(b.gender)) {
-                        for (int offset = 1; offset < members.size(); offset++) {
-                            Character candidate = members.get((second + offset) % members.size());
+                        for (int candidateOffset = 1; candidateOffset < members.size(); candidateOffset++) {
+                            Character candidate = members.get((second + candidateOffset) % members.size());
                             if (!candidate.gender.equals(a.gender) && candidate.alive
                                     && year - candidate.birthYear >= 18) {
                                 b = candidate;
@@ -132,6 +153,7 @@ public final class NpcSocialSimulation {
                     if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
                     interact(relations, registry, a, b, group.getKey(), members, day, year, ancestryCache);
                     interactions++;
+                    }
                 }
             }
 
