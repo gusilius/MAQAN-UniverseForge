@@ -1288,14 +1288,30 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         capability.catalog_count, capability.entity_count)).collect::<Vec<_>>();
     let mut titles_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
     let mut claims_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut titles_by_map: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut titles_by_map: BTreeMap<&str, (usize, BTreeSet<u32>)> = BTreeMap::new();
+    let mut leader_title_by_realm: BTreeMap<&str, (u32, &str)> = BTreeMap::new();
     for title in &snapshot.titles {
         if !title.realm_id.starts_with("unclaimed:") {
             *titles_by_realm.entry(title.realm_id.as_str()).or_default() += 1;
             *claims_by_realm.entry(title.realm_id.as_str()).or_default() += title.claims.len();
         }
-        *titles_by_map.entry(title.map_id.as_str()).or_default() += 1;
+        let map_stats = titles_by_map.entry(title.map_id.as_str()).or_default();
+        map_stats.0 += 1;
+        map_stats.1.insert(title.tier_index);
+        if !title.holder_character_id.is_empty() {
+            let replace = leader_title_by_realm.get(title.realm_id.as_str())
+                .map(|(tier, _)| title.tier_index >= *tier).unwrap_or(true);
+            if replace {
+                leader_title_by_realm.insert(title.realm_id.as_str(),
+                    (title.tier_index, title.holder_character_id.as_str()));
+            }
+        }
     }
+    // Resolve each realm's highest-ranked title holder once. Border evaluation
+    // must not rescan the complete title/Character collections per direction.
+    let leader_by_realm: BTreeMap<&str, &Character> = leader_title_by_realm.iter()
+        .filter_map(|(realm_id, (_, holder_id))| characters.get(holder_id).map(|leader| (*realm_id, *leader)))
+        .collect();
     diagnostics.push(format!("government_catalog:definitions={}:realm_selections={}",
         snapshot.government_definitions.len(), snapshot.realm_governments.len()));
     let mut catalog_counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
@@ -1314,10 +1330,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             actual_army_power.insert(realm.id.as_str(), power);
         }
     }
-    for (map_id, count) in &titles_by_map {
-        let tiers = snapshot.titles.iter().filter(|title| title.map_id == *map_id)
-            .map(|title| title.tier_index).collect::<BTreeSet<_>>().len();
-        diagnostics.push(format!("political_titles:{}:count={}:tiers={}", map_id, count, tiers));
+    for (map_id, (count, tiers)) in &titles_by_map {
+        diagnostics.push(format!("political_titles:{}:count={}:tiers={}", map_id, count, tiers.len()));
     }
     // Geography is observational input only in this integration pass: it is never
     // converted into pre-seeded realms, rulers, settlements or population counts.
@@ -1460,10 +1474,11 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let government_modifier = ["war_score", "military", "warfare", "expansion"]
                 .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
                 .sum::<f64>().round() as i64;
-            let leader_modifier = realm_leader(snapshot, &attacker.id).map(|leader|
+            let leader = leader_by_realm.get(attacker.id.as_str()).copied();
+            let leader_modifier = leader.map(|leader|
                 origin_modifier(snapshot, leader, "war_score") + origin_modifier(snapshot, leader, "military"))
                 .unwrap_or(0.0).round() as i64;
-            let leader_reputation = realm_leader(snapshot, &attacker.id)
+            let leader_reputation = leader
                 .map(|leader| scoped_reputation(snapshot, &leader.id, &attacker.id) / 5).unwrap_or(0);
             let score = clamp_score(
                 attacker.expansion_pressure as i64 / 2
