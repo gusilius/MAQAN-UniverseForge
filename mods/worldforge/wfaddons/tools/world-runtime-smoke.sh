@@ -278,6 +278,7 @@ checks = {
     "dedicated_server": report.get("dedicated_server") is True,
     "required_mods_loaded": report.get("required_mods_loaded") is True,
     "canonical_registry_population": report.get("canonical_registry_population") is True,
+    "demographic_fixture_disclosed": report.get("demographic_fixture_seeded_marriages") is True and report.get("fixture_married_couples", 0) > 0,
     "physical_entity_scope_explicit": report.get("physical_npc_entity_spawn_verified") is False,
     "server_restart_scope_explicit": report.get("server_restart_persistence_verified") is False,
     "created": report.get("created") == target,
