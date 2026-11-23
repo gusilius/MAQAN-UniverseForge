@@ -210,9 +210,10 @@ public final class PopulationComputeBridge {
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);
         byte[] bytes=Json.write(request).getBytes(StandardCharsets.UTF_8);
-        DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
-                .orElseThrow(()->new IllegalStateException("Canonical mutation overlapped population capture"));
-        if(!before.equals(after))throw new IllegalStateException("Canonical domain changed during population capture");
+        // Compare only the population dependency lane. Snapshot.equals also compares the
+        // global epoch, which would let unrelated social writes invalidate this capture.
+        if(!WorldForgeApi.revisions().isCurrent(before,DomainMutationRevisions.Domain.CHARACTERS))
+            throw new IllegalStateException("Population domain changed during population capture");
         if(!scan.current())throw new IllegalStateException("Character registry was restored during population capture");
         return new Captured(worldId,year,batchElapsed,targetWorldDay,before,scan,ids,birthYears,priorDays,
                 elapsedById,characters,owners,registryCursor,memberCursor,complete,bytes);
