@@ -56,12 +56,16 @@ public class RelationsMod {
         ticks++;
         try {
             // Prepare the next consumed calendar day gradually; never scan the full population
-            // synchronously on the day-advance tick.
-            long nextSocialDay = WorldForgeApi.clock().consumedDay("wf_relations") + 1;
-            NpcSocialSimulation.prepareContactIndex(nextSocialDay, 2048);
+            // synchronously on the day-advance tick. Do not consume calendar backlog until its
+            // index is complete, otherwise a day could be marked consumed without simulation.
+            boolean socialIndexReady = false;
+            if (!SocialLifeStressLab.isRunning()) {
+                long nextSocialDay = WorldForgeApi.clock().consumedDay("wf_relations") + 1;
+                socialIndexReady = NpcSocialSimulation.prepareContactIndex(nextSocialDay, 2048);
+            }
             // The isolated stress driver owns NpcSocialSimulation's shared cursors
             // while it advances its separate Relations graph on accelerated test days.
-            if (ticks % STEP == 0 && !SocialLifeStressLab.isRunning()) {
+            if (ticks % STEP == 0 && !SocialLifeStressLab.isRunning() && socialIndexReady) {
                 // A single bounded calendar step per cadence; backlog remains queued.
                 int elapsedDays = WorldForgeApi.clock().pullLimited("wf_relations", 1);
                 if (elapsedDays > 0) {
