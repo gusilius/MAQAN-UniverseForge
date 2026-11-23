@@ -77,6 +77,15 @@ public final class SocialLifeStressLab {
         long lifecycleWorkNanos;
         long peakHeapBytes;
         boolean annualLifecyclePending;
+        boolean lifecyclePassed;
+        boolean relationsSaveLoadVerified;
+        boolean familySaveLoadVerified;
+        CharacterRegistry restoredRegistry;
+        int familyCodecCursor;
+        int familyCodecTarget;
+        long familyIntegrityErrors = -1L;
+        long restoredFamilyIntegrityErrors = -1L;
+        long familyLinks = -1L;
         String phase = "CREATING";
         String status = "RUNNING";
         String failure = "";
@@ -151,7 +160,7 @@ public final class SocialLifeStressLab {
                 case "PROCESSING_CONCEPTIONS" -> processConceptionsBatch(run);
                 case "PROCESSING_DEATHS" -> processDeathsBatch(run);
                 case "SIMULATING" -> {
-                    if (run.daysCompleted >= run.daysTarget && run.phase.equals("SIMULATING")) finish(run);
+                    if (run.daysCompleted >= run.daysTarget) finish(run);
                     else {
                         int day = run.startDay + run.daysCompleted;
                         int year = run.startYear + Math.floorDiv(day, 365);
@@ -161,13 +170,19 @@ public final class SocialLifeStressLab {
                         if (indexReady && run.server.getTickCount() % 20 == 0) advanceSocialDay(run);
                     }
                 }
+                case "VERIFYING_RELATIONS" -> verifyRelationsSaveLoad(run);
+                case "VERIFYING_FAMILY_SOURCE" -> verifyFamilySource(run);
+                case "VERIFYING_FAMILY_CODEC" -> verifyFamilyCodecBatch(run);
+                case "VERIFYING_FAMILY_RESULT" -> verifyFamilyResult(run);
                 default -> throw new IllegalStateException("Unknown social stress phase " + run.phase);
             }
         } catch (Throwable failure) {
             run.status = "FAILED";
             run.failure = failure.getClass().getName() + ": " + String.valueOf(failure.getMessage());
-            RelationsMod.LOGGER.error("WF_STRESS contour=03_social failed phase={}", run.phase, failure);
-            writeReport(run);
+            RelationsMod.LOGGER.error("WF_STRESS contour=03_social failed phase={} familyCodec={}/{}",
+                    run.phase, run.familyCodecCursor, run.familyCodecTarget, failure);
+            writeReport(run, run.familyIntegrityErrors, run.restoredFamilyIntegrityErrors,
+                    run.familyLinks, run.relationsSaveLoadVerified, run.familySaveLoadVerified);
         }
     }
 
@@ -327,53 +342,77 @@ public final class SocialLifeStressLab {
         long bonds = npcBondCount(run.relations);
         long reciprocal = reciprocalNpcBonds(run.relations);
         long married = marriedNpcBonds(run.relations);
-        boolean passed = run.dedicatedServer && run.peopleModLoaded && run.relationsModLoaded
+        run.lifecyclePassed = run.dedicatedServer && run.peopleModLoaded && run.relationsModLoaded
                 && run.created == run.target && run.registry.size() >= run.initialSize + run.target
                 && run.daysCompleted == run.daysTarget && run.interactions > 0
                 && run.marriedCouples > 0 && bonds > 0 && reciprocal == bonds && married > 0
                 && run.conceptions > 0 && run.births > 0 && run.deaths > 0
                 && run.conceptions == run.births && run.pregnancies.isEmpty();
-        run.status = passed ? "PASS" : "FAILED";
-        if (!passed) run.failure = "social_and_family_lifecycle_invariants_not_satisfied";
-        boolean saveLoadVerified = false;
-        try {
-            Path saved = run.server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("stresslab")
-                    .resolve("contour-03-relations-checkpoint.json");
-            Files.createDirectories(saved.getParent());
-            Files.writeString(saved, run.relations.toJson(), StandardCharsets.UTF_8);
-            if (Files.isRegularFile(saved)) {
-                Relations restored = new Relations();
-                restored.hooks = run.relations.hooks;
-                restored.fromJson(Files.readString(saved, StandardCharsets.UTF_8));
-                saveLoadVerified = npcBondCount(restored) == bonds;
+        if (!run.lifecyclePassed) run.failure = "social_and_family_lifecycle_invariants_not_satisfied";
+        run.phase = "VERIFYING_RELATIONS";
+    }
+
+    private static void verifyRelationsSaveLoad(Run run) throws Exception {
+        Path saved = run.server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("stresslab")
+                .resolve("contour-03-relations-checkpoint.json");
+        Files.createDirectories(saved.getParent());
+        Files.writeString(saved, run.relations.toJson(), StandardCharsets.UTF_8);
+        if (Files.isRegularFile(saved)) {
+            Relations restored = new Relations();
+            restored.hooks = run.relations.hooks;
+            restored.fromJson(Files.readString(saved, StandardCharsets.UTF_8));
+            run.relationsSaveLoadVerified = npcBondCount(restored) == npcBondCount(run.relations);
+        }
+        run.phase = "VERIFYING_FAMILY_SOURCE";
+    }
+
+    private static void verifyFamilySource(Run run) {
+        run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
+        run.familyLinks = familyLinkCount(run.registry);
+        run.restoredRegistry = new CharacterRegistry();
+        run.familyCodecCursor = 0;
+        run.familyCodecTarget = run.registry.size();
+        run.phase = "VERIFYING_FAMILY_CODEC";
+        RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_begin characters={} batch={}",
+                run.familyCodecTarget, 128);
+    }
+
+    /** Bounded canonical record round-trip; never build a second full-registry JSON tree/string. */
+    private static void verifyFamilyCodecBatch(Run run) {
+        int liveSize = run.registry.size();
+        if (liveSize > run.familyCodecTarget) run.familyCodecTarget = liveSize;
+        int end = Math.min(run.familyCodecTarget, run.familyCodecCursor + 128);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            for (int i = run.familyCodecCursor; i < end; i++) {
+                Character person = run.population.get(i);
+                run.restoredRegistry.applyJsonRecord(
+                        run.registry.toJsonRecord(person), "contour-03-social-roundtrip");
             }
-        } catch (Exception saveFailure) {
-            RelationsMod.LOGGER.error("WF_STRESS contour=03_social save/load verification failed", saveFailure);
         }
-        boolean familySaveLoadVerified = false;
-        long familyIntegrityErrors = Long.MAX_VALUE;
-        long restoredFamilyIntegrityErrors = Long.MAX_VALUE;
-        long familyLinks = 0L;
-        try {
-            familyIntegrityErrors = familyIntegrityErrors(run.registry);
-            CharacterRegistry restoredRegistry = new CharacterRegistry();
-            restoredRegistry.fromJson(run.registry.toJson(), "contour-03-social-roundtrip");
-            restoredFamilyIntegrityErrors = familyIntegrityErrors(restoredRegistry);
-            familyLinks = familyLinkCount(run.registry);
-            familySaveLoadVerified = restoredRegistry.size() == run.registry.size()
-                    && restoredFamilyIntegrityErrors == 0L
-                    && familyIntegrityErrors == 0L
-                    && familyLinkCount(restoredRegistry) == familyLinks;
-        } catch (Exception familyFailure) {
-            RelationsMod.LOGGER.error("WF_STRESS contour=03_social family save/load verification failed", familyFailure);
-        }
-        if (!saveLoadVerified || !familySaveLoadVerified) {
-            run.status = "FAILED";
-            run.failure = !saveLoadVerified ? "relations_save_load_verification_failed"
-                    : "canonical_family_save_load_verification_failed";
-        }
-        writeReport(run, familyIntegrityErrors, restoredFamilyIntegrityErrors, familyLinks,
-                saveLoadVerified, familySaveLoadVerified);
+        run.familyCodecCursor = end;
+        if (run.familyCodecCursor % 4096 == 0 || run.familyCodecCursor == run.familyCodecTarget)
+            RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_progress characters={}/{} heapBytes={}",
+                    run.familyCodecCursor, run.familyCodecTarget, usedHeapBytes());
+        if (run.familyCodecCursor >= run.familyCodecTarget && run.registry.size() == run.familyCodecTarget)
+            run.phase = "VERIFYING_FAMILY_RESULT";
+    }
+
+    private static void verifyFamilyResult(Run run) {
+        run.restoredFamilyIntegrityErrors = familyIntegrityErrors(run.restoredRegistry);
+        long restoredLinks = familyLinkCount(run.restoredRegistry);
+        run.familySaveLoadVerified = run.restoredRegistry.size() == run.registry.size()
+                && run.restoredFamilyIntegrityErrors == 0L
+                && run.familyIntegrityErrors == 0L
+                && restoredLinks == run.familyLinks;
+        run.status = run.lifecyclePassed && run.relationsSaveLoadVerified && run.familySaveLoadVerified
+                ? "PASS" : "FAILED";
+        if (!run.relationsSaveLoadVerified)
+            run.failure = "relations_save_load_verification_failed";
+        else if (!run.familySaveLoadVerified)
+            run.failure = "canonical_family_save_load_verification_failed";
+        writeReport(run, run.familyIntegrityErrors, run.restoredFamilyIntegrityErrors, run.familyLinks,
+                run.relationsSaveLoadVerified, run.familySaveLoadVerified);
+        run.phase = "COMPLETE";
     }
 
     private static long familyIntegrityErrors(CharacterRegistry registry) {
