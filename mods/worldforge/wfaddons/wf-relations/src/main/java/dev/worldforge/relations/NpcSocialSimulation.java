@@ -3,7 +3,6 @@ package dev.worldforge.relations;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
-import dev.worldforge.people.CharacterIdentity;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.PopulationSimulation;
@@ -44,8 +43,8 @@ public final class NpcSocialSimulation {
     private static final class RegistryScan {
         final CharacterRegistry registry;
         final List<Character> people;
-        final int limit;
         final long membershipGeneration;
+        int limit;
         int cursor;
 
         RegistryScan(CharacterRegistry registry) {
@@ -61,10 +60,13 @@ public final class NpcSocialSimulation {
         final int year;
         final String world;
         final long registryGeneration;
-        final long membershipRevision;
+        long membershipRevision;
         final List<RegistryScan> scans;
-        final Map<CharacterRegistry, Map<String, List<Character>>> groups = new IdentityHashMap<>();
+        // These maps remain private and are published through read-only views. Appends
+        // extend their lists in place, so an index remains reusable during population growth.
+        final Map<CharacterRegistry, NavigableMap<String, List<Character>>> groups = new IdentityHashMap<>();
         int scanIndex;
+        boolean published;
 
         ContactIndexBuild(long day, int year, String world, long registryGeneration,
                           long membershipRevision, List<RegistryScan> scans) {
@@ -74,6 +76,7 @@ public final class NpcSocialSimulation {
             this.registryGeneration = registryGeneration;
             this.membershipRevision = membershipRevision;
             this.scans = scans;
+            for (RegistryScan scan : scans) groups.put(scan.registry, new TreeMap<>());
         }
     }
 
@@ -96,23 +99,36 @@ public final class NpcSocialSimulation {
                 && contactIndexMembershipRevision == membershipRevision) return true;
         if (!PeopleMod.identityPartitionsReady()) return false;
 
+        // Registry membership and Character membership are different dimensions. A new
+        // registry requires a new scan plan; appending residents to an existing append-only
+        // registry must extend the current cursor rather than discard all work already done.
         if (contactIndexBuild == null || contactIndexBuild.day != day
                 || contactIndexBuild.year != year || !contactIndexBuild.world.equals(world)
-                || contactIndexBuild.registryGeneration != registryGeneration
-                || contactIndexBuild.membershipRevision != membershipRevision) {
-            Set<String> ids = new TreeSet<>();
-            for (CharacterIdentity identity : PeopleMod.authority().identities())
-                if (!"__players__".equals(identity.mapId())) ids.add(identity.mapId());
-            List<RegistryScan> scans = new ArrayList<>(ids.size());
-            for (String id : ids) {
-                CharacterRegistry registry = PeopleMod.authority().registry(id);
-                if (registry != null) scans.add(new RegistryScan(registry));
+                || contactIndexBuild.registryGeneration != registryGeneration) {
+            List<RegistryScan> scans = new ArrayList<>();
+            for (CharacterRegistry registry : PeopleMod.populationRegistriesSnapshot()) {
+                if (registry != null && registry != PeopleMod.playerRegistry())
+                    scans.add(new RegistryScan(registry));
             }
-            contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration, membershipRevision, scans);
+            contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration,
+                    membershipRevision, scans);
+        }
+
+        ContactIndexBuild build = contactIndexBuild;
+        // Detect append-only growth in every partition, including partitions whose first
+        // scan already completed. Rewind only to the first newly extended partition.
+        for (int i = 0; i < build.scans.size(); i++) {
+            RegistryScan scan = build.scans.get(i);
+            if (scan.registry.membershipGeneration() != scan.membershipGeneration) {
+                contactIndexBuild = null;
+                return false; // A wholesale restore gets a fresh, consistent scan next tick.
+            }
+            int currentSize = scan.people.size();
+            if (currentSize > scan.limit) scan.limit = currentSize;
+            if (scan.cursor < scan.limit && i < build.scanIndex) build.scanIndex = i;
         }
 
         int remaining = Math.max(1, Math.min(8192, characterBudget));
-        ContactIndexBuild build = contactIndexBuild;
         while (remaining > 0 && build.scanIndex < build.scans.size()) {
             RegistryScan scan = build.scans.get(build.scanIndex);
             while (remaining > 0 && scan.cursor < scan.limit) {
@@ -124,41 +140,47 @@ public final class NpcSocialSimulation {
                 if (polity.isBlank()) continue;
                 String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
                 if (band.isBlank()) band = polity;
-                build.groups.computeIfAbsent(scan.registry, ignored -> new TreeMap<>())
+                build.groups.get(scan.registry)
                         .computeIfAbsent(band, ignored -> new ArrayList<>()).add(person);
             }
             if (scan.cursor >= scan.limit) build.scanIndex++;
         }
 
         if (build.scanIndex < build.scans.size()) return false;
-        // Membership may change while a large index is being built. Never publish a partial
-        // view that silently omits newly appended Characters or refers to replaced partitions.
         if (build.registryGeneration != PeopleMod.populationRegistryGeneration()
-                || build.membershipRevision != CharacterRegistry.globalMembershipRevision()
                 || build.scans.stream().anyMatch(scan ->
-                        scan.registry.membershipGeneration() != scan.membershipGeneration
-                                || scan.registry.size() != scan.limit)) {
+                        scan.registry.membershipGeneration() != scan.membershipGeneration)) {
             contactIndexBuild = null;
             return false;
         }
 
-        Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
-        build.groups.forEach((registry, byBand) -> {
-            NavigableMap<String, List<Character>> groups = new TreeMap<>();
-            // CharacterRegistry.all() preserves deterministic insertion order; retain it
-            // directly instead of sorting potentially million-member bands in one tick.
-            // The builder is no longer mutated after publication. Wrap its lists without
-            // copying every Character again in one finalization tick.
-            byBand.forEach((band, members) -> groups.put(band, Collections.unmodifiableList(members)));
-            frozen.put(registry, Collections.unmodifiableNavigableMap(groups));
-        });
-        contactsByRegistry = Collections.unmodifiableMap(frozen);
-        contactIndexMembershipRevision = build.membershipRevision;
+        // Recheck live sizes before publishing. If a partition grew while the scan was
+        // running, continue from its old cursor on the next tick instead of restarting.
+        for (int i = 0; i < build.scans.size(); i++) {
+            RegistryScan scan = build.scans.get(i);
+            int currentSize = scan.people.size();
+            if (currentSize > scan.limit) scan.limit = currentSize;
+            if (scan.cursor < scan.limit) {
+                build.scanIndex = i;
+                return false;
+            }
+        }
+
+        long publishedMembershipRevision = CharacterRegistry.globalMembershipRevision();
+        if (publishedMembershipRevision != CharacterRegistry.globalMembershipRevision()) return false;
+        build.membershipRevision = publishedMembershipRevision;
+        if (!build.published) {
+            Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
+            build.groups.forEach((registry, byBand) ->
+                    frozen.put(registry, Collections.unmodifiableNavigableMap(byBand)));
+            contactsByRegistry = Collections.unmodifiableMap(frozen);
+            build.published = true;
+        }
+        contactIndexMembershipRevision = publishedMembershipRevision;
         contactIndexRegistryGeneration = build.registryGeneration;
-        contactIndexWorld = world;
-        contactIndexDay = day;
-        contactIndexYear = year;
-        contactIndexBuild = null;
+        contactIndexWorld = build.world;
+        contactIndexYear = build.year;
+        contactIndexDay = build.day;
         return true;
     }
 
