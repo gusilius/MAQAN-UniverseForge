@@ -121,6 +121,7 @@ public class SettleMod {
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
     /** Normalized global settlement-name ownership; avoids O(C) name checks during genesis. */
     private static final Map<String, String> COLONY_ID_BY_NORMALIZED_NAME = new HashMap<>();
+    private static final Map<String, String> NORMALIZED_NAME_BY_COLONY_ID = new HashMap<>();
     /** Registry identity changes only when a Colony is inserted, replaced or removed. */
     private static volatile long colonyRegistryRevision;
     private static volatile long colonySimulationIndexRevision = Long.MIN_VALUE;
@@ -145,6 +146,7 @@ public class SettleMod {
         colonyRegistryRevision++;
         ColonyInterestIndex.clear();
         COLONY_ID_BY_NORMALIZED_NAME.clear();
+        NORMALIZED_NAME_BY_COLONY_ID.clear();
     }
 
     /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
@@ -900,14 +902,18 @@ public class SettleMod {
     private static void indexColonyName(Colony colony) {
         if (colony == null || colony.s == null || colony.s.id == null) return;
         String id = colony.s.id;
-        COLONY_ID_BY_NORMALIZED_NAME.entrySet().removeIf(entry -> id.equals(entry.getValue()));
+        String previous = NORMALIZED_NAME_BY_COLONY_ID.remove(id);
+        if (previous != null) COLONY_ID_BY_NORMALIZED_NAME.remove(previous, id);
         String normalized = normalizeSettlementName(colony.s.name);
-        if (!normalized.isBlank()) COLONY_ID_BY_NORMALIZED_NAME.putIfAbsent(normalized, id);
+        if (normalized.isBlank()) return;
+        String owner = COLONY_ID_BY_NORMALIZED_NAME.putIfAbsent(normalized, id);
+        if (owner == null || owner.equals(id)) NORMALIZED_NAME_BY_COLONY_ID.put(id, normalized);
     }
 
     private static void unindexColonyName(String colonyId) {
-        if (colonyId != null)
-            COLONY_ID_BY_NORMALIZED_NAME.entrySet().removeIf(entry -> colonyId.equals(entry.getValue()));
+        if (colonyId == null) return;
+        String normalized = NORMALIZED_NAME_BY_COLONY_ID.remove(colonyId);
+        if (normalized != null) COLONY_ID_BY_NORMALIZED_NAME.remove(normalized, colonyId);
     }
 
     /** Enforces one canonical settlement display name across every dimension in this save. */
