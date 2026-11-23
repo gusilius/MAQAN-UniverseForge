@@ -27,8 +27,8 @@ public final class NpcSocialSimulation {
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
     private static final int TRAVEL_SAMPLES_PER_GROUP_PER_DAY = 4;
-    private static final List<String> DIPLOMATIC_ROLES = DIPLOMATIC_ROLES;
-    private static final List<String> TRAVEL_ROLES = TRAVEL_ROLES;
+    private static final List<String> DIPLOMATIC_ROLES = List.of("diplomat", "envoy", "ambassador");
+    private static final List<String> TRAVEL_ROLES = List.of("trader", "merchant", "diplomat", "envoy", "ambassador");
     private static final String[] X_COORD_KEYS = {
             "world.x", "position.x", "emergence.x", "population.x", "settlement.x"
     };
