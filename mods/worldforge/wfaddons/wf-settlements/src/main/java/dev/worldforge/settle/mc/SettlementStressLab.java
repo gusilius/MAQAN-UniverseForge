@@ -46,7 +46,6 @@ public final class SettlementStressLab {
     private static final int TEST_TICKS = 420;
 
     private final MinecraftServer server;
-    private final UUID playerId;
     private final ServerPlayer fakePlayer;
     private final ServerLevel level;
     private final double originX, originY, originZ;
@@ -77,7 +76,6 @@ public final class SettlementStressLab {
 
     private SettlementStressLab(MinecraftServer server, ServerPlayer player, int targetRemoteColonies) {
         this.server = server;
-        this.playerId = player.getUUID();
         this.fakePlayer = player;
         this.level = player.serverLevel();
         this.originX = player.getX();
@@ -254,10 +252,10 @@ public final class SettlementStressLab {
     }
 
     private void teleportPlayer(boolean far) {
-        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-        if (player == null) {
+        ServerPlayer player = fakePlayer;
+        if (player == null || !player.isAddedToWorld()) {
             failed = true;
-            failure = "The protocol bot disconnected during physical LOD transition";
+            failure = "The server-side test player left the world during physical LOD transition";
             finish();
             return;
         }
