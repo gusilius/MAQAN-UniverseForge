@@ -117,6 +117,10 @@ public class PeopleMod {
     private static volatile long populationBaselineDay = Long.MIN_VALUE;
     private static volatile long populationRegistryGeneration;
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
+    /** One shared per-tick budget across every canonical population partition. */
+    private static final int POPULATION_FALLBACK_BUDGET_PER_TICK = 256;
+    private static int populationFallbackRegistryCursor;
+    private static long populationFallbackCursorGeneration = Long.MIN_VALUE;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -1010,17 +1014,8 @@ public class PeopleMod {
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
                     || populationFallbackGeneration != registryGeneration)) {
                 long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
-                boolean fallbackComplete = true;
-                for (CharacterRegistry registry : REGS.values())
-                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
-                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
-                for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
-                    fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
-                            registry, currentWorldDay, fallbackStartDay, YEAR, 256);
-                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
-                        WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
-                fallbackComplete &= PopulationSimulation.advanceToWorldDayBatch(
-                        PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR, 256);
+                boolean fallbackComplete = advancePopulationFallbackBatch(
+                        currentWorldDay, fallbackStartDay, YEAR, registryGeneration);
                 if (fallbackComplete) {
                     populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
                     populationFallbackGeneration = registryGeneration;
@@ -1036,6 +1031,44 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
         }
+    }
+
+    /**
+     * Advances all canonical partitions under one server-wide budget. Partitions are visited
+     * round-robin so a large first registry cannot monopolize the tick or starve later dimensions.
+     */
+    private static boolean advancePopulationFallbackBatch(long targetWorldDay, long fallbackStartDay,
+                                                          int year, long registryGeneration) {
+        List<CharacterRegistry> registries = new ArrayList<>();
+        Set<CharacterRegistry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (CharacterRegistry registry : REGS.values())
+            if (registry != null && seen.add(registry)) registries.add(registry);
+        for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
+            if (registry != null && seen.add(registry)) registries.add(registry);
+        if (seen.add(WORLD_REGISTRY)) registries.add(WORLD_REGISTRY);
+        if (seen.add(PLAYER_REGISTRY)) registries.add(PLAYER_REGISTRY);
+        if (registries.isEmpty()) return true;
+
+        if (populationFallbackCursorGeneration != registryGeneration) {
+            populationFallbackRegistryCursor = 0;
+            populationFallbackCursorGeneration = registryGeneration;
+        }
+        int count = registries.size();
+        int visitCount = Math.min(count, POPULATION_FALLBACK_BUDGET_PER_TICK);
+        int start = Math.floorMod(populationFallbackRegistryCursor, count);
+        int baseBudget = Math.max(1, POPULATION_FALLBACK_BUDGET_PER_TICK / visitCount);
+        int extra = visitCount <= POPULATION_FALLBACK_BUDGET_PER_TICK
+                ? POPULATION_FALLBACK_BUDGET_PER_TICK % visitCount : 0;
+        boolean complete = visitCount == count;
+        for (int offset = 0; offset < visitCount; offset++) {
+            CharacterRegistry registry = registries.get((start + offset) % count);
+            int budget = baseBudget + (offset < extra ? 1 : 0);
+            boolean registryComplete = PopulationSimulation.advanceToWorldDayBatch(
+                    registry, targetWorldDay, fallbackStartDay, year, budget);
+            complete &= registryComplete;
+        }
+        populationFallbackRegistryCursor = (start + visitCount) % count;
+        return complete;
     }
 
     private static boolean tryRustPopulationCompute(MinecraftServer server,long worldDay,int year) {
