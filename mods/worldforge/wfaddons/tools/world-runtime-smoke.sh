@@ -46,23 +46,15 @@ raise SystemExit(completed.returncode)
 PY
 }
 
-process_is_running() {
-  local pid="$1" state
-  kill -0 "$pid" 2>/dev/null || return 1
-  # Git Bash may keep an exited child as a zombie until wait() reaps it.
-  # kill -0 alone therefore incorrectly reports that it is still running.
-  state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
-  [[ -n "$state" && "$state" != Z* ]]
-}
 wait_for_process_exit() {
   local pid="$1"
   local seconds="$2"
   local elapsed
   for ((elapsed=0; elapsed<seconds; elapsed++)); do
-    process_is_running "$pid" || return 0
+    kill -0 "$pid" 2>/dev/null || return 0
     sleep 1
   done
-  ! process_is_running "$pid"
+  ! kill -0 "$pid" 2>/dev/null
 }
 
 capture_server_threads() {
@@ -115,7 +107,7 @@ runtime_exit() {
     echo "RUNTIME_SHUTDOWN_BEGIN_STAGE=$CURRENT_STAGE"
     printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
     for second in $(seq 1 30); do
-      process_is_running "$SERVER_PID" || break
+      kill -0 "$SERVER_PID" 2>/dev/null || break
       if (( second % 5 == 0 )); then
         echo "RUNTIME_SHUTDOWN_DIAGNOSTIC_SECONDS=$second"
         capture_server_threads
@@ -133,7 +125,7 @@ runtime_exit() {
       fi
       sleep 1
     done
-    if process_is_running "$SERVER_PID"; then
+    if kill -0 "$SERVER_PID" 2>/dev/null; then
       echo "RUNTIME_SHUTDOWN_GRACE_TIMEOUT=30"
       capture_server_threads
       TERMINATION_EVIDENCE="forced_kill_after_grace_timeout"
@@ -151,7 +143,7 @@ runtime_exit() {
     fi
     # wait is safe only after the process is no longer running. Never let the
     # cleanup trap block indefinitely after taskkill or a failed JVM shutdown.
-    if [ "$SERVER_EXIT_CODE" = "not_observed" ] && ! process_is_running "$SERVER_PID"; then
+    if [ "$SERVER_EXIT_CODE" = "not_observed" ] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
       if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"

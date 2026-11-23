@@ -60,7 +60,6 @@ public final class NpcSocialSimulation {
         building.forEach((registry, byPolity) -> {
             Map<String, List<Character>> groups = new TreeMap<>();
             byPolity.forEach((polity, members) -> {
-                members.sort(Comparator.comparing(person -> person.globalId));
                 groups.put(polity, List.copyOf(members));
             });
             frozen.put(registry, Collections.unmodifiableMap(groups));
@@ -424,12 +423,14 @@ public final class NpcSocialSimulation {
         if (registry == null) return List.of();
         String witnessPolity = polityOf(witness);
         if (!Objects.equals(witnessPolity, polityId)) return List.of();
+        String bandId = String.valueOf(witness.props.getOrDefault("emergence.band_id", polityId));
+        if (bandId.isBlank()) bandId = polityId;
         List<Character> members = contactIndex(RelationsMc.dayNumber())
-                .getOrDefault(registry, Map.of()).getOrDefault(polityId, List.of());
+                .getOrDefault(registry, Map.of()).getOrDefault(bandId, List.of());
         if (members.isEmpty()) return List.of();
         List<Contact> result = new ArrayList<>();
         for (Character candidate : members) {
-            if (candidate == witness || !candidate.alive) continue;
+            if (candidate == witness || !candidate.alive || !Objects.equals(polityOf(candidate), polityId)) continue;
             Relations.Bond bond = RelationsMc.REL.peek("npc:" + witness.globalId, "npc:" + candidate.globalId);
             if (bond == null) continue;
             result.add(new Contact(candidate.globalId, bond.affinity, polityId, true, true));
