@@ -117,25 +117,33 @@ final class NpcSpawner {
             if (roles != null) rolesByTier.put(tier.getValue(), roles);
         }
 
-        TargetIndex index = new TargetIndex();
+        // Resolve eligible role/place anchors first. The previous implementation called
+        // registry.holders() for every title/role pair; holders() scans the entire population.
+        Map<NpcSpawnTargetLookup.RolePlace, NpcSpawnTargetLookup.Location> locations = new HashMap<>();
         String dimension = level.dimension().location().toString();
         for (TitleData.Realm realm : titles.realmList()) {
             TitleData.Title capital = realmCapital(titles, realm);
             if (capital == null || !SimulationLod.shouldSpawnPeople(dimension, capital.capX, capital.capZ)) continue;
             List<Role> roles = rolesByPlace.get("realm");
             if (roles == null) continue;
+            String place = Courts.realmPlace(realm.id);
             for (Role role : roles)
-                for (Character character : registry.holders(role.id, Courts.realmPlace(realm.id)))
-                    index.add(character, role, capital.capX, capital.capZ);
+                locations.putIfAbsent(new NpcSpawnTargetLookup.RolePlace(role.id, place),
+                        new NpcSpawnTargetLookup.Location(role, capital.capX, capital.capZ));
         }
-
         for (TitleData.Title title : titles.allTitles()) {
             List<Role> roles = rolesByTier.get(title.tier);
             if (roles == null || !SimulationLod.shouldSpawnPeople(dimension, title.capX, title.capZ)) continue;
+            String place = Courts.titlePlace(title.id);
             for (Role role : roles)
-                for (Character character : registry.holders(role.id, Courts.titlePlace(title.id)))
-                    index.add(character, role, title.capX, title.capZ);
+                locations.putIfAbsent(new NpcSpawnTargetLookup.RolePlace(role.id, place),
+                        new NpcSpawnTargetLookup.Location(role, title.capX, title.capZ));
         }
+        // One canonical-registry traversal: O(population + eligible titles), not
+        // O(population * eligible titles * roles).
+        TargetIndex index = new TargetIndex();
+        for (NpcSpawnTargetLookup.Candidate candidate : NpcSpawnTargetLookup.collect(registry, locations))
+            index.add(candidate.character(), candidate.role(), candidate.x(), candidate.z());
         return index;
     }
 

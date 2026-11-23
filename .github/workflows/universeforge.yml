@@ -185,7 +185,7 @@ jobs:
         run: |
           "CONTOUR_01_SERVER_CORE_OUTCOME=$env:CORE_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:CORE_OUTCOME -ne "success") {
-            throw "Contour 01 Server Core failed; inspect the contour artifact."
+            "Contour 01 failed; continuing so independent contours still execute." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Contour 02 — real canonical population, production tick scheduler and durable Character writes
@@ -210,7 +210,7 @@ jobs:
         run: |
           "CONTOUR_02_POPULATION_OUTCOME=$env:POPULATION_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:POPULATION_OUTCOME -ne "success") {
-            throw "Contour 02 Population failed; inspect the in-game stress report and server evidence."
+            "Contour 02 failed; continuing to Families / Social and dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Contour 03 — Families / Social lifecycle (same acceptance job, independent server runs)
@@ -239,7 +239,7 @@ jobs:
         run: |
           "CONTOUR_03_SOCIAL_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:SOCIAL_OUTCOME -ne "success") {
-            throw "Contour 03 Families / Social failed; inspect the first failing tier's isolated server artifact."
+            "Contour 03 failed; continuing to dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Start one server with normal vanilla Overworld and image-derived dimension
@@ -262,7 +262,7 @@ jobs:
         run: |
           "SAME_SERVER_DUAL_WORLD_OUTCOME=$env:DUAL_WORLD_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:DUAL_WORLD_OUTCOME -ne "success") {
-            throw "Same-server dual-world genesis acceptance failed; inspect the runtime artifact."
+            "Dual-world contour failed; all requested runtime contours have now been attempted." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Upload same-server dual-world and acceptance diagnostics
@@ -278,3 +278,27 @@ jobs:
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Final acceptance gate — fail only after every contour has run
+        if: always()
+        shell: pwsh
+        env:
+          SERVER_CORE_OUTCOME: ${{ steps.server_core.outcome }}
+          POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
+          SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
+          DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
+        run: |
+          $outcomes = [ordered]@{
+            "01 Server Core" = $env:SERVER_CORE_OUTCOME
+            "02 Population" = $env:POPULATION_OUTCOME
+            "03 Families / Social" = $env:SOCIAL_OUTCOME
+            "Dual-world Genesis" = $env:DUAL_WORLD_OUTCOME
+          }
+          $failed = @()
+          foreach ($entry in $outcomes.GetEnumerator()) {
+            "$($entry.Key): $($entry.Value)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            if ($entry.Value -ne "success") { $failed += "$($entry.Key)=$($entry.Value)" }
+          }
+          if ($failed.Count -gt 0) {
+            throw "Runtime acceptance failed after all contours were attempted: $($failed -join '; ')"
+          }

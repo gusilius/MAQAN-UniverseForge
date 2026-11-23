@@ -1,14 +1,7 @@
 name: MAQAN UniverseForge — Contour 03 Families & Social Stress
 
 on:
-  push:
-    branches: [main, integration/worldgen-rts-unification]
-    paths:
-      - "mods/worldforge/wfaddons/wf-relations/**"
-      - "mods/worldforge/wfaddons/wf-people/**"
-      - "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh"
-      - "mods/worldforge/wfaddons/tools/build-all.sh"
-      - ".github/workflows/contour-03-social-stress.yml"
+  # Primary universeforge.yml runs this contour in sequence; manual ladder remains available.
   workflow_dispatch:
 
 permissions:
