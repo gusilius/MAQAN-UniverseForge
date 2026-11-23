@@ -53,14 +53,16 @@ public final class NpcSocialSimulation {
 
     private static final class ContactIndexBuild {
         final long day;
+        final int year;
         final String world;
         final long registryGeneration;
         final List<RegistryScan> scans;
         final Map<CharacterRegistry, Map<String, List<Character>>> groups = new IdentityHashMap<>();
         int scanIndex;
 
-        ContactIndexBuild(long day, String world, long registryGeneration, List<RegistryScan> scans) {
+        ContactIndexBuild(long day, int year, String world, long registryGeneration, List<RegistryScan> scans) {
             this.day = day;
+            this.year = year;
             this.world = world;
             this.registryGeneration = registryGeneration;
             this.scans = scans;
@@ -68,6 +70,7 @@ public final class NpcSocialSimulation {
     }
 
     private static ContactIndexBuild contactIndexBuild;
+    private static volatile int contactIndexYear = Integer.MIN_VALUE;
     private static volatile long contactIndexRegistryGeneration = Long.MIN_VALUE;
     private static volatile Map<CharacterRegistry, Long> contactIndexMembership = Map.of();
 
@@ -76,16 +79,16 @@ public final class NpcSocialSimulation {
      * view, so each partition's captured size can be scanned safely over multiple server ticks.
      * This prevents a million-character world from rebuilding its entire social index in one tick.
      */
-    public static synchronized boolean prepareContactIndex(long day, int characterBudget) {
+    public static synchronized boolean prepareContactIndex(long day, int year, int characterBudget) {
         String world = String.valueOf(WorldForgeMod.worldId());
-        if (contactIndexDay == day && contactIndexWorld.equals(world)
+        if (contactIndexDay == day && contactIndexYear == year && contactIndexWorld.equals(world)
                 && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
                 && contactIndexMembershipCurrent()) return true;
         if (!PeopleMod.identityPartitionsReady()) return false;
 
         long registryGeneration = PeopleMod.populationRegistryGeneration();
         if (contactIndexBuild == null || contactIndexBuild.day != day
-                || !contactIndexBuild.world.equals(world)
+                || contactIndexBuild.year != year || !contactIndexBuild.world.equals(world)
                 || contactIndexBuild.registryGeneration != registryGeneration) {
             Set<String> ids = new TreeSet<>();
             for (CharacterIdentity identity : PeopleMod.authority().identities())
@@ -95,7 +98,7 @@ public final class NpcSocialSimulation {
                 CharacterRegistry registry = PeopleMod.authority().registry(id);
                 if (registry != null) scans.add(new RegistryScan(registry));
             }
-            contactIndexBuild = new ContactIndexBuild(day, world, registryGeneration, scans);
+            contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration, scans);
         }
 
         int remaining = Math.max(1, Math.min(8192, characterBudget));
@@ -105,7 +108,8 @@ public final class NpcSocialSimulation {
             while (remaining > 0 && scan.cursor < scan.limit) {
                 Character person = scan.people.get(scan.cursor++);
                 remaining--;
-                if (person == null || !person.alive) continue;
+                if (person == null || !person.alive || year - person.birthYear < 18
+                        || !person.props.containsKey("emergence.polity_id")) continue;
                 String polity = polityOf(person);
                 if (polity.isBlank()) continue;
                 String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
@@ -129,10 +133,9 @@ public final class NpcSocialSimulation {
         Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
         build.groups.forEach((registry, byBand) -> {
             Map<String, List<Character>> groups = new TreeMap<>();
-            byBand.forEach((band, members) -> {
-                members.sort(Comparator.comparing(person -> person.globalId));
-                groups.put(band, List.copyOf(members));
-            });
+            // CharacterRegistry.all() preserves deterministic insertion order; retain it
+            // directly instead of sorting potentially million-member bands in one tick.
+            byBand.forEach((band, members) -> groups.put(band, List.copyOf(members)));
             frozen.put(registry, Collections.unmodifiableMap(groups));
         });
         contactsByRegistry = Collections.unmodifiableMap(frozen);
@@ -142,6 +145,7 @@ public final class NpcSocialSimulation {
         contactIndexRegistryGeneration = build.registryGeneration;
         contactIndexWorld = world;
         contactIndexDay = day;
+        contactIndexYear = year;
         contactIndexBuild = null;
         return true;
     }
@@ -152,9 +156,9 @@ public final class NpcSocialSimulation {
         return true;
     }
 
-    private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day) {
+    private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day, int year) {
         String world = String.valueOf(WorldForgeMod.worldId());
-        return contactIndexDay == day && contactIndexWorld.equals(world)
+        return contactIndexDay == day && contactIndexYear == year && contactIndexWorld.equals(world)
                 && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
                 && contactIndexMembershipCurrent() ? contactsByRegistry : null;
     }
@@ -170,7 +174,7 @@ public final class NpcSocialSimulation {
             CharacterRegistry registry = PeopleMod.authority().registry(mapId);
             if (registry != null) registries.put(mapId, registry);
         }
-        Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day);
+        Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day, year);
         if (indexedGroups == null) return 0; // Index construction is advanced incrementally by RelationsMod.
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
         int interactions = 0;
@@ -185,21 +189,8 @@ public final class NpcSocialSimulation {
         }
         for (Map.Entry<String, CharacterRegistry> partition : registries.entrySet()) {
             CharacterRegistry registry = partition.getValue();
-            Map<String, List<Character>> groups = new TreeMap<>();
+            Map<String, List<Character>> groups = indexedGroups.getOrDefault(registry, Map.of());
             List<Character> adults = new ArrayList<>();
-            for (Map.Entry<String, List<Character>> indexed : indexedGroups
-                    .getOrDefault(registry, Map.of()).entrySet()) {
-                List<Character> eligible = new ArrayList<>();
-                for (Character person : indexed.getValue())
-                    if (person.alive && year - person.birthYear >= 18
-                            && person.props.containsKey("emergence.polity_id"))
-                        eligible.add(person);
-                if (eligible.isEmpty()) continue;
-                // The cached contact index is already ordered by globalId; filtering preserves
-                // that order and avoids sorting the same large group on every social pass.
-                groups.put(indexed.getKey(), eligible);
-                adults.addAll(eligible);
-            }
             // Rotate a bounded window per partition. A fixed first-N cutoff starved
             // every later group indefinitely in large worlds.
             List<Map.Entry<String, List<Character>>> orderedGroups = new ArrayList<>(groups.entrySet());
@@ -217,6 +208,7 @@ public final class NpcSocialSimulation {
                     Map.Entry<String, List<Character>> group =
                             orderedGroups.get((start + groupOffset) % orderedGroups.size());
                     List<Character> members = group.getValue();
+                    adults.addAll(members);
                     if (members.size() < 2) continue;
                 for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
                     // Keep a small set of neighbours interacting regularly for a quarter-year,
