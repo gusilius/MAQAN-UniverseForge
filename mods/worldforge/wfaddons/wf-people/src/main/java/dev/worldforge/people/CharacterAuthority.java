@@ -113,6 +113,43 @@ public final class CharacterAuthority {
         sortedIdentityCache = null;
     }
 
+    /**
+     * Rebinds the global authority after an incremental record replaces an existing
+     * canonical Character. This is O(1) average and avoids leaving stale object references
+     * in the world-wide identity map until a later full registry restore.
+     */
+    synchronized void characterReplaced(CharacterRegistry registry, Character previous, Character replacement) {
+        String mapId = registryMapIds.get(registry);
+        WorldId currentWorld = worldId;
+        if (mapId == null || currentWorld == null) return;
+        if (previous != null) {
+            CharacterIdentity oldIdentity = new CharacterIdentity(
+                    currentWorld, mapId, previous.id, previous.globalId);
+            if (!previous.globalId.equals(replacement.globalId)) {
+                byIdentity.remove(oldIdentity, previous);
+                byGlobalId.remove(previous.globalId, oldIdentity);
+                Set<CharacterIdentity> legacy = byLegacyId.get(previous.id);
+                if (legacy != null) {
+                    legacy.remove(oldIdentity);
+                    if (legacy.isEmpty()) byLegacyId.remove(previous.id, legacy);
+                }
+            }
+        }
+        CharacterIdentity identity = new CharacterIdentity(
+                currentWorld, mapId, replacement.id, replacement.globalId);
+        CharacterIdentity globalOwner = byGlobalId.putIfAbsent(replacement.globalId, identity);
+        if (globalOwner != null && !globalOwner.equals(identity))
+            throw new IllegalStateException("Global Character UUID collision " + replacement.globalId
+                    + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
+                    + " and " + mapId + "/" + replacement.id);
+        byIdentity.put(identity, replacement);
+        byLegacyId.computeIfAbsent(replacement.id, ignored -> new LinkedHashSet<>()).add(identity);
+        indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
+        sortedIdentityCache = null;
+        // The reverse family projection is day-scoped and may contain edges from the old record.
+        familyIndexDay = Long.MIN_VALUE;
+    }
+
     /** Updates the reverse parent indexes after a canonical birth without a world scan. */
     synchronized void familyChanged(Character person) {
         if (person == null) return;
