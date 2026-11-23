@@ -275,6 +275,8 @@ checks = {
     "terrain_samples": report.get("terrain_cells_captured_from_loaded_world", 0) > 0,
     "save_load": report.get("work_order_save_load_round_trip") is True,
     "durable_snapshot": report.get("durable_settlement_snapshot") is True,
+    "canonical_worker_identity": report.get("canonical_worker_identity_verified") is True
+        and report.get("canonical_worker_character_links") == report.get("local_workers"),
     "physical_lod": report.get("physical_lod_verified") is True,
     "near_bodies": report.get("near_player_worker_bodies", 0) >= 4,
     "far_bodies": report.get("far_player_worker_bodies") == 0,
