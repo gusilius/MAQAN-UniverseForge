@@ -253,12 +253,23 @@ public final class CharacterStats {
     /** 3–5 stable, varied and mutually compatible traits; the same identity always yields the same profile. */
     public static List<String> traits(Character c) {
         if (!c.traits.isEmpty()) {
-            List<String> stored = new ArrayList<>();
+            // Canonical Character records normally contain an already-normalized TreeSet.
+            // The old hot path copied the growing list once per trait and revalidated every
+            // prefix, multiplying tiny allocations for every social interaction.
+            if (compatibleTraits(c.traits)) return List.copyOf(c.traits);
+            // Keep tolerant normalization for legacy or externally-mutated records.
+            List<String> stored = new ArrayList<>(c.traits.size());
             for (String id : c.traits) {
                 if (!TRAITS.containsKey(id)) continue;
-                List<String> attempt = new ArrayList<>(stored);
-                attempt.add(id);
-                if (compatibleTraits(attempt)) stored.add(id);
+                boolean conflict = false;
+                for (String existing : stored) {
+                    if (TRAIT_CONFLICTS.stream().anyMatch(pair ->
+                            pair.contains(id) && pair.contains(existing))) {
+                        conflict = true;
+                        break;
+                    }
+                }
+                if (!conflict) stored.add(id);
             }
             return stored;
         }
