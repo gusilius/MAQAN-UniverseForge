@@ -553,10 +553,14 @@ public class PeopleMod {
         Files.createDirectories(file.getParent());
         Path temp = file.resolveSibling(file.getFileName() + ".tmp");
         try {
-            try (java.io.BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8,
+            // Flush encoded characters and force file contents before publishing the new snapshot.
+            // A successful rename must not expose a file whose data was only in the OS page cache.
+            try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(temp,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+                java.io.Writer writer = java.nio.channels.Channels.newWriter(channel, StandardCharsets.UTF_8);
                 action.write(writer);
                 writer.flush();
+                channel.force(true);
             }
             try {
                 Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,

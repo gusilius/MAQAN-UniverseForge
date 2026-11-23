@@ -402,6 +402,14 @@ public class PeopleTest {
                 "one canonical per-character journal records birth, appointment, dismissal and death");
         ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
                 "lifecycle event bus notifies each listener exactly once per transition");
+        Map<String, Object> writerProbe = new LinkedHashMap<>();
+        writerProbe.put("escaped", "quote \\" slash \\\\ newline\\n control\\u0001");
+        writerProbe.put("nested", Arrays.asList(1, 2.5d, true, null));
+        writerProbe.put("float", 1.25f);
+        java.io.StringWriter jsonWriterProbe = new java.io.StringWriter();
+        Json.write(writerProbe, jsonWriterProbe);
+        ok(jsonWriterProbe.toString().equals(Json.write(writerProbe)),
+                "streaming JSON writer matches legacy encoder for escaping, nested values and numeric types");
         String journalSave = journal.toJson();
         java.io.StringWriter streamedSnapshot = new java.io.StringWriter();
         journal.writeJson(streamedSnapshot);
