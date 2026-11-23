@@ -60,7 +60,8 @@ pub fn advance(r:Request)->Result<Frame,String>{
    last_simulated_year:r.year,world_day:r.world_day});
  }
  // IDs are unique (validated above), so stable ordering has no semantic value.
- // Unstable sorting preserves deterministic ID order without allocating a merge buffer.\n out.sort_unstable_by(|a,b|a.id.cmp(&b.id));
+ // Unstable sorting preserves deterministic ID order without allocating a merge buffer.
+ out.sort_unstable_by(|a,b|a.id.cmp(&b.id));
  Ok(Frame{schema_version:1,world_id:r.world_id,year:r.year,elapsed_days:r.elapsed_days,world_day:r.world_day,characters:out})
 }
 #[cfg(test)]mod tests{use super::*;
