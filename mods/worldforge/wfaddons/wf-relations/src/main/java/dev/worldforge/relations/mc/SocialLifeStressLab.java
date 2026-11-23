@@ -154,8 +154,9 @@ public final class SocialLifeStressLab {
                     if (run.daysCompleted >= run.daysTarget && run.phase.equals("SIMULATING")) finish(run);
                     else {
                         int day = run.startDay + run.daysCompleted;
+                        int year = run.startYear + Math.floorDiv(day, 365);
                         long indexStarted = System.nanoTime();
-                        boolean indexReady = NpcSocialSimulation.prepareContactIndex(day, 2048);
+                        boolean indexReady = NpcSocialSimulation.prepareContactIndex(day, year, 2048);
                         run.socialIndexBuildNanos += System.nanoTime() - indexStarted;
                         if (indexReady && run.server.getTickCount() % 20 == 0) advanceSocialDay(run);
                     }
