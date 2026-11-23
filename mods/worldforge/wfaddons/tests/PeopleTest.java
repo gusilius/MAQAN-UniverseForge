@@ -489,6 +489,37 @@ public class PeopleTest {
         ok(journalReload.toJson().equals(journalSave),
                 "loading a character registry does not mutate its persisted lifecycle history");
 
+        Path layeredPersistenceRoot = Files.createTempDirectory("wf-character-layered-persistence");
+        try {
+            Path recordsPath = layeredPersistenceRoot.resolve("records");
+            Path walPath = layeredPersistenceRoot.resolve("wal");
+            try (dev.worldforge.people.storage.CharacterRecordStore records =
+                         new dev.worldforge.people.storage.CharacterRecordStore(recordsPath);
+                 dev.worldforge.people.storage.CharacterWal wal =
+                         new dev.worldforge.people.storage.CharacterWal(walPath, 4)) {
+                String checkpointPayload = journal.toJsonRecord(journalPerson);
+                journalPerson.props.put("persistence.recovery_probe", "wal-wins");
+                String latestPayload = journal.toJsonRecord(journalPerson);
+                records.put(journalPerson.globalId, checkpointPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                wal.append(journalPerson.globalId, latestPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                CharacterRegistry recovered = new CharacterRegistry();
+                recovered.fromJson(journalSave, "legacy-unscoped");
+                records.forEach(record -> recovered.applyJsonRecord(record.payloadUtf8(),
+                        "legacy-unscoped", record.globalId()));
+                wal.replayEach(record -> recovered.applyJsonRecord(record.payloadUtf8(),
+                        "legacy-unscoped", record.globalId()));
+                Character recoveredPerson = recovered.getByGlobalId(journalPerson.globalId);
+                ok(recoveredPerson != null
+                                && "wal-wins".equals(recoveredPerson.props.get("persistence.recovery_probe")),
+                        "addressable checkpoint loads before WAL replay and the newest durable WAL record wins after restart");
+            }
+        } finally {
+            try (var paths = Files.walk(layeredPersistenceRoot)) {
+                for (Path item : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(item);
+            }
+        }
+
         CharacterRegistry streamingReload = new CharacterRegistry();
         streamingReload.fromJson(new java.io.StringReader(journalSave), "legacy-unscoped");
         ok(streamingReload.toJson().equals(journalSave)
