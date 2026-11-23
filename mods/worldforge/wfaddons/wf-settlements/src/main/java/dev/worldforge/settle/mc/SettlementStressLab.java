@@ -63,6 +63,8 @@ public final class SettlementStressLab {
     private int returnBodies = -1;
     private int navigationSamples;
     private int capturedTerrainCells;
+    private double initialWoodStock;
+    private double woodProduced;
     private boolean roundTripVerified;
     private boolean durableSnapshotVerified;
     private int canonicalWorkerLinks;
@@ -89,6 +91,7 @@ public final class SettlementStressLab {
         local.s.add("food", 10000);
         local.s.add("wood", 10000);
         local.s.add("stone", 10000);
+        initialWoodStock = local.s.amount("wood");
         prepareLocalWorksite();
     }
 
@@ -306,6 +309,7 @@ public final class SettlementStressLab {
         double tps = elapsedSeconds <= 0 ? 0 : elapsedTicks / elapsedSeconds;
         long heapUsed = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
         int remoteLoaded = remoteChunksLoaded();
+        woodProduced = local.s.amount("wood") - initialWoodStock;
         var canonicalPeople = dev.worldforge.people.mc.PeopleMod.registryFor(level);
         if (canonicalPeople != null) {
             for (Worker worker : local.s.workers) {
@@ -324,7 +328,7 @@ public final class SettlementStressLab {
         boolean statusPass = !failed && created == targetRemoteColonies && roundTripVerified
                 && durableSnapshotVerified && canonicalWorkerLinks == local.s.workers.size()
                 && canonicalWorkerWrites == local.s.workers.size()
-                && remoteLoaded == 0 && lodVerified && performanceVerified;
+                && woodProduced > 0 && remoteLoaded == 0 && lodVerified && performanceVerified;
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schema_version", 1);
@@ -337,6 +341,8 @@ public final class SettlementStressLab {
         report.put("total_colonies", targetRemoteColonies + 1);
         report.put("local_workers", local.s.workers.size());
         report.put("local_work_orders", local.workOrders.size());
+        report.put("initial_wood_stock", initialWoodStock);
+        report.put("wood_produced_by_physical_workers", woodProduced);
         report.put("terrain_cells_captured_from_loaded_world", capturedTerrainCells);
         report.put("work_order_save_load_round_trip", roundTripVerified);
         report.put("durable_settlement_snapshot", durableSnapshotVerified);
