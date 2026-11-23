@@ -29,6 +29,9 @@ public final class Bodies {
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
     static void clearRuntimeIndexes() { WORKER_SCAN_CURSORS.clear(); }
+    static void forgetColony(String colonyId) {
+        if (colonyId != null) WORKER_SCAN_CURSORS.remove(colonyId);
+    }
 
     private static boolean hasLoadedVanillaVillagerBody(Worker worker, ServerLevel level) {
         if (worker == null || worker.person == null || worker.person.isBlank()) return false;
