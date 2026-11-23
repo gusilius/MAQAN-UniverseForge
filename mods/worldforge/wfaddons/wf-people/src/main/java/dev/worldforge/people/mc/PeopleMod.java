@@ -740,17 +740,10 @@ public class PeopleMod {
                 // this with fire-and-forget writer.submit(); bounded async writes are reserved
                 // for explicit bulk workloads that expose a durable completion future.
                 byte[] payload = owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
-                // WAL first: it is the authoritative crash-recovery record. The addressable
-                // checkpoint is a secondary durable copy and may be repaired from the WAL.
+                // Routine mutations pay for one durable append only. The addressable record
+                // store is refreshed during coordinated checkpoints, then the WAL is retired.
+                // This avoids a second fsync and one file replacement per Character mutation.
                 wal.append(character.globalId, payload);
-                CharacterRecordStore records = CHARACTER_RECORD_STORES.get(owner);
-                if (records != null) {
-                    try { records.put(character.globalId, payload); }
-                    catch (Exception checkpointFailure) {
-                        LOGGER.warn("wf_people: Character {} is WAL-durable; addressable checkpoint will be repaired at next coordinated save",
-                                character.globalId, checkpointFailure);
-                    }
-                }
                 return true;
             } catch (Exception walFailure) {
                 LOGGER.error("wf_people: Character WAL append failed for {}; identity writes are blocked", character.globalId, walFailure);
