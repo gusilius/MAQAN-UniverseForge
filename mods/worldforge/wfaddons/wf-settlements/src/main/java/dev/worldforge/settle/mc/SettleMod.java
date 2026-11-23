@@ -1686,7 +1686,7 @@ public class SettleMod {
         if (DEFS != null) save(e.getServer());
         Bodies.clearLive();
         LAST_SIMULATED_WORLD_MINUTE.clear();
-        COLONY_SIMULATION_PHASES = Map.of();
+        COLONY_SIMULATION_PHASES = new HashMap<>();
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
         colonySimulationIndexInterval = -1;
     }
@@ -1700,7 +1700,7 @@ public class SettleMod {
         tradeViewsRevision = Long.MIN_VALUE;
         colonySimulationIndexRevision = Long.MIN_VALUE;
         LAST_SIMULATED_WORLD_MINUTE.clear();
-        COLONY_SIMULATION_PHASES = Map.of();
+        COLONY_SIMULATION_PHASES = new HashMap<>();
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
         colonySimulationIndexInterval = -1;
         ColonyInterestIndex.clear();
