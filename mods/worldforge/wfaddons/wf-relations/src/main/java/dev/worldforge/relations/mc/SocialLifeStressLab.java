@@ -517,7 +517,7 @@ public final class SocialLifeStressLab {
             long reciprocal = reciprocalNpcBonds(run.relations);
             long married = marriedNpcBonds(run.relations);
             String json = String.format(Locale.ROOT,
-                    "{\"contour\":\"03_families_social\",\"status\":\"%s\",\"failure\":\"%s\","
+                    "{\"contour\":\"03_families_social\",\"status\":\"%s\",\"phase\":\"%s\",\"failure\":\"%s\","
                     + "\"target\":%d,\"created\":%d,\"initial_registry_size\":%d,\"final_registry_size\":%d,"
                     + "\"runtime_kind\":\"dedicated_server_production_domain_api_stress\",\"dedicated_server\":%s,"
                     + "\"required_mods_loaded\":%s,\"canonical_registry_population\":true,"
@@ -528,16 +528,17 @@ public final class SocialLifeStressLab {
                     + "\"pending_pregnancies\":%d,\"npc_directed_bonds\":%d,\"reciprocal_bonds\":%d,"
                     + "\"married_directed_bonds\":%d,\"family_links\":%d,\"family_integrity_errors\":%d,"
                     + "\"restored_family_integrity_errors\":%d,\"relations_save_load_verified\":%s,"
-                    + "\"family_save_load_verified\":%s,\"family_registry_codec_roundtrip_verified\":%s,"
+                    + "\"family_save_load_verified\":%s,\"family_registry_codec_roundtrip_verified\":%s,\"family_codec_cursor\":%d,\"family_codec_target\":%d,"
                     + "\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
                     + "\"day_ms_p99\":%.3f,\"day_ms_max\":%.3f,\"heap_used_bytes\":%d,"
                     + "\"peak_heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
-                    run.status, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
+                    run.status, run.phase, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
                     run.dedicatedServer, run.peopleModLoaded && run.relationsModLoaded,
                     run.marriedCouples, groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
                     run.marriedCouples, run.conceptions, run.births, run.deaths, run.pregnancies.size(),
                     bonds, reciprocal, married, familyLinks, familyIntegrityErrors, restoredFamilyIntegrityErrors,
                     relationsSaveLoadVerified, familySaveLoadVerified, familySaveLoadVerified,
+                    run.familyCodecCursor, run.familyCodecTarget,
                     percentile(samples, .50) / 1_000_000.0,
                     percentile(samples, .95) / 1_000_000.0, percentile(samples, .99) / 1_000_000.0,
                     run.maxDayNanos / 1_000_000.0, heap, run.peakHeapBytes, runtime.totalMemory(),
