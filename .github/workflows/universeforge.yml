@@ -41,7 +41,7 @@ jobs:
         include:
           - { id: "01", name: "Server Core", driver: "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh" }
           - { id: "02", name: "Character / Population", driver: "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java" }
-          - { id: "03", name: "Families / Social", driver: "mods/worldforge/wfaddons/wf-relations/src/main/java/dev/worldforge/relations/mc/SocialLifeStressLab.java" }
+          - { id: "03", name: "Families / Social", driver: "" }
           - { id: "04", name: "Settlements / Labor", driver: "" }
           - { id: "05", name: "Economy / Trade / Treasury", driver: "" }
           - { id: "06", name: "Politics / States", driver: "" }
@@ -213,7 +213,7 @@ jobs:
             throw "Contour 02 Population failed; inspect the in-game stress report and server evidence."
           }
 
-      - name: Contour 03 — independent Families / Social lifecycle ladder
+      - name: Contour 03 — Families / Social lifecycle (same acceptance job, independent server runs)
         id: social_stress
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
@@ -239,7 +239,7 @@ jobs:
         run: |
           "CONTOUR_03_SOCIAL_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:SOCIAL_OUTCOME -ne "success") {
-            throw "Contour 03 Families / Social failed; inspect the first failing isolated tier artifact."
+            throw "Contour 03 Families / Social failed; inspect the first failing tier's isolated server artifact."
           }
 
       - name: Start one server with normal vanilla Overworld and image-derived dimension
@@ -250,3 +250,31 @@ jobs:
         env:
           WF_ACCEPTANCE_MODE: "dual-world"
           WF_MAP_ID: "real-map"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3300"
+        run: |
+          bash tools/world-runtime-smoke.sh "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-dual-world-runtime"
+
+      - name: Aggregate same-server world genesis acceptance
+        if: always()
+        shell: pwsh
+        env:
+          DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
+        run: |
+          "SAME_SERVER_DUAL_WORLD_OUTCOME=$env:DUAL_WORLD_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:DUAL_WORLD_OUTCOME -ne "success") {
+            throw "Same-server dual-world genesis acceptance failed; inspect the runtime artifact."
+          }
+
+      - name: Upload same-server dual-world and acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-world-runtime-server-acceptance
+          path: |
+            ${{ runner.temp }}/maqan-dual-world-runtime/
+            ${{ runner.temp }}/maqan-contour-01-server-core/
+            ${{ runner.temp }}/maqan-contour-02-population/
+            ${{ runner.temp }}/maqan-contour-03-social-*/
+            ${{ runner.temp }}/maqan-world-runtime-map/
+          if-no-files-found: warn
+          retention-days: 30
