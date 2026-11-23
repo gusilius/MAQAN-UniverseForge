@@ -387,42 +387,87 @@ fn proposal_id(seed: u64, day: Day, domain: &str, a: &str, b: &str) -> String {
 fn clamp_score(v: i64) -> i32 { v.clamp(-100, 100) as i32 }
 
 
-fn realm_policy_modifier(snapshot: &WorldSnapshot, realm_id: &str, key: &str) -> f64 {
-    let Some(selection) = snapshot.realm_governments.iter().find(|selection| selection.realm_id == realm_id) else {
-        return 0.0;
-    };
-    let mut total = snapshot.government_definitions.iter()
-        .find(|definition| definition.id == selection.government_id)
+/// Immutable O(n) lookup projection built once per decision frame. Snapshot vectors remain
+/// the source of truth; indexes only borrow their entries and preserve first-match semantics.
+struct PolicyCatalogIndex<'a> {
+    selections: HashMap<&'a str, &'a RealmGovernment>,
+    governments: HashMap<&'a str, &'a GovernmentDefinition>,
+    levels: HashMap<&'a str, &'a CatalogEntry>,
+    doctrine_branches: HashMap<&'a str, &'a CatalogEntry>,
+    doctrine_nodes: HashMap<&'a str, &'a serde_json::Value>,
+    laws: HashMap<&'a str, &'a CatalogEntry>,
+}
+
+impl<'a> PolicyCatalogIndex<'a> {
+    fn new(snapshot: &'a WorldSnapshot) -> Self {
+        let mut index = Self {
+            selections: HashMap::with_capacity(snapshot.realm_governments.len()),
+            governments: HashMap::with_capacity(snapshot.government_definitions.len()),
+            levels: HashMap::new(),
+            doctrine_branches: HashMap::new(),
+            doctrine_nodes: HashMap::new(),
+            laws: HashMap::new(),
+        };
+        for selection in &snapshot.realm_governments {
+            index.selections.entry(selection.realm_id.as_str()).or_insert(selection);
+        }
+        for government in &snapshot.government_definitions {
+            index.governments.entry(government.id.as_str()).or_insert(government);
+        }
+        for entry in &snapshot.catalog_entries {
+            if entry.module_id != "wf_realms" { continue; }
+            match entry.catalog_id.as_str() {
+                "government_levels" => { index.levels.entry(entry.entry_id.as_str()).or_insert(entry); }
+                "doctrine_branches" => {
+                    index.doctrine_branches.entry(entry.entry_id.as_str()).or_insert(entry);
+                    if let Some(nodes) = entry.payload.get("nodes").and_then(serde_json::Value::as_array) {
+                        for node in nodes {
+                            if let Some(id) = node.get("key").or_else(|| node.get("id"))
+                                .and_then(serde_json::Value::as_str) {
+                                index.doctrine_nodes.entry(id).or_insert(node);
+                            }
+                        }
+                    }
+                }
+                "laws" => { index.laws.entry(entry.entry_id.as_str()).or_insert(entry); }
+                _ => {}
+            }
+        }
+        index
+    }
+}
+
+fn modifier_from_value(value: Option<&serde_json::Value>, key: &str) -> f64 {
+    value.and_then(|mods| mods.get(key)).and_then(serde_json::Value::as_f64).unwrap_or(0.0)
+}
+
+fn realm_policy_modifier(index: &PolicyCatalogIndex<'_>, realm_id: &str, key: &str) -> f64 {
+    let Some(selection) = index.selections.get(realm_id) else { return 0.0; };
+    let mut total = index.governments.get(selection.government_id.as_str())
         .and_then(|definition| definition.mods.get(key)).copied().unwrap_or(0.0);
-    if let Some(level) = snapshot.catalog_entries.iter().find(|entry|
-        entry.module_id == "wf_realms" && entry.catalog_id == "government_levels"
-            && entry.entry_id == selection.level_id) {
-        total += level.payload.get("mods").and_then(|mods| mods.get(key))
-            .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    if let Some(level) = index.levels.get(selection.level_id.as_str()) {
+        total += modifier_from_value(level.payload.get("mods"), key);
     }
     for doctrine in &selection.doctrine_ids {
         let (branch_id, node_id) = doctrine.split_once(':').unwrap_or(("", doctrine.as_str()));
-        for branch in snapshot.catalog_entries.iter().filter(|entry|
-            entry.module_id == "wf_realms" && entry.catalog_id == "doctrine_branches"
-                && (branch_id.is_empty() || entry.entry_id == branch_id)) {
-            if let Some(nodes) = branch.payload.get("nodes").and_then(serde_json::Value::as_array) {
-                if let Some(node) = nodes.iter().find(|node|
-                    node.get("key").or_else(|| node.get("id")).and_then(serde_json::Value::as_str) == Some(node_id)) {
-                    total += node.get("mods").and_then(|mods| mods.get(key))
-                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-                    break;
-                }
-            }
-        }
+        let node = if branch_id.is_empty() {
+            index.doctrine_nodes.get(node_id).copied()
+        } else {
+            index.doctrine_branches.get(branch_id).and_then(|branch|
+                branch.payload.get("nodes").and_then(serde_json::Value::as_array)
+                    .and_then(|nodes| nodes.iter().find(|node|
+                        node.get("key").or_else(|| node.get("id"))
+                            .and_then(serde_json::Value::as_str) == Some(node_id)))
+        };
+        total += node.and_then(|node| node.get("mods"))
+            .and_then(|mods| mods.get(key)).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
     }
     for (law_id, option_id) in &selection.laws {
-        if let Some(law) = snapshot.catalog_entries.iter().find(|entry|
-            entry.module_id == "wf_realms" && entry.catalog_id == "laws" && entry.entry_id == *law_id) {
+        if let Some(law) = index.laws.get(law_id.as_str()) {
             if let Some(options) = law.payload.get("options").and_then(serde_json::Value::as_array) {
                 if let Some(option) = options.iter().find(|option|
                     option.get("id").and_then(serde_json::Value::as_str) == Some(option_id.as_str())) {
-                    total += option.get("mods").and_then(|mods| mods.get(key))
-                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                    total += modifier_from_value(option.get("mods"), key);
                 }
             }
         }
@@ -1280,6 +1325,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     let realms: BTreeMap<&str, &Realm> = snapshot.realms.iter().map(|r| (r.id.as_str(), r)).collect();
     let settlements: BTreeMap<&str, &Settlement> = snapshot.settlements.iter().map(|s| (s.id.as_str(), s)).collect();
     let characters: BTreeMap<&str, &Character> = snapshot.characters.iter().map(|character| (character.id.as_str(), character)).collect();
+    let policy_index = PolicyCatalogIndex::new(snapshot);
     let mut proposals = Vec::new();
     let mut diagnostics = snapshot.capabilities.iter().map(|capability| format!(
         "capability:{} available={} snapshot_received={} simulation_consumed={} apply_handler_available={} catalogs={} entities={}",
@@ -1472,7 +1518,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let subject_penalty = vassal_by_realm.get(attacker.id.as_str())
                 .map(|loyalty| (100 - loyalty) / 4).unwrap_or(0);
             let government_modifier = ["war_score", "military", "warfare", "expansion"]
-                .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
+                .iter().map(|key| realm_policy_modifier(&policy_index, &attacker.id, key))
                 .sum::<f64>().round() as i64;
             let leader = leader_by_realm.get(attacker.id.as_str()).copied();
             let leader_modifier = leader.map(|leader|
