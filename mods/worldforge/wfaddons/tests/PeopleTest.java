@@ -439,6 +439,36 @@ public class PeopleTest {
         } catch (IllegalArgumentException expected) { trailingSnapshotDataRejected = true; }
         ok(trailingSnapshotDataRejected,
                 "streaming snapshot parser rejects trailing bytes after the root object");
+
+        Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
+        try (dev.worldforge.people.storage.CharacterRecordStore store =
+                     new dev.worldforge.people.storage.CharacterRecordStore(recordStorePath)) {
+            String storeId = "00000000-0000-0000-0000-000000000123";
+            byte[] firstPayload = "{\\"name\\":\\"first\\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] secondPayload = "{\\"name\\":\\"updated\\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            store.put(storeId, firstPayload);
+            boolean firstStored = store.get(storeId) != null
+                    && store.get(storeId).payloadUtf8().equals(new String(firstPayload, java.nio.charset.StandardCharsets.UTF_8));
+            store.put(storeId, secondPayload);
+            int[] enumerated = {0};
+            store.forEach(record -> {
+                if (record.globalId().equals(storeId)
+                        && record.payloadUtf8().equals(new String(secondPayload, java.nio.charset.StandardCharsets.UTF_8)))
+                    enumerated[0]++;
+            });
+            boolean removed = store.delete(storeId) && store.get(storeId) == null;
+            ok(firstStored && enumerated[0] == 1 && removed,
+                    "addressable Character checkpoint store atomically replaces, reads, streams and deletes UUID-keyed records");
+            boolean noPopulationMap = Arrays.stream(store.getClass().getDeclaredFields())
+                    .noneMatch(field -> Map.class.isAssignableFrom(field.getType())
+                            || Collection.class.isAssignableFrom(field.getType()));
+            ok(noPopulationMap,
+                    "disk Character record store resolves deterministic hashed paths without retaining a population-sized in-memory index");
+        } finally {
+            try (var paths = Files.walk(recordStorePath)) {
+                for (Path item : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(item);
+            }
+        }
         String journalSave = journal.toJson();
         java.io.StringWriter streamedSnapshot = new java.io.StringWriter();
         journal.writeJson(streamedSnapshot);
