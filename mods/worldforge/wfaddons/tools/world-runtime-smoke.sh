@@ -274,6 +274,7 @@ checks = {
     "remote_colonies": report.get("created_remote_colonies") == target,
     "local_workers": report.get("local_workers", 0) >= 4,
     "work_orders": report.get("local_work_orders") == report.get("local_workers"),
+    "physical_wood_harvest": report.get("wood_produced_by_physical_workers", 0) > 0,
     "terrain_samples": report.get("terrain_cells_captured_from_loaded_world", 0) > 0,
     "save_load": report.get("work_order_save_load_round_trip") is True,
     "durable_snapshot": report.get("durable_settlement_snapshot") is True,
