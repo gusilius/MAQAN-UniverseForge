@@ -62,6 +62,7 @@ public final class SocialLifeStressLab {
         final long startedNanos = System.nanoTime();
         final long cpuStartedNanos = processCpuNanos();
         final long[] dayNanos;
+        long socialIndexBuildNanos;
         final PriorityQueue<Pregnancy> pregnancies = new PriorityQueue<>(Comparator.comparingLong(p -> p.dueDay));
         int created;
         int daysCompleted;
@@ -151,7 +152,13 @@ public final class SocialLifeStressLab {
                 case "PROCESSING_DEATHS" -> processDeathsBatch(run);
                 case "SIMULATING" -> {
                     if (run.daysCompleted >= run.daysTarget && run.phase.equals("SIMULATING")) finish(run);
-                    else if (run.server.getTickCount() % 20 == 0) advanceSocialDay(run);
+                    else {
+                        int day = run.startDay + run.daysCompleted;
+                        long indexStarted = System.nanoTime();
+                        boolean indexReady = NpcSocialSimulation.prepareContactIndex(day, 2048);
+                        run.socialIndexBuildNanos += System.nanoTime() - indexStarted;
+                        if (indexReady && run.server.getTickCount() % 20 == 0) advanceSocialDay(run);
+                    }
                 }
                 default -> throw new IllegalStateException("Unknown social stress phase " + run.phase);
             }
@@ -204,7 +211,8 @@ public final class SocialLifeStressLab {
         int year = run.startYear + Math.floorDiv(day, 365);
         run.relations.tick(day);
         int processed = NpcSocialSimulation.advance(run.relations, day, year);
-        long elapsed = System.nanoTime() - started;
+        long elapsed = System.nanoTime() - started + run.socialIndexBuildNanos;
+        run.socialIndexBuildNanos = 0L;
         run.dayNanos[run.daysCompleted] = elapsed;
         run.maxDayNanos = Math.max(run.maxDayNanos, elapsed);
         run.interactions += processed;
