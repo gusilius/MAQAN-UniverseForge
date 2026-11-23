@@ -270,24 +270,25 @@ public final class SettlementStressLab {
 
     private int countLocalBodies() {
         int count = 0;
-        String prefix = local.s.id + "#";
-        for (Map.Entry<String, UUID> entry : Bodies.LIVE.entrySet()) {
-            if (!entry.getKey().startsWith(prefix)) continue;
-            for (ServerLevel candidate : server.getAllLevels()) {
-                var entity = candidate.getEntity(entry.getValue());
-                if (entity instanceof WFWorker && entity.isAlive()) { count++; break; }
-            }
+        // A Colony belongs to one dimension. Resolve only its own worker keys in that
+        // ServerLevel; scanning every global LIVE entry and every dimension made the
+        // acceptance observer itself scale with unrelated settlements and worlds.
+        for (Worker worker : local.s.workers) {
+            UUID uuid = Bodies.LIVE.get(Bodies.key(local.s.id, worker.id));
+            if (uuid == null) continue;
+            var entity = level.getEntity(uuid);
+            if (entity instanceof WFWorker && entity.isAlive()) count++;
         }
         return count;
     }
 
     private int countNavigatingLocalWorkers() {
         int count = 0;
-        String prefix = local.s.id + "#";
-        for (Map.Entry<String, UUID> entry : Bodies.LIVE.entrySet()) {
-            if (!entry.getKey().startsWith(prefix)) continue;
-            var entity = level.getEntity(entry.getValue());
-            if (entity instanceof WFWorker worker && worker.isAlive() && !worker.getNavigation().isDone()) count++;
+        for (Worker worker : local.s.workers) {
+            UUID uuid = Bodies.LIVE.get(Bodies.key(local.s.id, worker.id));
+            if (uuid == null) continue;
+            var entity = level.getEntity(uuid);
+            if (entity instanceof WFWorker body && body.isAlive() && !body.getNavigation().isDone()) count++;
         }
         return count;
     }
