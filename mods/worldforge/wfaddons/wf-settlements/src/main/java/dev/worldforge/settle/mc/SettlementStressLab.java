@@ -14,7 +14,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import com.mojang.authlib.GameProfile;
 import net.minecraftforge.common.util.FakePlayerFactory;
-import net.minecraft.world.level.LevelResource;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraftforge.common.MinecraftForge;
