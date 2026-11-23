@@ -166,17 +166,21 @@ public final class NpcSocialSimulation {
             }
         }
 
-        long publishedMembershipRevision = CharacterRegistry.globalMembershipRevision();
-        if (publishedMembershipRevision != CharacterRegistry.globalMembershipRevision()) return false;
-        build.membershipRevision = publishedMembershipRevision;
+        // Publish only against the revision observed at method entry. If another
+        // mutation raced the scan, leave the previous revision in place so the next
+        // tick necessarily resumes the newly appended tail instead of blessing a gap.
+        if (CharacterRegistry.globalMembershipRevision() != membershipRevision) return false;
+        build.membershipRevision = membershipRevision;
         if (!build.published) {
             Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
-            build.groups.forEach((registry, byBand) ->
-                    frozen.put(registry, Collections.unmodifiableNavigableMap(byBand)));
+            build.groups.forEach((registry, byBand) -> {
+                byBand.replaceAll((band, members) -> Collections.unmodifiableList(members));
+                frozen.put(registry, Collections.unmodifiableNavigableMap(byBand));
+            });
             contactsByRegistry = Collections.unmodifiableMap(frozen);
             build.published = true;
         }
-        contactIndexMembershipRevision = publishedMembershipRevision;
+        contactIndexMembershipRevision = membershipRevision;
         contactIndexRegistryGeneration = build.registryGeneration;
         contactIndexWorld = build.world;
         contactIndexYear = build.year;
