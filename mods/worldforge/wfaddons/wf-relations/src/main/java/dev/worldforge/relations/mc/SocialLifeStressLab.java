@@ -473,6 +473,7 @@ public final class SocialLifeStressLab {
                     + "\"target\":%d,\"created\":%d,\"initial_registry_size\":%d,\"final_registry_size\":%d,"
                     + "\"runtime_kind\":\"dedicated_server_production_domain_api_stress\",\"dedicated_server\":%s,"
                     + "\"required_mods_loaded\":%s,\"canonical_registry_population\":true,"
+                    + "\"demographic_fixture_seeded_marriages\":true,\"fixture_married_couples\":%d,"
                     + "\"physical_npc_entity_spawn_verified\":false,\"server_restart_persistence_verified\":false,"
                     + "\"groups\":%d,\"group_size\":%d,\"days_target\":%d,\"days_completed\":%d,"
                     + "\"autonomous_interactions\":%d,\"married_couples\":%d,\"conceptions\":%d,\"births\":%d,\"deaths\":%d,"
@@ -485,7 +486,7 @@ public final class SocialLifeStressLab {
                     + "\"peak_heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
                     run.status, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
                     run.dedicatedServer, run.peopleModLoaded && run.relationsModLoaded,
-                    groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
+                    run.marriedCouples, groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
                     run.marriedCouples, run.conceptions, run.births, run.deaths, run.pregnancies.size(),
                     bonds, reciprocal, married, familyLinks, familyIntegrityErrors, restoredFamilyIntegrityErrors,
                     relationsSaveLoadVerified, familySaveLoadVerified, familySaveLoadVerified,
