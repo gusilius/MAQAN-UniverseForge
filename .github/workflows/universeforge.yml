@@ -42,7 +42,7 @@ jobs:
           - { id: "01", name: "Server Core", driver: "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh" }
           - { id: "02", name: "Character / Population", driver: "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java" }
           - { id: "03", name: "Families / Social", driver: "mods/worldforge/wfaddons/wf-relations/src/main/java/dev/worldforge/relations/mc/SocialLifeStressLab.java" }
-          - { id: "04", name: "Settlements / Labor", driver: "" }
+          - { id: "04", name: "Settlements / Labor", driver: "mods/worldforge/wfaddons/wf-settlements/src/main/java/dev/worldforge/settle/mc/SettlementStressLab.java" }
           - { id: "05", name: "Economy / Trade / Treasury", driver: "" }
           - { id: "06", name: "Politics / States", driver: "" }
           - { id: "07", name: "Army / RTS", driver: "" }
@@ -242,6 +242,28 @@ jobs:
             "Contour 03 failed; continuing to dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
+      - name: Contour 04 — real Minecraft Settlements / Labor / physical LOD stress
+        id: settlement_stress
+        continue-on-error: true
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: "settlement-stress"
+          WF_SETTLEMENT_STRESS_TARGET: "250"
+          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
+        run: |
+          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-04-settlements"
+
+      - name: Aggregate Settlements / Labor contour result
+        if: always()
+        shell: pwsh
+        env:
+          SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
+        run: |
+          "CONTOUR_04_SETTLEMENTS_OUTCOME=$env:SETTLEMENT_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:SETTLEMENT_OUTCOME -ne "success") {
+            "Contour 04 failed; continuing to same-server dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
       - name: Start one server with normal vanilla Overworld and image-derived dimension
         id: dual_world_smoke
         continue-on-error: true
@@ -275,6 +297,7 @@ jobs:
             ${{ runner.temp }}/maqan-contour-01-server-core/
             ${{ runner.temp }}/maqan-contour-02-population/
             ${{ runner.temp }}/maqan-contour-03-social-*/
+            ${{ runner.temp }}/maqan-contour-04-settlements/
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
@@ -286,12 +309,14 @@ jobs:
           SERVER_CORE_OUTCOME: ${{ steps.server_core.outcome }}
           POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
           SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
+          SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
           DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
         run: |
           $outcomes = [ordered]@{
             "01 Server Core" = $env:SERVER_CORE_OUTCOME
             "02 Population" = $env:POPULATION_OUTCOME
             "03 Families / Social" = $env:SOCIAL_OUTCOME
+            "04 Settlements / Labor" = $env:SETTLEMENT_OUTCOME
             "Dual-world Genesis" = $env:DUAL_WORLD_OUTCOME
           }
           $failed = @()

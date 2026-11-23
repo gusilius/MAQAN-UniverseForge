@@ -2436,5 +2436,6 @@ public class SettleMod {
         SettleCommands.register(e.getDispatcher());
         SettleMapCommands.register(e.getDispatcher());
         ResidentInteraction.register(e);
+        SettlementStressLab.register(e.getDispatcher());
     }
 }

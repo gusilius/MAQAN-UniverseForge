@@ -37,6 +37,8 @@ capture_server_threads() {
   pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-$stamp.txt")"
   [ -n "$pid" ] || return 0
   jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || true
+  jcmd "$pid" GC.heap_info > "$OUTPUT/runtime-heap-$stamp.txt" 2>&1 || true
+  WF_METRIC_PID="$pid" powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/runtime-process-$stamp.json" 2>&1 || true
   THREAD_DUMP_COUNT=$((THREAD_DUMP_COUNT + 1))
   echo "RUNTIME_THREAD_DUMP=$stamp PID=$pid"
   # Keep the complete dump as an artifact and print the server plus chunk/IO
@@ -210,7 +212,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.social.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]] && echo true || echo false) -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
+java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.social.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]] && echo true || echo false) -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.settlement.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -231,6 +233,82 @@ grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startu
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]; then
+  CURRENT_STAGE="settlement_labor_stress"
+  TARGET="${WF_SETTLEMENT_STRESS_TARGET:-250}"
+  REPORT="world/worldforge/stresslab/contour-04-settlements.json"
+  echo "SETTLEMENT_STRESS_CONTOUR=04"
+  echo "SETTLEMENT_STRESS_REMOTE_COLONIES=$TARGET"
+  printf 'wfsettle-stress start %s\n' "$TARGET" >> in.txt
+  SETTLEMENT_REPORT_READY=0
+  for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
+    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second % 15 == 0 )); then
+      echo "SETTLEMENT_STRESS_ELAPSED_SECONDS=$second"
+      grep 'WF_STRESS contour=04_settlements' server.log | tail -5 || true
+    fi
+    if [ -f "$REPORT" ]; then
+      cp "$REPORT" "$OUTPUT/contour-04-settlements.json"
+      SETTLEMENT_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","INVALID"))' "$REPORT")"
+      echo "SETTLEMENT_STRESS_REPORTED_STATUS=$SETTLEMENT_STATUS"
+      SETTLEMENT_REPORT_READY=1
+      break
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: Forge server exited during settlement/labor stress"; exit 51; }
+    sleep 1
+  done
+  if [ "$SETTLEMENT_REPORT_READY" -ne 1 ]; then
+    echo "SETTLEMENT_STRESS_TIMEOUT_STAGE=$CURRENT_STAGE"
+    grep 'WF_STRESS contour=04_settlements' server.log | tail -80 || true
+    exit 52
+  fi
+  python3 - "$REPORT" "$TARGET" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+target = int(sys.argv[2])
+checks = {
+    "status": report.get("status") == "PASS",
+    "runtime_kind": report.get("runtime_kind") == "minecraft_forge_dedicated_server_settlement_stress",
+    "dedicated_server": report.get("dedicated_server") is True,
+    "mods_loaded": report.get("required_mods_loaded") is True,
+    "remote_colonies": report.get("created_remote_colonies") == target,
+    "local_workers": report.get("local_workers", 0) >= 4,
+    "work_orders": report.get("local_work_orders") == report.get("local_workers"),
+    "physical_wood_harvest": report.get("wood_produced_by_physical_workers", 0) > 0,
+    "terrain_samples": report.get("terrain_cells_captured_from_loaded_world", 0) > 0,
+    "save_load": report.get("work_order_save_load_round_trip") is True,
+    "durable_snapshot": report.get("durable_settlement_snapshot") is True,
+    "canonical_worker_identity": report.get("canonical_worker_identity_verified") is True
+        and report.get("canonical_worker_character_links") == report.get("local_workers"),
+    "canonical_worker_durable_writes": report.get("canonical_worker_durable_writes_verified") is True
+        and report.get("canonical_worker_durable_writes") == report.get("local_workers"),
+    "physical_lod": report.get("physical_lod_verified") is True,
+    "near_bodies": report.get("near_player_worker_bodies", 0) >= 4,
+    "far_bodies": report.get("far_player_worker_bodies") == 0,
+    "return_bodies": report.get("return_player_worker_bodies", 0) >= 4,
+    "navigation": report.get("worker_navigation_active_samples", 0) > 0,
+    "remote_chunks_dormant": report.get("remote_settlement_chunks_loaded") == 0,
+    "ticks": report.get("measured_server_ticks", 0) >= 400,
+    "tps": report.get("server_tps", 0) >= 15,
+    "tick_p95": report.get("server_tick_ms_p95", 1e9) <= 50,
+    "tick_p99": report.get("server_tick_ms_p99", 1e9) <= 100,
+    "tick_max": report.get("server_tick_ms_max", 1e9) <= 1000,
+}
+for key, passed in checks.items():
+    print(f"SETTLEMENT_STRESS_CHECK_{key.upper()}={'PASS' if passed else 'FAIL'}")
+if not all(checks.values()):
+    raise SystemExit("Contour 04 evidence failed: " + repr(report))
+print("SETTLEMENT_STRESS_EVIDENCE=PASS")
+print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+PY
+  printf '%s\n' "save-all flush" >> in.txt
+  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
+  grep -Fq 'Saved the game' server.log || { echo "ERROR: contour 04 save-all flush was not acknowledged"; exit 53; }
+  echo "SETTLEMENT_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
+  CURRENT_STAGE="settlement_labor_stress_complete"
+  exit 0
+fi
+
 if [ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]; then
   CURRENT_STAGE="social_life_stress"
   TARGET="${WF_SOCIAL_STRESS_TARGET:-100000}"
