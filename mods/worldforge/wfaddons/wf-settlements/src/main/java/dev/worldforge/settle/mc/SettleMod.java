@@ -1578,7 +1578,7 @@ public class SettleMod {
      * Worker.person is the durable foreign key; profession/building remain settlement-owned state.
      * The optional wf_people addon remains optional and no duplicate character registry is created here.
      */
-    private static void syncPeople(Colony colony, MinecraftServer server) {
+    static void syncPeople(Colony colony, MinecraftServer server) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
         // Use the exact dimension's canonical registry: map-backed and vanilla settlements
         // follow the same Character lifecycle and never infer identity from map sovereignty.
