@@ -22,17 +22,21 @@ final class ColonyInterestIndex {
     private static final int CELL_SIZE = 256;
     private static final long REBUILD_INTERVAL_TICKS = 100L;
     private static long builtAt = Long.MIN_VALUE;
+    private static volatile boolean dirty = true;
     private static Map<String, Map<Long, List<Colony>>> byDimension = Map.of();
 
     private ColonyInterestIndex() {}
 
     static synchronized void clear() {
         builtAt = Long.MIN_VALUE;
+        dirty = true;
         byDimension = Map.of();
     }
 
+    static void invalidate() { dirty = true; }
+
     static synchronized void refresh(Collection<Colony> colonies, long tick) {
-        if (builtAt != Long.MIN_VALUE && tick >= builtAt
+        if (!dirty && builtAt != Long.MIN_VALUE && tick >= builtAt
                 && tick - builtAt < REBUILD_INTERVAL_TICKS) return;
         Map<String, Map<Long, List<Colony>>> mutable = new HashMap<>();
         for (Colony colony : colonies) {
@@ -54,6 +58,7 @@ final class ColonyInterestIndex {
         });
         byDimension = Map.copyOf(frozen);
         builtAt = tick;
+        dirty = false;
     }
 
     static List<Colony> nearby(MinecraftServer server, double radius) {
