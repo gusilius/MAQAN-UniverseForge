@@ -2305,12 +2305,9 @@ public class SettleMod {
      */
     private static void advanceCanonicalResidentLife() {
         try {
-            LinkedHashSet<CharacterRegistry> unique = new LinkedHashSet<>();
-            unique.addAll(PeopleMod.registries().values());
-            unique.addAll(PeopleMod.dimensionRegistries().values());
-            unique.add(PeopleMod.worldRegistry());
-            unique.add(PeopleMod.playerRegistry());
-            List<CharacterRegistry> registries = new ArrayList<>(unique);
+            // Reuse PeopleMod's generation-keyed immutable snapshot instead of cloning
+            // both registry maps and rebuilding a set/list on every server tick.
+            List<CharacterRegistry> registries = PeopleMod.populationRegistriesSnapshot();
             if (registries.isEmpty()) return;
             int count = registries.size();
             int start = Math.floorMod(lifeRegistryCursor++, count);

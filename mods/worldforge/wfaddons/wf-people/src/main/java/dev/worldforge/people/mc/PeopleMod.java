@@ -410,6 +410,10 @@ public class PeopleMod {
     /** Read-only snapshot for optional population/progression bridges. */
     public static Map<MapData, CharacterRegistry> registries() { return java.util.Collections.unmodifiableMap(new HashMap<>(REGS)); }
     public static Map<String, CharacterRegistry> dimensionRegistries() { return java.util.Collections.unmodifiableMap(new TreeMap<>(DIMENSION_REGISTRIES)); }
+    /** Shared immutable partition view for bounded cross-addon schedulers. */
+    public static List<CharacterRegistry> populationRegistriesSnapshot() {
+        return populationFallbackRegistries(populationRegistryGeneration);
+    }
 
     /** Resolve the canonical player Character by the stable Minecraft account UUID. */
     public static Character playerCharacter(UUID playerUuid) {
