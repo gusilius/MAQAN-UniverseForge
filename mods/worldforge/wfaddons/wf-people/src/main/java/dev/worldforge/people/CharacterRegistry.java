@@ -40,11 +40,25 @@ public final class CharacterRegistry {
     private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
-    private final List<String> ordered = new ArrayList<>();
-    /** Compatibility view resolves IDs on access and avoids a second retained Character reference per resident. */
+    /**
+     * Compatibility view over LinkedHashMap insertion order. Do not retain a second
+     * population-sized list of IDs: at multi-million scale that duplicate reference
+     * array alone costs tens of megabytes. Iteration walks the canonical map directly.
+     */
     private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
-        @Override public Character get(int index) { return byId.get(ordered.get(index)); }
-        @Override public int size() { return ordered.size(); }
+        @Override public Character get(int index) {
+            if (index < 0 || index >= byId.size()) throw new IndexOutOfBoundsException(index);
+            Iterator<Character> iterator = byId.values().iterator();
+            for (int current = 0; iterator.hasNext(); current++) {
+                Character character = iterator.next();
+                if (current == index) return character;
+            }
+            throw new IndexOutOfBoundsException(index);
+        }
+        @Override public int size() { return byId.size(); }
+        @Override public Iterator<Character> iterator() {
+            return Collections.unmodifiableCollection(byId.values()).iterator();
+        }
     });
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
@@ -171,7 +185,7 @@ public final class CharacterRegistry {
      */
     public List<Character> all() { return orderedView; }
 
-    public int size() { return ordered.size(); }
+    public int size() { return byId.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
@@ -194,7 +208,6 @@ public final class CharacterRegistry {
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
         byGlobalId.put(c.globalId, c.id);
-        ordered.add(c.id);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterCreated(this, c);
         markMembershipMutation();
@@ -914,7 +927,6 @@ public final class CharacterRegistry {
         byId.put(restored.id, restored);
         byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
-        if (previous == null) ordered.add(restored.id);
         if (restored.id.matches("c[0-9]+")) {
             try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
             catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
@@ -1167,8 +1179,6 @@ public final class CharacterRegistry {
         }
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
-        ordered.clear();
-        ordered.addAll(loaded.keySet());
         membershipGeneration++;
         next = safeNext;
         markMembershipMutation();
