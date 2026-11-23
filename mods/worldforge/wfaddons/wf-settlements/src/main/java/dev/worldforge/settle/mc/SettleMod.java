@@ -182,7 +182,7 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
-    private static int lifeRegistryCursor;
+    private static int lifeOperationLaneCursor;
     private static final Map<Integer, Integer> COLONY_SIMULATION_CURSORS = new HashMap<>();
 
     private static int rotationStride(int minimum, int size) {
@@ -2341,35 +2341,41 @@ public class SettleMod {
      */
     private static void advanceCanonicalResidentLife() {
         try {
-            // Reuse PeopleMod's generation-keyed immutable snapshot instead of cloning
-            // both registry maps and rebuilding a set/list on every server tick.
             List<CharacterRegistry> registries = PeopleMod.populationRegistriesSnapshot();
             if (registries.isEmpty()) return;
-            int count = registries.size();
-            // Bound both work and iteration count across all partitions. The previous loop
-            // visited every registry; above 128 partitions its per-registry share became zero,
-            // so resident life events stopped progressing while the server still paid O(N).
-            final int totalBudget = 128;
-            int visitCount = Math.min(count, totalBudget);
-            int start = Math.floorMod(lifeRegistryCursor, count);
-            int baseShare = totalBudget / visitCount;
-            int extraShare = totalBudget % visitCount;
+            int registryCount = registries.size();
+            // One shared operation budget covers all three queues across every registry.
+            // A lane is one (registry, subsystem) pair: bereavement, pregnancy, or health.
+            final int totalOperationBudget = 384;
+            long laneCountLong = (long) registryCount * 3L;
+            if (laneCountLong > Integer.MAX_VALUE) throw new IllegalStateException("too many Character registry lanes");
+            int laneCount = (int) laneCountLong;
+            int visitCount = Math.min(laneCount, totalOperationBudget);
+            int start = Math.floorMod(lifeOperationLaneCursor, laneCount);
+            int baseShare = totalOperationBudget / visitCount;
+            int extraShare = totalOperationBudget % visitCount;
             var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
             long worldDay = clock.dayNumber();
             int year = clock.year();
+
             for (int offset = 0; offset < visitCount; offset++) {
+                int lane = (start + offset) % laneCount;
+                int registryIndex = lane / 3;
+                int subsystem = lane % 3;
+                CharacterRegistry registry = registries.get(registryIndex);
                 int share = baseShare + (offset < extraShare ? 1 : 0);
-                CharacterRegistry registry = registries.get((start + offset) % count);
-                registry.processPendingBereavementBatch(share);
-                ResidentLifeEvents.advanceDuePregnanciesBatch(
-                        registry, year, worldDay, PeopleMod.NAMES, share);
-                ResidentLifeEvents.advanceHealthBatch(
-                        registry, worldDay, share);
+                switch (subsystem) {
+                    case 0 -> registry.processPendingBereavementBatch(share);
+                    case 1 -> ResidentLifeEvents.advanceDuePregnanciesBatch(
+                            registry, year, worldDay, PeopleMod.NAMES, share);
+                    case 2 -> ResidentLifeEvents.advanceHealthBatch(registry, worldDay, share);
+                    default -> throw new IllegalStateException("unknown resident-life lane " + subsystem);
+                }
             }
-            // Slide by one partition, not by the whole window, so every partition eventually
-            // receives work even when count and totalBudget have a common divisor.
-            lifeRegistryCursor = count <= totalBudget ? 0
-                    : (start + rotationStride(visitCount, count)) % count;
+            // Coprime rotation prevents a repeating subset when lane count and budget share
+            // a divisor. Every subsystem in every partition eventually receives service.
+            lifeOperationLaneCursor = laneCount <= totalOperationBudget ? 0
+                    : (start + rotationStride(visitCount, laneCount)) % laneCount;
         } catch (LinkageError | RuntimeException error) {
             LOGGER.error("wf_settle: canonical resident life pass failed: {}", error.toString(), error);
         }
