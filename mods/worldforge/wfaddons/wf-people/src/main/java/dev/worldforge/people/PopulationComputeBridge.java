@@ -128,7 +128,7 @@ public final class PopulationComputeBridge {
     /** Compatibility capture: elapsedDays is measured from world day zero. */
     public static Captured capture(String worldId,int year,long elapsedDays,Collection<CharacterRegistry> registries){
         Scan scan=Scan.begin(registries);
-        return captureForWorldDay(worldId,year,elapsedDays,0L,scan,registries,0,
+        return captureForWorldDay(worldId,year,elapsedDays,0L,registries,scan,0,
                 scan.firstMemberCursor(), Integer.MAX_VALUE);
     }
 
