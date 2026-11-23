@@ -42,7 +42,7 @@ jobs:
           - { id: "01", name: "Server Core", driver: "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh" }
           - { id: "02", name: "Character / Population", driver: "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java" }
           - { id: "03", name: "Families / Social", driver: "mods/worldforge/wfaddons/wf-relations/src/main/java/dev/worldforge/relations/mc/SocialLifeStressLab.java" }
-          - { id: "04", name: "Settlements / Labor", driver: "" }
+          - { id: "04", name: "Settlements / Labor", driver: "mods/worldforge/wfaddons/wf-settlements/src/main/java/dev/worldforge/settle/mc/SettlementStressLab.java" }
           - { id: "05", name: "Economy / Trade / Treasury", driver: "" }
           - { id: "06", name: "Politics / States", driver: "" }
           - { id: "07", name: "Army / RTS", driver: "" }
