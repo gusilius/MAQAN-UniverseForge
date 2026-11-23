@@ -108,10 +108,14 @@ public final class PopulationComputeBridge {
                          boolean scanComplete,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.targetWorldDay=targetWorldDay;this.revisions=revisions;
             this.scan=scan;this.characterIds=List.copyOf(ids);
-            this.birthYears=Map.copyOf(birthYears);this.priorDays=Map.copyOf(priorDays);this.elapsedById=Map.copyOf(elapsedById);
-            this.characters=Map.copyOf(characters);this.owners=Map.copyOf(owners);
+            // These maps and the byte array are freshly allocated inside captureForWorldDay,
+            // transferred only to this private constructor, and never mutated or exposed.
+            // Taking ownership avoids a second full set of per-character hash-table entries
+            // and a second copy of the serialized request at the end of every capture.
+            this.birthYears=birthYears;this.priorDays=priorDays;this.elapsedById=elapsedById;
+            this.characters=characters;this.owners=owners;
             this.nextRegistryCursor=nextRegistryCursor;this.nextMemberCursor=nextMemberCursor;this.scanComplete=scanComplete;
-            this.request=request.clone();
+            this.request=request;
         }
         public String worldId(){return worldId;} public int year(){return year;} public long elapsedDays(){return elapsedDays;}
         public long targetWorldDay(){return targetWorldDay;}
