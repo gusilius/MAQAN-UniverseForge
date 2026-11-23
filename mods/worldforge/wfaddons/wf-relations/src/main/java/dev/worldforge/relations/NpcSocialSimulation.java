@@ -481,8 +481,8 @@ public final class NpcSocialSimulation {
         Relations.Bond ab = relations.bond(aKey, bKey);
         Relations.Bond ba = relations.bond(bKey, aKey);
         int oldAffinity = ab.affinity;
-        Set<String> ta = new HashSet<>(CharacterStats.traits(a));
-        Set<String> tb = new HashSet<>(CharacterStats.traits(b));
+        List<String> ta = CharacterStats.traits(a);
+        List<String> tb = CharacterStats.traits(b);
         int delta = 1;
         if (ta.contains("gregarious") || tb.contains("gregarious")) delta++;
         if (ta.contains("generous") && tb.contains("generous")) delta++;
