@@ -304,15 +304,6 @@ public final class SocialLifeStressLab {
         run.lifecycleWorkNanos = 0L;
     }
 
-    private static void addReciprocalBond(Run run, Character first, Character second, boolean married) {
-        Relations.Bond forward = run.relations.bond("npc:" + first.globalId, "npc:" + second.globalId);
-        Relations.Bond reverse = run.relations.bond("npc:" + second.globalId, "npc:" + first.globalId);
-        forward.met = reverse.met = 1;
-        forward.affinity = reverse.affinity = married ? 75 : 35;
-        forward.love = reverse.love = married ? 60 : 20;
-        forward.married = reverse.married = married;
-    }
-
     private static void finish(Run run) {
         long bonds = npcBondCount(run.relations);
         long reciprocal = reciprocalNpcBonds(run.relations);
