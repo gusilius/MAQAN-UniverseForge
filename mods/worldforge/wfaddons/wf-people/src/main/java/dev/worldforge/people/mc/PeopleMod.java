@@ -312,7 +312,7 @@ public class PeopleMod {
 
     /** Stream legacy snapshots directly from disk; never allocate a whole-file String. */
     private static void loadCharacterSnapshot(Path file, CharacterRegistry registry, String identityNamespace)
-            throws IOException {
+            throws java.io.IOException {
         try (java.io.BufferedReader reader = Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
             registry.fromJson(reader, identityNamespace);
         }
