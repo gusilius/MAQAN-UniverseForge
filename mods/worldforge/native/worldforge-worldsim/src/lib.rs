@@ -457,7 +457,7 @@ fn realm_policy_modifier(index: &PolicyCatalogIndex<'_>, realm_id: &str, key: &s
                 branch.payload.get("nodes").and_then(serde_json::Value::as_array)
                     .and_then(|nodes| nodes.iter().find(|node|
                         node.get("key").or_else(|| node.get("id"))
-                            .and_then(serde_json::Value::as_str) == Some(node_id)))
+                            .and_then(serde_json::Value::as_str) == Some(node_id))))
         };
         total += node.and_then(|node| node.get("mods"))
             .and_then(|mods| mods.get(key)).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
