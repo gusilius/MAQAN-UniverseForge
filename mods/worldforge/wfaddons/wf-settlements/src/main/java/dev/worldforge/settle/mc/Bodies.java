@@ -24,6 +24,8 @@ public final class Bodies {
     public static final double SPAWN = SimulationLod.WORKER_SPAWN_RADIUS, DESPAWN = SimulationLod.WORKER_RETAIN_RADIUS;
     /** "поселение#рабочий" -> UUID живого тела. Тело, которого здесь нет, само исчезает (см. WFWorker.tick). */
     public static final Map<String, UUID> LIVE = new HashMap<>();
+    /** Per-colony worker scan cursor; avoids rescanning the same leading workers every pass. */
+    private static final Map<String, Integer> WORKER_SCAN_CURSORS = new HashMap<>();
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
 
@@ -115,18 +117,35 @@ public final class Bodies {
 
         int spawned = 0;
         int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
+        // Bound candidate inspection separately from successful spawns. Otherwise a nearby
+        // colony with thousands of already-materialized workers forces a full worker-list scan
+        // every pass even though the spawn budget is exhausted by existing bodies.
+        int scanBudget = (int)Math.min(4096L, Math.max(256L, (long)spawnBudget * 16L));
+        int perColonyScan = Math.max(1, (scanBudget + Math.max(1, nearby.size()) - 1)
+                / Math.max(1, nearby.size()));
         for (Colony colony : nearby) {
-            if (spawned >= spawnBudget) break;
+            if (spawned >= spawnBudget || scanBudget <= 0) break;
+            if (colony == null || colony.s == null || colony.s.id == null) continue;
             String colonyId = colony.s.id;
             ServerLevel level = colony.level(server);
             if (level == null || !SimulationLod.shouldSpawnWorkers(
                     colony.dim, colony.cx, colony.cz)) continue;
 
+            List<Worker> workers = colony.s.workers;
+            int workerCount = workers.size();
+            if (workerCount == 0) {
+                WORKER_SCAN_CURSORS.remove(colonyId);
+                continue;
+            }
             int colonyBodyCount = bodyCounts.getOrDefault(colonyId, 0);
             if (colonyBodyCount >= colonyBodyLimit) continue;
 
-            for (Worker worker : colony.s.workers) {
-                if (spawned >= spawnBudget || colonyBodyCount >= colonyBodyLimit) break;
+            int inspect = Math.min(Math.min(workerCount, perColonyScan), scanBudget);
+            int cursor = Math.floorMod(WORKER_SCAN_CURSORS.getOrDefault(colonyId, 0), workerCount);
+            for (int offset = 0; offset < inspect && spawned < spawnBudget
+                    && colonyBodyCount < colonyBodyLimit; offset++) {
+                Worker worker = workers.get((cursor + offset) % workerCount);
+                if (worker == null) continue;
                 String liveKey = key(colonyId, worker.id);
                 UUID trackedUuid = LIVE.get(liveKey);
                 Entity body = trackedUuid == null ? null : level.getEntity(trackedUuid);
@@ -156,6 +175,8 @@ public final class Bodies {
                     colonyBodyCount++;
                 }
             }
+            WORKER_SCAN_CURSORS.put(colonyId, (cursor + inspect) % workerCount);
+            scanBudget -= inspect;
         }
     }
 }
