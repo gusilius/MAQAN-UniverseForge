@@ -121,6 +121,9 @@ public class PeopleMod {
     private static final int POPULATION_FALLBACK_BUDGET_PER_TICK = 256;
     private static int populationFallbackRegistryCursor;
     private static long populationFallbackCursorGeneration = Long.MIN_VALUE;
+    /** Stable partition snapshot; rebuilt only when the canonical registry set changes. */
+    private static volatile List<CharacterRegistry> populationFallbackRegistrySnapshot = List.of();
+    private static volatile long populationFallbackSnapshotGeneration = Long.MIN_VALUE;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -389,7 +392,8 @@ public class PeopleMod {
                 identityPartitionsReady = false;
                 // A map rejected by global identity validation must be removed from the local cache too.
                 // It must never be used as a fallback source for ambiguous or foreign Characters.
-                REGS.remove(m, selected);
+                if (REGS.remove(m, selected))
+                    populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
                 INVALID_REGS.add(m);
                 LOGGER.error("wf_people: global Character authority rejected map '{}'; map registry is disabled: {}",
                         m.name, ex.toString());
@@ -1037,28 +1041,56 @@ public class PeopleMod {
      * Advances all canonical partitions under one server-wide budget. Partitions are visited
      * round-robin so a large first registry cannot monopolize the tick or starve later dimensions.
      */
+    private static List<CharacterRegistry> populationFallbackRegistries(long registryGeneration) {
+        if (populationFallbackSnapshotGeneration == registryGeneration)
+            return populationFallbackRegistrySnapshot;
+        synchronized (PeopleMod.class) {
+            if (populationFallbackSnapshotGeneration == registryGeneration)
+                return populationFallbackRegistrySnapshot;
+            List<Map.Entry<MapData, CharacterRegistry>> mapEntries = new ArrayList<>(REGS.entrySet());
+            mapEntries.sort(java.util.Comparator.comparing(entry -> entry.getKey().name));
+            List<Map.Entry<String, CharacterRegistry>> dimensionEntries =
+                    new ArrayList<>(DIMENSION_REGISTRIES.entrySet());
+            dimensionEntries.sort(Map.Entry.comparingByKey());
+            List<CharacterRegistry> registries = new ArrayList<>(
+                    mapEntries.size() + dimensionEntries.size() + 2);
+            Set<CharacterRegistry> seen =
+                    java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            for (Map.Entry<MapData, CharacterRegistry> entry : mapEntries) {
+                CharacterRegistry registry = entry.getValue();
+                if (registry != null && seen.add(registry)) registries.add(registry);
+            }
+            for (Map.Entry<String, CharacterRegistry> entry : dimensionEntries) {
+                CharacterRegistry registry = entry.getValue();
+                if (registry != null && seen.add(registry)) registries.add(registry);
+            }
+            if (seen.add(WORLD_REGISTRY)) registries.add(WORLD_REGISTRY);
+            if (seen.add(PLAYER_REGISTRY)) registries.add(PLAYER_REGISTRY);
+            populationFallbackRegistrySnapshot = List.copyOf(registries);
+            populationFallbackSnapshotGeneration = registryGeneration;
+            return populationFallbackRegistrySnapshot;
+        }
+    }
+
+    /**
+     * Advances all canonical partitions under one server-wide budget. A stable snapshot avoids
+     * per-tick map copies; a sliding round-robin window prevents starvation even when partitions
+     * outnumber the budget (advancing by the window size could cycle over only a subset).
+     */
     private static boolean advancePopulationFallbackBatch(long targetWorldDay, long fallbackStartDay,
                                                           int year, long registryGeneration) {
-        List<CharacterRegistry> registries = new ArrayList<>();
-        Set<CharacterRegistry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        for (CharacterRegistry registry : REGS.values())
-            if (registry != null && seen.add(registry)) registries.add(registry);
-        for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
-            if (registry != null && seen.add(registry)) registries.add(registry);
-        if (seen.add(WORLD_REGISTRY)) registries.add(WORLD_REGISTRY);
-        if (seen.add(PLAYER_REGISTRY)) registries.add(PLAYER_REGISTRY);
-        if (registries.isEmpty()) return true;
+        List<CharacterRegistry> registries = populationFallbackRegistries(registryGeneration);
+        int count = registries.size();
+        if (count == 0) return true;
 
         if (populationFallbackCursorGeneration != registryGeneration) {
             populationFallbackRegistryCursor = 0;
             populationFallbackCursorGeneration = registryGeneration;
         }
-        int count = registries.size();
         int visitCount = Math.min(count, POPULATION_FALLBACK_BUDGET_PER_TICK);
         int start = Math.floorMod(populationFallbackRegistryCursor, count);
-        int baseBudget = Math.max(1, POPULATION_FALLBACK_BUDGET_PER_TICK / visitCount);
-        int extra = visitCount <= POPULATION_FALLBACK_BUDGET_PER_TICK
-                ? POPULATION_FALLBACK_BUDGET_PER_TICK % visitCount : 0;
+        int baseBudget = POPULATION_FALLBACK_BUDGET_PER_TICK / visitCount;
+        int extra = POPULATION_FALLBACK_BUDGET_PER_TICK % visitCount;
         boolean complete = visitCount == count;
         for (int offset = 0; offset < visitCount; offset++) {
             CharacterRegistry registry = registries.get((start + offset) % count);
@@ -1067,7 +1099,10 @@ public class PeopleMod {
                     registry, targetWorldDay, fallbackStartDay, year, budget);
             complete &= registryComplete;
         }
-        populationFallbackRegistryCursor = (start + visitCount) % count;
+        // If every registry fits, revisit all of them next tick. Otherwise slide one position
+        // so every partition is guaranteed to enter the bounded window.
+        populationFallbackRegistryCursor = count <= POPULATION_FALLBACK_BUDGET_PER_TICK
+                ? 0 : (start + 1) % count;
         return complete;
     }
 
