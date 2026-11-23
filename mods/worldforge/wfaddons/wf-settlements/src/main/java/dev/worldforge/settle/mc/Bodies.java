@@ -28,6 +28,7 @@ public final class Bodies {
     private static final Map<String, Integer> WORKER_SCAN_CURSORS = new HashMap<>();
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
+    static void clearRuntimeIndexes() { WORKER_SCAN_CURSORS.clear(); }
 
     private static boolean hasLoadedVanillaVillagerBody(Worker worker, ServerLevel level) {
         if (worker == null || worker.person == null || worker.person.isBlank()) return false;
@@ -142,9 +143,11 @@ public final class Bodies {
 
             int inspect = Math.min(Math.min(workerCount, perColonyScan), scanBudget);
             int cursor = Math.floorMod(WORKER_SCAN_CURSORS.getOrDefault(colonyId, 0), workerCount);
+            int inspected = 0;
             for (int offset = 0; offset < inspect && spawned < spawnBudget
                     && colonyBodyCount < colonyBodyLimit; offset++) {
                 Worker worker = workers.get((cursor + offset) % workerCount);
+                inspected++;
                 if (worker == null) continue;
                 String liveKey = key(colonyId, worker.id);
                 UUID trackedUuid = LIVE.get(liveKey);
@@ -175,8 +178,9 @@ public final class Bodies {
                     colonyBodyCount++;
                 }
             }
-            WORKER_SCAN_CURSORS.put(colonyId, (cursor + inspect) % workerCount);
-            scanBudget -= inspect;
+            if (inspected > 0)
+                WORKER_SCAN_CURSORS.put(colonyId, (cursor + inspected) % workerCount);
+            scanBudget -= inspected;
         }
     }
 }
