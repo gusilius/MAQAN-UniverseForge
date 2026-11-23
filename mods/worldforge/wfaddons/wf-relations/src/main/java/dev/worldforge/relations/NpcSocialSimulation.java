@@ -39,6 +39,10 @@ public final class NpcSocialSimulation {
     private static volatile Map<CharacterRegistry, Map<String, List<Character>>> contactsByRegistry = Map.of();
 
     private static final int CONTACT_INDEX_CHARACTERS_PER_TICK = 2048;
+    // A count-only budget is unsafe when Character extension data varies widely.
+    // Cap wall-clock work as well, checking periodically to keep timer overhead low.
+    private static final long CONTACT_INDEX_NANOS_PER_TICK = 2_000_000L;
+    private static final int CONTACT_INDEX_DEADLINE_CHECK_MASK = 31;
 
     private static final class RegistryScan {
         final CharacterRegistry registry;
@@ -138,11 +142,16 @@ public final class NpcSocialSimulation {
             if (scan.cursor < scan.limit && i < build.scanIndex) build.scanIndex = i;
         }
 
-        int remaining = Math.max(1, Math.min(8192, characterBudget));
+        int remaining = Math.max(1, Math.min(CONTACT_INDEX_CHARACTERS_PER_TICK, characterBudget));
+        long deadline = System.nanoTime() + CONTACT_INDEX_NANOS_PER_TICK;
+        int processed = 0;
         while (remaining > 0 && build.scanIndex < build.scans.size()) {
             RegistryScan scan = build.scans.get(build.scanIndex);
             while (remaining > 0 && scan.cursor < scan.limit) {
+                if (processed > 0 && (processed & CONTACT_INDEX_DEADLINE_CHECK_MASK) == 0
+                        && System.nanoTime() >= deadline) return false;
                 Character person = scan.people.get(scan.cursor++);
+                processed++;
                 remaining--;
                 if (person == null || !person.alive || year - person.birthYear < 18
                         || !person.props.containsKey("emergence.polity_id")) continue;
