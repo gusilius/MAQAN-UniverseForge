@@ -206,7 +206,7 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army strategic snapshot unavailable or exceeds 8 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army strategic schema_version=1"),
+        // strategic_army::compute performs the typed operation/schema validation.
         Some(bytes) => match crate::strategic_army::compute(&bytes) {
             Ok(frame) => frame,
             Err(error) => error_json("army_strategic_rejected", &error),
