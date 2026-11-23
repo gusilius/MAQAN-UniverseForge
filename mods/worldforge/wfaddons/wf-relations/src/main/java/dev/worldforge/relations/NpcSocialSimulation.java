@@ -27,6 +27,8 @@ public final class NpcSocialSimulation {
 
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
+    private static final int TRAVEL_SAMPLES_PER_GROUP_PER_DAY = 4;
+    private static final int MAX_COMPATIBLE_PARTNER_PROBES = 64;
     private static final Map<String, Integer> GROUP_CURSORS = new HashMap<>();
     private static String groupCursorWorld = "";
 
@@ -208,7 +210,17 @@ public final class NpcSocialSimulation {
                     Map.Entry<String, List<Character>> group =
                             orderedGroups.get((start + groupOffset) % orderedGroups.size());
                     List<Character> members = group.getValue();
-                    adults.addAll(members);
+                    // Cross-band travel uses a deterministic rotating sample, not a copy of
+                    // every resident in each selected group. This keeps travel work bounded
+                    // even when one social band contains hundreds of thousands of adults.
+                    int travelSamples = Math.min(TRAVEL_SAMPLES_PER_GROUP_PER_DAY, members.size());
+                    if (travelSamples > 0) {
+                        long sampleHash = mix(seed ^ group.getKey().hashCode()
+                                ^ ((long) day * 0x9E3779B97F4A7C15L));
+                        int sampleStart = Math.floorMod((int) sampleHash, members.size());
+                        for (int sample = 0; sample < travelSamples; sample++)
+                            adults.add(members.get((sampleStart + sample) % members.size()));
+                    }
                     if (members.size() < 2) continue;
                 for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
                     // Keep a small set of neighbours interacting regularly for a quarter-year,
@@ -225,7 +237,9 @@ public final class NpcSocialSimulation {
                     // starving marriage simulation merely because random slots keep pairing
                     // same-gender neighbours in a small settlement.
                     if (a.gender.equals(b.gender)) {
-                        for (int candidateOffset = 1; candidateOffset < members.size(); candidateOffset++) {
+                        for (int candidateOffset = 1;
+                             candidateOffset < Math.min(members.size(), MAX_COMPATIBLE_PARTNER_PROBES);
+                             candidateOffset++) {
                             Character candidate = members.get((second + candidateOffset) % members.size());
                             if (!candidate.gender.equals(a.gender) && candidate.alive
                                     && year - candidate.birthYear >= 18) {
@@ -243,7 +257,7 @@ public final class NpcSocialSimulation {
 
             // Traders and diplomatic envoys can establish ties beyond their home settlement.
             // Keep this bounded and deterministic; ordinary residents never receive this bypass.
-            adults.sort(Comparator.comparing(person -> person.globalId));
+            // The travel sample inherits deterministic group-key and registry insertion order.
             Map<String, List<Character>> adultsByBand = new TreeMap<>();
             for (Character adult : adults) {
                 String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
@@ -253,7 +267,7 @@ public final class NpcSocialSimulation {
             if (travelBands.size() > 1) {
                 long travelEpoch = Math.floorDiv(day, 30);
                 for (Character traveler : adults) {
-                    if (!hasTravelRole(traveler)) continue;
+                    if (!traveler.alive || !hasTravelRole(traveler)) continue;
                     String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
                     long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
                     int startBand = Math.floorMod((int) travelHash, travelBands.size());
@@ -262,7 +276,7 @@ public final class NpcSocialSimulation {
                     List<Character> candidates = adultsByBand.get(targetBand);
                     if (candidates == null || candidates.isEmpty()) continue;
                     Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
-                    if (candidate == traveler) continue;
+                    if (candidate == traveler || !candidate.alive) continue;
                     interact(relations, registry, traveler, candidate,
                             "travel:" + homeBand + ":" + targetBand, adults, day, year, ancestryCache);
                     interactions++;
