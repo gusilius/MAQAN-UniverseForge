@@ -135,12 +135,25 @@ public class SettleMod {
         colonyRegistryRevision++;
         ColonyInterestIndex.upsert(colony);
         indexColonyName(colony);
+        if (colony != null && colony.s != null && colony.s.id != null && !colony.s.id.isBlank()) {
+            try {
+                LAST_SIMULATED_WORLD_MINUTE.putIfAbsent(colony.s.id,
+                        dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+            } catch (RuntimeException clockUnavailableDuringLoad) {
+                // The first server tick initializes the baseline if the clock is not ready yet.
+            }
+            updateColonySimulationIndex(colony);
+        }
     }
 
     private static void markColonyRegistryRemoved(String colonyId) {
         colonyRegistryRevision++;
         ColonyInterestIndex.remove(colonyId);
         unindexColonyName(colonyId);
+        if (colonyId != null && !colonyId.isBlank()) {
+            LAST_SIMULATED_WORLD_MINUTE.remove(colonyId);
+            removeColonySimulationIndex(colonyId);
+        }
     }
 
     private static void resetColonyRegistryIndex() {
@@ -148,6 +161,11 @@ public class SettleMod {
         ColonyInterestIndex.clear();
         COLONY_ID_BY_NORMALIZED_NAME.clear();
         NORMALIZED_NAME_BY_COLONY_ID.clear();
+        COLONY_SIMULATION_PHASES = new HashMap<>();
+        colonySimulationIndexBuild = null;
+        colonySimulationIndexRevision = Long.MIN_VALUE;
+        colonySimulationIndexInterval = -1;
+        COLONY_SIMULATION_CURSORS.clear();
     }
 
     /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
@@ -183,7 +201,7 @@ public class SettleMod {
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
     private static int lifeOperationLaneCursor;
-    private static final Map<Integer, Integer> COLONY_SIMULATION_CURSORS = new HashMap<>();
+    private static final Map<Integer, String> COLONY_SIMULATION_CURSORS = new HashMap<>();
 
     private static int rotationStride(int minimum, int size) {
         if (size <= 1) return 1;
@@ -196,57 +214,135 @@ public class SettleMod {
         while (b != 0) { int next = a % b; a = b; b = next; }
         return Math.abs(a);
     }
-    private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
-        if (interval < 1) return;
-        long registryRevision = colonyRegistryRevision;
-        if (colonySimulationIndexInterval == interval
-                && colonySimulationIndexRevision == registryRevision) return;
-        Map<Integer, List<Colony>> mutable = new HashMap<>();
-        Set<String> activeIds = new HashSet<>();
-        for (Colony colony : COLONIES.values()) {
-            if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
-            int phase = ColonySimulationCadence.phase(colony.s.id, interval);
-            mutable.computeIfAbsent(phase, ignored -> new ArrayList<>()).add(colony);
-            activeIds.add(colony.s.id);
-            LAST_SIMULATED_WORLD_MINUTE.putIfAbsent(colony.s.id, worldMinute);
+    private static final int COLONY_SIMULATION_INDEX_BUILD_BUDGET = 4096;
+
+    private static final class ColonySimulationIndexBuild {
+        final int interval;
+        final long startedTick;
+        final Iterator<Colony> source = COLONIES.values().iterator();
+        final Map<Integer, NavigableMap<String, Colony>> phases = new HashMap<>();
+        int indexed;
+
+        ColonySimulationIndexBuild(int interval, long startedTick) {
+            this.interval = interval;
+            this.startedTick = startedTick;
         }
-        Map<Integer, List<Colony>> frozen = new HashMap<>();
-        mutable.forEach((phase, colonies) -> {
-            colonies.sort(Comparator.comparing(colony -> colony.s.id));
-            frozen.put(phase, List.copyOf(colonies));
-        });
-        LAST_SIMULATED_WORLD_MINUTE.keySet().retainAll(activeIds);
-        COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
-        // Preserve per-phase cursors when the colony set changes. Clearing them on every
-        // insertion would repeatedly restart large phases at index zero and starve later colonies.
-        if (colonySimulationIndexInterval != interval) COLONY_SIMULATION_CURSORS.clear();
-        colonySimulationIndexInterval = interval;
-        colonySimulationIndexBuiltAt = tick;
-        colonySimulationIndexRevision = registryRevision;
+
+        void upsert(Colony colony) {
+            if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) return;
+            int phase = ColonySimulationCadence.phase(colony.s.id, interval);
+            NavigableMap<String, Colony> bucket = phases.computeIfAbsent(phase, ignored -> new TreeMap<>());
+            if (bucket.put(colony.s.id, colony) == null) indexed++;
+        }
+
+        void remove(String colonyId) {
+            int phase = ColonySimulationCadence.phase(colonyId, interval);
+            NavigableMap<String, Colony> bucket = phases.get(phase);
+            if (bucket == null) return;
+            if (bucket.remove(colonyId) != null) indexed--;
+            if (bucket.isEmpty()) phases.remove(phase);
+        }
     }
 
-    private static List<Colony> coloniesDueForSimulation(long tick, int interval) {
-        if (interval < 1 || tick < 1) return List.of();
+    private static void updateColonySimulationIndex(Colony colony) {
+        if (colonySimulationIndexInterval < 1) return;
+        if (colonySimulationIndexBuild != null) {
+            colonySimulationIndexBuild.upsert(colony);
+        } else {
+            int phase = ColonySimulationCadence.phase(colony.s.id, colonySimulationIndexInterval);
+            COLONY_SIMULATION_PHASES.computeIfAbsent(phase, ignored -> new TreeMap<>())
+                    .put(colony.s.id, colony);
+            colonySimulationIndexRevision = colonyRegistryRevision;
+        }
+    }
+
+    private static void removeColonySimulationIndex(String colonyId) {
+        if (colonySimulationIndexInterval < 1 || colonyId == null || colonyId.isBlank()) return;
+        int phase = ColonySimulationCadence.phase(colonyId, colonySimulationIndexInterval);
+        if (colonySimulationIndexBuild != null) {
+            colonySimulationIndexBuild.remove(colonyId);
+        } else {
+            NavigableMap<String, Colony> bucket = COLONY_SIMULATION_PHASES.get(phase);
+            if (bucket != null) {
+                bucket.remove(colonyId);
+                if (bucket.isEmpty()) COLONY_SIMULATION_PHASES.remove(phase);
+            }
+            colonySimulationIndexRevision = colonyRegistryRevision;
+        }
+        COLONY_SIMULATION_CURSORS.remove(phase);
+    }
+
+    private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
+        if (interval < 1) return;
+        if (colonySimulationIndexInterval != interval) {
+            colonySimulationIndexInterval = interval;
+            colonySimulationIndexRevision = Long.MIN_VALUE;
+            colonySimulationIndexBuild = new ColonySimulationIndexBuild(interval, tick);
+            COLONY_SIMULATION_PHASES = new HashMap<>();
+            COLONY_SIMULATION_CURSORS.clear();
+            colonySimulationIndexBuiltAt = tick;
+            LOGGER.info("wf_settle: incrementally building colony simulation index colonies={} budgetPerTick={}",
+                    COLONIES.size(), COLONY_SIMULATION_INDEX_BUILD_BUDGET);
+        } else if (colonySimulationIndexBuild == null
+                && colonySimulationIndexRevision != colonyRegistryRevision) {
+            // A missed mutation hook is recovered incrementally, never by a full-tick scan.
+            colonySimulationIndexBuild = new ColonySimulationIndexBuild(interval, tick);
+            colonySimulationIndexBuiltAt = tick;
+            LOGGER.warn("wf_settle: rebuilding colony simulation index incrementally after an untracked registry revision");
+        }
+
+        ColonySimulationIndexBuild build = colonySimulationIndexBuild;
+        if (build == null) return;
+        int processed = 0;
+        while (processed < COLONY_SIMULATION_INDEX_BUILD_BUDGET && build.source.hasNext()) {
+            Colony colony = build.source.next();
+            processed++;
+            if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
+            // ConcurrentHashMap's iterator is weakly consistent. A removed/replaced object
+            // is ignored; mutation hooks have already applied the current object to the build.
+            if (COLONIES.get(colony.s.id) != colony) continue;
+            build.upsert(colony);
+            LAST_SIMULATED_WORLD_MINUTE.putIfAbsent(colony.s.id, worldMinute);
+        }
+        if (!build.source.hasNext()) {
+            COLONY_SIMULATION_PHASES = build.phases;
+            colonySimulationIndexBuild = null;
+            colonySimulationIndexRevision = colonyRegistryRevision;
+            LOGGER.info("wf_settle: colony simulation index ready colonies={} buildTicks={} interval={}",
+                    build.indexed, Math.max(1L, tick - build.startedTick + 1L), interval);
+        }
+    }
+
+    private static NavigableMap<String, Colony> coloniesDueForSimulation(long tick, int interval) {
+        if (interval < 1 || tick < 1) return Collections.emptyNavigableMap();
         int phase = (int) Math.floorMod(tick - 1L, interval);
-        return COLONY_SIMULATION_PHASES.getOrDefault(phase, List.of());
+        return COLONY_SIMULATION_PHASES.getOrDefault(phase, Collections.emptyNavigableMap());
     }
 
     /** Selects a bounded rotating slice; deferred colonies retain their elapsed calendar time. */
     private static List<Colony> coloniesDueBatch(long tick, int interval) {
         if (interval < 1 || tick < 1) return List.of();
         int phase = (int) Math.floorMod(tick - 1L, interval);
-        List<Colony> due = coloniesDueForSimulation(tick, interval);
+        NavigableMap<String, Colony> due = coloniesDueForSimulation(tick, interval);
         int size = due.size();
         if (size <= COLONY_SIMULATION_BATCH_BUDGET) {
             COLONY_SIMULATION_CURSORS.remove(phase);
-            return due;
+            return new ArrayList<>(due.values());
         }
-        int start = Math.floorMod(COLONY_SIMULATION_CURSORS.getOrDefault(phase, 0), size);
+        String lastId = COLONY_SIMULATION_CURSORS.get(phase);
+        NavigableMap<String, Colony> tail = lastId == null ? due : due.tailMap(lastId, false);
         List<Colony> batch = new ArrayList<>(COLONY_SIMULATION_BATCH_BUDGET);
-        for (int offset = 0; offset < COLONY_SIMULATION_BATCH_BUDGET; offset++)
-            batch.add(due.get((start + offset) % size));
-        int stride = rotationStride(COLONY_SIMULATION_BATCH_BUDGET, size);
-        COLONY_SIMULATION_CURSORS.put(phase, (start + stride) % size);
+        for (Colony colony : tail.values()) {
+            batch.add(colony);
+            if (batch.size() == COLONY_SIMULATION_BATCH_BUDGET) break;
+        }
+        if (batch.size() < COLONY_SIMULATION_BATCH_BUDGET && lastId != null) {
+            for (Colony colony : due.headMap(lastId, true).values()) {
+                batch.add(colony);
+                if (batch.size() == COLONY_SIMULATION_BATCH_BUDGET) break;
+            }
+        }
+        if (!batch.isEmpty()) COLONY_SIMULATION_CURSORS.put(phase, batch.get(batch.size() - 1).s.id);
         return batch;
     }
 
@@ -337,8 +433,9 @@ public class SettleMod {
         }
         return best;
     }
-    /** Phase buckets avoid scanning the complete colony registry on every server tick. */
-    private static Map<Integer, List<Colony>> COLONY_SIMULATION_PHASES = Map.of();
+    /** Ordered phase buckets update in O(log n) for a single colony mutation. */
+    private static Map<Integer, NavigableMap<String, Colony>> COLONY_SIMULATION_PHASES = new HashMap<>();
+    private static ColonySimulationIndexBuild colonySimulationIndexBuild;
     private static long colonySimulationIndexBuiltAt = Long.MIN_VALUE;
     private static int colonySimulationIndexInterval = -1;
     /** Static profession definitions are synchronized once per server lifecycle, not every tick. */
@@ -1567,7 +1664,8 @@ public class SettleMod {
         LAST_SIMULATED_WORLD_MINUTE.clear();
         LIFE_AI_CURSORS.clear();
         RESIDENT_LIFE_INDEXES.clear();
-        COLONY_SIMULATION_PHASES = Map.of();
+        COLONY_SIMULATION_PHASES = new HashMap<>();
+        colonySimulationIndexBuild = null;
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
         colonySimulationIndexInterval = -1;
         professionsSynced = false;

@@ -619,13 +619,17 @@ public class PeopleMod {
         Object previousReceipt = deceased.props.get("estate.transfer_receipt");
         try {
             heirWal.append(heir.globalId, heirRegistry.toJsonRecord(heir).getBytes(StandardCharsets.UTF_8));
-            sourceWal.append(deceased.globalId,
-                    sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8));
+            byte[] pendingSource = sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8);
             deceased.props.put("estate.transfer_receipt", transfer.transferId());
             deceased.props.remove("estate.transfer_pending");
             deceased.props.put("estate.transfer_wal_committed", transfer.transferId());
-            sourceWal.append(deceased.globalId,
-                    sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8));
+            byte[] committedSource = sourceRegistry.toJsonRecord(deceased).getBytes(StandardCharsets.UTF_8);
+            // Keep both ordered recovery states, but force them together in one source-WAL batch.
+            // A surviving first frame retains the pending marker; a surviving second frame
+            // additionally records the durable receipt and completes the transfer on replay.
+            sourceWal.appendBatch(List.of(
+                    new CharacterWal.Write(deceased.globalId, pendingSource),
+                    new CharacterWal.Write(deceased.globalId, committedSource)));
             return true;
         } catch (Exception failure) {
             // If the recipient frame reached stable storage, leave a pending source marker:
@@ -676,6 +680,10 @@ public class PeopleMod {
         CharacterWal wal = CHARACTER_WALS.get(owner);
         if (wal != null) {
             try {
+                // Transactional identity mutations remain synchronous: returning true means
+                // this exact Character frame has been forced to stable storage. Do not replace
+                // this with fire-and-forget writer.submit(); bounded async writes are reserved
+                // for explicit bulk workloads that expose a durable completion future.
                 wal.append(character.globalId, owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
                 return true;
             } catch (Exception walFailure) {

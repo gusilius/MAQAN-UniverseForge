@@ -64,7 +64,17 @@ public final class CharacterWalWriter implements AutoCloseable {
                 if (first == null) continue;
                 List<Pending> batch = new ArrayList<>(MAX_BATCH);
                 batch.add(first);
-                queue.drainTo(batch, MAX_BATCH - 1);
+                // A short group-commit window lets concurrent producers share one fsync.
+                // Every receipt still completes only after appendBatch has forced the batch.
+                long batchDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2);
+                while (batch.size() < MAX_BATCH && !Thread.currentThread().isInterrupted()) {
+                    queue.drainTo(batch, MAX_BATCH - batch.size());
+                    long remaining = batchDeadline - System.nanoTime();
+                    if (remaining <= 0) break;
+                    java.util.concurrent.locks.LockSupport.parkNanos(remaining);
+                }
+                // Interrupts are handled by the outer loop only after this batch is either
+                // durably committed or explicitly failed; no dequeued receipt can be stranded.
                 inFlight = batch.size();
                 try {
                     List<CharacterWal.Write> writes = batch.stream()
