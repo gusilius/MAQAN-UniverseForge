@@ -2310,20 +2310,29 @@ public class SettleMod {
             List<CharacterRegistry> registries = PeopleMod.populationRegistriesSnapshot();
             if (registries.isEmpty()) return;
             int count = registries.size();
-            int start = Math.floorMod(lifeRegistryCursor++, count);
+            // Bound both work and iteration count across all partitions. The previous loop
+            // visited every registry; above 128 partitions its per-registry share became zero,
+            // so resident life events stopped progressing while the server still paid O(N).
+            final int totalBudget = 128;
+            int visitCount = Math.min(count, totalBudget);
+            int start = Math.floorMod(lifeRegistryCursor, count);
+            int baseShare = totalBudget / visitCount;
+            int extraShare = totalBudget % visitCount;
             var clock = dev.worldforge.mod.api.WorldForgeApi.clock();
             long worldDay = clock.dayNumber();
             int year = clock.year();
-            for (int i = 0; i < count; i++) {
-                int share = 128 / count + (i < 128 % count ? 1 : 0);
-                if (share <= 0) continue;
-                CharacterRegistry registry = registries.get((start + i) % count);
+            for (int offset = 0; offset < visitCount; offset++) {
+                int share = baseShare + (offset < extraShare ? 1 : 0);
+                CharacterRegistry registry = registries.get((start + offset) % count);
                 registry.processPendingBereavementBatch(share);
                 ResidentLifeEvents.advanceDuePregnanciesBatch(
                         registry, year, worldDay, PeopleMod.NAMES, share);
                 ResidentLifeEvents.advanceHealthBatch(
                         registry, worldDay, share);
             }
+            // Slide by one partition, not by the whole window, so every partition eventually
+            // receives work even when count and totalBudget have a common divisor.
+            lifeRegistryCursor = count <= totalBudget ? 0 : (start + 1) % count;
         } catch (LinkageError | RuntimeException error) {
             LOGGER.error("wf_settle: canonical resident life pass failed: {}", error.toString(), error);
         }
