@@ -1989,6 +1989,7 @@ public class SettleMod {
     }
 
     private static void resetWorkerIndexes() {
+        Bodies.clearRuntimeIndexes();
         WORKER_COLONY_BY_PERSON.clear();
         workerOwnershipRevision = null;
         workerOwnershipIndexBuilt = false;
