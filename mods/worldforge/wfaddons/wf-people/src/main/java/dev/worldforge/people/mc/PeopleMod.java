@@ -232,7 +232,7 @@ public class PeopleMod {
             if (Files.exists(worldFile)) {
                 WorldId world = WorldForgeMod.worldId();
                 if (world == null) throw new IllegalStateException("WorldId is unavailable for world Character identity migration");
-                WORLD_REGISTRY.fromJson(Files.readString(worldFile), world + "|" + WORLD_PARTITION_ID);
+                loadCharacterSnapshot(worldFile, WORLD_REGISTRY, world + "|" + WORLD_PARTITION_ID);
             }
             if (WorldForgeMod.worldId() == null) throw new IllegalStateException("WorldId is unavailable for world Character identity partition");
             openCharacterWal(server, WORLD_REGISTRY, "world", WorldForgeMod.worldId() + "|" + WORLD_PARTITION_ID);
@@ -246,7 +246,7 @@ public class PeopleMod {
                 CharacterRegistry dimensionRegistry = new CharacterRegistry();
                 Path dimensionFile = dimensionRegistryFile(server, dimension);
                 if (Files.exists(dimensionFile))
-                    dimensionRegistry.fromJson(Files.readString(dimensionFile), WorldForgeMod.worldId() + "|dimension|" + dimension);
+                    loadCharacterSnapshot(dimensionFile, dimensionRegistry, WorldForgeMod.worldId() + "|dimension|" + dimension);
                 openCharacterWal(server, dimensionRegistry, "dimension|" + dimension,
                         WorldForgeMod.worldId() + "|dimension|" + dimension);
                 String partitionId = dimensionPartitionId(dimension);
@@ -260,7 +260,7 @@ public class PeopleMod {
             if (Files.exists(playerFile)) {
                 WorldId world = WorldForgeMod.worldId();
                 if (world == null) throw new IllegalStateException("WorldId is unavailable for player identity migration");
-                PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
+                loadCharacterSnapshot(playerFile, PLAYER_REGISTRY, world + "|__players__");
             }
             openCharacterWal(server, PLAYER_REGISTRY, "players", WorldForgeMod.worldId() + "|__players__");
             AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
@@ -310,6 +310,14 @@ public class PeopleMod {
         }
     }
 
+    /** Stream legacy snapshots directly from disk; never allocate a whole-file String. */
+    private static void loadCharacterSnapshot(Path file, CharacterRegistry registry, String identityNamespace)
+            throws IOException {
+        try (java.io.BufferedReader reader = Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
+            registry.fromJson(reader, identityNamespace);
+        }
+    }
+
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
     public static CharacterRegistry registry(MapData m) {
         if (m == null || INVALID_REGS.contains(m)) return null;
@@ -323,7 +331,7 @@ public class PeopleMod {
                 if (Files.exists(f)) {
                     WorldId world = WorldForgeMod.worldId();
                     if (world == null) throw new IllegalStateException("WorldId is unavailable; refusing to migrate Character identities");
-                    reg.fromJson(Files.readString(f), world + "|" + m.name);
+                    loadCharacterSnapshot(f, reg, world + "|" + m.name);
                 }
             } catch (Exception ex) {
                 identityPartitionsReady = false;
