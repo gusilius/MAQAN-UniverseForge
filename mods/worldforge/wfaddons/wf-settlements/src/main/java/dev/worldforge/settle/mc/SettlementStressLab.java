@@ -12,6 +12,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import com.mojang.authlib.GameProfile;
+import net.minecraftforge.common.util.FakePlayerFactory;
 import net.minecraft.world.level.LevelResource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -45,6 +47,7 @@ public final class SettlementStressLab {
 
     private final MinecraftServer server;
     private final UUID playerId;
+    private final ServerPlayer fakePlayer;
     private final ServerLevel level;
     private final double originX, originY, originZ;
     private final Colony local;
@@ -70,6 +73,7 @@ public final class SettlementStressLab {
     private SettlementStressLab(MinecraftServer server, ServerPlayer player, int targetRemoteColonies) {
         this.server = server;
         this.playerId = player.getUUID();
+        this.fakePlayer = player;
         this.level = player.serverLevel();
         this.originX = player.getX();
         this.originY = player.getY();
@@ -99,11 +103,18 @@ public final class SettlementStressLab {
             source.sendFailure(Component.literal("Contour 04 stress driver is disabled outside acceptance mode"));
             return 0;
         }
-        ServerPlayer player = source.getServer().getPlayerList().getPlayers().stream()
-                .filter(candidate -> BOT_NAME.equals(candidate.getGameProfile().getName()))
-                .findFirst().orElse(null);
-        if (player == null) {
-            source.sendFailure(Component.literal("Contour 04 requires the dedicated-server protocol bot " + BOT_NAME));
+        ServerPlayer player;
+        try {
+            UUID botId = UUID.nameUUIDFromBytes((source.getServer().getWorldData().getLevelName()
+                    + ":" + BOT_NAME).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            player = FakePlayerFactory.get(source.getLevel(), new GameProfile(botId, BOT_NAME));
+            if (!source.getServer().getPlayerList().getPlayers().contains(player))
+                source.getServer().getPlayerList().getPlayers().add(player);
+            if (!player.isAddedToWorld()) source.getLevel().addNewPlayer(player);
+            player.teleportTo(source.getLevel(), source.getPosition().x, source.getPosition().y,
+                    source.getPosition().z, Set.of(), source.getRotation().y, source.getRotation().x);
+        } catch (RuntimeException error) {
+            source.sendFailure(Component.literal("Could not attach server-side test player: " + error));
             return 0;
         }
         if (SettleMod.DEFS == null) {
@@ -278,6 +289,10 @@ public final class SettlementStressLab {
 
     private void finish() {
         MinecraftForge.EVENT_BUS.unregister(this);
+        if (fakePlayer.isAddedToWorld()) {
+            server.getPlayerList().getPlayers().remove(fakePlayer);
+            fakePlayer.discard();
+        }
         List<Double> sorted = new ArrayList<>(tickMillis);
         sorted.sort(Comparator.naturalOrder());
         double p50 = percentile(sorted, 0.50);
