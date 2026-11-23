@@ -112,6 +112,15 @@ public final class NpcSocialSimulation {
             }
             contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration,
                     membershipRevision, scans);
+            // The previous day/world snapshot is no longer queryable. Release its band
+            // lists immediately instead of retaining two population-sized indexes while
+            // the next one is built incrementally.
+            contactsByRegistry = Map.of();
+            contactIndexDay = Long.MIN_VALUE;
+            contactIndexYear = Integer.MIN_VALUE;
+            contactIndexWorld = "";
+            contactIndexRegistryGeneration = Long.MIN_VALUE;
+            contactIndexMembershipRevision = Long.MIN_VALUE;
         }
 
         ContactIndexBuild build = contactIndexBuild;
