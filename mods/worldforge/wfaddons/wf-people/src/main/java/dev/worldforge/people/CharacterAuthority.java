@@ -357,7 +357,7 @@ public final class CharacterAuthority {
     public synchronized Collection<CharacterIdentity> identities() {
         refreshIndex();
         if (sortedIdentityCache == null) {
-            List<CharacterIdentity> result = new ArrayList<>(byIdentity.keySet());
+            List<CharacterIdentity> result = new ArrayList<>(byIdentity);
             result.sort(Comparator.comparing((CharacterIdentity id) -> id.worldId().toString())
                     .thenComparing(CharacterIdentity::mapId)
                     .thenComparing(CharacterIdentity::globalCharacterId));
