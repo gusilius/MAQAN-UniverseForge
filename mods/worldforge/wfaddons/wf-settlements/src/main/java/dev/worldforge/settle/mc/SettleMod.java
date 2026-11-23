@@ -119,6 +119,8 @@ public class SettleMod {
         return rep;
     }
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
+    /** Normalized global settlement-name ownership; avoids O(C) name checks during genesis. */
+    private static final Map<String, String> COLONY_ID_BY_NORMALIZED_NAME = new HashMap<>();
     /** Registry identity changes only when a Colony is inserted, replaced or removed. */
     private static volatile long colonyRegistryRevision;
     private static volatile long colonySimulationIndexRevision = Long.MIN_VALUE;
@@ -130,16 +132,19 @@ public class SettleMod {
     private static void markColonyRegistryChanged(Colony colony) {
         colonyRegistryRevision++;
         ColonyInterestIndex.upsert(colony);
+        indexColonyName(colony);
     }
 
     private static void markColonyRegistryRemoved(String colonyId) {
         colonyRegistryRevision++;
         ColonyInterestIndex.remove(colonyId);
+        unindexColonyName(colonyId);
     }
 
     private static void resetColonyRegistryIndex() {
         colonyRegistryRevision++;
         ColonyInterestIndex.clear();
+        COLONY_ID_BY_NORMALIZED_NAME.clear();
     }
 
     /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
@@ -892,15 +897,26 @@ public class SettleMod {
         return name == null ? "" : name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
+    private static void indexColonyName(Colony colony) {
+        if (colony == null || colony.s == null || colony.s.id == null) return;
+        String id = colony.s.id;
+        COLONY_ID_BY_NORMALIZED_NAME.entrySet().removeIf(entry -> id.equals(entry.getValue()));
+        String normalized = normalizeSettlementName(colony.s.name);
+        if (!normalized.isBlank()) COLONY_ID_BY_NORMALIZED_NAME.putIfAbsent(normalized, id);
+    }
+
+    private static void unindexColonyName(String colonyId) {
+        if (colonyId != null)
+            COLONY_ID_BY_NORMALIZED_NAME.entrySet().removeIf(entry -> colonyId.equals(entry.getValue()));
+    }
+
     /** Enforces one canonical settlement display name across every dimension in this save. */
     private static void requireUniqueSettlementName(String name, String exceptId) {
         String normalized = normalizeSettlementName(name);
         if (normalized.isBlank()) throw new IllegalArgumentException("Settlement name is required");
-        for (Colony existing : COLONIES.values()) {
-            if (existing == null || existing.s == null || Objects.equals(existing.s.id, exceptId)) continue;
-            if (normalized.equals(normalizeSettlementName(existing.s.name)))
-                throw new IllegalStateException("Settlement name is already reserved: " + name);
-        }
+        String owner = COLONY_ID_BY_NORMALIZED_NAME.get(normalized);
+        if (owner != null && !Objects.equals(owner, exceptId))
+            throw new IllegalStateException("Settlement name is already reserved: " + name);
     }
 
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
@@ -2208,6 +2224,7 @@ public class SettleMod {
                     // on the canonical Colony record; name remains Settlement.s.name.
                     colony.applyBlueprintIdentity(map.name, seed, uniqueName, race, culture,
                             realm == null ? "" : String.valueOf(realm.props.getOrDefault("politics.government", "")));
+                    indexColonyName(colony);
                     // Verify that every seed became a real Colony and that its persisted form can be restored.
                     Colony restored = Colony.fromMap(colony.toMap(), DEFS);
                     if (!id.equals(restored.s.id) || !operationId.equals(restored.genesisOperationId)
