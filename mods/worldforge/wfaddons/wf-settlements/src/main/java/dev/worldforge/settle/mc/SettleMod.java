@@ -217,7 +217,9 @@ public class SettleMod {
         });
         LAST_SIMULATED_WORLD_MINUTE.keySet().retainAll(activeIds);
         COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
-        COLONY_SIMULATION_CURSORS.clear();
+        // Preserve per-phase cursors when the colony set changes. Clearing them on every
+        // insertion would repeatedly restart large phases at index zero and starve later colonies.
+        if (colonySimulationIndexInterval != interval) COLONY_SIMULATION_CURSORS.clear();
         colonySimulationIndexInterval = interval;
         colonySimulationIndexBuiltAt = tick;
         colonySimulationIndexRevision = registryRevision;
