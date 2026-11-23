@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** World-wide authority over map-local persistence partitions and immutable global person IDs. */
 public final class CharacterAuthority {
-    private final Map<CharacterIdentity, Character> byIdentity = new ConcurrentHashMap<>();
+    private final Set<CharacterIdentity> byIdentity = ConcurrentHashMap.newKeySet();
     private final Map<String, CharacterIdentity> byGlobalId = new ConcurrentHashMap<>();
     private final Map<String, Set<CharacterIdentity>> byLegacyId = new ConcurrentHashMap<>();
     /** Family reverse indexes: estate succession must never scan every living Character per death. */
@@ -105,8 +105,7 @@ public final class CharacterAuthority {
             throw new IllegalStateException("Global Character UUID collision " + character.globalId
                     + " between " + existingGlobal.mapId() + "/" + existingGlobal.characterId()
                     + " and " + mapId + "/" + character.id);
-        Character existing = byIdentity.putIfAbsent(identity, character);
-        if (existing != null && existing != character)
+        if (!byIdentity.add(identity))
             throw new IllegalStateException("Duplicate Character identity " + identity);
         byLegacyId.computeIfAbsent(character.id, ignored -> new LinkedHashSet<>()).add(identity);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
@@ -126,7 +125,7 @@ public final class CharacterAuthority {
             CharacterIdentity oldIdentity = new CharacterIdentity(
                     currentWorld, mapId, previous.id, previous.globalId);
             if (!previous.globalId.equals(replacement.globalId)) {
-                byIdentity.remove(oldIdentity, previous);
+                byIdentity.remove(oldIdentity);
                 byGlobalId.remove(previous.globalId, oldIdentity);
                 Set<CharacterIdentity> legacy = byLegacyId.get(previous.id);
                 if (legacy != null) {
@@ -142,7 +141,7 @@ public final class CharacterAuthority {
             throw new IllegalStateException("Global Character UUID collision " + replacement.globalId
                     + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
                     + " and " + mapId + "/" + replacement.id);
-        byIdentity.put(identity, replacement);
+        byIdentity.add(identity);
         byLegacyId.computeIfAbsent(replacement.id, ignored -> new LinkedHashSet<>()).add(identity);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         sortedIdentityCache = null;
@@ -154,7 +153,7 @@ public final class CharacterAuthority {
     synchronized void familyChanged(Character person) {
         if (person == null) return;
         CharacterIdentity identity = byGlobalId.get(person.globalId);
-        if (identity == null || byIdentity.get(identity) != person) return;
+        if (identity == null || !byIdentity.contains(identity)) return;
         addFamilyIndex(familyByParentLegacy, person.father, identity);
         addFamilyIndex(familyByParentLegacy, person.mother, identity);
         addFamilyIndex(familyByParentGlobal, familyId(person, "family.father_global_id"), identity);
@@ -181,7 +180,7 @@ public final class CharacterAuthority {
         }
         if (!changed) return;
 
-        Map<CharacterIdentity, Character> nextByIdentity = new HashMap<>();
+        Set<CharacterIdentity> nextByIdentity = new HashSet<>();
         Map<String, CharacterIdentity> nextByGlobalId = new HashMap<>();
         Map<String, Set<CharacterIdentity>> nextByLegacyId = new HashMap<>();
         Map<String, Long> nextMembershipGenerations = new HashMap<>();
@@ -204,8 +203,7 @@ public final class CharacterAuthority {
                     throw new IllegalStateException("Global Character UUID collision " + character.globalId
                             + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
                             + " and " + mapId + "/" + character.id);
-                Character existing = nextByIdentity.putIfAbsent(identity, character);
-                if (existing != null && existing != character)
+                if (!nextByIdentity.add(identity))
                     throw new IllegalStateException("Duplicate Character identity " + identity);
                 nextByLegacyId.computeIfAbsent(character.id, ignored -> new HashSet<>()).add(identity);
             }
@@ -213,9 +211,10 @@ public final class CharacterAuthority {
 
         // Build relationship indexes from the same validated population snapshot.
         // Parent fields and child lists are both indexed because old saves may contain only one side.
-        for (Map.Entry<CharacterIdentity, Character> entry : nextByIdentity.entrySet()) {
-            CharacterIdentity identity = entry.getKey();
-            Character person = entry.getValue();
+        for (CharacterIdentity identity : nextByIdentity) {
+            CharacterRegistry owner = registries.get(identity.mapId());
+            Character person = owner == null ? null : owner.get(identity.characterId());
+            if (person == null) continue;
             addFamilyIndex(nextFamilyByParentLegacy, person.father, identity);
             addFamilyIndex(nextFamilyByParentLegacy, person.mother, identity);
             addFamilyIndex(nextFamilyByParentGlobal, familyId(person, "family.father_global_id"), identity);
@@ -239,14 +238,14 @@ public final class CharacterAuthority {
                 if (child == null) continue;
                 addFamilyIndex(nextFamilyByParentLegacy, person.id, child);
                 addFamilyIndex(nextFamilyByParentGlobal, person.globalId, child);
-                addFamilyIndex(nextFamilyByChildLegacy, nextByIdentity.get(child).id, identity);
+                addFamilyIndex(nextFamilyByChildLegacy, child.characterId(), identity);
                 addFamilyIndex(nextFamilyByChildGlobal, childId, identity);
             }
         }
 
         // Publish only a completely validated snapshot.
         byIdentity.clear();
-        byIdentity.putAll(nextByIdentity);
+        byIdentity.addAll(nextByIdentity);
         byGlobalId.clear();
         byGlobalId.putAll(nextByGlobalId);
         byLegacyId.clear();
@@ -266,9 +265,16 @@ public final class CharacterAuthority {
         familyIndexDay = Long.MIN_VALUE;
     }
 
+    /** Resolves an identity through its owning partition; the authority stores keys, not Character objects. */
+    private Character resolve(CharacterIdentity identity) {
+        if (identity == null || !byIdentity.contains(identity)) return null;
+        CharacterRegistry owner = registries.get(identity.mapId());
+        return owner == null ? null : owner.get(identity.characterId());
+    }
+
     public synchronized Character get(CharacterIdentity identity) {
         refreshIndex();
-        return identity == null ? null : byIdentity.get(identity);
+        return resolve(identity);
     }
 
     public synchronized Character getGlobal(String globalCharacterId) {
@@ -324,8 +330,8 @@ public final class CharacterAuthority {
         refreshIndex();
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
         if (identity == null) return false;
-        Character person = byIdentity.get(identity);
         CharacterRegistry owner = registries.get(identity.mapId());
+        Character person = owner == null ? null : owner.get(identity.characterId());
         if (person == null || owner == null || !person.alive) return false;
 
         // Check one reverse-index entry per partition, independent of population size.
@@ -341,7 +347,9 @@ public final class CharacterAuthority {
         refreshIndex();
         Set<CharacterIdentity> matches = byLegacyId.get(characterId);
         if (matches == null || matches.size() != 1) return null;
-        return byIdentity.get(matches.iterator().next());
+        CharacterIdentity identity = matches.iterator().next();
+        CharacterRegistry owner = registries.get(identity.mapId());
+        return owner == null ? null : owner.get(identity.characterId());
     }
 
     public synchronized CharacterRegistry registry(String mapId) { return registries.get(mapId); }
@@ -373,9 +381,10 @@ public final class CharacterAuthority {
         Map<String, Set<CharacterIdentity>> spouseGlobal = new HashMap<>();
         Map<String, Set<CharacterIdentity>> spouseLegacy = new HashMap<>();
 
-        for (Map.Entry<CharacterIdentity, Character> entry : byIdentity.entrySet()) {
-            CharacterIdentity identity = entry.getKey();
-            Character person = entry.getValue();
+        for (CharacterIdentity identity : byIdentity) {
+            CharacterRegistry owner = registries.get(identity.mapId());
+            Character person = owner == null ? null : owner.get(identity.characterId());
+            if (person == null) continue;
             String fatherGlobal = familyId(person, "family.father_global_id");
             String motherGlobal = familyId(person, "family.mother_global_id");
             addFamilyIndex(parentLegacy, person.father, identity);
@@ -411,7 +420,7 @@ public final class CharacterAuthority {
                 if (child == null) continue;
                 addFamilyIndex(parentLegacy, person.id, child);
                 addFamilyIndex(parentGlobal, person.globalId, child);
-                addFamilyIndex(childLegacy, byIdentity.get(child).id, identity);
+                addFamilyIndex(childLegacy, child.characterId(), identity);
                 addFamilyIndex(childGlobal, childId, identity);
             }
         }
@@ -466,7 +475,7 @@ public final class CharacterAuthority {
         CharacterIdentity owner = byGlobalId.get(person.globalId);
         String localMap = owner == null ? "" : owner.mapId();
         List<CharacterIdentity> ordered = new ArrayList<>(matches);
-        ordered.removeIf(identity -> !byIdentity.containsKey(identity));
+        ordered.removeIf(identity -> !byIdentity.contains(identity));
         ordered.sort(Comparator
                 .comparingInt((CharacterIdentity identity) -> identity.mapId().equals(localMap) ? 0 : 1)
                 .thenComparing(CharacterIdentity::mapId)
@@ -474,7 +483,8 @@ public final class CharacterAuthority {
                 .thenComparing(CharacterIdentity::globalCharacterId));
         List<Character> result = new ArrayList<>(ordered.size());
         for (CharacterIdentity identity : ordered) {
-            Character candidate = byIdentity.get(identity);
+            CharacterRegistry ownerRegistry = registries.get(identity.mapId());
+            Character candidate = ownerRegistry == null ? null : ownerRegistry.get(identity.characterId());
             if (candidate != null) result.add(candidate);
         }
         return Collections.unmodifiableList(result);
