@@ -55,6 +55,10 @@ public class RelationsMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
+            // Prepare the next consumed calendar day gradually; never scan the full population
+            // synchronously on the day-advance tick.
+            long nextSocialDay = WorldForgeApi.clock().consumedDay("wf_relations") + 1;
+            NpcSocialSimulation.prepareContactIndex(nextSocialDay, 2048);
             // The isolated stress driver owns NpcSocialSimulation's shared cursors
             // while it advances its separate Relations graph on accelerated test days.
             if (ticks % STEP == 0 && !SocialLifeStressLab.isRunning()) {
