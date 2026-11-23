@@ -1,0 +1,95 @@
+name: MAQAN UniverseForge — Contour 03 Families & Social Stress
+
+on:
+  push:
+    branches: [main, integration/worldgen-rts-unification]
+    paths:
+      - "mods/worldforge/wfaddons/wf-relations/**"
+      - "mods/worldforge/wfaddons/wf-people/**"
+      - "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh"
+      - "mods/worldforge/wfaddons/tools/build-all.sh"
+      - ".github/workflows/contour-03-social-stress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maqan-contour-03-social-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contour-03-social-ladder:
+    name: "Contour 03 — isolated social life \${{ matrix.label }}"
+    runs-on: windows-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { label: "10k → 20k → 50k → 100k → 500k", ladder: "full" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1.1"
+
+      - name: Build MAQAN core and addons once in dependency order
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/build-all.sh ../wfmod
+          expected_addons=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
+          actual_addons=$(find dist -maxdepth 1 -type f -name 'wf_*.jar' ! -name '*-sources.jar' | wc -l)
+          echo "CONTOUR_03_BUILD_ADDONS=$actual_addons/$expected_addons"
+          test -f dist/worldforge-0.1.jar || find dist -maxdepth 1 -type f -name 'worldforge-*.jar' -print -quit | grep -q .
+          test "$actual_addons" -eq "$expected_addons"
+
+      - name: Contour 03 — independent sequential scale ladder
+        id: social_ladder
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: "social-stress"
+          WF_SOCIAL_STRESS_DAYS: "635"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
+        run: |
+          set -euo pipefail
+          for target in 10000 20000 50000 100000 500000; do
+            echo "CONTOUR_03_STAGE_BEGIN=$target"
+            output="$RUNNER_TEMP/maqan-contour-03-social-$target"
+            WF_SOCIAL_STRESS_TARGET="$target" bash tools/world-runtime-smoke.sh vanilla dist "$output"
+            echo "CONTOUR_03_STAGE_PASS=$target"
+            echo "### Contour 03 — $target NPC: PASS" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload contour 03 stage evidence (including failed stage)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contour-03-social-ladder-\${{ github.run_id }}
+          path: \${{ runner.temp }}/maqan-contour-03-social-*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Final contour 03 status
+        if: always()
+        shell: pwsh
+        env:
+          LADDER_OUTCOME: \${{ steps.social_ladder.outcome }}
+        run: |
+          "CONTOUR_03_SOCIAL_LADDER_OUTCOME=$env:LADDER_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:LADDER_OUTCOME -ne "success") {
+            throw "Contour 03 ladder failed. Inspect the artifact for the failing population tier."
+          }
