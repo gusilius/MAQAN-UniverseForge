@@ -1061,49 +1061,69 @@ public final class CharacterRegistry {
         return character;
     }
 
-    @SuppressWarnings("unchecked")
     public void fromJson(String json) { fromJson(json, "legacy-unscoped"); }
 
-    /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
+    /** Loads legacy snapshots without retaining a second, whole-population JSON object tree. */
     public void fromJson(String json, String identityNamespace) {
+        fromJson(new java.io.StringReader(json == null ? "" : json), identityNamespace);
+    }
+
+    /**
+     * Streaming restore path for server saves. Only one decoded JSON Character record is
+     * temporary at a time; the canonical Character objects and indexes are staged separately
+     * and published only after the complete file has been validated.
+     */
+    public void fromJson(java.io.Reader reader, String identityNamespace) {
+        Objects.requireNonNull(reader, "reader");
         try (MutationBatch ignored = beginMutationBatch()) {
-            fromJsonBatched(json, identityNamespace);
+            fromJsonBatched(reader, identityNamespace);
         }
     }
 
-    private void fromJsonBatched(String json, String identityNamespace) {
-        if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
-        // Parse and validate into an isolated snapshot. Never destroy the live registry
-        // until the entire save has been accepted.
-        Object parsed = Json.parse(json == null ? "" : json);
-        if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
-        String format = raw.get("format") instanceof String f ? f : "";
-        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
-            throw new IllegalArgumentException("Неверный формат людей: " + format);
-        // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
-        // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
-        Object rawNext = raw.get("next");
-        if (!(rawNext instanceof Number nextNumber)) throw new IllegalArgumentException("Отсутствует счётчик персонажей");
-        long requestedNext = nextNumber.longValue();
-        if (requestedNext < 1 || requestedNext > Integer.MAX_VALUE) throw new IllegalArgumentException("Недопустимый счётчик персонажей");
-        if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
+    private void fromJsonBatched(java.io.Reader reader, String identityNamespace) {
+        if (identityNamespace == null || identityNamespace.isBlank())
+            throw new IllegalArgumentException("identityNamespace is required");
 
         Map<String, Character> loaded = new LinkedHashMap<>();
         Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
-        int maxNumericId = 0;
-        for (Object value : entries) {
-            if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
-            Character character = decodeCharacter(m, identityNamespace, globalOwners, entityOwners);
-            if (loaded.putIfAbsent(character.id, character) != null)
-                throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
-            if (character.id.matches("c[0-9]+")) {
-                try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(character.id.substring(1))); }
-                catch (NumberFormatException ignored) { /* non-allocatable legacy identifier */ }
-            }
+        int[] maxNumericId = {0};
+        Json.StreamedArray snapshot;
+        try {
+            snapshot = Json.readObjectArray(reader, "characters", value -> {
+                if (!(value instanceof Map<?, ?> record))
+                    throw new IllegalArgumentException("Повреждена запись персонажа");
+                Character character = decodeCharacter(record, identityNamespace, globalOwners, entityOwners);
+                if (loaded.putIfAbsent(character.id, character) != null)
+                    throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
+                if (character.id.matches("c[0-9]+")) {
+                    try {
+                        maxNumericId[0] = Math.max(maxNumericId[0],
+                                Integer.parseInt(character.id.substring(1)));
+                    } catch (NumberFormatException ignoredNumber) {
+                        // Non-allocatable legacy identifier.
+                    }
+                }
+            });
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Не удалось потоково прочитать сохранение персонажей", ex);
         }
-        if (maxNumericId == Integer.MAX_VALUE) throw new IllegalArgumentException("Исчерпаны ID персонажей");
-        int safeNext = (int) Math.max(requestedNext, (long) maxNumericId + 1L);
+
+        Map<String, Object> root = snapshot.fields();
+        String format = root.get("format") instanceof String f ? f : "";
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
+            throw new IllegalArgumentException("Неверный формат людей: " + format);
+        Object rawNext = root.get("next");
+        if (!(rawNext instanceof Number nextNumber))
+            throw new IllegalArgumentException("Отсутствует счётчик персонажей");
+        long requestedNext = nextNumber.longValue();
+        if (requestedNext < 1 || requestedNext > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Недопустимый счётчик персонажей");
+        if (!snapshot.present()) throw new IllegalArgumentException("Отсутствует список персонажей");
+        if (maxNumericId[0] == Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Исчерпаны ID персонажей");
+        int safeNext = (int) Math.max(requestedNext, (long) maxNumericId[0] + 1L);
+
         // Upgrade legacy map-local family references to stable global UUID references.
         for (Character character : loaded.values()) {
             Character father = loaded.get(character.father);
@@ -1119,8 +1139,8 @@ public final class CharacterRegistry {
             }
             if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
         }
-        // The parsed LinkedHashMap is already validated and insertion-ordered. Publish it directly:
-        // copying into the live map doubles hash-table nodes and key references at peak load.
+
+        // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         byGlobalId.clear();
         pendingBereavement.clear();
