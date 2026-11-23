@@ -34,40 +34,99 @@ public final class NpcSocialSimulation {
     private static volatile String contactIndexWorld = "";
     private static volatile Map<CharacterRegistry, Map<String, List<Character>>> contactsByRegistry = Map.of();
 
-    private static synchronized Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day) {
+    private static final int CONTACT_INDEX_CHARACTERS_PER_TICK = 2048;
+
+    private static final class RegistryScan {
+        final CharacterRegistry registry;
+        final List<Character> people;
+        final int limit;
+        int cursor;
+
+        RegistryScan(CharacterRegistry registry) {
+            this.registry = registry;
+            this.people = registry.all();
+            this.limit = people.size();
+        }
+    }
+
+    private static final class ContactIndexBuild {
+        final long day;
+        final String world;
+        final List<RegistryScan> scans;
+        final Map<CharacterRegistry, Map<String, List<Character>>> groups = new IdentityHashMap<>();
+        int scanIndex;
+
+        ContactIndexBuild(long day, String world, List<RegistryScan> scans) {
+            this.day = day;
+            this.world = world;
+            this.scans = scans;
+        }
+    }
+
+    private static ContactIndexBuild contactIndexBuild;
+
+    /**
+     * Incrementally prepares the daily social index. CharacterRegistry.all() is an append-only
+     * view, so each partition's captured size can be scanned safely over multiple server ticks.
+     * This prevents a million-character world from rebuilding its entire social index in one tick.
+     */
+    public static synchronized boolean prepareContactIndex(long day, int characterBudget) {
         String world = String.valueOf(WorldForgeMod.worldId());
-        if (contactIndexDay == day && contactIndexWorld.equals(world)) return contactsByRegistry;
-        Map<CharacterRegistry, Map<String, List<Character>>> building = new IdentityHashMap<>();
-        if (PeopleMod.identityPartitionsReady()) {
+        if (contactIndexDay == day && contactIndexWorld.equals(world)) return true;
+        if (!PeopleMod.identityPartitionsReady()) return false;
+
+        if (contactIndexBuild == null || contactIndexBuild.day != day
+                || !contactIndexBuild.world.equals(world)) {
             Set<String> ids = new TreeSet<>();
             for (CharacterIdentity identity : PeopleMod.authority().identities())
                 if (!"__players__".equals(identity.mapId())) ids.add(identity.mapId());
+            List<RegistryScan> scans = new ArrayList<>(ids.size());
             for (String id : ids) {
                 CharacterRegistry registry = PeopleMod.authority().registry(id);
-                if (registry == null) continue;
-                Map<String, List<Character>> byPolity = building.computeIfAbsent(registry, ignored -> new TreeMap<>());
-                for (Character person : registry.all()) {
-                    if (!person.alive) continue;
-                    String polity = polityOf(person);
-                    if (polity.isBlank()) continue;
-                    String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
-                    if (band.isBlank()) band = polity;
-                    byPolity.computeIfAbsent(band, ignored -> new ArrayList<>()).add(person);
-                }
+                if (registry != null) scans.add(new RegistryScan(registry));
             }
+            contactIndexBuild = new ContactIndexBuild(day, world, scans);
         }
+
+        int remaining = Math.max(1, Math.min(8192, characterBudget));
+        ContactIndexBuild build = contactIndexBuild;
+        while (remaining > 0 && build.scanIndex < build.scans.size()) {
+            RegistryScan scan = build.scans.get(build.scanIndex);
+            while (remaining > 0 && scan.cursor < scan.limit) {
+                Character person = scan.people.get(scan.cursor++);
+                remaining--;
+                if (person == null || !person.alive) continue;
+                String polity = polityOf(person);
+                if (polity.isBlank()) continue;
+                String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
+                if (band.isBlank()) band = polity;
+                build.groups.computeIfAbsent(scan.registry, ignored -> new TreeMap<>())
+                        .computeIfAbsent(band, ignored -> new ArrayList<>()).add(person);
+            }
+            if (scan.cursor >= scan.limit) build.scanIndex++;
+        }
+
+        if (build.scanIndex < build.scans.size()) return false;
+
         Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
-        building.forEach((registry, byPolity) -> {
+        build.groups.forEach((registry, byBand) -> {
             Map<String, List<Character>> groups = new TreeMap<>();
-            byPolity.forEach((polity, members) -> {
-                groups.put(polity, List.copyOf(members));
+            byBand.forEach((band, members) -> {
+                members.sort(Comparator.comparing(person -> person.globalId));
+                groups.put(band, List.copyOf(members));
             });
             frozen.put(registry, Collections.unmodifiableMap(groups));
         });
         contactsByRegistry = Collections.unmodifiableMap(frozen);
         contactIndexWorld = world;
         contactIndexDay = day;
-        return contactsByRegistry;
+        contactIndexBuild = null;
+        return true;
+    }
+
+    private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day) {
+        String world = String.valueOf(WorldForgeMod.worldId());
+        return contactIndexDay == day && contactIndexWorld.equals(world) ? contactsByRegistry : null;
     }
 
     public static int advance(Relations relations, int day, int year) {
@@ -82,6 +141,7 @@ public final class NpcSocialSimulation {
             if (registry != null) registries.put(mapId, registry);
         }
         Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day);
+        if (indexedGroups == null) return 0; // Index construction is advanced incrementally by RelationsMod.
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
         int interactions = 0;
         // Family trees are stable during this daily pass; cache ancestry to avoid repeated traversal.
@@ -105,9 +165,8 @@ public final class NpcSocialSimulation {
                             && person.props.containsKey("emergence.polity_id"))
                         eligible.add(person);
                 if (eligible.isEmpty()) continue;
-                // Sort once while building this day's eligible group. Sorting again inside
-                // every selected group adds avoidable O(n log n) work to the interaction pass.
-                eligible.sort(Comparator.comparing(person -> person.globalId));
+                // The cached contact index is already ordered by globalId; filtering preserves
+                // that order and avoids sorting the same large group on every social pass.
                 groups.put(indexed.getKey(), eligible);
                 adults.addAll(eligible);
             }
