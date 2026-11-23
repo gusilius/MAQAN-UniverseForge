@@ -181,7 +181,6 @@ public final class SocialLifeStressLab {
                     boolean plansChildren = age < 80 && pair % 10 == 0;
                     wife.props.put("family.wants_children", plansChildren);
                     person.props.put("family.wants_children", plansChildren);
-                    addReciprocalBond(run, wife, person, true);
                     run.marriedCouples++;
                 }
                 run.created++;
@@ -233,8 +232,6 @@ public final class SocialLifeStressLab {
             Character child = run.registry.addChild(father, mother, "Social Stress Child " + run.births,
                     (run.births & 1) == 0 ? "f" : "m", year);
             child.props.put("population.last_simulated_world_day", Long.toString(day));
-            addReciprocalBond(run, father, child, false);
-            addReciprocalBond(run, mother, child, false);
             FamilyPlanning.complete(mother, father, year, child.id);
             if (!mother.children.contains(child.id) || !father.children.contains(child.id)
                     || !father.id.equals(child.father) || !mother.id.equals(child.mother))
@@ -447,6 +444,10 @@ public final class SocialLifeStressLab {
 
     private static int groupCount(int target) {
         return (target + GROUP_SIZE - 1) / GROUP_SIZE;
+    }
+
+    private static void writeReport(Run run) {
+        writeReport(run, -1L, -1L, -1L, false, false);
     }
 
     private static void writeReport(Run run, long familyIntegrityErrors,
