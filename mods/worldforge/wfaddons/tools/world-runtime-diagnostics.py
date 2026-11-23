@@ -20,9 +20,6 @@ for dump in work.glob("thread-dump-*.txt"): shutil.copy2(dump,out/dump.name)
 for listing in work.glob("jcmd-processes-*.txt"): shutil.copy2(listing,out/listing.name)
 for pattern in ("core-jcmd-*.txt", "core-heap-*.txt", "core-process-*.json"):
     for metric_file in work.glob(pattern): shutil.copy2(metric_file, out/metric_file.name)
-for pattern in ("runtime-heap-*.txt", "runtime-process-*.json"):
-    for metric_file in out.glob(pattern): metric_file.unlink()
-    for metric_file in work.glob(pattern): shutil.copy2(metric_file, out/metric_file.name)
 for pattern in ("hs_err_pid*.log", "java_pid*.hprof", "gc-*.log"):
     for diagnostic_file in work.glob(pattern): shutil.copy2(diagnostic_file, out/diagnostic_file.name)
 profile_src=work/"performance-profile.json"
