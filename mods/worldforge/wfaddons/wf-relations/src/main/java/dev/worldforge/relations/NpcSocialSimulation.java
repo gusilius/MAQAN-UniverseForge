@@ -27,6 +27,14 @@ public final class NpcSocialSimulation {
     private static final int MAX_GROUPS_PER_DAY = 256;
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
     private static final int TRAVEL_SAMPLES_PER_GROUP_PER_DAY = 4;
+    private static final List<String> DIPLOMATIC_ROLES = DIPLOMATIC_ROLES;
+    private static final List<String> TRAVEL_ROLES = TRAVEL_ROLES;
+    private static final String[] X_COORD_KEYS = {
+            "world.x", "position.x", "emergence.x", "population.x", "settlement.x"
+    };
+    private static final String[] Z_COORD_KEYS = {
+            "world.z", "position.z", "emergence.z", "population.z", "settlement.z"
+    };
     private static final int MAX_COMPATIBLE_PARTNER_PROBES = 64;
     /** Last processed band per canonical registry; identity keys avoid synthetic string allocations. */
     private static final Map<CharacterRegistry, String> GROUP_CURSORS = new IdentityHashMap<>();
@@ -382,10 +390,10 @@ public final class NpcSocialSimulation {
     }
 
     private static boolean hasDiplomaticRole(Character person) {
-        for (String role : List.of("diplomat", "envoy", "ambassador"))
+        for (String role : DIPLOMATIC_ROLES)
             if (person.hasRole(role)) return true;
         Object role = person.props.get("emergence.polity_role");
-        return role instanceof String value && List.of("diplomat", "envoy", "ambassador")
+        return role instanceof String value && DIPLOMATIC_ROLES
                 .contains(value.toLowerCase(Locale.ROOT));
     }
 
@@ -402,8 +410,8 @@ public final class NpcSocialSimulation {
     }
 
     private static Double coordinate(Character person, String axis) {
-        for (String key : List.of("world." + axis, "position." + axis, "emergence." + axis,
-                "population." + axis, "settlement." + axis)) {
+        String[] keys = "x".equals(axis) ? X_COORD_KEYS : Z_COORD_KEYS;
+        for (String key : keys) {
             Object value = person.props.get(key);
             if (value instanceof Number number) return number.doubleValue();
         }
@@ -411,13 +419,14 @@ public final class NpcSocialSimulation {
     }
 
     private static boolean hasTravelRole(Character person) {
-        for (String role : List.of("trader", "merchant", "diplomat", "envoy", "ambassador"))
+        for (String role : TRAVEL_ROLES)
             if (person.hasRole(role)) return true;
         Object role = person.props.get("emergence.polity_role");
-        if (role instanceof String value && List.of("trader", "merchant", "diplomat", "envoy", "ambassador")
+        if (role instanceof String value && TRAVEL_ROLES
                 .contains(value.toLowerCase(Locale.ROOT))) return true;
-        List<String> traits = CharacterStats.traits(person);
-        return traits.contains("trader") || traits.contains("diplomat") || traits.contains("merchant");
+        return CharacterStats.hasTrait(person, "trader")
+                || CharacterStats.hasTrait(person, "diplomat")
+                || CharacterStats.hasTrait(person, "merchant");
     }
 
     private static int kinshipDistance(Character a, Character b, CharacterRegistry registry,
@@ -466,12 +475,21 @@ public final class NpcSocialSimulation {
         }
     }
 
-    private static String identityValue(Character person, String... keys) {
-        for (String key : keys) {
-            Object value = person.props.get(key);
-            if (value instanceof String text && !text.isBlank()) return text.trim();
-        }
-        return "";
+    private static String identityValue(Character person, String key1, String key2, String key3) {
+        Object value = person.props.get(key1);
+        if (value instanceof String text && !text.isBlank()) return text.trim();
+        value = person.props.get(key2);
+        if (value instanceof String text && !text.isBlank()) return text.trim();
+        value = person.props.get(key3);
+        return value instanceof String text && !text.isBlank() ? text.trim() : "";
+    }
+
+    private static String identityValue(Character person, String key1, String key2,
+                                        String key3, String key4) {
+        String value = identityValue(person, key1, key2, key3);
+        if (!value.isBlank()) return value;
+        Object fallback = person.props.get(key4);
+        return fallback instanceof String text && !text.isBlank() ? text.trim() : "";
     }
 
     private static void interact(Relations relations, CharacterRegistry registry, Character a, Character b,
