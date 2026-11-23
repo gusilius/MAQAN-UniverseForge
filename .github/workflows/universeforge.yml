@@ -29,7 +29,8 @@ permissions:
 
 concurrency:
   group: universeforge-world-runtime-acceptance-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  # Never cancel a long integrated acceptance pass just because a follow-up fix was pushed.
+  cancel-in-progress: false
 
 jobs:
   stress-contour-coverage:
