@@ -976,6 +976,7 @@ public class SettleMod {
         Colony colony = foundEmergentInMemory(server, dimension, id, name, x, z, operationId);
         if (existing == null && !saveDurably(server)) {
             COLONIES.remove(id, colony);
+            Bodies.forgetColony(id);
             markColonyRegistryRemoved(id);
             throw new IllegalStateException("Could not durably persist emergent settlement " + id);
         }
