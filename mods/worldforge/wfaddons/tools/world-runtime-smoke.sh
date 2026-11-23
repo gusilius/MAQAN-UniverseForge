@@ -30,15 +30,49 @@ SERVER_EXIT_CODE="not_observed"
 TERMINATION_EVIDENCE="not_observed"
 CURRENT_STAGE="preflight"
 THREAD_DUMP_COUNT=0
+run_bounded() {
+  local seconds="$1"
+  shift
+  python3 - "$seconds" "$@" <<'PY'
+import subprocess, sys
+limit = float(sys.argv[1])
+command = sys.argv[2:]
+try:
+    completed = subprocess.run(command, timeout=limit)
+except subprocess.TimeoutExpired:
+    print("BOUNDED_COMMAND_TIMEOUT seconds=%s command=%r" % (limit, command), file=sys.stderr)
+    raise SystemExit(124)
+raise SystemExit(completed.returncode)
+PY
+}
+
+wait_for_process_exit() {
+  local pid="$1"
+  local seconds="$2"
+  local elapsed
+  for ((elapsed=0; elapsed<seconds; elapsed++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+  done
+  ! kill -0 "$pid" 2>/dev/null
+}
+
 capture_server_threads() {
   local stamp pid
   stamp="$(date +%s)"
-  jcmd -l > "$OUTPUT/jcmd-processes-$stamp.txt" 2>&1 || return 0
+  run_bounded 8 jcmd -l > "$OUTPUT/jcmd-processes-$stamp.txt" 2>&1 || {
+    echo "RUNTIME_DIAGNOSTIC_JCMD_LIST_FAILED_OR_TIMED_OUT=$stamp"
+    return 0
+  }
   pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-$stamp.txt")"
   [ -n "$pid" ] || return 0
-  jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || true
-  jcmd "$pid" GC.heap_info > "$OUTPUT/runtime-heap-$stamp.txt" 2>&1 || true
-  WF_METRIC_PID="$pid" powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/runtime-process-$stamp.json" 2>&1 || true
+  run_bounded 12 jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || {
+    echo "RUNTIME_DIAGNOSTIC_THREAD_DUMP_FAILED_OR_TIMED_OUT=$stamp PID=$pid"
+  }
+  run_bounded 8 jcmd "$pid" GC.heap_info > "$OUTPUT/runtime-heap-$stamp.txt" 2>&1 || {
+    echo "RUNTIME_DIAGNOSTIC_HEAP_FAILED_OR_TIMED_OUT=$stamp PID=$pid"
+  }
+  WF_METRIC_PID="$pid" run_bounded 10 powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/runtime-process-$stamp.json" 2>&1 || true
   THREAD_DUMP_COUNT=$((THREAD_DUMP_COUNT + 1))
   echo "RUNTIME_THREAD_DUMP=$stamp PID=$pid"
   # Keep the complete dump as an artifact and print the server plus chunk/IO
@@ -56,7 +90,18 @@ capture_server_threads() {
 runtime_exit() {
   local exit_code="$1"
   trap - EXIT
-  if [ -n "$BOT_PID" ]; then kill "$BOT_PID" 2>/dev/null || true; wait "$BOT_PID" 2>/dev/null || true; fi
+  if [ -n "$BOT_PID" ]; then
+    kill "$BOT_PID" 2>/dev/null || true
+    if ! wait_for_process_exit "$BOT_PID" 5; then
+      echo "RUNTIME_BOT_GRACE_TIMEOUT=5"
+      kill -KILL "$BOT_PID" 2>/dev/null || true
+    fi
+    if wait_for_process_exit "$BOT_PID" 5; then
+      wait "$BOT_PID" 2>/dev/null || true
+    else
+      echo "RUNTIME_BOT_REAP_TIMEOUT=5"
+    fi
+  fi
   if [ -f "$WORK/in.txt" ] && [ -n "$SERVER_PID" ]; then
     CURRENT_STAGE="server_shutdown"
     echo "RUNTIME_SHUTDOWN_BEGIN_STAGE=$CURRENT_STAGE"
@@ -68,10 +113,14 @@ runtime_exit() {
         capture_server_threads
         local stamp pid
         stamp="$(date +%s)"
-        jcmd -l > "$OUTPUT/jcmd-processes-shutdown-$stamp.txt" 2>&1 || true
+        run_bounded 8 jcmd -l > "$OUTPUT/jcmd-processes-shutdown-$stamp.txt" 2>&1 || {
+          echo "RUNTIME_SHUTDOWN_JCMD_LIST_FAILED_OR_TIMED_OUT=$stamp"
+        }
         pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-shutdown-$stamp.txt")"
         if [ -n "$pid" ]; then
-          jcmd "$pid" GC.heap_info > "$OUTPUT/shutdown-heap-$stamp.txt" 2>&1 || true
+          run_bounded 8 jcmd "$pid" GC.heap_info > "$OUTPUT/shutdown-heap-$stamp.txt" 2>&1 || {
+            echo "RUNTIME_SHUTDOWN_HEAP_FAILED_OR_TIMED_OUT=$stamp PID=$pid"
+          }
         fi
       fi
       sleep 1
@@ -80,11 +129,23 @@ runtime_exit() {
       echo "RUNTIME_SHUTDOWN_GRACE_TIMEOUT=30"
       capture_server_threads
       TERMINATION_EVIDENCE="forced_kill_after_grace_timeout"
-      taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
+      run_bounded 12 taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || true
+      kill -TERM "$SERVER_PID" 2>/dev/null || true
+      if ! wait_for_process_exit "$SERVER_PID" 5; then
+        kill -KILL "$SERVER_PID" 2>/dev/null || true
+      fi
+      if ! wait_for_process_exit "$SERVER_PID" 10; then
+        SERVER_EXIT_CODE="not_reaped_after_forced_kill"
+        echo "RUNTIME_PROCESS_REAP_TIMEOUT=10"
+      fi
     else
       TERMINATION_EVIDENCE="graceful_stop"
     fi
-    if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+    # wait is safe only after the process is no longer running. Never let the
+    # cleanup trap block indefinitely after taskkill or a failed JVM shutdown.
+    if [ "$SERVER_EXIT_CODE" = "not_observed" ] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+    fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
     echo "RUNTIME_TERMINATION_EVIDENCE=$TERMINATION_EVIDENCE"
   fi
