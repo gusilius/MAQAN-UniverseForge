@@ -80,6 +80,7 @@ public final class PopulationComputeBridge {
         private int start(int index) { return starts[index]; }
         private int limit(int index) { return limits[index]; }
         private int registryCount() { return registries.size(); }
+        public int firstMemberCursor() { return starts.length == 0 ? 0 : starts[0]; }
         private boolean current() {
             for (int i = 0; i < registries.size(); i++)
                 if (registries.get(i).membershipGeneration() != membershipGenerations[i]) return false;
@@ -128,7 +129,7 @@ public final class PopulationComputeBridge {
     public static Captured capture(String worldId,int year,long elapsedDays,Collection<CharacterRegistry> registries){
         Scan scan=Scan.begin(registries);
         return captureForWorldDay(worldId,year,elapsedDays,0L,scan,registries,0,
-                scan.registryCount()==0?0:0, Integer.MAX_VALUE);
+                scan.firstMemberCursor(), Integer.MAX_VALUE);
     }
 
     /** Begins one stable scan. Registry appends are tracked as tail ranges; wholesale restores invalidate it. */

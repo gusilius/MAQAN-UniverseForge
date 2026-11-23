@@ -88,7 +88,7 @@ public final class PopulationComputeCoordinator {
                             PopulationComputeBridge.Scan appended=done.captured.scan().appendedTail();
                             if(appended!=null){
                                 activeScan=appended;scanRegistryCursor=0;
-                                scanMemberCursor=appended.registryCount()==0?0:appended.start(0);
+                                scanMemberCursor=appended.firstMemberCursor();
                             }else{
                                 PeopleMod.markPopulationProcessed(done.captured.targetWorldDay());
                                 lastScannedWorldDay=done.captured.targetWorldDay();
@@ -113,7 +113,7 @@ public final class PopulationComputeCoordinator {
             if(currentWorldDay==lastScannedWorldDay
                     &&registryGeneration==lastScannedRegistryGeneration) return true;
             activeScan=PopulationComputeBridge.beginScan(currentRegistries);
-            scanRegistryCursor=0;scanMemberCursor=activeScan.registryCount()==0?0:activeScan.start(0);
+            scanRegistryCursor=0;scanMemberCursor=activeScan.firstMemberCursor();
             scanTargetWorldDay=currentWorldDay;scanRegistryGeneration=registryGeneration;scanYear=year;
         }
         long fallbackStartDay=PeopleMod.populationBaselineDay();
