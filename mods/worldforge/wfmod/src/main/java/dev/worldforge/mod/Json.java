@@ -44,7 +44,11 @@ public final class Json {
         expect(reader, '{');
         skipWhitespace(reader);
         int next = reader.read();
-        if (next == '}') return new StreamedArray(fields, 0L, false);
+        if (next == '}') {
+            skipWhitespace(reader);
+            if (reader.read() != -1) throw new IllegalArgumentException("Trailing data after streamed JSON object");
+            return new StreamedArray(fields, 0L, false);
+        }
         reader.unread(next);
         while (true) {
             String key = (String) parseRawValue(reader);
@@ -72,8 +76,8 @@ public final class Json {
                 fields.put(arrayKey, Boolean.TRUE);
             } else {
                 Object value = parseRawValue(reader);
-                if (fields.putIfAbsent(key, value) != null || fields.containsKey(key) && value == null)
-                    throw new IllegalArgumentException("Duplicate JSON object field: " + key);
+                if (fields.containsKey(key)) throw new IllegalArgumentException("Duplicate JSON object field: " + key);
+                fields.put(key, value);
             }
             skipWhitespace(reader);
             int separator = reader.read();
