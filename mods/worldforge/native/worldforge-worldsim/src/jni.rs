@@ -43,11 +43,11 @@ unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
     if exception(env) != 0 { return std::ptr::null_mut(); }
     array
 }
-fn has_supported_schema(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|value| value.get("schema_version").and_then(|v| v.as_u64()))
-        == Some(1)
+#[derive(serde::Deserialize)]
+struct VersionedPayload<T> {
+    schema_version: u32,
+    #[serde(flatten)]
+    payload: T,
 }
 
 fn error_json(status: &str, error: &str) -> Vec<u8> {
@@ -69,9 +69,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
         None => error_json("invalid_input", "decision input unavailable or exceeds 64 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected snapshot schema_version=1"),
-        Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
-            Ok(snapshot) => match decide(&snapshot) {
+        // Decode the version envelope and the typed snapshot in one serde pass.
+        Some(bytes) => match serde_json::from_slice::<VersionedPayload<WorldSnapshot>>(&bytes) {
+            Ok(envelope) if envelope.schema_version != 1 =>
+                error_json("unsupported_schema", "expected snapshot schema_version=1"),
+            Ok(envelope) => match decide(&envelope.payload) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "decision frame")),
                 Err(error) => error_json("rejected", &format!("{error:?}")),
             },
@@ -104,9 +106,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
         None => error_json("invalid_input", "emergence input unavailable or exceeds 64 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected emergence request schema_version=1"),
-        Some(bytes) => match serde_json::from_slice::<EmergenceRequest>(&bytes) {
-            Ok(request) => match advance(request) {
+        // The outer schema envelope and nested snapshot/state are decoded together.
+        Some(bytes) => match serde_json::from_slice::<VersionedPayload<EmergenceRequest>>(&bytes) {
+            Ok(envelope) if envelope.schema_version != 1 =>
+                error_json("unsupported_schema", "expected emergence request schema_version=1"),
+            Ok(envelope) => match advance(envelope.payload) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "emergence frame")),
                 Err(error) => error_json("emergence_rejected", &error),
             },
