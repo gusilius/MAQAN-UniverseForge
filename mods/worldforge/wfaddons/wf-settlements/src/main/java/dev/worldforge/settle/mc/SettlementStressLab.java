@@ -58,6 +58,7 @@ public final class SettlementStressLab {
     private long runStartedNanos;
     private int created;
     private int elapsedTicks;
+    private int setupTicks;
     private int nearBodies = -1;
     private int farBodies = -1;
     private int returnBodies = -1;
@@ -193,6 +194,8 @@ public final class SettlementStressLab {
         if (event.phase != TickEvent.Phase.END || failed) return;
 
         if (runStartedNanos == 0) {
+            tickMillis.add((System.nanoTime() - tickStartedNanos) / 1_000_000.0);
+            setupTicks++;
             createRemoteBatch();
             if (created >= targetRemoteColonies) finishSetup();
             return;
@@ -360,7 +363,9 @@ public final class SettlementStressLab {
         report.put("return_player_worker_bodies", returnBodies);
         report.put("worker_navigation_active_samples", navigationSamples);
         report.put("remote_settlement_chunks_loaded", remoteLoaded);
+        report.put("setup_server_ticks", setupTicks);
         report.put("measured_server_ticks", elapsedTicks);
+        report.put("tick_samples_including_setup", tickMillis.size());
         report.put("elapsed_seconds", elapsedSeconds);
         report.put("server_tps", tps);
         report.put("server_tick_ms_p50", p50);
