@@ -22,6 +22,133 @@ public final class Json {
         return new Json(text).value();
     }
 
+
+    /**
+     * Parses a root object while consuming one named array item at a time.
+     * The streamed array is deliberately not retained in the returned object: callers
+     * can build their canonical index without simultaneously holding a JSON tree for
+     * the entire population. Each element is parsed independently, bounding temporary
+     * parser memory to the largest single record.
+     */
+    public record StreamedArray(Map<String, Object> fields, long itemCount, boolean present) { }
+
+    public static StreamedArray readObjectArray(java.io.Reader input, String arrayKey,
+                                                 java.util.function.Consumer<Object> consumer) throws IOException {
+        if (input == null) throw new NullPointerException("input");
+        if (arrayKey == null || arrayKey.isBlank()) throw new IllegalArgumentException("arrayKey is required");
+        if (consumer == null) throw new NullPointerException("consumer");
+        java.io.PushbackReader reader = new java.io.PushbackReader(new java.io.BufferedReader(input), 2);
+        Map<String, Object> fields = new LinkedHashMap<>();
+        long[] count = {0L};
+        boolean present = false;
+        expect(reader, '{');
+        skipWhitespace(reader);
+        int next = reader.read();
+        if (next == '}') return new StreamedArray(fields, 0L, false);
+        reader.unread(next);
+        while (true) {
+            String key = (String) parseRawValue(reader);
+            skipWhitespace(reader);
+            expect(reader, ':');
+            if (arrayKey.equals(key)) {
+                if (present) throw new IllegalArgumentException("Duplicate streamed JSON array field: " + arrayKey);
+                present = true;
+                skipWhitespace(reader);
+                expect(reader, '[');
+                skipWhitespace(reader);
+                int item = reader.read();
+                if (item != ']') {
+                    reader.unread(item);
+                    while (true) {
+                        Object value = parseRawValue(reader);
+                        consumer.accept(value);
+                        count[0] = Math.incrementExact(count[0]);
+                        skipWhitespace(reader);
+                        int separator = reader.read();
+                        if (separator == ']') break;
+                        if (separator != ',') throw new IllegalArgumentException("Expected ',' or ']' in streamed JSON array");
+                    }
+                }
+                fields.put(arrayKey, Boolean.TRUE);
+            } else {
+                Object value = parseRawValue(reader);
+                if (fields.putIfAbsent(key, value) != null || fields.containsKey(key) && value == null)
+                    throw new IllegalArgumentException("Duplicate JSON object field: " + key);
+            }
+            skipWhitespace(reader);
+            int separator = reader.read();
+            if (separator == '}') break;
+            if (separator != ',') throw new IllegalArgumentException("Expected ',' or '}' in streamed JSON object");
+        }
+        skipWhitespace(reader);
+        if (reader.read() != -1) throw new IllegalArgumentException("Trailing data after streamed JSON object");
+        return new StreamedArray(fields, count[0], present);
+    }
+
+    private static Object parseRawValue(java.io.PushbackReader reader) throws IOException {
+        skipWhitespace(reader);
+        StringBuilder raw = new StringBuilder(256);
+        int first = reader.read();
+        if (first < 0) throw new IllegalArgumentException("Unexpected end of JSON");
+        raw.append((char) first);
+        if (first == '"') {
+            boolean escaped = false;
+            while (true) {
+                int ch = reader.read();
+                if (ch < 0) throw new IllegalArgumentException("Unterminated JSON string");
+                raw.append((char) ch);
+                if (escaped) escaped = false;
+                else if (ch == '\\\\') escaped = true;
+                else if (ch == '"') break;
+            }
+        } else if (first == '{' || first == '[') {
+            java.util.ArrayDeque<Character> nesting = new java.util.ArrayDeque<>();
+            nesting.push(first == '{' ? '}' : ']');
+            boolean inString = false, escaped = false;
+            while (!nesting.isEmpty()) {
+                int ch = reader.read();
+                if (ch < 0) throw new IllegalArgumentException("Unterminated JSON container");
+                raw.append((char) ch);
+                if (inString) {
+                    if (escaped) escaped = false;
+                    else if (ch == '\\\\') escaped = true;
+                    else if (ch == '"') inString = false;
+                    continue;
+                }
+                if (ch == '"') inString = true;
+                else if (ch == '{') nesting.push('}');
+                else if (ch == '[') nesting.push(']');
+                else if (ch == '}' || ch == ']') {
+                    if (nesting.isEmpty() || nesting.pop() != (char) ch)
+                        throw new IllegalArgumentException("Mismatched JSON container");
+                }
+            }
+        } else {
+            while (true) {
+                int ch = reader.read();
+                if (ch < 0) break;
+                if (ch == ',' || ch == ']' || ch == '}' || Character.isWhitespace(ch)) {
+                    reader.unread(ch);
+                    break;
+                }
+                raw.append((char) ch);
+            }
+        }
+        return parse(raw.toString());
+    }
+
+    private static void skipWhitespace(java.io.PushbackReader reader) throws IOException {
+        int ch;
+        do { ch = reader.read(); } while (ch >= 0 && Character.isWhitespace(ch));
+        if (ch >= 0) reader.unread(ch);
+    }
+
+    private static void expect(java.io.PushbackReader reader, char expected) throws IOException {
+        skipWhitespace(reader);
+        int actual = reader.read();
+        if (actual != expected) throw new IllegalArgumentException("Expected '" + expected + "' in JSON");
+    }
+
     private void ws() {
         while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
     }
