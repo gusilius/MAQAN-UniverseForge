@@ -14,6 +14,7 @@ import dev.worldforge.people.CharacterInventoryTransactions;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.storage.CharacterWal;
 import dev.worldforge.people.storage.CharacterWalWriter;
+import dev.worldforge.people.storage.CharacterRecordStore;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
@@ -90,6 +91,8 @@ public class PeopleMod {
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
     /** Durable per-partition incremental journal; snapshots remain the compatibility checkpoint format. */
     private static final Map<CharacterRegistry, CharacterWal> CHARACTER_WALS = new java.util.IdentityHashMap<>();
+    /** Addressable per-Character checkpoint store; the WAL remains the write-ahead authority. */
+    private static final Map<CharacterRegistry, CharacterRecordStore> CHARACTER_RECORD_STORES = new java.util.IdentityHashMap<>();
     /** Bounded asynchronous writers for explicit bulk workloads; transactional writes remain synchronous. */
     private static final Map<CharacterRegistry, CharacterWalWriter> CHARACTER_WAL_WRITERS = new java.util.IdentityHashMap<>();
     /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
@@ -494,25 +497,39 @@ public class PeopleMod {
                 .resolve("worldforge").resolve("people-wal").resolve(token);
     }
 
+    private static Path characterRecordDirectory(MinecraftServer server, String partition) {
+        String token = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("people-records").resolve(token);
+    }
+
     private static synchronized void openCharacterWal(MinecraftServer server, CharacterRegistry registry,
                                                         String partition, String identityNamespace) throws Exception {
         if (CHARACTER_WALS.containsKey(registry)) return;
+        CharacterRecordStore records = new CharacterRecordStore(characterRecordDirectory(server, partition));
         CharacterWal wal = new CharacterWal(characterWalDirectory(server, partition), 16);
         try {
+            long[] checkpointRecords = {0L};
+            // The record store is the compacted per-UUID checkpoint. Load it after the
+            // legacy snapshot and before WAL replay: newer journal frames always win.
+            records.forEach(record -> {
+                registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
+                checkpointRecords[0]++;
+            });
             long[] replayed = {0L};
             wal.replayEach(record -> {
-                // The registry parser validates schema, payload identity and all Character invariants
-                // in one pass. Avoid parsing the same potentially large record twice during recovery.
                 registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
                 replayed[0]++;
             });
+            CHARACTER_RECORD_STORES.put(registry, records);
             CHARACTER_WALS.put(registry, wal);
             String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
             CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken));
-            LOGGER.info("wf_people: recovered Character WAL partition={} records={} characters={}",
-                    partition, replayed[0], registry.size());
+            LOGGER.info("wf_people: recovered Character partition={} checkpointRecords={} walRecords={} characters={}",
+                    partition, checkpointRecords[0], replayed[0], registry.size());
         } catch (Exception failure) {
             try { wal.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
+            try { records.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
             throw failure;
         }
     }
@@ -527,6 +544,14 @@ public class PeopleMod {
         writer = CHARACTER_WAL_WRITERS.remove(registry);
         if (writer != null) writer.close();
         try {
+            CharacterRecordStore records = CHARACTER_RECORD_STORES.get(registry);
+            if (records == null) throw new java.io.IOException("Character record store is not open");
+            // Publish every current Character record before retiring any WAL frame.
+            // Membership is append-only; per-record replacements are atomic and replayable.
+            for (Character character : registry.all()) {
+                records.put(character.globalId,
+                        registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+            }
             wal.checkpoint();
         } finally {
             CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192,
@@ -545,6 +570,11 @@ public class PeopleMod {
             catch (Exception failure) { LOGGER.error("wf_people: failed to close Character WAL cleanly", failure); }
         }
         CHARACTER_WALS.clear();
+        for (CharacterRecordStore records : CHARACTER_RECORD_STORES.values()) {
+            try { records.close(); }
+            catch (Exception failure) { LOGGER.error("wf_people: failed to close Character record store", failure); }
+        }
+        CHARACTER_RECORD_STORES.clear();
     }
 
     @FunctionalInterface
@@ -709,7 +739,18 @@ public class PeopleMod {
                 // this exact Character frame has been forced to stable storage. Do not replace
                 // this with fire-and-forget writer.submit(); bounded async writes are reserved
                 // for explicit bulk workloads that expose a durable completion future.
-                wal.append(character.globalId, owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+                byte[] payload = owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
+                // WAL first: it is the authoritative crash-recovery record. The addressable
+                // checkpoint is a secondary durable copy and may be repaired from the WAL.
+                wal.append(character.globalId, payload);
+                CharacterRecordStore records = CHARACTER_RECORD_STORES.get(owner);
+                if (records != null) {
+                    try { records.put(character.globalId, payload); }
+                    catch (Exception checkpointFailure) {
+                        LOGGER.warn("wf_people: Character {} is WAL-durable; addressable checkpoint will be repaired at next coordinated save",
+                                character.globalId, checkpointFailure);
+                    }
+                }
                 return true;
             } catch (Exception walFailure) {
                 LOGGER.error("wf_people: Character WAL append failed for {}; identity writes are blocked", character.globalId, walFailure);
