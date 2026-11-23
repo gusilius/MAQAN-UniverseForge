@@ -977,8 +977,8 @@ public class SettleMod {
         if (id.startsWith("emg_")) {
             final long minimumDistance = 128L;
             final long minimumDistanceSq = minimumDistance * minimumDistance;
-            Colony conflict = COLONIES.values().stream()
-                    .filter(other -> other != null && other.s != null && dim.equals(other.dim))
+            Colony conflict = ColonyInterestIndex.nearbyAt(dim, x, z,
+                            SettlementSpacing.MINIMUM_CENTER_DISTANCE_BLOCKS).stream()
                     .filter(other -> other.s.population() > 0 || !other.residentCharacterIds.isEmpty()
                             || !other.s.buildings.isEmpty() || !other.s.workers.isEmpty())
                     .filter(other -> SettlementSpacing.conflicts(
