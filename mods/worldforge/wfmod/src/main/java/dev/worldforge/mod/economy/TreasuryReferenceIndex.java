@@ -91,15 +91,20 @@ final class TreasuryReferenceIndex {
 
     /** Groups records by bucket so a checkpoint writes at most 256 files, not one fsync per entry. */
     private void appendRecords(List<TreasuryLedger.Entry> entries) throws IOException {
-        Map<Integer, ByteArrayOutputStream> batches = new HashMap<>();
+        Map<Integer, ByteArrayOutputStream> batches = new HashMap<>(BUCKETS);
+        // Reuse one fixed-width encoder for the entire append. Allocating a ByteBuffer
+        // object and backing array for every journal row creates avoidable allocation
+        // pressure during large checkpoint/index rebuild batches.
+        byte[] record = new byte[RECORD_BYTES];
         for (TreasuryLedger.Entry entry : entries) {
             String key = String.valueOf(entry.accountId()) + "\\u0000" + entry.kind().name()
                     + "\\u0000" + (entry.reference() == null ? "" : entry.reference().trim());
             long fingerprint = fingerprint(key);
             int bucketId = (int) fingerprint & 0xff;
             ByteArrayOutputStream batch = batches.computeIfAbsent(bucketId, ignored -> new ByteArrayOutputStream());
-            ByteBuffer record = ByteBuffer.allocate(RECORD_BYTES).putLong(fingerprint).putLong(entry.sequence());
-            batch.writeBytes(record.array());
+            putLong(record, 0, fingerprint);
+            putLong(record, Long.BYTES, entry.sequence());
+            batch.write(record, 0, record.length);
         }
         for (Map.Entry<Integer, ByteArrayOutputStream> batch : batches.entrySet()) {
             try (FileChannel channel = FileChannel.open(bucketPath(batch.getKey()), StandardOpenOption.CREATE,
@@ -167,6 +172,13 @@ final class TreasuryReferenceIndex {
 
     private Path bucketPath(int bucket) {
         return directory.resolve(String.format(java.util.Locale.ROOT, "bucket-%02x.bin", bucket));
+    }
+
+    private static void putLong(byte[] target, int offset, long value) {
+        for (int index = Long.BYTES - 1; index >= 0; index--) {
+            target[offset + index] = (byte) value;
+            value >>>= Byte.SIZE;
+        }
     }
 
     private static long fingerprint(String value) {
