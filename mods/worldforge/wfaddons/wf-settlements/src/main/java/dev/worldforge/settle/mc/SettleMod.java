@@ -1687,6 +1687,7 @@ public class SettleMod {
         Bodies.clearLive();
         LAST_SIMULATED_WORLD_MINUTE.clear();
         COLONY_SIMULATION_PHASES = new HashMap<>();
+        colonySimulationIndexBuild = null;
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
         colonySimulationIndexInterval = -1;
     }
