@@ -14,7 +14,7 @@ pub mod strategic_army;
 pub mod troops;
 pub mod trade;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub type Day = u64;
 pub type Fixed = i64;
