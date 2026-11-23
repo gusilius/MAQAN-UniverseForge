@@ -61,7 +61,8 @@ public class RelationsMod {
             boolean socialIndexReady = false;
             if (!SocialLifeStressLab.isRunning()) {
                 long nextSocialDay = WorldForgeApi.clock().consumedDay("wf_relations") + 1;
-                socialIndexReady = NpcSocialSimulation.prepareContactIndex(nextSocialDay, 2048);
+                int nextSocialYear = WorldForgeApi.clock().startYear + (int) (nextSocialDay / 365L);
+                socialIndexReady = NpcSocialSimulation.prepareContactIndex(nextSocialDay, nextSocialYear, 2048);
             }
             // The isolated stress driver owns NpcSocialSimulation's shared cursors
             // while it advances its separate Relations graph on accelerated test days.
