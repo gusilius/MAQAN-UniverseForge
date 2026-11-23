@@ -9,172 +9,196 @@ import java.util.*;
 /** Immutable server-thread capture and validated apply boundary for Rust population batches. */
 public final class PopulationComputeBridge {
     public static final int SCHEMA_VERSION = 1;
+    public static final class Scan {
+        private final List<CharacterRegistry> registries;
+        private final long[] membershipGenerations;
+        private final int[] starts, limits;
+
+        private Scan(Collection<CharacterRegistry> source, int[] starts, int[] limits) {
+            List<CharacterRegistry> ordered = new ArrayList<>();
+            Set<CharacterRegistry> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (CharacterRegistry registry : source) {
+                Objects.requireNonNull(registry, "registry");
+                if (seen.add(registry)) ordered.add(registry);
+            }
+            this.registries = List.copyOf(ordered);
+            this.membershipGenerations = new long[ordered.size()];
+            this.starts = starts == null ? new int[ordered.size()] : starts.clone();
+            this.limits = limits == null ? new int[ordered.size()] : limits.clone();
+            if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
+                throw new IllegalArgumentException("Population scan partition shape changed");
+            for (int i = 0; i < ordered.size(); i++) {
+                CharacterRegistry registry = ordered.get(i);
+                membershipGenerations[i] = registry.membershipGeneration();
+                if (starts == null) this.starts[i] = 0;
+                if (limits == null) this.limits[i] = registry.size();
+                if (this.starts[i] < 0 || this.limits[i] < this.starts[i]
+                        || this.limits[i] > registry.size())
+                    throw new IllegalArgumentException("Invalid population scan partition bounds");
+            }
+        }
+
+        /** Stable registry membership plus append-only per-registry views; no population-wide copy or sort. */
+        public static Scan begin(Collection<CharacterRegistry> registries) {
+            return new Scan(Objects.requireNonNull(registries, "registries"), null, null);
+        }
+
+        public boolean matches(Collection<CharacterRegistry> source) {
+            if (source == null) return false;
+            List<CharacterRegistry> current = new ArrayList<>();
+            Set<CharacterRegistry> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (CharacterRegistry registry : source) if (registry != null && seen.add(registry)) current.add(registry);
+            if (current.size() != registries.size()) return false;
+            for (int i = 0; i < current.size(); i++) {
+                if (current.get(i) != registries.get(i)
+                        || current.get(i).membershipGeneration() != membershipGenerations[i]) return false;
+            }
+            return true;
+        }
+
+        /** Captures only newly appended tails after the current bounded pass has completed. */
+        public Scan appendedTail() {
+            int[] nextStarts = limits.clone();
+            int[] nextLimits = limits.clone();
+            boolean appended = false;
+            for (int i = 0; i < registries.size(); i++) {
+                CharacterRegistry registry = registries.get(i);
+                if (registry.membershipGeneration() != membershipGenerations[i])
+                    throw new IllegalStateException("Character registry was restored during population scan");
+                int currentSize = registry.size();
+                if (currentSize < limits[i])
+                    throw new IllegalStateException("Append-only Character registry unexpectedly shrank");
+                if (currentSize > limits[i]) {
+                    nextLimits[i] = currentSize;
+                    appended = true;
+                }
+            }
+            return appended ? new Scan(registries, nextStarts, nextLimits) : null;
+        }
+
+        private CharacterRegistry registry(int index) { return registries.get(index); }
+        private int start(int index) { return starts[index]; }
+        private int limit(int index) { return limits[index]; }
+        private int registryCount() { return registries.size(); }
+        private boolean current() {
+            for (int i = 0; i < registries.size(); i++)
+                if (registries.get(i).membershipGeneration() != membershipGenerations[i]) return false;
+            return true;
+        }
+    }
+
     public static final class Captured {
         private final String worldId; private final int year; private final long elapsedDays;
         private final long targetWorldDay;
         private final DomainMutationRevisions.Snapshot revisions;
+        private final Scan scan;
         private final List<String> characterIds;
         private final Map<String,Integer> birthYears;
         private final Map<String,Long> priorDays, elapsedById;
+        private final Map<String,Character> characters;
+        private final Map<String,CharacterRegistry> owners;
+        private final int nextRegistryCursor, nextMemberCursor;
+        private final boolean scanComplete;
         private final byte[] request;
         private Captured(String worldId,int year,long elapsedDays,long targetWorldDay,DomainMutationRevisions.Snapshot revisions,
-                         List<String> ids,Map<String,Integer> birthYears,Map<String,Long> priorDays,
-                         Map<String,Long> elapsedById,byte[] request){
+                         Scan scan,List<String> ids,Map<String,Integer> birthYears,Map<String,Long> priorDays,
+                         Map<String,Long> elapsedById,Map<String,Character> characters,
+                         Map<String,CharacterRegistry> owners,int nextRegistryCursor,int nextMemberCursor,
+                         boolean scanComplete,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.targetWorldDay=targetWorldDay;this.revisions=revisions;
-            this.characterIds=List.copyOf(ids);
-            this.birthYears=Map.copyOf(birthYears);this.priorDays=Map.copyOf(priorDays);this.elapsedById=Map.copyOf(elapsedById);this.request=request.clone();
+            this.scan=scan;this.characterIds=List.copyOf(ids);
+            this.birthYears=Map.copyOf(birthYears);this.priorDays=Map.copyOf(priorDays);this.elapsedById=Map.copyOf(elapsedById);
+            this.characters=Map.copyOf(characters);this.owners=Map.copyOf(owners);
+            this.nextRegistryCursor=nextRegistryCursor;this.nextMemberCursor=nextMemberCursor;this.scanComplete=scanComplete;
+            this.request=request.clone();
         }
         public String worldId(){return worldId;} public int year(){return year;} public long elapsedDays(){return elapsedDays;}
         public long targetWorldDay(){return targetWorldDay;}
         public DomainMutationRevisions.Snapshot revisions(){return revisions;}
+        public Scan scan(){return scan;}
         public List<String> characterIds(){return characterIds;} public boolean hasWork(){return !characterIds.isEmpty();}
+        public int nextRegistryCursor(){return nextRegistryCursor;} public int nextMemberCursor(){return nextMemberCursor;}
+        public boolean scanComplete(){return scanComplete;}
         public byte[] request(){return request.clone();}
     }
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
-    /**
-     * Reusable membership-only index. It holds canonical references and is rebuilt
-     * only when registry membership changes, not for every capture/apply operation.
-     */
-    private static final class RegistryIndex {
-        private final List<CharacterRegistry> registries;
-        private final long[] revisions;
-        private final Character[] members;
-        /** Registry ownership is indexed beside sorted members to avoid a registry scan per result. */
-        private final CharacterRegistry[] owners;
-        private RegistryIndex(Collection<CharacterRegistry> source) {
-            registries = List.copyOf(source);
-            revisions = new long[registries.size()];
-            int memberCount = 0;
-            for (CharacterRegistry registry : registries) memberCount = Math.addExact(memberCount, registry.all().size());
-            members = new Character[memberCount];
-            owners = new CharacterRegistry[memberCount];
-            int cursor = 0;
-            for (int i = 0; i < registries.size(); i++) {
-                CharacterRegistry registry = Objects.requireNonNull(registries.get(i));
-                revisions[i] = registry.revision();
-                for (Character character : registry.all()) {
-                    members[cursor] = character;
-                    owners[cursor] = registry;
-                    cursor++;
-                }
-            }
-            sortMembersAndOwners();
-            for (int i = 1; i < members.length; i++) {
-                if (members[i - 1].globalId.equals(members[i].globalId))
-                    throw new IllegalStateException("Duplicate canonical Character UUID: " + members[i].globalId);
-            }
-        }
-        /** In-place paired heapsort avoids allocating one wrapper object per NPC during index rebuild. */
-        private void sortMembersAndOwners() {
-            int size = members.length;
-            for (int root = size / 2 - 1; root >= 0; root--) siftDown(root, size);
-            for (int end = size - 1; end > 0; end--) {
-                swap(0, end);
-                siftDown(0, end);
-            }
-        }
-        private void siftDown(int root, int end) {
-            while (true) {
-                int child = root * 2 + 1;
-                if (child >= end) return;
-                if (child + 1 < end && compare(child, child + 1) < 0) child++;
-                if (compare(root, child) >= 0) return;
-                swap(root, child);
-                root = child;
-            }
-        }
-        private int compare(int left, int right) {
-            return members[left].globalId.compareTo(members[right].globalId);
-        }
-        private void swap(int left, int right) {
-            Character character = members[left];
-            members[left] = members[right];
-            members[right] = character;
-            CharacterRegistry owner = owners[left];
-            owners[left] = owners[right];
-            owners[right] = owner;
-        }
-        private boolean matches(Collection<CharacterRegistry> source) {
-            if (source.size() != registries.size()) return false;
-            int i = 0;
-            for (CharacterRegistry registry : source) {
-                if (registry != registries.get(i) || registry.revision() != revisions[i]) return false;
-                i++;
-            }
-            return true;
-        }
-        private Character[] members() { return members; }
-        private int findIndex(String globalId) {
-            int low = 0, high = members.length - 1;
-            while (low <= high) {
-                int mid = (low + high) >>> 1;
-                int cmp = members[mid].globalId.compareTo(globalId);
-                if (cmp == 0) return mid;
-                if (cmp < 0) low = mid + 1; else high = mid - 1;
-            }
-            return -1;
-        }
-        private Character find(String globalId) {
-            int index = findIndex(globalId);
-            return index < 0 ? null : members[index];
-        }
-        private CharacterRegistry ownerAt(int index) { return owners[index]; }
-    }
-    private static volatile RegistryIndex cachedIndex;
-    private static RegistryIndex indexFor(Collection<CharacterRegistry> registries) {
-        RegistryIndex current = cachedIndex;
-        if (current != null && current.matches(registries)) return current;
-        synchronized (PopulationComputeBridge.class) {
-            current = cachedIndex;
-            if (current == null || !current.matches(registries)) cachedIndex = current = new RegistryIndex(registries);
-            return current;
-        }
-    }
-
     private PopulationComputeBridge(){}
 
     /** Compatibility capture: elapsedDays is measured from world day zero. */
     public static Captured capture(String worldId,int year,long elapsedDays,Collection<CharacterRegistry> registries){
-        return captureForWorldDay(worldId,year,elapsedDays,0L,registries);
+        Scan scan=Scan.begin(registries);
+        return captureForWorldDay(worldId,year,elapsedDays,0L,scan,registries,0,
+                scan.registryCount()==0?0:0, Integer.MAX_VALUE);
+    }
+
+    /** Begins one stable scan. Registry appends are tracked as tail ranges; wholesale restores invalidate it. */
+    public static Scan beginScan(Collection<CharacterRegistry> registries) {
+        return Scan.begin(registries);
     }
 
     /**
-     * Captures only Characters that have not acknowledged targetWorldDay.
-     * Per-Character world-day receipts make retries safe across partial registry saves/reloads.
+     * Captures a bounded range from append-only CharacterRegistry views. No global member array,
+     * sort, wrapper allocation or population-wide traversal is performed during a slice.
      */
     public static Captured captureForWorldDay(String worldId,int year,long targetWorldDay,long fallbackStartDay,
-                                               Collection<CharacterRegistry> registries){
+                                               Collection<CharacterRegistry> registries,Scan scan,
+                                               int startRegistryCursor,int startMemberCursor,int scanLimit){
         if(worldId==null||worldId.isBlank())throw new IllegalArgumentException("worldId is required");
         if(targetWorldDay<0||fallbackStartDay<0||targetWorldDay<fallbackStartDay)
             throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
-        Objects.requireNonNull(registries,"registries");
+        if(startRegistryCursor<0||startMemberCursor<0||scanLimit<1)
+            throw new IllegalArgumentException("population scan cursor/limit is invalid");
+        Objects.requireNonNull(registries,"registries");Objects.requireNonNull(scan,"scan");
+        if(!scan.matches(registries))throw new IllegalStateException("Character registry membership changed during population scan");
+        if(startRegistryCursor>scan.registryCount()
+                ||(startRegistryCursor==scan.registryCount()&&startMemberCursor!=0))
+            throw new IllegalArgumentException("population scan cursor exceeds registry bounds");
+        if(startRegistryCursor<scan.registryCount()
+                &&(startMemberCursor<scan.start(startRegistryCursor)||startMemberCursor>scan.limit(startRegistryCursor)))
+            throw new IllegalArgumentException("population member cursor exceeds partition bounds");
+
         DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
-        RegistryIndex registryIndex = indexFor(registries);
-        Character[] ordered = registryIndex.members();
-        List<Object> people = new ArrayList<>(ordered.length);
-        List<String> ids = new ArrayList<>(ordered.length);
-        Map<String,Integer> birthYears = new HashMap<>();
-        Map<String,Long> priorDays = new HashMap<>(), elapsedById = new HashMap<>();
-        for (Character c : ordered) {
-            if (!c.alive) continue; // cached membership must not cache mutable life-state
-            Object rawWorldDay=c.props.get("population.last_simulated_world_day");
-            long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
-            long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
-            if(elapsed==0)continue;
-            Map<String,Object> person=new LinkedHashMap<>();
-            person.put("id",c.globalId);person.put("birth_year",c.birthYear);person.put("alive",true);
-            person.put("needs",needsSnapshot(c));person.put("duties",new ArrayList<>(PopulationSimulation.duties(c)));
-            person.put("profession",PopulationSimulation.profession(c));person.put("training_target",PopulationSimulation.trainingTarget(c));
-            person.put("command",String.valueOf(c.props.getOrDefault("population.command","")));
-            person.put("can_work",PopulationSimulation.canWork(c,year));
-            person.put("elapsed_days",elapsed);
-            Object rawDays=c.props.get("population.simulated_days");
-            long days=PopulationSimulation.persistedNonNegativeLong(rawDays);
-            person.put("simulated_days",Long.toString(days));people.add(person);ids.add(c.globalId);
-            birthYears.put(c.globalId,c.birthYear);priorDays.put(c.globalId,days);elapsedById.put(c.globalId,elapsed);
+        List<Object> people=new ArrayList<>(Math.min(scanLimit,1024));
+        List<String> ids=new ArrayList<>(Math.min(scanLimit,1024));
+        Map<String,Integer> birthYears=new HashMap<>();
+        Map<String,Long> priorDays=new HashMap<>(),elapsedById=new HashMap<>();
+        Map<String,Character> characters=new HashMap<>();
+        Map<String,CharacterRegistry> owners=new HashMap<>();
+        long batchElapsed=0L;
+        int registryCursor=startRegistryCursor;
+        int memberCursor=startMemberCursor;
+        int inspected=0;
+        while(registryCursor<scan.registryCount()&&inspected<scanLimit){
+            CharacterRegistry registry=scan.registry(registryCursor);
+            int end=scan.limit(registryCursor);
+            while(memberCursor<end&&inspected<scanLimit){
+                Character character=registry.all().get(memberCursor++);
+                inspected++;
+                if(!character.alive)continue;
+                Object rawWorldDay=character.props.get("population.last_simulated_world_day");
+                long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
+                long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
+                if(elapsed==0)continue;
+                String id=character.globalId;
+                Map<String,Object> person=new LinkedHashMap<>();
+                person.put("id",id);person.put("birth_year",character.birthYear);person.put("alive",true);
+                person.put("needs",needsSnapshot(character));person.put("duties",new ArrayList<>(PopulationSimulation.duties(character)));
+                person.put("profession",PopulationSimulation.profession(character));person.put("training_target",PopulationSimulation.trainingTarget(character));
+                person.put("command",String.valueOf(character.props.getOrDefault("population.command","")));
+                person.put("can_work",PopulationSimulation.canWork(character,year));person.put("elapsed_days",elapsed);
+                long days=PopulationSimulation.persistedNonNegativeLong(character.props.get("population.simulated_days"));
+                person.put("simulated_days",Long.toString(days));people.add(person);ids.add(id);
+                birthYears.put(id,character.birthYear);priorDays.put(id,days);elapsedById.put(id,elapsed);
+                characters.put(id,character);owners.put(id,registry);
+                batchElapsed=Math.max(batchElapsed,elapsed);
+            }
+            if(memberCursor>=end){
+                registryCursor++;
+                memberCursor=registryCursor<scan.registryCount()?scan.start(registryCursor):0;
+            }
         }
-        long batchElapsed=elapsedById.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+        boolean complete=registryCursor>=scan.registryCount();
         Map<String,Object> request=new LinkedHashMap<>();
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);
@@ -182,13 +206,16 @@ public final class PopulationComputeBridge {
         DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical mutation overlapped population capture"));
         if(!before.equals(after))throw new IllegalStateException("Canonical domain changed during population capture");
-        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,ids,birthYears,priorDays,elapsedById,bytes);
+        if(!scan.current())throw new IllegalStateException("Character registry was restored during population capture");
+        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,scan,ids,birthYears,priorDays,
+                elapsedById,characters,owners,registryCursor,memberCursor,complete,bytes);
     }
 
     /** Validates the complete frame before the first write. False means stale and requires retry. */
     public static boolean apply(Captured captured,byte[] frameBytes,Collection<CharacterRegistry> registries){
         Objects.requireNonNull(captured);Objects.requireNonNull(frameBytes);Objects.requireNonNull(registries);
-        if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
+        if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS)
+                ||!captured.scan.matches(registries))return false;
         Map<?,?> frame=object(Json.parse(new String(frameBytes,StandardCharsets.UTF_8)),"frame");
         if(integer(frame.get("schema_version"),"schema_version")!=SCHEMA_VERSION)throw new IllegalArgumentException("Unsupported population frame schema");
         if(!captured.worldId.equals(string(frame.get("world_id"),"world_id"))
@@ -231,24 +258,21 @@ public final class PopulationComputeBridge {
             if(worldDay!=captured.targetWorldDay)throw new IllegalArgumentException("Population world-day acknowledgement mismatch: "+id);
             updates.add(new Update(id,needs,intent,age,stage,days,lastYear,worldDay));
         }
-        if(!seen.equals(new TreeSet<>(captured.characterIds)))throw new IllegalArgumentException("Population frame Character set differs from captured snapshot");
-        RegistryIndex current = indexFor(registries);
-        if (!WorldForgeApi.revisions().isCurrent(captured.revisions, DomainMutationRevisions.Domain.CHARACTERS)) return false;
-        int[] memberIndices = new int[updates.size()];
-        for (int i = 0; i < updates.size(); i++) {
-            Update u = updates.get(i);
-            int memberIndex = current.findIndex(u.id);
-            if (memberIndex < 0 || !current.members()[memberIndex].alive) return false;
-            memberIndices[i] = memberIndex;
+        if(!seen.equals(captured.characters.keySet()))throw new IllegalArgumentException("Population frame Character set differs from captured snapshot");
+        if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS)
+                ||!captured.scan.matches(registries))return false;
+        for(Update update:updates){
+            Character character=captured.characters.get(update.id);
+            CharacterRegistry owner=captured.owners.get(update.id);
+            if(character==null||owner==null||!character.alive||owner.getByGlobalId(update.id)!=character)return false;
         }
-        if (!WorldForgeApi.revisions().isCurrent(captured.revisions, DomainMutationRevisions.Domain.CHARACTERS)) return false;
+        if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-            for (int i = 0; i < updates.size(); i++) {
-                Update u = updates.get(i);
-                Character character = current.members()[memberIndices[i]];
-                CharacterRegistry owner = current.ownerAt(memberIndices[i]);
-                owner.applyLifeStageResult(character, u.age, u.stage, captured.year);
-                PopulationSimulation.applyComputedResult(character, u.needs, u.intent, u.simulatedDays, u.lastYear, u.worldDay);
+            for(Update update:updates){
+                Character character=captured.characters.get(update.id);
+                CharacterRegistry owner=captured.owners.get(update.id);
+                owner.applyLifeStageResult(character,update.age,update.stage,captured.year);
+                PopulationSimulation.applyComputedResult(character,update.needs,update.intent,update.simulatedDays,update.lastYear,update.worldDay);
             }
         }
         return true;
