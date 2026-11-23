@@ -5,12 +5,17 @@ import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Все персонажи мира и их должности. Сохраняется целиком в JSON вместе с миром. Аддоны подписываются на события
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
+    private static final AtomicLong GLOBAL_MEMBERSHIP_REVISION = new AtomicLong();
+
+    /** Monotonic O(1) invalidation signal for cross-partition membership snapshots. */
+    public static long globalMembershipRevision() { return GLOBAL_MEMBERSHIP_REVISION.get(); }
     public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, MARRIAGE_DISSOLVED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
@@ -76,7 +81,10 @@ public final class CharacterRegistry {
             if (--state.depth == 0) {
                 MUTATION_BATCH.remove();
                 try {
-                    for (CharacterRegistry registry : state.membershipChanged) registry.revision++;
+                    for (CharacterRegistry registry : state.membershipChanged) {
+                        registry.revision++;
+                        GLOBAL_MEMBERSHIP_REVISION.incrementAndGet();
+                    }
                     if (state.dirty) state.mutation.commit();
                 } finally {
                     state.mutation.close();
@@ -456,7 +464,10 @@ public final class CharacterRegistry {
     private void markMembershipMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
         if (batch != null) batch.membershipChanged.add(this);
-        else revision++;
+        else {
+            revision++;
+            GLOBAL_MEMBERSHIP_REVISION.incrementAndGet();
+        }
     }
 
     private static void recordDomainMutation() {

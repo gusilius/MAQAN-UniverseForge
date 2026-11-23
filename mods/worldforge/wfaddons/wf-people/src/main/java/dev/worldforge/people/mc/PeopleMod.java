@@ -1081,6 +1081,18 @@ public class PeopleMod {
      * per-tick map copies; a sliding round-robin window prevents starvation even when partitions
      * outnumber the budget (advancing by the window size could cycle over only a subset).
      */
+    private static int rotationStride(int minimum, int size) {
+        if (size <= 1) return 1;
+        int stride = Math.max(1, Math.min(minimum, size - 1));
+        while (stride < size && gcd(stride, size) != 1) stride++;
+        return stride < size ? stride : 1;
+    }
+
+    private static int gcd(int a, int b) {
+        while (b != 0) { int next = a % b; a = b; b = next; }
+        return Math.abs(a);
+    }
+
     private static boolean advancePopulationFallbackBatch(long targetWorldDay, long fallbackStartDay,
                                                           int year, long registryGeneration) {
         List<CharacterRegistry> registries = populationFallbackRegistries(registryGeneration);
@@ -1118,7 +1130,7 @@ public class PeopleMod {
         // If every registry fits, revisit all of them next tick. Otherwise slide one position
         // so every partition is guaranteed to enter the bounded window.
         populationFallbackRegistryCursor = count <= POPULATION_FALLBACK_BUDGET_PER_TICK
-                ? 0 : (start + 1) % count;
+                ? 0 : (start + rotationStride(visitCount, count)) % count;
         return complete;
     }
 

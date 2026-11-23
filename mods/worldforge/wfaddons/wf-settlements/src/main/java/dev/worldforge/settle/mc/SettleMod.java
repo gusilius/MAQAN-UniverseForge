@@ -65,6 +65,7 @@ public class SettleMod {
     public static final String MOD_ID = "wf_settle";
     public static final Logger LOGGER = LogUtils.getLogger();
     public static final int STEP_TICKS = 20, SITE_TICKS = 10, SAVE_EVERY = 6000;
+    private static final int COLONY_SIMULATION_BATCH_BUDGET = 128;
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
@@ -182,6 +183,19 @@ public class SettleMod {
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
     private static int lifeRegistryCursor;
+    private static final Map<Integer, Integer> COLONY_SIMULATION_CURSORS = new HashMap<>();
+
+    private static int rotationStride(int minimum, int size) {
+        if (size <= 1) return 1;
+        int stride = Math.max(1, Math.min(minimum, size - 1));
+        while (stride < size && gcd(stride, size) != 1) stride++;
+        return stride < size ? stride : 1;
+    }
+
+    private static int gcd(int a, int b) {
+        while (b != 0) { int next = a % b; a = b; b = next; }
+        return Math.abs(a);
+    }
     private static void refreshColonySimulationIndex(int interval, long tick, long worldMinute) {
         if (interval < 1) return;
         long registryRevision = colonyRegistryRevision;
@@ -203,6 +217,7 @@ public class SettleMod {
         });
         LAST_SIMULATED_WORLD_MINUTE.keySet().retainAll(activeIds);
         COLONY_SIMULATION_PHASES = Map.copyOf(frozen);
+        COLONY_SIMULATION_CURSORS.clear();
         colonySimulationIndexInterval = interval;
         colonySimulationIndexBuiltAt = tick;
         colonySimulationIndexRevision = registryRevision;
@@ -212,6 +227,25 @@ public class SettleMod {
         if (interval < 1 || tick < 1) return List.of();
         int phase = (int) Math.floorMod(tick - 1L, interval);
         return COLONY_SIMULATION_PHASES.getOrDefault(phase, List.of());
+    }
+
+    /** Selects a bounded rotating slice; deferred colonies retain their elapsed calendar time. */
+    private static List<Colony> coloniesDueBatch(long tick, int interval) {
+        if (interval < 1 || tick < 1) return List.of();
+        int phase = (int) Math.floorMod(tick - 1L, interval);
+        List<Colony> due = coloniesDueForSimulation(tick, interval);
+        int size = due.size();
+        if (size <= COLONY_SIMULATION_BATCH_BUDGET) {
+            COLONY_SIMULATION_CURSORS.remove(phase);
+            return due;
+        }
+        int start = Math.floorMod(COLONY_SIMULATION_CURSORS.getOrDefault(phase, 0), size);
+        List<Colony> batch = new ArrayList<>(COLONY_SIMULATION_BATCH_BUDGET);
+        for (int offset = 0; offset < COLONY_SIMULATION_BATCH_BUDGET; offset++)
+            batch.add(due.get((start + offset) % size));
+        int stride = rotationStride(COLONY_SIMULATION_BATCH_BUDGET, size);
+        COLONY_SIMULATION_CURSORS.put(phase, (start + stride) % size);
+        return batch;
     }
 
     /** Last shared-calendar minute simulated by each colony; runtime-only and rebuilt on server start. */
@@ -1540,7 +1574,7 @@ public class SettleMod {
         lastResidentAuditTick = Long.MIN_VALUE;
         REPORTED_RESIDENT_LINK_ERRORS.clear();
         Blueprints.clearCache();
-        Bodies.LIVE.clear();
+        Bodies.clearLive();
         DEFS = loadDefs(e.getServer());
         load(e.getServer());
         // The shared clock is restored by ClockService on the same lifecycle event.
@@ -1550,7 +1584,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
         if (DEFS != null) save(e.getServer());
-        Bodies.LIVE.clear();
+        Bodies.clearLive();
         LAST_SIMULATED_WORLD_MINUTE.clear();
         COLONY_SIMULATION_PHASES = Map.of();
         colonySimulationIndexBuiltAt = Long.MIN_VALUE;
@@ -2334,7 +2368,8 @@ public class SettleMod {
             }
             // Slide by one partition, not by the whole window, so every partition eventually
             // receives work even when count and totalBudget have a common divisor.
-            lifeRegistryCursor = count <= totalBudget ? 0 : (start + 1) % count;
+            lifeRegistryCursor = count <= totalBudget ? 0
+                    : (start + rotationStride(visitCount, count)) % count;
         } catch (LinkageError | RuntimeException error) {
             LOGGER.error("wf_settle: canonical resident life pass failed: {}", error.toString(), error);
         }
@@ -2369,7 +2404,7 @@ public class SettleMod {
             double speed = clock.multiplier();
             refreshColonySimulationIndex(simulationInterval, ticks, worldMinute);
             if (speed > 0) {
-                for (Colony c : coloniesDueForSimulation(ticks, simulationInterval)) {
+                for (Colony c : coloniesDueBatch(ticks, simulationInterval)) {
                     if (c == null || c.s == null || COLONIES.get(c.s.id) != c) continue;
                     try {
                         // Stable colony phases spread work across the interval. The shared calendar,

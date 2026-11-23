@@ -29,8 +29,11 @@ public final class NpcSocialSimulation {
     private static final int PAIRS_PER_GROUP_PER_DAY = 2;
     private static final int TRAVEL_SAMPLES_PER_GROUP_PER_DAY = 4;
     private static final int MAX_COMPATIBLE_PARTNER_PROBES = 64;
-    private static final Map<String, Integer> GROUP_CURSORS = new HashMap<>();
+    /** Last processed band per canonical registry; identity keys avoid synthetic string allocations. */
+    private static final Map<CharacterRegistry, String> GROUP_CURSORS = new IdentityHashMap<>();
     private static String groupCursorWorld = "";
+    private static long groupCursorRegistryGeneration = Long.MIN_VALUE;
+    private static int partitionCursor;
 
     private static volatile long contactIndexDay = Long.MIN_VALUE;
     private static volatile String contactIndexWorld = "";
@@ -58,15 +61,18 @@ public final class NpcSocialSimulation {
         final int year;
         final String world;
         final long registryGeneration;
+        final long membershipRevision;
         final List<RegistryScan> scans;
         final Map<CharacterRegistry, Map<String, List<Character>>> groups = new IdentityHashMap<>();
         int scanIndex;
 
-        ContactIndexBuild(long day, int year, String world, long registryGeneration, List<RegistryScan> scans) {
+        ContactIndexBuild(long day, int year, String world, long registryGeneration,
+                          long membershipRevision, List<RegistryScan> scans) {
             this.day = day;
             this.year = year;
             this.world = world;
             this.registryGeneration = registryGeneration;
+            this.membershipRevision = membershipRevision;
             this.scans = scans;
         }
     }
@@ -74,7 +80,7 @@ public final class NpcSocialSimulation {
     private static ContactIndexBuild contactIndexBuild;
     private static volatile int contactIndexYear = Integer.MIN_VALUE;
     private static volatile long contactIndexRegistryGeneration = Long.MIN_VALUE;
-    private static volatile Map<CharacterRegistry, Long> contactIndexMembership = Map.of();
+    private static volatile long contactIndexMembershipRevision = Long.MIN_VALUE;
 
     /**
      * Incrementally prepares the daily social index. CharacterRegistry.all() is an append-only
@@ -83,15 +89,17 @@ public final class NpcSocialSimulation {
      */
     public static synchronized boolean prepareContactIndex(long day, int year, int characterBudget) {
         String world = String.valueOf(WorldForgeMod.worldId());
+        long registryGeneration = PeopleMod.populationRegistryGeneration();
+        long membershipRevision = CharacterRegistry.globalMembershipRevision();
         if (contactIndexDay == day && contactIndexYear == year && contactIndexWorld.equals(world)
-                && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
-                && contactIndexMembershipCurrent()) return true;
+                && contactIndexRegistryGeneration == registryGeneration
+                && contactIndexMembershipRevision == membershipRevision) return true;
         if (!PeopleMod.identityPartitionsReady()) return false;
 
-        long registryGeneration = PeopleMod.populationRegistryGeneration();
         if (contactIndexBuild == null || contactIndexBuild.day != day
                 || contactIndexBuild.year != year || !contactIndexBuild.world.equals(world)
-                || contactIndexBuild.registryGeneration != registryGeneration) {
+                || contactIndexBuild.registryGeneration != registryGeneration
+                || contactIndexBuild.membershipRevision != membershipRevision) {
             Set<String> ids = new TreeSet<>();
             for (CharacterIdentity identity : PeopleMod.authority().identities())
                 if (!"__players__".equals(identity.mapId())) ids.add(identity.mapId());
@@ -100,7 +108,7 @@ public final class NpcSocialSimulation {
                 CharacterRegistry registry = PeopleMod.authority().registry(id);
                 if (registry != null) scans.add(new RegistryScan(registry));
             }
-            contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration, scans);
+            contactIndexBuild = new ContactIndexBuild(day, year, world, registryGeneration, membershipRevision, scans);
         }
 
         int remaining = Math.max(1, Math.min(8192, characterBudget));
@@ -126,24 +134,24 @@ public final class NpcSocialSimulation {
         // Membership may change while a large index is being built. Never publish a partial
         // view that silently omits newly appended Characters or refers to replaced partitions.
         if (build.registryGeneration != PeopleMod.populationRegistryGeneration()
+                || build.membershipRevision != CharacterRegistry.globalMembershipRevision()
                 || build.scans.stream().anyMatch(scan ->
-                        scan.registry.membershipGeneration() != scan.membershipGeneration)) {
+                        scan.registry.membershipGeneration() != scan.membershipGeneration
+                                || scan.registry.size() != scan.limit)) {
             contactIndexBuild = null;
             return false;
         }
 
         Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
         build.groups.forEach((registry, byBand) -> {
-            Map<String, List<Character>> groups = new TreeMap<>();
+            NavigableMap<String, List<Character>> groups = new TreeMap<>();
             // CharacterRegistry.all() preserves deterministic insertion order; retain it
             // directly instead of sorting potentially million-member bands in one tick.
             byBand.forEach((band, members) -> groups.put(band, List.copyOf(members)));
-            frozen.put(registry, Collections.unmodifiableMap(groups));
+            frozen.put(registry, Collections.unmodifiableNavigableMap(groups));
         });
         contactsByRegistry = Collections.unmodifiableMap(frozen);
-        Map<CharacterRegistry, Long> membership = new IdentityHashMap<>();
-        for (RegistryScan scan : build.scans) membership.put(scan.registry, scan.membershipGeneration);
-        contactIndexMembership = Collections.unmodifiableMap(membership);
+        contactIndexMembershipRevision = build.membershipRevision;
         contactIndexRegistryGeneration = build.registryGeneration;
         contactIndexWorld = world;
         contactIndexDay = day;
@@ -152,138 +160,166 @@ public final class NpcSocialSimulation {
         return true;
     }
 
-    private static boolean contactIndexMembershipCurrent() {
-        for (Map.Entry<CharacterRegistry, Long> entry : contactIndexMembership.entrySet())
-            if (entry.getKey().membershipGeneration() != entry.getValue()) return false;
-        return true;
-    }
-
     private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day, int year) {
         String world = String.valueOf(WorldForgeMod.worldId());
         return contactIndexDay == day && contactIndexYear == year && contactIndexWorld.equals(world)
                 && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
-                && contactIndexMembershipCurrent() ? contactsByRegistry : null;
+                && contactIndexMembershipRevision == CharacterRegistry.globalMembershipRevision()
+                ? contactsByRegistry : null;
     }
 
     public static int advance(Relations relations, int day, int year) {
         if (relations == null || !PeopleMod.identityPartitionsReady()) return 0;
-        Map<String, CharacterRegistry> registries = new TreeMap<>();
-        Set<String> mapIds = new TreeSet<>();
-        for (CharacterIdentity identity : PeopleMod.authority().identities()) {
-            if (!"__players__".equals(identity.mapId())) mapIds.add(identity.mapId());
-        }
-        for (String mapId : mapIds) {
-            CharacterRegistry registry = PeopleMod.authority().registry(mapId);
-            if (registry != null) registries.put(mapId, registry);
-        }
         Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day, year);
         if (indexedGroups == null) return 0; // Index construction is advanced incrementally by RelationsMod.
+
+        List<CharacterRegistry> registries = PeopleMod.populationRegistriesSnapshot();
+        int registryCount = registries.size();
+        if (registryCount > 0 && registries.get(registryCount - 1) == PeopleMod.playerRegistry())
+            registryCount--;
+        if (registryCount <= 0) return 0;
+
         long seed = WorldForgeMod.worldId() == null ? 0L : WorldForgeMod.worldId().toString().hashCode();
-        int interactions = 0;
-        // Family trees are stable during this daily pass; cache ancestry to avoid repeated traversal.
-        Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
         String cursorWorld = String.valueOf(WorldForgeMod.worldId());
+        long registryGeneration = PeopleMod.populationRegistryGeneration();
         synchronized (GROUP_CURSORS) {
-            if (!cursorWorld.equals(groupCursorWorld)) {
+            if (!cursorWorld.equals(groupCursorWorld)
+                    || groupCursorRegistryGeneration != registryGeneration) {
                 GROUP_CURSORS.clear();
                 groupCursorWorld = cursorWorld;
+                groupCursorRegistryGeneration = registryGeneration;
+                partitionCursor = 0;
             }
         }
-        for (Map.Entry<String, CharacterRegistry> partition : registries.entrySet()) {
-            CharacterRegistry registry = partition.getValue();
-            Map<String, List<Character>> groups = indexedGroups.getOrDefault(registry, Map.of());
-            List<Character> adults = new ArrayList<>();
-            // Rotate a bounded window per partition. A fixed first-N cutoff starved
-            // every later group indefinitely in large worlds.
-            List<Map.Entry<String, List<Character>>> orderedGroups = new ArrayList<>(groups.entrySet());
-            if (!orderedGroups.isEmpty()) {
-                String cursorKey = cursorWorld + "|" + partition.getKey();
-                int visitCount = Math.min(MAX_GROUPS_PER_DAY, orderedGroups.size());
-                int start;
-                synchronized (GROUP_CURSORS) {
-                    start = Math.floorMod(GROUP_CURSORS.getOrDefault(cursorKey, 0), orderedGroups.size());
-                    // Slide by one group: advancing by the full window can cycle over
-                    // only a subset whenever group count and window size share a divisor.
-                    GROUP_CURSORS.put(cursorKey, (start + 1) % orderedGroups.size());
-                }
-                for (int groupOffset = 0; groupOffset < visitCount; groupOffset++) {
-                    Map.Entry<String, List<Character>> group =
-                            orderedGroups.get((start + groupOffset) % orderedGroups.size());
-                    List<Character> members = group.getValue();
-                    // Cross-band travel uses a deterministic rotating sample, not a copy of
-                    // every resident in each selected group. This keeps travel work bounded
-                    // even when one social band contains hundreds of thousands of adults.
-                    int travelSamples = Math.min(TRAVEL_SAMPLES_PER_GROUP_PER_DAY, members.size());
-                    if (travelSamples > 0) {
-                        long sampleHash = mix(seed ^ group.getKey().hashCode()
-                                ^ ((long) day * 0x9E3779B97F4A7C15L));
-                        int sampleStart = Math.floorMod((int) sampleHash, members.size());
-                        for (int sample = 0; sample < travelSamples; sample++)
-                            adults.add(members.get((sampleStart + sample) % members.size()));
-                    }
-                    if (members.size() < 2) continue;
-                for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
-                    // Keep a small set of neighbours interacting regularly for a quarter-year,
-                    // then rotate the pairs so the whole settlement gradually builds social ties.
-                    long interactionEpoch = Math.floorDiv(day, 90);
-                    long hash = mix(seed ^ (interactionEpoch * 0xD6E8FEB86659FD93L)
-                            ^ group.getKey().hashCode() ^ slot * 0x9E3779B97F4A7C15L);
-                    int first = Math.floorMod((int) hash, members.size());
-                    int second = Math.floorMod((int) (hash >>> 32), members.size() - 1);
-                    if (second >= first) second++;
-                    Character a = members.get(first), b = members.get(second);
-                    // Prefer a biologically compatible adult pair when one exists in the same
-                    // social band. The starting candidate remains deterministic; this avoids
-                    // starving marriage simulation merely because random slots keep pairing
-                    // same-gender neighbours in a small settlement.
-                    if (a.gender.equals(b.gender)) {
-                        for (int candidateOffset = 1;
-                             candidateOffset < Math.min(members.size(), MAX_COMPATIBLE_PARTNER_PROBES);
-                             candidateOffset++) {
-                            Character candidate = members.get((second + candidateOffset) % members.size());
-                            if (!candidate.gender.equals(a.gender) && candidate.alive
-                                    && year - candidate.birthYear >= 18) {
-                                b = candidate;
-                                break;
-                            }
-                        }
-                    }
-                    if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
-                    interact(relations, registry, a, b, group.getKey(), members, day, year, ancestryCache);
-                    interactions++;
-                    }
-                }
-            }
 
-            // Traders and diplomatic envoys can establish ties beyond their home settlement.
-            // Keep this bounded and deterministic; ordinary residents never receive this bypass.
-            // The travel sample inherits deterministic group-key and registry insertion order.
-            Map<String, List<Character>> adultsByBand = new TreeMap<>();
-            for (Character adult : adults) {
-                String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
-                adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
-            }
-            List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
-            if (travelBands.size() > 1) {
-                long travelEpoch = Math.floorDiv(day, 30);
-                for (Character traveler : adults) {
-                    if (!traveler.alive || !hasTravelRole(traveler)) continue;
-                    String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
-                    long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
-                    int startBand = Math.floorMod((int) travelHash, travelBands.size());
-                    String targetBand = travelBands.get(startBand);
-                    if (targetBand.equals(homeBand)) targetBand = travelBands.get((startBand + 1) % travelBands.size());
-                    List<Character> candidates = adultsByBand.get(targetBand);
-                    if (candidates == null || candidates.isEmpty()) continue;
-                    Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
-                    if (candidate == traveler || !candidate.alive) continue;
-                    interact(relations, registry, traveler, candidate,
-                            "travel:" + homeBand + ":" + targetBand, adults, day, year, ancestryCache);
-                    interactions++;
+        int visitCount = Math.min(MAX_GROUPS_PER_DAY, registryCount);
+        int start = Math.floorMod(partitionCursor, registryCount);
+        int baseShare = MAX_GROUPS_PER_DAY / visitCount;
+        int extraShare = MAX_GROUPS_PER_DAY % visitCount;
+        int interactions = 0;
+        Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
+        List<Character> travelCandidates =
+                new ArrayList<>(MAX_GROUPS_PER_DAY * TRAVEL_SAMPLES_PER_GROUP_PER_DAY);
+        Map<Character, CharacterRegistry> travelOwners = new IdentityHashMap<>();
+
+        for (int offset = 0; offset < visitCount; offset++) {
+            CharacterRegistry registry = registries.get((start + offset) % registryCount);
+            Map<String, List<Character>> rawGroups = indexedGroups.getOrDefault(registry, Map.of());
+            if (!(rawGroups instanceof NavigableMap<?, ?>)) continue;
+            @SuppressWarnings("unchecked")
+            NavigableMap<String, List<Character>> groups =
+                    (NavigableMap<String, List<Character>>) rawGroups;
+            if (groups.isEmpty()) continue;
+
+            int share = baseShare + (offset < extraShare ? 1 : 0);
+            int groupLimit = Math.min(share, groups.size());
+            String lastGroup;
+            synchronized (GROUP_CURSORS) { lastGroup = GROUP_CURSORS.get(registry); }
+            for (int groupOffset = 0; groupOffset < groupLimit; groupOffset++) {
+                Map.Entry<String, List<Character>> group =
+                        lastGroup == null ? groups.firstEntry() : groups.higherEntry(lastGroup);
+                if (group == null) group = groups.firstEntry();
+                if (group == null) break;
+                lastGroup = group.getKey();
+                List<Character> members = group.getValue();
+
+                int travelSamples = Math.min(TRAVEL_SAMPLES_PER_GROUP_PER_DAY, members.size());
+                if (travelSamples > 0) {
+                    long sampleHash = mix(seed ^ group.getKey().hashCode()
+                            ^ ((long) day * 0x9E3779B97F4A7C15L));
+                    int sampleStart = Math.floorMod((int) sampleHash, members.size());
+                    for (int sample = 0; sample < travelSamples; sample++) {
+                        Character sampled = members.get((sampleStart + sample) % members.size());
+                        travelCandidates.add(sampled);
+                        travelOwners.put(sampled, registry);
+                    }
                 }
+                interactions += processSocialGroup(relations, registry, group.getKey(), members,
+                        day, year, seed, ancestryCache);
+            }
+            synchronized (GROUP_CURSORS) { GROUP_CURSORS.put(registry, lastGroup); }
+        }
+
+        // The partition window advances by a coprime stride: no registry is permanently
+        // excluded when partition count and the 256-group budget share a divisor.
+        partitionCursor = registryCount <= MAX_GROUPS_PER_DAY
+                ? 0 : (start + rotationStride(visitCount, registryCount)) % registryCount;
+
+        // Cross-band travel sees only the bounded sample (at most 1024 residents), never a
+        // full population copy. The same global group budget therefore bounds both phases.
+        Map<String, List<Character>> adultsByBand = new TreeMap<>();
+        for (Character adult : travelCandidates) {
+            String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
+            adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
+        }
+        List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
+        if (travelBands.size() > 1) {
+            long travelEpoch = Math.floorDiv(day, 30);
+            for (Character traveler : travelCandidates) {
+                if (!traveler.alive || !hasTravelRole(traveler)) continue;
+                String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
+                long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
+                int startBand = Math.floorMod((int) travelHash, travelBands.size());
+                String targetBand = travelBands.get(startBand);
+                if (targetBand.equals(homeBand))
+                    targetBand = travelBands.get((startBand + 1) % travelBands.size());
+                List<Character> candidates = adultsByBand.get(targetBand);
+                if (candidates == null || candidates.isEmpty()) continue;
+                Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
+                if (candidate == traveler || !candidate.alive) continue;
+                CharacterRegistry registry = travelOwners.get(traveler);
+                if (registry == null) continue;
+                interact(relations, registry, traveler, candidate,
+                        "travel:" + homeBand + ":" + targetBand, travelCandidates,
+                        day, year, ancestryCache);
+                interactions++;
             }
         }
         return interactions;
+    }
+
+    private static int processSocialGroup(Relations relations, CharacterRegistry registry, String groupId,
+                                          List<Character> members, int day, int year, long seed,
+                                          Map<String, Map<String, Integer>> ancestryCache) {
+        if (members.size() < 2) return 0;
+        int interactions = 0;
+        long interactionEpoch = Math.floorDiv(day, 90);
+        for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
+            long hash = mix(seed ^ (interactionEpoch * 0xD6E8FEB86659FD93L)
+                    ^ groupId.hashCode() ^ slot * 0x9E3779B97F4A7C15L);
+            int first = Math.floorMod((int) hash, members.size());
+            int second = Math.floorMod((int) (hash >>> 32), members.size() - 1);
+            if (second >= first) second++;
+            Character a = members.get(first), b = members.get(second);
+            if (a.gender.equals(b.gender)) {
+                for (int candidateOffset = 1;
+                     candidateOffset < Math.min(members.size(), MAX_COMPATIBLE_PARTNER_PROBES);
+                     candidateOffset++) {
+                    Character candidate = members.get((second + candidateOffset) % members.size());
+                    if (!candidate.gender.equals(a.gender) && candidate.alive
+                            && year - candidate.birthYear >= 18) {
+                        b = candidate;
+                        break;
+                    }
+                }
+            }
+            if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
+            interact(relations, registry, a, b, groupId, members, day, year, ancestryCache);
+            interactions++;
+        }
+        return interactions;
+    }
+
+    private static int rotationStride(int minimum, int size) {
+        if (size <= 1) return 1;
+        int stride = Math.max(1, Math.min(minimum, size - 1));
+        while (stride < size && gcd(stride, size) != 1) stride++;
+        return stride < size ? stride : 1;
+    }
+
+    private static int gcd(int a, int b) {
+        while (b != 0) { int next = a % b; a = b; b = next; }
+        return Math.abs(a);
     }
 
     private static boolean hasDiplomaticRole(Character person) {

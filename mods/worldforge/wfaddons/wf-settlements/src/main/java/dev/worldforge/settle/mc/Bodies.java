@@ -16,6 +16,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Тела рабочих: по одному WFWorker на Worker, пока рядом (64 блока) есть игрок; когда игроки ушли (80 блоков) - тела убираются. */
 public final class Bodies {
@@ -23,12 +24,45 @@ public final class Bodies {
 
     public static final double SPAWN = SimulationLod.WORKER_SPAWN_RADIUS, DESPAWN = SimulationLod.WORKER_RETAIN_RADIUS;
     /** "поселение#рабочий" -> UUID живого тела. Тело, которого здесь нет, само исчезает (см. WFWorker.tick). */
-    public static final Map<String, UUID> LIVE = new HashMap<>();
+    public static final Map<String, UUID> LIVE = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> LIVE_BODY_COUNTS = new HashMap<>();
+    private static final int LIVE_RECONCILE_BUDGET_PER_PASS = 512;
+    /** Weakly-consistent iterator survives map mutations between bounded server passes. */
+    private static Iterator<Map.Entry<String, UUID>> liveReconciliationCursor;
     /** Per-colony worker scan cursor; avoids rescanning the same leading workers every pass. */
     private static final Map<String, Integer> WORKER_SCAN_CURSORS = new HashMap<>();
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
-    static void clearRuntimeIndexes() { WORKER_SCAN_CURSORS.clear(); }
+    static void clearRuntimeIndexes() {
+        WORKER_SCAN_CURSORS.clear();
+        clearLive();
+    }
+
+    static void clearLive() {
+        LIVE.clear();
+        LIVE_BODY_COUNTS.clear();
+        liveReconciliationCursor = null;
+    }
+
+    private static String colonyIdFromLiveKey(String liveKey) {
+        if (liveKey == null) return null;
+        int separator = liveKey.lastIndexOf('#');
+        return separator <= 0 ? null : liveKey.substring(0, separator);
+    }
+
+    private static void trackLive(String liveKey, UUID uuid) {
+        UUID previous = LIVE.put(liveKey, uuid);
+        if (previous == null) {
+            String colonyId = colonyIdFromLiveKey(liveKey);
+            if (colonyId != null) LIVE_BODY_COUNTS.merge(colonyId, 1, Integer::sum);
+        }
+    }
+
+    private static void untrackLive(String liveKey, UUID uuid) {
+        if (!LIVE.remove(liveKey, uuid)) return;
+        String colonyId = colonyIdFromLiveKey(liveKey);
+        if (colonyId != null) decrement(LIVE_BODY_COUNTS, colonyId);
+    }
     static void forgetColony(String colonyId) {
         if (colonyId != null) WORKER_SCAN_CURSORS.remove(colonyId);
     }
@@ -72,21 +106,26 @@ public final class Bodies {
                 nearbyById.put(colony.s.id, colony);
         }
 
-        // Reconcile already materialized entities without scanning every colony.
-        Map<String, Integer> bodyCounts = new HashMap<>();
-        Iterator<Map.Entry<String, UUID>> live = LIVE.entrySet().iterator();
-        while (live.hasNext()) {
-            Map.Entry<String, UUID> entry = live.next();
+        // Reconcile a bounded slice of materialized entities. ConcurrentHashMap's
+        // weakly-consistent iterator remains valid while workers spawn/despawn between passes.
+        if (liveReconciliationCursor == null) liveReconciliationCursor = LIVE.entrySet().iterator();
+        int reconciled = 0;
+        while (reconciled < LIVE_RECONCILE_BUDGET_PER_PASS && liveReconciliationCursor.hasNext()) {
+            Map.Entry<String, UUID> entry = liveReconciliationCursor.next();
+            reconciled++;
             String liveKey = entry.getKey();
+            UUID trackedUuid = entry.getValue();
+            if (!trackedUuid.equals(LIVE.get(liveKey))) continue;
+
             int separator = liveKey.lastIndexOf('#');
             if (separator <= 0 || separator == liveKey.length() - 1) {
-                live.remove();
+                untrackLive(liveKey, trackedUuid);
                 continue;
             }
             String colonyId = liveKey.substring(0, separator);
             Colony colony = SettleMod.COLONIES.get(colonyId);
             if (colony == null || colony.s == null) {
-                live.remove();
+                untrackLive(liveKey, trackedUuid);
                 continue;
             }
 
@@ -103,23 +142,23 @@ public final class Bodies {
                 workerId = -1;
             }
             boolean workerExists = workerId >= 0 && colony.s.worker(workerId) != null;
-            Entity body = colonyLevel.getEntity(entry.getValue());
+            Entity body = colonyLevel.getEntity(trackedUuid);
 
             if (!retained || !workerExists || (body != null && !body.isAlive())) {
                 if (body != null) {
                     body.discard();
                     dev.worldforge.mod.MaqanPerformanceTelemetry.workerDespawned();
                 }
-                live.remove();
+                untrackLive(liveKey, trackedUuid);
                 continue;
             }
-            if (body != null && body.isAlive()) bodyCounts.merge(colonyId, 1, Integer::sum);
-            else {
-                // Keep the UUID only while the chunk/entity is temporarily unavailable.
-                // A loaded colony with a missing body can be safely rematerialized below.
-                live.remove();
+            if (body == null) {
+                // Worker bodies are intentionally ephemeral and are rematerialized when the
+                // relevant loaded neighborhood is active again.
+                untrackLive(liveKey, trackedUuid);
             }
         }
+        if (!liveReconciliationCursor.hasNext()) liveReconciliationCursor = null;
 
         int spawned = 0;
         int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
@@ -143,7 +182,7 @@ public final class Bodies {
                 WORKER_SCAN_CURSORS.remove(colonyId);
                 continue;
             }
-            int colonyBodyCount = bodyCounts.getOrDefault(colonyId, 0);
+            int colonyBodyCount = LIVE_BODY_COUNTS.getOrDefault(colonyId, 0);
             if (colonyBodyCount >= colonyBodyLimit) continue;
 
             int inspect = Math.min(Math.min(workerCount, perColonyScan), scanBudget);
@@ -160,7 +199,7 @@ public final class Bodies {
                 if (body != null && body.isAlive()) continue;
 
                 if (hasLoadedVanillaVillagerBody(worker, level)) {
-                    if (trackedUuid != null) LIVE.remove(liveKey, trackedUuid);
+                    if (trackedUuid != null) untrackLive(liveKey, trackedUuid);
                     continue;
                 }
 
@@ -176,10 +215,9 @@ public final class Bodies {
                 entity.refreshName();
 
                 if (level.addFreshEntity(entity)) {
-                    LIVE.put(liveKey, entity.getUUID());
+                    trackLive(liveKey, entity.getUUID());
                     dev.worldforge.mod.MaqanPerformanceTelemetry.workerSpawned();
                     spawned++;
-                    bodyCounts.merge(colonyId, 1, Integer::sum);
                     colonyBodyCount++;
                 }
             }
