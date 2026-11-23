@@ -127,7 +127,10 @@ public class SettleMod {
     private static volatile TradeViews cachedTradeViews = new TradeViews(Map.of(), Map.of());
     private static volatile long tradeViewsRevision = Long.MIN_VALUE;
 
-    private static void markColonyRegistryChanged() { colonyRegistryRevision++; }
+    private static void markColonyRegistryChanged() {
+        colonyRegistryRevision++;
+        ColonyInterestIndex.invalidate();
+    }
 
     /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
     private static TradeViews tradeViews() {
