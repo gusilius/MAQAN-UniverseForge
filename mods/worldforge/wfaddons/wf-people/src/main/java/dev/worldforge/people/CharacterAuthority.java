@@ -99,8 +99,8 @@ public final class CharacterAuthority {
         if (mapId == null || currentWorld == null) return;
         CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, character.id, character.globalId);
         CharacterIdentity existingGlobal = byGlobalId.putIfAbsent(character.globalId, identity);
-        if (existingGlobal != null && !existingGlobal.equals(identity))
-            throw new IllegalStateException("Global Character UUID collision " + character.globalId
+        if (existingGlobal != null)
+            throw new IllegalStateException("Duplicate global Character UUID " + character.globalId
                     + " between " + existingGlobal.mapId() + "/" + existingGlobal.characterId()
                     + " and " + mapId + "/" + character.id);
         byLegacyId.computeIfAbsent(character.id, ignored -> new LinkedHashSet<>()).add(identity);
@@ -148,7 +148,7 @@ public final class CharacterAuthority {
     synchronized void familyChanged(Character person) {
         if (person == null) return;
         CharacterIdentity identity = byGlobalId.get(person.globalId);
-        if (identity == null || !identity.equals(byGlobalId.get(identity.globalCharacterId()))) return;
+        if (identity == null) return;
         addFamilyIndex(familyByParentLegacy, person.father, identity);
         addFamilyIndex(familyByParentLegacy, person.mother, identity);
         addFamilyIndex(familyByParentGlobal, familyId(person, "family.father_global_id"), identity);
@@ -212,7 +212,6 @@ public final class CharacterAuthority {
                 CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
                 if (collision != null && !collision.equals(identity))
                     throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
-
                 byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
