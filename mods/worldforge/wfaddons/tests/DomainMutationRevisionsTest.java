@@ -25,6 +25,13 @@ public final class DomainMutationRevisionsTest {
         check(revisions.isCurrent(initial), "aborted write scope does not advance committed revisions");
 
         var characterOnly = revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).orElseThrow();
+        try (var social = revisions.begin(DomainMutationRevisions.Domain.CHARACTER_SOCIAL)) {
+            social.commit();
+        }
+        check(revisions.isCurrent(characterOnly, DomainMutationRevisions.Domain.CHARACTERS),
+                "social-only mutation does not stale a population/Character-only snapshot");
+        check(!revisions.isCurrent(characterOnly),
+                "global snapshot freshness still observes social mutations");
         try (var unrelated = revisions.begin(DomainMutationRevisions.Domain.SETTLEMENTS)) {
             check(revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).isPresent(),
                     "Character snapshot is not blocked by an unrelated Settlement writer");
