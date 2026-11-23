@@ -122,8 +122,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 16 * 1024 * 1024) {
         None => error_json("invalid_input", "population input unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected population schema_version=1"),
+        // Population::advance validates schema_version after the typed decode. Avoid
+        // parsing the entire large population payload into serde_json::Value first.
         Some(bytes) => match serde_json::from_slice::<crate::population::Request>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected population schema_version=1"),
             Ok(request) => match crate::population::advance(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "population frame")),
                 Err(error) => error_json("population_rejected", &error),
@@ -140,8 +143,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army combat snapshot unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army combat schema_version=1"),
+        // CombatRequest::simulate performs the same schema gate on the typed request.
+        // Decode once instead of materializing a generic JSON tree before the real decode.
         Some(bytes) => match serde_json::from_slice::<crate::army::CombatRequest>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected army combat schema_version=1"),
             Ok(request) => match crate::army::simulate(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "army combat frame")),
                 Err(error) => error_json("army_combat_rejected", &error),
@@ -158,8 +164,10 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army combat batch unavailable or exceeds 8 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army combat batch schema_version=1"),
+        // CombatBatchRequest::simulate_batch validates the typed schema itself.
         Some(bytes) => match serde_json::from_slice::<crate::army::CombatBatchRequest>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected army combat batch schema_version=1"),
             Ok(request) => match crate::army::simulate_batch(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "army combat batch frame")),
                 Err(error) => error_json("army_combat_batch_rejected", &error),
