@@ -207,9 +207,9 @@ public final class CharacterRecordStore implements AutoCloseable {
     }
 
     private static void forceDirectory(Path directory) throws IOException {
-        // Directory fsync is supported on the target Linux/Windows filesystems used by
-        // the server; if a provider rejects opening directories, the forced record file
-        // and atomic replacement still preserve the record's own integrity.
+        // Windows does not expose directory handles through FileChannel on all supported
+        // providers. The record itself is already force(true)'d before its atomic rename.
+        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) return;
         try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
             channel.force(true);
         } catch (UnsupportedOperationException ignored) {
