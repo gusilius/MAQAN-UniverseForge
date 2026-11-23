@@ -15,12 +15,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: maqan-contour-03-social-\${{ github.ref }}
+  group: maqan-contour-03-social-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   contour-03-social-ladder:
-    name: "Contour 03 — isolated social life \${{ matrix.label }}"
+    name: "Contour 03 — isolated social life ${{ matrix.label }}"
     runs-on: windows-latest
     timeout-minutes: 360
     strategy:
@@ -78,8 +78,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: contour-03-social-ladder-\${{ github.run_id }}
-          path: \${{ runner.temp }}/maqan-contour-03-social-*
+          name: contour-03-social-ladder-${{ github.run_id }}
+          path: ${{ runner.temp }}/maqan-contour-03-social-*
           if-no-files-found: warn
           retention-days: 14
 
@@ -87,7 +87,7 @@ jobs:
         if: always()
         shell: pwsh
         env:
-          LADDER_OUTCOME: \${{ steps.social_ladder.outcome }}
+          LADDER_OUTCOME: ${{ steps.social_ladder.outcome }}
         run: |
           "CONTOUR_03_SOCIAL_LADDER_OUTCOME=$env:LADDER_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:LADDER_OUTCOME -ne "success") {
