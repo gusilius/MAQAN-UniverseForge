@@ -40,30 +40,36 @@ public final class NpcSocialSimulation {
         final CharacterRegistry registry;
         final List<Character> people;
         final int limit;
+        final long membershipGeneration;
         int cursor;
 
         RegistryScan(CharacterRegistry registry) {
             this.registry = registry;
             this.people = registry.all();
             this.limit = people.size();
+            this.membershipGeneration = registry.membershipGeneration();
         }
     }
 
     private static final class ContactIndexBuild {
         final long day;
         final String world;
+        final long registryGeneration;
         final List<RegistryScan> scans;
         final Map<CharacterRegistry, Map<String, List<Character>>> groups = new IdentityHashMap<>();
         int scanIndex;
 
-        ContactIndexBuild(long day, String world, List<RegistryScan> scans) {
+        ContactIndexBuild(long day, String world, long registryGeneration, List<RegistryScan> scans) {
             this.day = day;
             this.world = world;
+            this.registryGeneration = registryGeneration;
             this.scans = scans;
         }
     }
 
     private static ContactIndexBuild contactIndexBuild;
+    private static volatile long contactIndexRegistryGeneration = Long.MIN_VALUE;
+    private static volatile Map<CharacterRegistry, Long> contactIndexMembership = Map.of();
 
     /**
      * Incrementally prepares the daily social index. CharacterRegistry.all() is an append-only
@@ -72,11 +78,15 @@ public final class NpcSocialSimulation {
      */
     public static synchronized boolean prepareContactIndex(long day, int characterBudget) {
         String world = String.valueOf(WorldForgeMod.worldId());
-        if (contactIndexDay == day && contactIndexWorld.equals(world)) return true;
+        if (contactIndexDay == day && contactIndexWorld.equals(world)
+                && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
+                && contactIndexMembershipCurrent()) return true;
         if (!PeopleMod.identityPartitionsReady()) return false;
 
+        long registryGeneration = PeopleMod.populationRegistryGeneration();
         if (contactIndexBuild == null || contactIndexBuild.day != day
-                || !contactIndexBuild.world.equals(world)) {
+                || !contactIndexBuild.world.equals(world)
+                || contactIndexBuild.registryGeneration != registryGeneration) {
             Set<String> ids = new TreeSet<>();
             for (CharacterIdentity identity : PeopleMod.authority().identities())
                 if (!"__players__".equals(identity.mapId())) ids.add(identity.mapId());
@@ -85,7 +95,7 @@ public final class NpcSocialSimulation {
                 CharacterRegistry registry = PeopleMod.authority().registry(id);
                 if (registry != null) scans.add(new RegistryScan(registry));
             }
-            contactIndexBuild = new ContactIndexBuild(day, world, scans);
+            contactIndexBuild = new ContactIndexBuild(day, world, registryGeneration, scans);
         }
 
         int remaining = Math.max(1, Math.min(8192, characterBudget));
@@ -107,6 +117,14 @@ public final class NpcSocialSimulation {
         }
 
         if (build.scanIndex < build.scans.size()) return false;
+        // Membership may change while a large index is being built. Never publish a partial
+        // view that silently omits newly appended Characters or refers to replaced partitions.
+        if (build.registryGeneration != PeopleMod.populationRegistryGeneration()
+                || build.scans.stream().anyMatch(scan ->
+                        scan.registry.membershipGeneration() != scan.membershipGeneration)) {
+            contactIndexBuild = null;
+            return false;
+        }
 
         Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
         build.groups.forEach((registry, byBand) -> {
@@ -118,15 +136,27 @@ public final class NpcSocialSimulation {
             frozen.put(registry, Collections.unmodifiableMap(groups));
         });
         contactsByRegistry = Collections.unmodifiableMap(frozen);
+        Map<CharacterRegistry, Long> membership = new IdentityHashMap<>();
+        for (RegistryScan scan : build.scans) membership.put(scan.registry, scan.membershipGeneration);
+        contactIndexMembership = Collections.unmodifiableMap(membership);
+        contactIndexRegistryGeneration = build.registryGeneration;
         contactIndexWorld = world;
         contactIndexDay = day;
         contactIndexBuild = null;
         return true;
     }
 
+    private static boolean contactIndexMembershipCurrent() {
+        for (Map.Entry<CharacterRegistry, Long> entry : contactIndexMembership.entrySet())
+            if (entry.getKey().membershipGeneration() != entry.getValue()) return false;
+        return true;
+    }
+
     private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day) {
         String world = String.valueOf(WorldForgeMod.worldId());
-        return contactIndexDay == day && contactIndexWorld.equals(world) ? contactsByRegistry : null;
+        return contactIndexDay == day && contactIndexWorld.equals(world)
+                && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
+                && contactIndexMembershipCurrent() ? contactsByRegistry : null;
     }
 
     public static int advance(Relations relations, int day, int year) {
