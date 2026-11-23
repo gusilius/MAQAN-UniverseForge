@@ -147,7 +147,9 @@ public final class NpcSocialSimulation {
             NavigableMap<String, List<Character>> groups = new TreeMap<>();
             // CharacterRegistry.all() preserves deterministic insertion order; retain it
             // directly instead of sorting potentially million-member bands in one tick.
-            byBand.forEach((band, members) -> groups.put(band, List.copyOf(members)));
+            // The builder is no longer mutated after publication. Wrap its lists without
+            // copying every Character again in one finalization tick.
+            byBand.forEach((band, members) -> groups.put(band, Collections.unmodifiableList(members)));
             frozen.put(registry, Collections.unmodifiableNavigableMap(groups));
         });
         contactsByRegistry = Collections.unmodifiableMap(frozen);
@@ -198,9 +200,7 @@ public final class NpcSocialSimulation {
         int extraShare = MAX_GROUPS_PER_DAY % visitCount;
         int interactions = 0;
         Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
-        List<Character> travelCandidates =
-                new ArrayList<>(MAX_GROUPS_PER_DAY * TRAVEL_SAMPLES_PER_GROUP_PER_DAY);
-        Map<Character, CharacterRegistry> travelOwners = new IdentityHashMap<>();
+        Map<CharacterRegistry, List<Character>> travelCandidates = new IdentityHashMap<>();
 
         for (int offset = 0; offset < visitCount; offset++) {
             CharacterRegistry registry = registries.get((start + offset) % registryCount);
@@ -228,11 +228,10 @@ public final class NpcSocialSimulation {
                     long sampleHash = mix(seed ^ group.getKey().hashCode()
                             ^ ((long) day * 0x9E3779B97F4A7C15L));
                     int sampleStart = Math.floorMod((int) sampleHash, members.size());
-                    for (int sample = 0; sample < travelSamples; sample++) {
-                        Character sampled = members.get((sampleStart + sample) % members.size());
-                        travelCandidates.add(sampled);
-                        travelOwners.put(sampled, registry);
-                    }
+                    List<Character> registryTravelCandidates =
+                            travelCandidates.computeIfAbsent(registry, ignored -> new ArrayList<>());
+                    for (int sample = 0; sample < travelSamples; sample++)
+                        registryTravelCandidates.add(members.get((sampleStart + sample) % members.size()));
                 }
                 interactions += processSocialGroup(relations, registry, group.getKey(), members,
                         day, year, seed, ancestryCache);
@@ -245,17 +244,20 @@ public final class NpcSocialSimulation {
         partitionCursor = registryCount <= MAX_GROUPS_PER_DAY
                 ? 0 : (start + rotationStride(visitCount, registryCount)) % registryCount;
 
-        // Cross-band travel sees only the bounded sample (at most 1024 residents), never a
-        // full population copy. The same global group budget therefore bounds both phases.
-        Map<String, List<Character>> adultsByBand = new TreeMap<>();
-        for (Character adult : travelCandidates) {
-            String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
-            adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
-        }
-        List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
-        if (travelBands.size() > 1) {
+        // Cross-band travel is evaluated independently inside each canonical registry:
+        // kinship checks and marriage writes must never cross registry ownership boundaries.
+        for (Map.Entry<CharacterRegistry, List<Character>> travelEntry : travelCandidates.entrySet()) {
+            CharacterRegistry registry = travelEntry.getKey();
+            List<Character> candidatesForRegistry = travelEntry.getValue();
+            Map<String, List<Character>> adultsByBand = new TreeMap<>();
+            for (Character adult : candidatesForRegistry) {
+                String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
+                adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
+            }
+            List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
+            if (travelBands.size() <= 1) continue;
             long travelEpoch = Math.floorDiv(day, 30);
-            for (Character traveler : travelCandidates) {
+            for (Character traveler : candidatesForRegistry) {
                 if (!traveler.alive || !hasTravelRole(traveler)) continue;
                 String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
                 long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
@@ -267,10 +269,8 @@ public final class NpcSocialSimulation {
                 if (candidates == null || candidates.isEmpty()) continue;
                 Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
                 if (candidate == traveler || !candidate.alive) continue;
-                CharacterRegistry registry = travelOwners.get(traveler);
-                if (registry == null) continue;
                 interact(relations, registry, traveler, candidate,
-                        "travel:" + homeBand + ":" + targetBand, travelCandidates,
+                        "travel:" + homeBand + ":" + targetBand, candidatesForRegistry,
                         day, year, ancestryCache);
                 interactions++;
             }
