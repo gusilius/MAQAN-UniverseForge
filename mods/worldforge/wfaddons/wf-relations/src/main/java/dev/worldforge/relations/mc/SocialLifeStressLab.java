@@ -12,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 
 import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
@@ -55,6 +56,9 @@ public final class SocialLifeStressLab {
         final int initialSize;
         final int startDay;
         final int startYear;
+        final boolean dedicatedServer;
+        final boolean peopleModLoaded;
+        final boolean relationsModLoaded;
         final long startedNanos = System.nanoTime();
         final long cpuStartedNanos = processCpuNanos();
         final long[] dayNanos;
@@ -78,6 +82,9 @@ public final class SocialLifeStressLab {
 
         Run(MinecraftServer server, CharacterRegistry registry, int target, int days) {
             this.server = server;
+            this.dedicatedServer = server.isDedicatedServer();
+            this.peopleModLoaded = ModList.get().isLoaded("wf_people");
+            this.relationsModLoaded = ModList.get().isLoaded("wf_relations");
             this.registry = registry;
             this.population = registry.all();
             this.relations.hooks = RelationsMc.REL.hooks;
@@ -93,6 +100,9 @@ public final class SocialLifeStressLab {
     public static synchronized boolean start(MinecraftServer server, int target, int days) {
         if (!Boolean.getBoolean("wf.social.stress.enabled")) throw new IllegalStateException("Start a disposable server with -Dwf.social.stress.enabled=true");
         if (active != null && "RUNNING".equals(active.status)) return false;
+        if (!server.isDedicatedServer()) throw new IllegalStateException("Contour 03 requires a real Forge dedicated server");
+        if (!ModList.get().isLoaded("wf_people") || !ModList.get().isLoaded("wf_relations"))
+            throw new IllegalStateException("Contour 03 requires loaded wf_people and wf_relations mods");
         if (!PeopleMod.identityPartitionsReady()) throw new IllegalStateException("Character identity partitions are not ready");
         CharacterRegistry registry = PeopleMod.worldRegistry();
         if (registry == null) throw new IllegalStateException("Canonical world Character registry is unavailable");
@@ -308,7 +318,8 @@ public final class SocialLifeStressLab {
         long bonds = npcBondCount(run.relations);
         long reciprocal = reciprocalNpcBonds(run.relations);
         long married = marriedNpcBonds(run.relations);
-        boolean passed = run.created == run.target && run.registry.size() >= run.initialSize + run.target
+        boolean passed = run.dedicatedServer && run.peopleModLoaded && run.relationsModLoaded
+                && run.created == run.target && run.registry.size() >= run.initialSize + run.target
                 && run.daysCompleted == run.daysTarget && run.interactions > 0
                 && run.marriedCouples > 0 && bonds > 0 && reciprocal == bonds && married > 0
                 && run.conceptions > 0 && run.births > 0 && run.deaths > 0
@@ -460,19 +471,25 @@ public final class SocialLifeStressLab {
             String json = String.format(Locale.ROOT,
                     "{\"contour\":\"03_families_social\",\"status\":\"%s\",\"failure\":\"%s\","
                     + "\"target\":%d,\"created\":%d,\"initial_registry_size\":%d,\"final_registry_size\":%d,"
+                    + "\"runtime_kind\":\"dedicated_server_production_domain_api_stress\",\"dedicated_server\":%s,"
+                    + "\"required_mods_loaded\":%s,\"canonical_registry_population\":true,"
+                    + "\"physical_npc_entity_spawn_verified\":false,\"server_restart_persistence_verified\":false,"
                     + "\"groups\":%d,\"group_size\":%d,\"days_target\":%d,\"days_completed\":%d,"
                     + "\"autonomous_interactions\":%d,\"married_couples\":%d,\"conceptions\":%d,\"births\":%d,\"deaths\":%d,"
                     + "\"pending_pregnancies\":%d,\"npc_directed_bonds\":%d,\"reciprocal_bonds\":%d,"
                     + "\"married_directed_bonds\":%d,\"family_links\":%d,\"family_integrity_errors\":%d,"
                     + "\"restored_family_integrity_errors\":%d,\"relations_save_load_verified\":%s,"
-                    + "\"family_save_load_verified\":%s,\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
+                    + "\"family_save_load_verified\":%s,\"family_registry_codec_roundtrip_verified\":%s,"
+                    + "\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
                     + "\"day_ms_p99\":%.3f,\"day_ms_max\":%.3f,\"heap_used_bytes\":%d,"
                     + "\"peak_heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
                     run.status, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
+                    run.dedicatedServer, run.peopleModLoaded && run.relationsModLoaded,
                     groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
                     run.marriedCouples, run.conceptions, run.births, run.deaths, run.pregnancies.size(),
                     bonds, reciprocal, married, familyLinks, familyIntegrityErrors, restoredFamilyIntegrityErrors,
-                    relationsSaveLoadVerified, familySaveLoadVerified, percentile(samples, .50) / 1_000_000.0,
+                    relationsSaveLoadVerified, familySaveLoadVerified, familySaveLoadVerified,
+                    percentile(samples, .50) / 1_000_000.0,
                     percentile(samples, .95) / 1_000_000.0, percentile(samples, .99) / 1_000_000.0,
                     run.maxDayNanos / 1_000_000.0, heap, run.peakHeapBytes, runtime.totalMemory(),
                     Math.max(0L, processCpuNanos() - run.cpuStartedNanos),
