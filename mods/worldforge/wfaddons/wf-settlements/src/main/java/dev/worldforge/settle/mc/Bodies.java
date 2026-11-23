@@ -60,8 +60,10 @@ public final class Bodies {
      * The global colony registry is never traversed by this hot path.
      */
     public static void tick(MinecraftServer server) {
-        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass();
-        if (spawnBudget <= 0 || server == null) return;
+        int spawnBudget = Math.max(0, dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass());
+        if (server == null) return;
+        // A zero spawn budget disables creation only. Existing bodies must still be reconciled
+        // and despawned when their colony leaves the retention radius or loses its worker.
 
         List<Colony> nearby = ColonyInterestIndex.nearby(server, DESPAWN);
         Map<String, Colony> nearbyById = new HashMap<>(Math.max(16, nearby.size() * 2));
