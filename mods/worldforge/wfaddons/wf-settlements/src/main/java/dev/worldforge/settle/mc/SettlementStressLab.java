@@ -299,7 +299,8 @@ public final class SettlementStressLab {
         MinecraftForge.EVENT_BUS.unregister(this);
         if (fakePlayer.isAddedToWorld()) {
             server.getPlayerList().getPlayers().remove(fakePlayer);
-            fakePlayer.discard();
+            fakePlayer.serverLevel().removePlayerImmediately(fakePlayer,
+                    net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
         }
         List<Double> sorted = new ArrayList<>(tickMillis);
         sorted.sort(Comparator.naturalOrder());
