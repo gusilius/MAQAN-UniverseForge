@@ -498,21 +498,26 @@ public class PeopleTest {
                  dev.worldforge.people.storage.CharacterWal wal =
                          new dev.worldforge.people.storage.CharacterWal(walPath, 4)) {
                 String checkpointPayload = journal.toJsonRecord(journalPerson);
+                journalPerson.props.put("persistence.recovery_probe", "snapshot-wins");
+                String currentSnapshot = journal.toJson();
                 journalPerson.props.put("persistence.recovery_probe", "wal-wins");
                 String latestPayload = journal.toJsonRecord(journalPerson);
                 records.put(journalPerson.globalId, checkpointPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 wal.append(journalPerson.globalId, latestPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
                 CharacterRegistry recovered = new CharacterRegistry();
-                recovered.fromJson(journalSave, "legacy-unscoped");
-                records.forEach(record -> recovered.applyJsonRecord(record.payloadUtf8(),
+                recovered.fromJson(currentSnapshot, "legacy-unscoped");
+                records.forEach(record -> recovered.applyJsonRecordIfAbsent(record.payloadUtf8(),
                         "legacy-unscoped", record.globalId()));
+                Character snapshotPerson = recovered.getByGlobalId(journalPerson.globalId);
+                boolean snapshotWinsOverStaleCheckpoint = snapshotPerson != null
+                        && "snapshot-wins".equals(snapshotPerson.props.get("persistence.recovery_probe"));
                 wal.replayEach(record -> recovered.applyJsonRecord(record.payloadUtf8(),
                         "legacy-unscoped", record.globalId()));
                 Character recoveredPerson = recovered.getByGlobalId(journalPerson.globalId);
-                ok(recoveredPerson != null
+                ok(snapshotWinsOverStaleCheckpoint && recoveredPerson != null
                                 && "wal-wins".equals(recoveredPerson.props.get("persistence.recovery_probe")),
-                        "addressable checkpoint loads before WAL replay and the newest durable WAL record wins after restart");
+                        "newer snapshot beats stale addressable checkpoint and later WAL replay wins after restart");
             }
         } finally {
             try (var paths = Files.walk(layeredPersistenceRoot)) {
