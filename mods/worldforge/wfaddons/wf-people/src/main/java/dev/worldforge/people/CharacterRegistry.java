@@ -829,35 +829,48 @@ public final class CharacterRegistry {
         if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
                 || !(root.get("character") instanceof Map<?, ?> rawCharacter))
             throw new IllegalArgumentException("Invalid incremental Character record");
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("format", "wf-people/3");
-        snapshot.put("schema_version", 3);
-        snapshot.put("next", root.get("next") instanceof Number n ? n : next);
-        snapshot.put("characters", List.of(rawCharacter));
-        CharacterRegistry decoded = new CharacterRegistry();
-        decoded.fromJson(Json.write(snapshot), identityNamespace);
-        Character restored = decoded.all().iterator().next();
-        Object restoredBindings = restored.props.get("population.entity_bindings");
-        if (restoredBindings instanceof Map<?, ?> bindings) for (Object uuid : bindings.values())
-            if (uuid instanceof String value) {
-                String owner = entityOwnerByUuid.get(value);
-                if (owner != null && !owner.equals(restored.id))
-                    throw new IllegalArgumentException("Minecraft Entity UUID " + value + " is already owned by Character " + owner);
-            }
+        Map<String, String> globalOwners = new HashMap<>();
+        Map<String, String> entityOwners = new HashMap<>();
+        Character restored = decodeCharacter(rawCharacter, identityNamespace, globalOwners, entityOwners);
+
         Character previous = byId.get(restored.id);
-        if (previous != null) removeEntityBindings(previous);
-        previous = byId.put(restored.id, restored);
+        Character globalOwner = byGlobalId.get(restored.globalId);
+        if (globalOwner != null && globalOwner != previous)
+            throw new IllegalArgumentException("Duplicate canonical global Character identity: " + restored.globalId);
+        for (String uuid : entityOwners.keySet()) {
+            String owner = entityOwnerByUuid.get(uuid);
+            if (owner != null && !owner.equals(restored.id))
+                throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                        + " is already owned by Character " + owner);
+        }
+
+        if (previous != null) {
+            removeEntityBindings(previous);
+            if (!previous.globalId.equals(restored.globalId)) {
+                byGlobalId.remove(previous.globalId, previous);
+                pendingBereavement.remove(previous.globalId);
+            }
+        }
+        byId.put(restored.id, restored);
+        byGlobalId.put(restored.globalId, restored);
         indexEntityBindings(restored);
         if (previous == null) ordered.add(restored);
         else {
             for (int index = 0; index < ordered.size(); index++) {
-                if (ordered.get(index) == previous) { ordered.set(index, restored); break; }
+                if (ordered.get(index) == previous) {
+                    ordered.set(index, restored);
+                    break;
+                }
             }
         }
         if (restored.id.matches("c[0-9]+")) {
             try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
             catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
         }
+        Object recipients = restored.props.get("death.bereavement.recipients");
+        if (!Boolean.TRUE.equals(restored.props.get("death.bereavement.completed"))
+                && recipients instanceof List<?> && !pendingBereavement.contains(restored.globalId))
+            pendingBereavement.addLast(restored.globalId);
         if (previous == null) markMembershipMutation();
         recordDomainMutation();
     }
@@ -886,6 +899,92 @@ public final class CharacterRegistry {
         }
         root.put("characters", list);
         return Json.write(root);
+    }
+
+    /**
+     * The single canonical record decoder shared by full snapshots and incremental WAL
+     * replay. Keeping one parser prevents the two persistence paths from drifting.
+     */
+    private static Character decodeCharacter(Map<?, ?> m, String identityNamespace,
+                                             Map<String, String> globalOwners,
+                                             Map<String, String> entityOwners) {
+        if (identityNamespace == null || identityNamespace.isBlank())
+            throw new IllegalArgumentException("identityNamespace is required");
+        String id = requiredString(m, "id");
+        String name = requiredString(m, "name");
+        if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
+        String globalId = optionalString(m, "global_id");
+        if (globalId.isBlank()) {
+            globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        } else {
+            try { globalId = java.util.UUID.fromString(globalId).toString(); }
+            catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex);
+            }
+        }
+        String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
+        if (previousGlobalOwner != null)
+            throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId
+                    + " (" + previousGlobalOwner + ", " + id + ")");
+        Character character = new Character(id, globalId, name);
+        character.house = optionalString(m, "house");
+        character.culture = optionalString(m, "culture");
+        character.gender = optionalString(m, "gender");
+        if (character.gender.isBlank()) character.gender = "m";
+        Object birth = m.get("birth");
+        if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
+        character.birthYear = birthNumber.intValue();
+        Object alive = m.get("alive");
+        if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
+        character.alive = (Boolean) alive;
+        character.father = optionalString(m, "father");
+        character.mother = optionalString(m, "mother");
+        character.spouse = optionalString(m, "spouse");
+
+        readStringList(m.get("children"), character.children, "children", id);
+        Object rawPosts = m.get("posts");
+        if (!(rawPosts instanceof List<?> posts)) throw new IllegalArgumentException("Повреждены должности персонажа " + id);
+        for (Object post : posts) {
+            if (!(post instanceof List<?> pair) || pair.size() != 2
+                    || !(pair.get(0) instanceof String role) || role.isBlank()
+                    || !(pair.get(1) instanceof String place) || place.isBlank())
+                throw new IllegalArgumentException("Повреждена должность персонажа " + id);
+            if (character.has(role, place)) throw new IllegalArgumentException("Повторная должность персонажа " + id);
+            character.posts.add(new Character.Post(role, place));
+        }
+        Object rawTraits = m.get("traits");
+        if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
+        Set<String> uniqueTraits = new HashSet<>();
+        for (Object trait : traits) {
+            if (!(trait instanceof String value) || value.isBlank() || !uniqueTraits.add(value))
+                throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
+            character.traits.add(value);
+        }
+        Object props = m.get("props");
+        if (props != null) {
+            if (!(props instanceof Map<?, ?> properties))
+                throw new IllegalArgumentException("Повреждены свойства персонажа " + id);
+            for (Map.Entry<?, ?> entry : properties.entrySet()) {
+                if (!(entry.getKey() instanceof String key))
+                    throw new IllegalArgumentException("Некорректный ключ свойства " + id);
+                character.props.put(key, entry.getValue());
+            }
+        }
+        Object bindingsRaw = character.props.get("population.entity_bindings");
+        if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
+            throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
+        if (bindingsRaw instanceof Map<?, ?> bindings) {
+            for (Object bindingValue : bindings.values()) {
+                if (!(bindingValue instanceof String uuid) || uuid.isBlank())
+                    throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
+                String previousOwner = entityOwners.putIfAbsent(uuid, id);
+                if (previousOwner != null && !previousOwner.equals(id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                            + " привязан к двум персонажам: " + previousOwner + " и " + id);
+            }
+        }
+        return character;
     }
 
     @SuppressWarnings("unchecked")
@@ -921,77 +1020,11 @@ public final class CharacterRegistry {
         int maxNumericId = 0;
         for (Object value : entries) {
             if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
-            String id = requiredString(m, "id");
-            String name = requiredString(m, "name");
-            if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
-            String globalId = optionalString(m, "global_id");
-            if (globalId.isBlank()) {
-                globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
-            } else {
-                try { globalId = java.util.UUID.fromString(globalId).toString(); }
-                catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex); }
-            }
-            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
-            if (previousGlobalOwner != null)
-                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId + " (" + previousGlobalOwner + ", " + id + ")");
-            Character c = new Character(id, globalId, name);
-            c.house = optionalString(m, "house");
-            c.culture = optionalString(m, "culture");
-            c.gender = optionalString(m, "gender");
-            if (c.gender.isBlank()) c.gender = "m";
-            Object birth = m.get("birth");
-            if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
-            c.birthYear = birthNumber.intValue();
-            Object alive = m.get("alive");
-            if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
-            c.alive = (Boolean) alive;
-            c.father = optionalString(m, "father");
-            c.mother = optionalString(m, "mother");
-            c.spouse = optionalString(m, "spouse");
-
-            readStringList(m.get("children"), c.children, "children", id);
-            Object rawPosts = m.get("posts");
-            if (!(rawPosts instanceof List<?> posts)) throw new IllegalArgumentException("Повреждены должности персонажа " + id);
-            for (Object post : posts) {
-                if (!(post instanceof List<?> pair) || pair.size() != 2
-                        || !(pair.get(0) instanceof String role) || role.isBlank()
-                        || !(pair.get(1) instanceof String place) || place.isBlank())
-                    throw new IllegalArgumentException("Повреждена должность персонажа " + id);
-                if (c.has(role, place)) throw new IllegalArgumentException("Повторная должность персонажа " + id);
-                c.posts.add(new Character.Post(role, place));
-            }
-            Object rawTraits = m.get("traits");
-            if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
-            Set<String> uniqueTraits = new HashSet<>();
-            for (Object trait : traits) {
-                if (!(trait instanceof String s) || s.isBlank() || !uniqueTraits.add(s))
-                    throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
-                c.traits.add(s);
-            }
-            Object props = m.get("props");
-            if (props != null) {
-                if (!(props instanceof Map<?, ?> p)) throw new IllegalArgumentException("Повреждены свойства персонажа " + id);
-                for (Map.Entry<?, ?> entry : p.entrySet()) {
-                    if (!(entry.getKey() instanceof String key)) throw new IllegalArgumentException("Некорректный ключ свойства " + id);
-                    c.props.put(key, entry.getValue());
-                }
-            }
-            Object bindingsRaw = c.props.get("population.entity_bindings");
-            if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
-                throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
-            if (bindingsRaw instanceof Map<?, ?> bindings) {
-                for (Object bindingValue : bindings.values()) {
-                    if (!(bindingValue instanceof String uuid) || uuid.isBlank())
-                        throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
-                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
-                    if (previousOwner != null && !previousOwner.equals(id))
-                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid + " привязан к двум персонажам: " + previousOwner + " и " + id);
-                }
-            }
-            if (loaded.putIfAbsent(id, c) != null) throw new IllegalArgumentException("Повторный ID персонажа: " + id);
-            if (id.matches("c[0-9]+")) {
-                try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(id.substring(1))); }
+            Character character = decodeCharacter(m, identityNamespace, globalOwners, entityOwners);
+            if (loaded.putIfAbsent(character.id, character) != null)
+                throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
+            if (character.id.matches("c[0-9]+")) {
+                try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(character.id.substring(1))); }
                 catch (NumberFormatException ignored) { /* non-allocatable legacy identifier */ }
             }
         }
