@@ -127,9 +127,19 @@ public class SettleMod {
     private static volatile TradeViews cachedTradeViews = new TradeViews(Map.of(), Map.of());
     private static volatile long tradeViewsRevision = Long.MIN_VALUE;
 
-    private static void markColonyRegistryChanged() {
+    private static void markColonyRegistryChanged(Colony colony) {
         colonyRegistryRevision++;
-        ColonyInterestIndex.invalidate();
+        ColonyInterestIndex.upsert(colony);
+    }
+
+    private static void markColonyRegistryRemoved(String colonyId) {
+        colonyRegistryRevision++;
+        ColonyInterestIndex.remove(colonyId);
+    }
+
+    private static void resetColonyRegistryIndex() {
+        colonyRegistryRevision++;
+        ColonyInterestIndex.clear();
     }
 
     /** Rebuilds the large trade lookup maps only when the canonical colony registry changes. */
@@ -933,7 +943,7 @@ public class SettleMod {
         c.genesisOperationId = genesisOperationId == null ? "" : genesisOperationId;
         c.captureTerrain(lv);
         COLONIES.put(id, c);
-        markColonyRegistryChanged();
+        markColonyRegistryChanged(c);
         return c;
     }
 
@@ -944,7 +954,7 @@ public class SettleMod {
         Colony colony = foundEmergentInMemory(server, dimension, id, name, x, z, operationId);
         if (existing == null && !saveDurably(server)) {
             COLONIES.remove(id, colony);
-            markColonyRegistryChanged();
+            markColonyRegistryRemoved(id);
             throw new IllegalStateException("Could not durably persist emergent settlement " + id);
         }
         return colony;
@@ -989,7 +999,7 @@ public class SettleMod {
         Colony colony = new Colony(settlement, dim, x, z);
         colony.genesisOperationId = operationId == null ? "" : operationId;
         COLONIES.put(id, colony);
-        markColonyRegistryChanged();
+        markColonyRegistryChanged(colony);
         LOGGER.info("wf_settle: map-first settlement staged id={} dim={} x={} z={} (no synthetic workers or stock)",
                 id, dim, x, z);
         return colony;
@@ -1435,7 +1445,7 @@ public class SettleMod {
     static void load(MinecraftServer server) {
         resetWorkerIndexes();
         COLONIES.clear();
-        markColonyRegistryChanged();
+        resetColonyRegistryIndex();
         NETWORK = new dev.worldforge.settle.TradeNetwork();
         Path f = file(server);
         if (!Files.exists(f)) return;
@@ -1446,7 +1456,7 @@ public class SettleMod {
                     Colony c = Colony.fromMap((Map<String, Object>) o, DEFS);
                     c.s.types = TYPES;
                     COLONIES.put(c.s.id, c);
-                    markColonyRegistryChanged();
+                    markColonyRegistryChanged(c);
                 } catch (Exception ex) {
                     LOGGER.error("wf_settle: поселение не прочитано: {}", ex.toString());
                 }
@@ -1528,7 +1538,7 @@ public class SettleMod {
     public void onStopped(ServerStoppedEvent e) {
         resetWorkerIndexes();
         COLONIES.clear();
-        markColonyRegistryChanged();
+        resetColonyRegistryIndex();
         cachedTradeViews = new TradeViews(Map.of(), Map.of());
         tradeViewsRevision = Long.MIN_VALUE;
         colonySimulationIndexRevision = Long.MIN_VALUE;
@@ -2416,9 +2426,7 @@ public class SettleMod {
             }
         }
         if (ticks % SITE_TICKS == 0) {
-            // Rebuild the spatial index every five seconds; each site pass then visits only
-            // settlements within the materialization radius of an actual player.
-            ColonyInterestIndex.refresh(COLONIES.values(), ticks);
+            // The incremental spatial index is maintained by canonical registry mutations.
             for (Colony c : ColonyInterestIndex.nearby(server, SimulationLod.LOCAL_RADIUS)) {
                 ServerLevel lv = c.level(server);
                 if (lv == null) continue;
