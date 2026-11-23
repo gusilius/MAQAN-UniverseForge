@@ -50,7 +50,10 @@ pub fn advance(r:Request)->Result<Frame,String>{
   let d=p.elapsed_days.min(MAX as u64) as i32;
   let drifts=[("hunger",10*d),("rest",6*d),("social",2*d),("purpose",d),("leisure",3*d)];
   let age=r.year.saturating_sub(p.birth_year).max(0);
-  for (key,drift) in drifts{\n   if let Some(value)=p.needs.get_mut(key){*value=value.saturating_add(drift).clamp(0,MAX);}\n   else{p.needs.insert(key.to_owned(),drift.clamp(0,MAX));}\n  }
+  for (key,drift) in drifts{
+   if let Some(value)=p.needs.get_mut(key){*value=value.saturating_add(drift).clamp(0,MAX);}
+   else{p.needs.insert(key.to_owned(),drift.clamp(0,MAX));}
+  }
   let intent=decide(&p,&p.needs,age).to_owned();
   out.push(PersonResult{id:p.id,needs:p.needs,intent,age_years:age,
    life_stage:stage(age).into(),simulated_days:p.simulated_days.max(0).saturating_add(p.elapsed_days.min(i64::MAX as u64) as i64),
