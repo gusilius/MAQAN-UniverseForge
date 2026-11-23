@@ -7,6 +7,8 @@ import dev.worldforge.people.CharacterIdentity;
 import dev.worldforge.people.CharacterRegistry;
 
 import java.util.UUID;
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
 
 /** Global character authority collision and legacy-lookup tests. */
 public final class CharacterAuthorityTest {
@@ -16,7 +18,21 @@ public final class CharacterAuthorityTest {
         if (!value) failures++;
     }
 
+    private static boolean authorityIdentityIndexStoresOnlyKeys() {
+        try {
+            Field field = CharacterAuthority.class.getDeclaredField("byIdentity");
+            if (!java.util.Set.class.isAssignableFrom(field.getType())) return false;
+            if (!(field.getGenericType() instanceof ParameterizedType generic)) return false;
+            String elementType = generic.getActualTypeArguments()[0].getTypeName();
+            return elementType.equals("dev.worldforge.people.CharacterIdentity");
+        } catch (ReflectiveOperationException ex) {
+            return false;
+        }
+    }
+
     public static void main(String[] args) {
+        check(authorityIdentityIndexStoresOnlyKeys(),
+                "global authority retains compact identity keys rather than a second Character object graph");
         CharacterAuthority authority = new CharacterAuthority();
         WorldId world = new WorldId(UUID.fromString("11111111-1111-4111-8111-111111111111"));
         authority.beginWorld(world);
