@@ -249,3 +249,66 @@ jobs:
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
+  contour-03-social-stress:
+    name: "Contour 03 — independent Families / Social scale ladder"
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1.1"
+
+      - name: Build WorldForge core and addons
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          bash tools/build-all.sh ../wfmod
+          test -f dist/worldforge-0.1.jar || find dist -maxdepth 1 -type f -name 'worldforge-*.jar' -print -quit | grep -q .
+          addon_count=$(find dist -maxdepth 1 -type f -name 'wf_*.jar' ! -name '*-sources.jar' | wc -l)
+          expected_count=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
+          echo "ADDON_JARS=$addon_count EXPECTED_ADDONS=$expected_count"
+          test "$addon_count" -eq "$expected_count"
+
+      - name: Run separate social-life stress tiers
+        id: social_ladder
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: "social-stress"
+          WF_SOCIAL_STRESS_DAYS: "635"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
+        run: |
+          set -euo pipefail
+          for target in 10000 20000 50000 100000 500000; do
+            echo "CONTOUR_03_STAGE_BEGIN=${target}"
+            WF_SOCIAL_STRESS_TARGET="${target}" bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-03-social-${target}"
+            echo "CONTOUR_03_STAGE_PASS=${target}"
+            echo "CONTOUR_03_SOCIAL_${target}=PASS" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Aggregate independent contour 03
+        if: always()
+        shell: pwsh
+        env:
+          SOCIAL_OUTCOME: ${{ steps.social_ladder.outcome }}
+        run: |
+          "CONTOUR_03_SOCIAL_LADDER_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:SOCIAL_OUTCOME -ne "success") {
+            throw "Independent contour 03 failed; inspect the first failing tier's isolated server artifact."
+          }
+
+      - name: Upload contour 03 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-contour-03-social-ladder
+          path: ${{ runner.temp }}/maqan-contour-03-social-*/
+          if-no-files-found: warn
+          retention-days: 30
