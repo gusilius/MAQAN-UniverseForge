@@ -9,6 +9,7 @@ import dev.worldforge.people.CharacterRegistry;
 import java.util.UUID;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Modifier;
 
 /** Global character authority collision and legacy-lookup tests. */
 public final class CharacterAuthorityTest {
@@ -89,7 +90,18 @@ public final class CharacterAuthorityTest {
         authority.registerMap("reload", reload);
         CharacterRegistry replacement = new CharacterRegistry();
         Character afterReload = replacement.create("After reload", "", "", "m", 2);
-        reload.fromJson(replacement.toJson(), world + "|reload");
+        Object previousCanonicalStore;
+        try {
+            Field canonicalStore = CharacterRegistry.class.getDeclaredField("byId");
+            canonicalStore.setAccessible(true);
+            previousCanonicalStore = canonicalStore.get(reload);
+            boolean replaceable = !Modifier.isFinal(canonicalStore.getModifiers());
+            reload.fromJson(replacement.toJson(), world + "|reload");
+            check(replaceable && canonicalStore.get(reload) != previousCanonicalStore,
+                    "validated registry restore atomically adopts parsed canonical map without copying all map nodes");
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("Could not inspect canonical registry restore", failure);
+        }
         check(authority.getGlobal(beforeReload.globalId) == null
                         && authority.getGlobal(afterReload.globalId) == reload.get(afterReload.id),
                 "global identity index refreshes after a same-size registry replacement");

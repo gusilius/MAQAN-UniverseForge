@@ -29,7 +29,8 @@ public final class CharacterRegistry {
         default void lifecycle(Character c, LifecycleEvent event) { }
     }
 
-    private final Map<String, Character> byId = new LinkedHashMap<>();
+    /** Canonical materialized objects for this partition; restore atomically swaps the parsed map. */
+    private Map<String, Character> byId = new LinkedHashMap<>();
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, String> byGlobalId = new HashMap<>();
     /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
@@ -1072,8 +1073,9 @@ public final class CharacterRegistry {
             }
             if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
         }
-        byId.clear();
-        byId.putAll(loaded);
+        // The parsed LinkedHashMap is already validated and insertion-ordered. Publish it directly:
+        // copying into the live map doubles hash-table nodes and key references at peak load.
+        byId = loaded;
         byGlobalId.clear();
         pendingBereavement.clear();
         for (Character character : loaded.values()) {
