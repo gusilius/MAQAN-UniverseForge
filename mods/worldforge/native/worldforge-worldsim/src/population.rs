@@ -59,7 +59,7 @@ pub fn advance(r:Request)->Result<Frame,String>{
    life_stage:stage(age).into(),simulated_days:p.simulated_days.max(0).saturating_add(p.elapsed_days.min(i64::MAX as u64) as i64),
    last_simulated_year:r.year,world_day:r.world_day});
  }
- out.sort_by(|a,b|a.id.cmp(&b.id));
+ // IDs are unique (validated above), so stable ordering has no semantic value.\n // Unstable sorting preserves deterministic ID order without allocating a merge buffer.\n out.sort_unstable_by(|a,b|a.id.cmp(&b.id));
  Ok(Frame{schema_version:1,world_id:r.world_id,year:r.year,elapsed_days:r.elapsed_days,world_day:r.world_day,characters:out})
 }
 #[cfg(test)]mod tests{use super::*;
