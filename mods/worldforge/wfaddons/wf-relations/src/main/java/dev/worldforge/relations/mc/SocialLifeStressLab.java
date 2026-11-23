@@ -181,7 +181,7 @@ public final class SocialLifeStressLab {
                     boolean plansChildren = age < 80 && pair % 10 == 0;
                     wife.props.put("family.wants_children", plansChildren);
                     person.props.put("family.wants_children", plansChildren);
-                    addReciprocalBond(wife, person, true);
+                    addReciprocalBond(run, wife, person, true);
                     run.marriedCouples++;
                 }
                 run.created++;
@@ -233,8 +233,8 @@ public final class SocialLifeStressLab {
             Character child = run.registry.addChild(father, mother, "Social Stress Child " + run.births,
                     (run.births & 1) == 0 ? "f" : "m", year);
             child.props.put("population.last_simulated_world_day", Long.toString(day));
-            addReciprocalBond(father, child, false);
-            addReciprocalBond(mother, child, false);
+            addReciprocalBond(run, father, child, false);
+            addReciprocalBond(run, mother, child, false);
             FamilyPlanning.complete(mother, father, year, child.id);
             if (!mother.children.contains(child.id) || !father.children.contains(child.id)
                     || !father.id.equals(child.father) || !mother.id.equals(child.mother))
@@ -307,7 +307,7 @@ public final class SocialLifeStressLab {
         run.lifecycleWorkNanos = 0L;
     }
 
-    private static void addReciprocalBond(Character first, Character second, boolean married) {
+    private static void addReciprocalBond(Run run, Character first, Character second, boolean married) {
         Relations.Bond forward = run.relations.bond("npc:" + first.globalId, "npc:" + second.globalId);
         Relations.Bond reverse = run.relations.bond("npc:" + second.globalId, "npc:" + first.globalId);
         forward.met = reverse.met = 1;
