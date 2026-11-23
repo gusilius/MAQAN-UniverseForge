@@ -538,11 +538,26 @@ public class PeopleMod {
         CHARACTER_WALS.clear();
     }
 
+    @FunctionalInterface
+    private interface JsonWriteAction { void write(java.io.Writer writer) throws java.io.IOException; }
+
     private static void writeAtomic(Path file, String content) throws java.io.IOException {
+        writeAtomic(file, writer -> writer.write(content));
+    }
+
+    private static void writeAtomic(Path file, CharacterRegistry registry) throws java.io.IOException {
+        writeAtomic(file, registry::writeJson);
+    }
+
+    private static void writeAtomic(Path file, JsonWriteAction action) throws java.io.IOException {
         Files.createDirectories(file.getParent());
         Path temp = file.resolveSibling(file.getFileName() + ".tmp");
         try {
-            Files.writeString(temp, content);
+            try (java.io.BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+                action.write(writer);
+                writer.flush();
+            }
             try {
                 Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                         java.nio.file.StandardCopyOption.ATOMIC_MOVE);
@@ -694,7 +709,7 @@ public class PeopleMod {
             try {
                 Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                         .resolve("worldforge").resolve("wf_players.json");
-                writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                writeAtomic(playerFile, PLAYER_REGISTRY);
                 return true;
             } catch (Exception ex) {
                 playerRegistryAvailable = false;
@@ -706,7 +721,7 @@ public class PeopleMod {
             try {
                 Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                         .resolve("worldforge").resolve("wf_people_world.json");
-                writeAtomic(file, WORLD_REGISTRY.toJson());
+                writeAtomic(file, WORLD_REGISTRY);
                 return true;
             } catch (Exception ex) {
                 LOGGER.error("wf_people: failed to persist ordinary-world Character {}: {}", character.globalId, ex.toString());
@@ -716,7 +731,7 @@ public class PeopleMod {
         for (Map.Entry<String, CharacterRegistry> entry : DIMENSION_REGISTRIES.entrySet()) {
             if (entry.getValue() != owner) continue;
             try {
-                writeAtomic(dimensionRegistryFile(server, entry.getKey()), owner.toJson());
+                writeAtomic(dimensionRegistryFile(server, entry.getKey()), owner);
                 return true;
             } catch (Exception ex) {
                 LOGGER.error("wf_people: failed to persist Character {} in dimension {}: {}",
@@ -727,7 +742,7 @@ public class PeopleMod {
         for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) if (entry.getValue() == owner) {
             try {
                 Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
-                writeAtomic(file, owner.toJson());
+                writeAtomic(file, owner);
                 return true;
             } catch (Exception ex) {
                 LOGGER.error("wf_people: failed to persist Character {} in map {}: {}",
@@ -910,18 +925,18 @@ public class PeopleMod {
                 if (registry == PLAYER_REGISTRY) {
                     Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_players.json");
-                    writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                    writeAtomic(playerFile, PLAYER_REGISTRY);
                 } else if (registry == WORLD_REGISTRY) {
                     Path worldFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_people_world.json");
-                    writeAtomic(worldFile, WORLD_REGISTRY.toJson());
+                    writeAtomic(worldFile, WORLD_REGISTRY);
                 } else if (dimensionOwners.containsKey(registry)) {
-                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry.toJson());
+                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry);
                 } else {
                     MapData map = mapOwners.get(registry);
                     if (map == null) return false;
                     Path dir = EditorManager.overlayDir(server, map);
-                    writeAtomic(dir.resolve("wf_people.json"), registry.toJson());
+                    writeAtomic(dir.resolve("wf_people.json"), registry);
                 }
             } catch (Exception ex) {
                 if (registry == PLAYER_REGISTRY) {
@@ -979,17 +994,17 @@ public class PeopleMod {
                 if (registry == PLAYER_REGISTRY) {
                     Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_players.json");
-                    writeAtomic(file, registry.toJson());
+                    writeAtomic(file, registry);
                 } else if (registry == WORLD_REGISTRY) {
                     Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_people_world.json");
-                    writeAtomic(file, registry.toJson());
+                    writeAtomic(file, registry);
                 } else if (dimensionOwners.containsKey(registry)) {
-                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry.toJson());
+                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry);
                 } else {
                     MapData map = mapOwners.get(registry);
                     if (map == null) throw new IllegalStateException("Estate source registry has no durable owner");
-                    writeAtomic(EditorManager.overlayDir(server, map).resolve("wf_people.json"), registry.toJson());
+                    writeAtomic(EditorManager.overlayDir(server, map).resolve("wf_people.json"), registry);
                 }
             } catch (Exception ex) {
                 LOGGER.error("wf_people: could not finalize committed estate receipts: {}", ex.toString(), ex);

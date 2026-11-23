@@ -131,6 +131,28 @@ public final class Json {
         } else writer.write(Long.toString(value.longValue()));
     }
 
+    /** Streams JSON without allocating a full-document StringBuilder. */
+    public static void write(Object value, Writer writer) throws IOException {
+        if (value == null) writer.write("null");
+        else if (value instanceof String string) writeString(writer, string);
+        else if (value instanceof Boolean) writer.write(value.toString());
+        else if (value instanceof Number number) writeNumber(writer, number);
+        else if (value instanceof Map<?, ?> map) {
+            writer.write('{'); boolean first=true;
+            for (Map.Entry<?, ?> entry:map.entrySet()) {
+                if(!first)writer.write(','); first=false;
+                writeString(writer,String.valueOf(entry.getKey())); writer.write(':'); write(entry.getValue(),writer);
+            }
+            writer.write('}');
+        } else if (value instanceof List<?> list) {
+            writer.write('['); boolean first=true;
+            for(Object item:list){if(!first)writer.write(',');first=false;write(item,writer);}
+            writer.write(']');
+        } else if (value instanceof int[] values) {
+            writer.write('['); for(int i=0;i<values.length;i++){if(i>0)writer.write(',');writer.write(Integer.toString(values[i]));} writer.write(']');
+        } else writeString(writer,value.toString());
+    }
+
     /** Компактная запись JSON: Map, List, String, Number, Boolean, null. Целые числа пишутся без «.0». */
     public static String write(Object o) {
         StringBuilder b = new StringBuilder();

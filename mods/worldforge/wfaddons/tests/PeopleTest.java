@@ -403,6 +403,10 @@ public class PeopleTest {
         ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
                 "lifecycle event bus notifies each listener exactly once per transition");
         String journalSave = journal.toJson();
+        java.io.StringWriter streamedSnapshot = new java.io.StringWriter();
+        journal.writeJson(streamedSnapshot);
+        ok(streamedSnapshot.toString().equals(journalSave),
+                "streamed Character snapshot is byte-for-byte compatible with canonical JSON String encoding");
         CharacterRegistry journalReload = new CharacterRegistry();
         journalReload.fromJson(journalSave);
         List<Map<String, Object>> restoredHistory = journalReload.recentLifecycle(journalPerson.id, 20);

@@ -5,6 +5,9 @@ import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -913,28 +916,42 @@ public final class CharacterRegistry {
 
     public String toJson() { return toJson(null); }
 
-    /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
+    /** Compatibility encoder for callers that explicitly require a String snapshot. */
     public String toJson(Set<String> only) {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/3");
-        root.put("schema_version", 3);
-        root.put("next", next);
-        List<Object> list = new ArrayList<>();
+        StringWriter output = new StringWriter();
+        try { writeJson(output, only); }
+        catch (IOException impossible) { throw new IllegalStateException("StringWriter unexpectedly failed", impossible); }
+        return output.toString();
+    }
+
+    /** Streams a canonical partition snapshot with temporary memory bounded to one Character record. */
+    public void writeJson(Writer writer) throws IOException { writeJson(writer, null); }
+
+    /** Streams either the complete partition or a selected set of local Character IDs. */
+    public void writeJson(Writer writer, Set<String> only) throws IOException {
+        Objects.requireNonNull(writer, "writer");
+        writer.write("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":");
+        Json.writeNumber(writer, next);
+        writer.write(",\"characters\":[");
+        boolean first = true;
         for (Character c : byId.values()) {
             if (only != null && !only.contains(c.id)) continue;
+            if (!first) writer.write(',');
+            first = false;
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
-            m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father); m.put("mother", c.mother); m.put("spouse", c.spouse);
+            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name);
+            m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
+            m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father);
+            m.put("mother", c.mother); m.put("spouse", c.spouse);
             m.put("children", new ArrayList<Object>(c.children));
             List<Object> posts = new ArrayList<>();
-            for (Character.Post p : c.posts) posts.add(new ArrayList<Object>(List.of(p.role, p.place)));
+            for (Character.Post post : c.posts) posts.add(new ArrayList<Object>(List.of(post.role, post.place)));
             m.put("posts", posts);
             m.put("traits", new ArrayList<Object>(c.traits));
             m.put("props", c.props);
-            list.add(m);
+            Json.write(m, writer);
         }
-        root.put("characters", list);
-        return Json.write(root);
+        writer.write("]}");
     }
 
     /**
