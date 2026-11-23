@@ -279,6 +279,8 @@ checks = {
     "durable_snapshot": report.get("durable_settlement_snapshot") is True,
     "canonical_worker_identity": report.get("canonical_worker_identity_verified") is True
         and report.get("canonical_worker_character_links") == report.get("local_workers"),
+    "canonical_worker_durable_writes": report.get("canonical_worker_durable_writes_verified") is True
+        and report.get("canonical_worker_durable_writes") == report.get("local_workers"),
     "physical_lod": report.get("physical_lod_verified") is True,
     "near_bodies": report.get("near_player_worker_bodies", 0) >= 4,
     "far_bodies": report.get("far_player_worker_bodies") == 0,
