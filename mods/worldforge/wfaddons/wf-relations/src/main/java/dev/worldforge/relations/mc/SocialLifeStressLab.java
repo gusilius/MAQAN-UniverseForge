@@ -342,11 +342,69 @@ public final class SocialLifeStressLab {
         } catch (Exception saveFailure) {
             RelationsMod.LOGGER.error("WF_STRESS contour=03_social save/load verification failed", saveFailure);
         }
-        if (!saveLoadVerified) {
-            run.status = "FAILED";
-            run.failure = "relations_save_load_verification_failed";
+        boolean familySaveLoadVerified = false;
+        long familyIntegrityErrors = Long.MAX_VALUE;
+        long restoredFamilyIntegrityErrors = Long.MAX_VALUE;
+        long familyLinks = 0L;
+        try {
+            familyIntegrityErrors = familyIntegrityErrors(run.registry);
+            CharacterRegistry restoredRegistry = new CharacterRegistry();
+            restoredRegistry.fromJson(run.registry.toJson(), "contour-03-social-roundtrip");
+            restoredFamilyIntegrityErrors = familyIntegrityErrors(restoredRegistry);
+            familyLinks = familyLinkCount(run.registry);
+            familySaveLoadVerified = restoredRegistry.size() == run.registry.size()
+                    && restoredFamilyIntegrityErrors == 0L
+                    && familyIntegrityErrors == 0L
+                    && familyLinkCount(restoredRegistry) == familyLinks;
+        } catch (Exception familyFailure) {
+            RelationsMod.LOGGER.error("WF_STRESS contour=03_social family save/load verification failed", familyFailure);
         }
-        writeReport(run);
+        if (!saveLoadVerified || !familySaveLoadVerified) {
+            run.status = "FAILED";
+            run.failure = !saveLoadVerified ? "relations_save_load_verification_failed"
+                    : "canonical_family_save_load_verification_failed";
+        }
+        writeReport(run, familyIntegrityErrors, restoredFamilyIntegrityErrors, familyLinks,
+                saveLoadVerified, familySaveLoadVerified);
+    }
+
+    private static long familyIntegrityErrors(CharacterRegistry registry) {
+        long errors = 0L;
+        for (Character person : registry.all()) {
+            if (person == null || person.id == null || person.id.isBlank()
+                    || person.globalId == null || person.globalId.isBlank()) {
+                errors++;
+                continue;
+            }
+            if (person.spouse != null && !person.spouse.isBlank()) {
+                Character spouse = registry.get(person.spouse);
+                if (spouse == null || !person.id.equals(spouse.spouse)) errors++;
+            }
+            if (person.father != null && !person.father.isBlank()) {
+                Character father = registry.get(person.father);
+                if (father == null || !father.children.contains(person.id)) errors++;
+            }
+            if (person.mother != null && !person.mother.isBlank()) {
+                Character mother = registry.get(person.mother);
+                if (mother == null || !mother.children.contains(person.id)) errors++;
+            }
+            for (String childId : person.children) {
+                Character child = registry.get(childId);
+                if (child == null || !(person.id.equals(child.father) || person.id.equals(child.mother))) errors++;
+            }
+        }
+        return errors;
+    }
+
+    private static long familyLinkCount(CharacterRegistry registry) {
+        long links = 0L;
+        for (Character person : registry.all()) {
+            if (person.spouse != null && !person.spouse.isBlank()) links++;
+            if (person.father != null && !person.father.isBlank()) links++;
+            if (person.mother != null && !person.mother.isBlank()) links++;
+            links += person.children.size();
+        }
+        return links;
     }
 
     private static void sampleRuntime(Run run) {
@@ -391,7 +449,9 @@ public final class SocialLifeStressLab {
         return (target + GROUP_SIZE - 1) / GROUP_SIZE;
     }
 
-    private static void writeReport(Run run) {
+    private static void writeReport(Run run, long familyIntegrityErrors,
+                                     long restoredFamilyIntegrityErrors, long familyLinks,
+                                     boolean relationsSaveLoadVerified, boolean familySaveLoadVerified) {
         try {
             Path directory = run.server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("stresslab");
             Files.createDirectories(directory);
@@ -411,21 +471,25 @@ public final class SocialLifeStressLab {
                     + "\"groups\":%d,\"group_size\":%d,\"days_target\":%d,\"days_completed\":%d,"
                     + "\"autonomous_interactions\":%d,\"married_couples\":%d,\"conceptions\":%d,\"births\":%d,\"deaths\":%d,"
                     + "\"pending_pregnancies\":%d,\"npc_directed_bonds\":%d,\"reciprocal_bonds\":%d,"
-                    + "\"married_directed_bonds\":%d,\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
+                    + "\"married_directed_bonds\":%d,\"family_links\":%d,\"family_integrity_errors\":%d,"
+                    + "\"restored_family_integrity_errors\":%d,\"relations_save_load_verified\":%s,"
+                    + "\"family_save_load_verified\":%s,\"day_ms_p50\":%.3f,\"day_ms_p95\":%.3f,"
                     + "\"day_ms_p99\":%.3f,\"day_ms_max\":%.3f,\"heap_used_bytes\":%d,"
                     + "\"peak_heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,\"elapsed_seconds\":%.3f}\n",
                     run.status, run.failure, run.target, run.created, run.initialSize, run.registry.size(),
                     groupCount(run.target), GROUP_SIZE, run.daysTarget, run.daysCompleted, run.interactions,
                     run.marriedCouples, run.conceptions, run.births, run.deaths, run.pregnancies.size(),
-                    bonds, reciprocal, married, percentile(samples, .50) / 1_000_000.0,
+                    bonds, reciprocal, married, familyLinks, familyIntegrityErrors, restoredFamilyIntegrityErrors,
+                    relationsSaveLoadVerified, familySaveLoadVerified, percentile(samples, .50) / 1_000_000.0,
                     percentile(samples, .95) / 1_000_000.0, percentile(samples, .99) / 1_000_000.0,
                     run.maxDayNanos / 1_000_000.0, heap, run.peakHeapBytes, runtime.totalMemory(),
                     Math.max(0L, processCpuNanos() - run.cpuStartedNanos),
                     (System.nanoTime() - run.startedNanos) / 1_000_000_000.0);
             Path report = directory.resolve("contour-03-social.json");
             Files.writeString(report, json, StandardCharsets.UTF_8);
-            RelationsMod.LOGGER.warn("WF_STRESS contour=03_social status={} created={} days={} interactions={} bonds={} reciprocal={} married={} report={}",
-                    run.status, run.created, run.daysCompleted, run.interactions, bonds, reciprocal, married, report.toAbsolutePath());
+            RelationsMod.LOGGER.warn("WF_STRESS contour=03_social status={} created={} days={} interactions={} bonds={} reciprocal={} married={} familyLinks={} familyErrors={} familySaveLoad={} report={}",
+                    run.status, run.created, run.daysCompleted, run.interactions, bonds, reciprocal, married,
+                    familyLinks, familyIntegrityErrors, familySaveLoadVerified, report.toAbsolutePath());
         } catch (Exception failure) {
             run.status = "REPORT_FAILED";
             run.failure = failure.getClass().getName() + ": " + String.valueOf(failure.getMessage());
