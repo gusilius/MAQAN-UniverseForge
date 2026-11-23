@@ -168,99 +168,80 @@ public final class CharacterAuthority {
     private void refreshIndex() {
         WorldId currentWorld = worldId;
         if (currentWorld == null) return;
-        boolean changed = indexedMembershipGenerations.size() != registries.size();
-        if (!changed) for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            // Appends are indexed incrementally by characterCreated(). Only a wholesale
-            // registry replacement invalidates the complete identity projection.
-            if (!Objects.equals(indexedMembershipGenerations.get(entry.getKey()),
-                    entry.getValue().membershipGeneration())) {
-                changed = true;
-                break;
+
+        // A registry restore is a partition-local event. Rebuilding six world-wide
+        // identity/family projections into temporary maps doubled peak memory for the
+        // entire population. Validate and replace only the changed partition instead.
+        List<Map.Entry<String, CharacterRegistry>> changed = new ArrayList<>();
+        for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
+            Long indexed = indexedMembershipGenerations.get(entry.getKey());
+            if (indexed == null || indexed.longValue() != entry.getValue().membershipGeneration())
+                changed.add(entry);
+        }
+        if (indexedMembershipGenerations.size() != registries.size()) {
+            for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
+                if (!indexedMembershipGenerations.containsKey(entry.getKey()) && !changed.contains(entry))
+                    changed.add(entry);
             }
         }
-        if (!changed) return;
+        if (changed.isEmpty()) return;
 
-        Set<CharacterIdentity> nextByIdentity = new HashSet<>();
-        Map<String, CharacterIdentity> nextByGlobalId = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextByLegacyId = new HashMap<>();
-        Map<String, Long> nextMembershipGenerations = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyByParentGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyByParentLegacy = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyByChildGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyByChildLegacy = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyBySpouseGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> nextFamilyBySpouseLegacy = new HashMap<>();
-
-        for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
+        // Validate every changed partition before publishing any of its identities.
+        // The temporary validation set is bounded by the largest changed partition,
+        // not by the complete world population plus a second copy of every index.
+        Map<String, List<CharacterIdentity>> validated = new LinkedHashMap<>();
+        for (Map.Entry<String, CharacterRegistry> entry : changed) {
             String mapId = entry.getKey();
-            CharacterRegistry registry = entry.getValue();
-            nextMembershipGenerations.put(mapId, registry.membershipGeneration());
-            for (Character character : registry.all()) {
+            List<CharacterIdentity> identities = new ArrayList<>(entry.getValue().size());
+            Map<String, CharacterIdentity> localGlobals = new HashMap<>();
+            for (Character character : entry.getValue().all()) {
                 CharacterIdentity identity = new CharacterIdentity(
                         currentWorld, mapId, character.id, character.globalId);
-                CharacterIdentity globalOwner = nextByGlobalId.putIfAbsent(character.globalId, identity);
-                if (globalOwner != null && !globalOwner.equals(identity))
+                CharacterIdentity duplicateLocal = localGlobals.putIfAbsent(character.globalId, identity);
+                if (duplicateLocal != null)
+                    throw new IllegalStateException("Duplicate Character UUID inside partition " + mapId
+                            + ": " + character.globalId);
+                CharacterIdentity globalOwner = byGlobalId.get(character.globalId);
+                if (globalOwner != null && !globalOwner.mapId().equals(mapId))
                     throw new IllegalStateException("Global Character UUID collision " + character.globalId
                             + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
                             + " and " + mapId + "/" + character.id);
-                if (!nextByIdentity.add(identity))
-                    throw new IllegalStateException("Duplicate Character identity " + identity);
-                nextByLegacyId.computeIfAbsent(character.id, ignored -> new HashSet<>()).add(identity);
+                identities.add(identity);
             }
+            validated.put(mapId, identities);
         }
 
-        // Build relationship indexes from the same validated population snapshot.
-        // Parent fields and child lists are both indexed because old saves may contain only one side.
-        for (CharacterIdentity identity : nextByIdentity) {
-            CharacterRegistry owner = registries.get(identity.mapId());
-            Character person = owner == null ? null : owner.get(identity.characterId());
-            if (person == null) continue;
-            addFamilyIndex(nextFamilyByParentLegacy, person.father, identity);
-            addFamilyIndex(nextFamilyByParentLegacy, person.mother, identity);
-            addFamilyIndex(nextFamilyByParentGlobal, familyId(person, "family.father_global_id"), identity);
-            addFamilyIndex(nextFamilyByParentGlobal, familyId(person, "family.mother_global_id"), identity);
-            addFamilyIndex(nextFamilyBySpouseLegacy, person.spouse, identity);
-            addFamilyIndex(nextFamilyBySpouseGlobal, familyId(person, "family.spouse_global_id"), identity);
+        for (Map.Entry<String, List<CharacterIdentity>> replacement : validated.entrySet()) {
+            String mapId = replacement.getKey();
 
-            for (String childId : person.children) {
-                Set<CharacterIdentity> children = nextByLegacyId.get(childId);
-                if (children != null) for (CharacterIdentity child : children) {
-                    addFamilyIndex(nextFamilyByParentLegacy, person.id, child);
-                    addFamilyIndex(nextFamilyByParentGlobal, person.globalId, child);
-                    addFamilyIndex(nextFamilyByChildLegacy, childId, identity);
-                    addFamilyIndex(nextFamilyByChildGlobal, child.globalCharacterId(), identity);
+            // Remove only the previous projection for this partition. Other maps'
+            // identity buckets remain live and are never copied or reallocated.
+            Iterator<CharacterIdentity> existing = byIdentity.iterator();
+            while (existing.hasNext()) {
+                CharacterIdentity identity = existing.next();
+                if (!identity.mapId().equals(mapId)) continue;
+                existing.remove();
+                byGlobalId.remove(identity.globalCharacterId(), identity);
+                Set<CharacterIdentity> legacy = byLegacyId.get(identity.characterId());
+                if (legacy != null) {
+                    legacy.remove(identity);
+                    if (legacy.isEmpty()) byLegacyId.remove(identity.characterId(), legacy);
                 }
             }
-            Object globalChildren = person.props.get("family.children_global_ids");
-            if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
-                if (!(rawId instanceof String childId) || childId.isBlank()) continue;
-                CharacterIdentity child = nextByGlobalId.get(childId);
-                if (child == null) continue;
-                addFamilyIndex(nextFamilyByParentLegacy, person.id, child);
-                addFamilyIndex(nextFamilyByParentGlobal, person.globalId, child);
-                addFamilyIndex(nextFamilyByChildLegacy, child.characterId(), identity);
-                addFamilyIndex(nextFamilyByChildGlobal, childId, identity);
+
+            for (CharacterIdentity identity : replacement.getValue()) {
+                CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
+                if (collision != null && !collision.equals(identity))
+                    throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
+                byIdentity.add(identity);
+                byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
             }
+            indexedMembershipGenerations.put(mapId, registries.get(mapId).membershipGeneration());
         }
 
-        // Publish only a completely validated snapshot.
-        byIdentity.clear();
-        byIdentity.addAll(nextByIdentity);
-        byGlobalId.clear();
-        byGlobalId.putAll(nextByGlobalId);
-        byLegacyId.clear();
-        // nextByLegacyId is a private build graph that is never exposed elsewhere.
-        // Transfer its sets directly instead of cloning every legacy-ID bucket during
-        // publication; the old copy doubled peak bucket memory and allocation pressure.
-        byLegacyId.putAll(nextByLegacyId);
-        familyByParentGlobal = nextFamilyByParentGlobal;
-        familyByParentLegacy = nextFamilyByParentLegacy;
-        familyByChildGlobal = nextFamilyByChildGlobal;
-        familyByChildLegacy = nextFamilyByChildLegacy;
-        familyBySpouseGlobal = nextFamilyBySpouseGlobal;
-        familyBySpouseLegacy = nextFamilyBySpouseLegacy;
-        indexedMembershipGenerations.clear();
-        indexedMembershipGenerations.putAll(nextMembershipGenerations);
+        // Family projections are day-scoped and are rebuilt on demand by
+        // rebuildFamilyIndex(); keeping them stale is unsafe after a partition restore.
+        indexedMembershipGenerations.keySet().removeIf(mapId -> !registries.containsKey(mapId));
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
     }
