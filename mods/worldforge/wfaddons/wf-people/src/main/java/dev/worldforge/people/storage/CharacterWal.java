@@ -23,6 +23,8 @@ public final class CharacterWal implements AutoCloseable {
     public record Record(int shard, long sequence, String globalId, byte[] payload) {
         public Record { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }
+        /** Decodes the private immutable frame payload without allocating defensive byte-array copies. */
+        public String payloadUtf8() { return new String(payload, StandardCharsets.UTF_8); }
     }
     @FunctionalInterface
     public interface ReplayConsumer {

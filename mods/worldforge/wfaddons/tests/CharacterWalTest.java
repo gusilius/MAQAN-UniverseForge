@@ -43,6 +43,13 @@ public final class CharacterWalTest {
                 ok(records.size() == 2 && streamed.size() == 2
                                 && streamed.get(0).startsWith("1:") && streamed.get(1).startsWith("2:"),
                         "streaming replay preserves deterministic shard/sequence order and crash-tail recovery");
+                CharacterWal.Record payloadRecord = records.get(0);
+                byte[] isolatedPayload = payloadRecord.payload();
+                isolatedPayload[0] ^= 0x01;
+                ok(payloadRecord.payloadUtf8().equals("{\"version\":1}")
+                                && new String(payloadRecord.payload(), java.nio.charset.StandardCharsets.UTF_8)
+                                .equals("{\"version\":1}"),
+                        "UTF-8 replay accessor avoids payload copies while public byte access remains defensive");
                 CharacterWal.Record next = recovered.append(id, "{\"version\":3}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 ok(next.sequence() == 3 && recovered.replayAll().size() == 3, "repaired WAL resumes sequence without losing records");
                 recovered.checkpoint();

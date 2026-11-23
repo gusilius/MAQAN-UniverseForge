@@ -492,13 +492,9 @@ public class PeopleMod {
         try {
             long[] replayed = {0L};
             wal.replayEach(record -> {
-                String payload = new String(record.payload(), StandardCharsets.UTF_8);
-                Object decoded = Json.parse(payload);
-                if (!(decoded instanceof Map<?, ?> root)
-                        || !(root.get("character") instanceof Map<?, ?> character)
-                        || !record.globalId().equals(character.get("global_id")))
-                    throw new IllegalStateException("Character WAL identity mismatch in partition " + partition);
-                registry.applyJsonRecord(payload, identityNamespace);
+                // The registry parser validates schema, payload identity and all Character invariants
+                // in one pass. Avoid parsing the same potentially large record twice during recovery.
+                registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
                 replayed[0]++;
             });
             CHARACTER_WALS.put(registry, wal);

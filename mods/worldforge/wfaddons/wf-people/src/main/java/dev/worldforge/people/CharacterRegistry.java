@@ -859,6 +859,11 @@ public final class CharacterRegistry {
      * the legacy identity rules. Callers must replay records in per-shard sequence order.
      */
     public void applyJsonRecord(String json, String identityNamespace) {
+        applyJsonRecord(json, identityNamespace, null);
+    }
+
+    /** Applies a WAL record while verifying its frame identity in the same parse pass. */
+    public void applyJsonRecord(String json, String identityNamespace, String expectedGlobalId) {
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
                 || !(root.get("character") instanceof Map<?, ?> rawCharacter))
@@ -866,6 +871,9 @@ public final class CharacterRegistry {
         Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
         Character restored = decodeCharacter(rawCharacter, identityNamespace, globalOwners, entityOwners);
+        if (expectedGlobalId != null && !expectedGlobalId.equals(restored.globalId))
+            throw new IllegalArgumentException("Character WAL identity mismatch: frame="
+                    + expectedGlobalId + " payload=" + restored.globalId);
 
         Character previous = byId.get(restored.id);
         String globalOwnerId = byGlobalId.get(restored.globalId);

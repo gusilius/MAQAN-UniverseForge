@@ -412,6 +412,21 @@ public class PeopleTest {
                 "canonical character event sequence survives save/load without synthetic restore events");
         ok(journalReload.toJson().equals(journalSave),
                 "loading a character registry does not mutate its persisted lifecycle history");
+        CharacterRegistry incrementalReload = new CharacterRegistry();
+        incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
+                journalPerson.globalId);
+        ok(incrementalReload.getByGlobalId(journalPerson.globalId) != null
+                        && incrementalReload.get(journalPerson.id).name.equals(journalPerson.name),
+                "incremental record restore verifies frame UUID and restores the complete canonical Character");
+        boolean mismatchedFrameRejected = false;
+        try {
+            incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
+                    "00000000-0000-0000-0000-000000000000");
+        } catch (IllegalArgumentException expected) {
+            mismatchedFrameRejected = expected.getMessage().contains("WAL identity mismatch");
+        }
+        ok(mismatchedFrameRejected,
+                "incremental WAL restore rejects a frame whose UUID does not match its Character payload");
         ok(CharacterInventory.count(journalReload.get(journalPerson.id),"minecraft:bread")==5
                         &&CharacterInventory.count(journalReload.get(carrier.id),"minecraft:bread")==3
                         &&CharacterInventory.items(journalReload.get(journalPerson.id)).stream()
