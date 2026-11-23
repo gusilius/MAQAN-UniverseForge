@@ -410,6 +410,35 @@ public class PeopleTest {
         Json.write(writerProbe, jsonWriterProbe);
         ok(jsonWriterProbe.toString().equals(Json.write(writerProbe)),
                 "streaming JSON writer matches legacy encoder for escaping, nested values and numeric types");
+
+        String streamedJson = "{\\"format\\":\\"wf-people/3\\",\\"next\\":3,\\"characters\\":["
+                + "{\\"id\\":\\"c1\\",\\"props\\":{\\"nested\\":[1,2,{\\"text\\":\\"a,b]c\\"}]}}"
+                + ",{\\"id\\":\\"c2\\",\\"props\\":null}]}";
+        List<Object> streamedRecords = new ArrayList<>();
+        Json.StreamedArray streamedRoot = Json.readObjectArray(
+                new java.io.StringReader(streamedJson), "characters", streamedRecords::add);
+        ok(streamedRoot.present() && streamedRoot.itemCount() == 2
+                        && streamedRecords.size() == 2
+                        && "wf-people/3".equals(streamedRoot.fields().get("format"))
+                        && ((Map<?, ?>) streamedRecords.get(0)).get("id").equals("c1")
+                        && ((Map<?, ?>) streamedRecords.get(1)).containsKey("props"),
+                "streaming JSON reader emits one complete nested Character record at a time and retains only root metadata");
+        boolean duplicateRootFieldRejected = false;
+        try {
+            Json.readObjectArray(new java.io.StringReader(
+                    "{\\"format\\":\\"wf-people/3\\",\\"next\\":1,\\"next\\":2,\\"characters\\":[]}"),
+                    "characters", ignoredRecord -> { });
+        } catch (IllegalArgumentException expected) { duplicateRootFieldRejected = true; }
+        ok(duplicateRootFieldRejected,
+                "streaming snapshot parser rejects duplicate root metadata instead of silently accepting ambiguous save data");
+        boolean trailingSnapshotDataRejected = false;
+        try {
+            Json.readObjectArray(new java.io.StringReader(
+                    "{\\"format\\":\\"wf-people/3\\",\\"next\\":1,\\"characters\\":[]} trailing"),
+                    "characters", ignoredRecord -> { });
+        } catch (IllegalArgumentException expected) { trailingSnapshotDataRejected = true; }
+        ok(trailingSnapshotDataRejected,
+                "streaming snapshot parser rejects trailing bytes after the root object");
         String journalSave = journal.toJson();
         java.io.StringWriter streamedSnapshot = new java.io.StringWriter();
         journal.writeJson(streamedSnapshot);
