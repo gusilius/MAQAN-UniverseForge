@@ -88,9 +88,9 @@ public final class SettlementStressLab {
                 PREFIX + "local", "MAQAN Stress Local",
                 player.blockPosition().getX(), player.blockPosition().getZ(),
                 "wf-settlement-stress:local");
-        local.s.add("food", 10000);
-        local.s.add("wood", 10000);
-        local.s.add("stone", 10000);
+        local.s.add("food", 100);
+        local.s.add("wood", 20);
+        local.s.add("stone", 100);
         initialWoodStock = local.s.amount("wood");
         prepareLocalWorksite();
     }
