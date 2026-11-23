@@ -458,6 +458,13 @@ public class PeopleTest {
                 "canonical character event sequence survives save/load without synthetic restore events");
         ok(journalReload.toJson().equals(journalSave),
                 "loading a character registry does not mutate its persisted lifecycle history");
+
+        CharacterRegistry streamingReload = new CharacterRegistry();
+        streamingReload.fromJson(new java.io.StringReader(journalSave), "legacy-unscoped");
+        ok(streamingReload.toJson().equals(journalSave)
+                        && streamingReload.size() == journalReload.size()
+                        && streamingReload.getByGlobalId(journalPerson.globalId) != null,
+                "streamed CharacterRegistry restore preserves canonical records, UUID indexes and legacy save semantics");
         CharacterRegistry incrementalReload = new CharacterRegistry();
         incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
                 journalPerson.globalId);
