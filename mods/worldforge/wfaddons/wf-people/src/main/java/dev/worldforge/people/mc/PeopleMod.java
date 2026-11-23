@@ -513,7 +513,7 @@ public class PeopleMod {
             // The record store is the compacted per-UUID checkpoint. Load it after the
             // legacy snapshot and before WAL replay: newer journal frames always win.
             records.forEach(record -> {
-                registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
+                registry.applyJsonRecordIfAbsent(record.payloadUtf8(), identityNamespace, record.globalId());
                 checkpointRecords[0]++;
             });
             long[] replayed = {0L};
