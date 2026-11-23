@@ -172,6 +172,7 @@ public final class SettlementStressLab {
             order.x = treeX;
             order.z = treeZ;
             order.radius = 4;
+            order.level = baseY + 1;
             order.halfX = 4;
             order.halfZ = 4;
             order.overlay = 0;
