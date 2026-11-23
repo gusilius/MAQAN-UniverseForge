@@ -481,15 +481,14 @@ public final class NpcSocialSimulation {
         Relations.Bond ab = relations.bond(aKey, bKey);
         Relations.Bond ba = relations.bond(bKey, aKey);
         int oldAffinity = ab.affinity;
-        List<String> ta = CharacterStats.traits(a);
-        List<String> tb = CharacterStats.traits(b);
+
         int delta = 1;
-        if (ta.contains("gregarious") || tb.contains("gregarious")) delta++;
-        if (ta.contains("generous") && tb.contains("generous")) delta++;
-        if (ta.contains("loyal") && tb.contains("loyal")) delta++;
-        if ((ta.contains("cruel") && tb.contains("just")) || (tb.contains("cruel") && ta.contains("just"))) delta -= 3;
-        if ((ta.contains("deceitful") && tb.contains("honorable")) || (tb.contains("deceitful") && ta.contains("honorable"))) delta -= 2;
-        if (ta.contains("wroth") && tb.contains("wroth")) delta--;
+        if (CharacterStats.hasTrait(a, "gregarious") || CharacterStats.hasTrait(b, "gregarious")) delta++;
+        if (CharacterStats.hasTrait(a, "generous") && CharacterStats.hasTrait(b, "generous")) delta++;
+        if (CharacterStats.hasTrait(a, "loyal") && CharacterStats.hasTrait(b, "loyal")) delta++;
+        if ((CharacterStats.hasTrait(a, "cruel") && CharacterStats.hasTrait(b, "just")) || (CharacterStats.hasTrait(b, "cruel") && CharacterStats.hasTrait(a, "just"))) delta -= 3;
+        if ((CharacterStats.hasTrait(a, "deceitful") && CharacterStats.hasTrait(b, "honorable")) || (CharacterStats.hasTrait(b, "deceitful") && CharacterStats.hasTrait(a, "honorable"))) delta -= 2;
+        if (CharacterStats.hasTrait(a, "wroth") && CharacterStats.hasTrait(b, "wroth")) delta--;
         // Social compatibility is multi-dimensional: culture, language, faith, occupation,
         // house and political context influence affinity, but none of them is an absolute
         // barrier to friendship, rivalry, courtship or diplomacy.
@@ -504,8 +503,8 @@ public final class NpcSocialSimulation {
         String faithA = identityValue(a, "religion", "faith", "identity.religion", "identity.faith");
         String faithB = identityValue(b, "religion", "faith", "identity.religion", "identity.faith");
         if (!faithA.isBlank() && !faithB.isBlank() && !faithA.equalsIgnoreCase(faithB)) {
-            boolean tolerant = ta.contains("tolerant") || tb.contains("tolerant");
-            boolean zealous = ta.contains("zealous") || tb.contains("zealous");
+            boolean tolerant = CharacterStats.hasTrait(a, "tolerant") || CharacterStats.hasTrait(b, "tolerant");
+            boolean zealous = CharacterStats.hasTrait(a, "zealous") || CharacterStats.hasTrait(b, "zealous");
             delta += tolerant ? 0 : zealous ? -2 : -1;
         } else if (!faithA.isBlank() && faithA.equalsIgnoreCase(faithB)) delta++;
         String professionA = PopulationSimulation.profession(a);
@@ -515,8 +514,8 @@ public final class NpcSocialSimulation {
         String classA = identityValue(a, "social.class", "population.social_class", "identity.class");
         String classB = identityValue(b, "social.class", "population.social_class", "identity.class");
         if (!classA.isBlank() && !classB.isBlank() && !classA.equalsIgnoreCase(classB)) {
-            if (ta.contains("egalitarian") || tb.contains("egalitarian")) delta++;
-            else if (ta.contains("proud") || tb.contains("proud")) delta--;
+            if (CharacterStats.hasTrait(a, "egalitarian") || CharacterStats.hasTrait(b, "egalitarian")) delta++;
+            else if (CharacterStats.hasTrait(a, "proud") || CharacterStats.hasTrait(b, "proud")) delta--;
         }
         String polityA = polityOf(a), polityB = polityOf(b);
         if (!polityA.isBlank() && !polityB.isBlank() && !polityA.equals(polityB)) delta--;
@@ -539,9 +538,9 @@ public final class NpcSocialSimulation {
                 && year - a.birthYear >= 18 && year - b.birthYear >= 18
                 && year - a.birthYear <= 70 && year - b.birthYear <= 70;
         if (eligibleRomance && ab.affinity >= 25) {
-            int loveDelta = ta.contains("shy") || tb.contains("shy") ? 1 : 2;
+            int loveDelta = CharacterStats.hasTrait(a, "shy") || CharacterStats.hasTrait(b, "shy") ? 1 : 2;
             if (kinship >= 3 && kinship <= 5) loveDelta = Math.max(1, loveDelta - 1);
-            if (ta.contains("gregarious") || tb.contains("gregarious")) loveDelta++;
+            if (CharacterStats.hasTrait(a, "gregarious") || CharacterStats.hasTrait(b, "gregarious")) loveDelta++;
             ab.love = clamp(ab.love + loveDelta, 0, 100);
             ba.love = clamp(ba.love + loveDelta, 0, 100);
             if (ab.affinity >= 40 && ab.love >= 35) { ab.dating = true; ba.dating = true; }
