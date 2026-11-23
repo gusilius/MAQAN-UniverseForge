@@ -105,6 +105,9 @@ public final class NpcSocialSimulation {
                             && person.props.containsKey("emergence.polity_id"))
                         eligible.add(person);
                 if (eligible.isEmpty()) continue;
+                // Sort once while building this day's eligible group. Sorting again inside
+                // every selected group adds avoidable O(n log n) work to the interaction pass.
+                eligible.sort(Comparator.comparing(person -> person.globalId));
                 groups.put(indexed.getKey(), eligible);
                 adults.addAll(eligible);
             }
@@ -117,14 +120,15 @@ public final class NpcSocialSimulation {
                 int start;
                 synchronized (GROUP_CURSORS) {
                     start = Math.floorMod(GROUP_CURSORS.getOrDefault(cursorKey, 0), orderedGroups.size());
-                    GROUP_CURSORS.put(cursorKey, (start + visitCount) % orderedGroups.size());
+                    // Slide by one group: advancing by the full window can cycle over
+                    // only a subset whenever group count and window size share a divisor.
+                    GROUP_CURSORS.put(cursorKey, (start + 1) % orderedGroups.size());
                 }
                 for (int groupOffset = 0; groupOffset < visitCount; groupOffset++) {
                     Map.Entry<String, List<Character>> group =
                             orderedGroups.get((start + groupOffset) % orderedGroups.size());
                     List<Character> members = group.getValue();
-                if (members.size() < 2) continue;
-                members.sort(Comparator.comparing(person -> person.globalId));
+                    if (members.size() < 2) continue;
                 for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
                     // Keep a small set of neighbours interacting regularly for a quarter-year,
                     // then rotate the pairs so the whole settlement gradually builds social ties.
