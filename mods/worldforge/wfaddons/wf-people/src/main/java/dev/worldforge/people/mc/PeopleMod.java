@@ -490,8 +490,8 @@ public class PeopleMod {
         if (CHARACTER_WALS.containsKey(registry)) return;
         CharacterWal wal = new CharacterWal(characterWalDirectory(server, partition), 16);
         try {
-            List<CharacterWal.Record> records = wal.replayAll();
-            for (CharacterWal.Record record : records) {
+            long[] replayed = {0L};
+            wal.replayEach(record -> {
                 String payload = new String(record.payload(), StandardCharsets.UTF_8);
                 Object decoded = Json.parse(payload);
                 if (!(decoded instanceof Map<?, ?> root)
@@ -499,12 +499,13 @@ public class PeopleMod {
                         || !record.globalId().equals(character.get("global_id")))
                     throw new IllegalStateException("Character WAL identity mismatch in partition " + partition);
                 registry.applyJsonRecord(payload, identityNamespace);
-            }
+                replayed[0]++;
+            });
             CHARACTER_WALS.put(registry, wal);
             String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
             CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken));
             LOGGER.info("wf_people: recovered Character WAL partition={} records={} characters={}",
-                    partition, records.size(), registry.size());
+                    partition, replayed[0], registry.size());
         } catch (Exception failure) {
             try { wal.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
             throw failure;

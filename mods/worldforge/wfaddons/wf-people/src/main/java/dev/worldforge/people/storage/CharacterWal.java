@@ -24,6 +24,10 @@ public final class CharacterWal implements AutoCloseable {
         public Record { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }
     }
+    @FunctionalInterface
+    public interface ReplayConsumer {
+        void accept(Record record) throws IOException;
+    }
     public record Write(String globalId, byte[] payload) {
         public Write {
             Objects.requireNonNull(globalId, "globalId");
@@ -129,11 +133,23 @@ public final class CharacterWal implements AutoCloseable {
         return appendBatch(List.of(new Write(globalId, payload))).get(0);
     }
 
+    /**
+     * Replays records in deterministic shard/sequence order without retaining the complete
+     * journal in a temporary List. The consumer must finish processing each record before
+     * returning; this is the recovery path for large partitions.
+     */
+    public synchronized void replayEach(ReplayConsumer consumer) throws IOException {
+        ensureOpen();
+        Objects.requireNonNull(consumer, "consumer");
+        for (int i = 0; i < shards.length; i++)
+            readValid(shards[i].channel, i, false, consumer);
+    }
+
+    /** Compatibility helper for small tests/tools; production recovery should use replayEach. */
     public synchronized List<Record> replayAll() throws IOException {
         ensureOpen();
         List<Record> result = new ArrayList<>();
-        for (int i = 0; i < shards.length; i++) result.addAll(readValid(shards[i].channel, i, false));
-        result.sort(Comparator.comparingInt(Record::shard).thenComparingLong(Record::sequence));
+        replayEach(result::add);
         return result;
     }
 
@@ -149,12 +165,12 @@ public final class CharacterWal implements AutoCloseable {
     }
 
     private long repairAndFindNext(FileChannel channel) throws IOException {
-        List<Record> valid = readValid(channel, 0, true);
-        return valid.isEmpty() ? 1 : valid.get(valid.size() - 1).sequence() + 1;
+        long[] lastSequence = {0L};
+        readValid(channel, 0, true, record -> lastSequence[0] = record.sequence());
+        return lastSequence[0] + 1;
     }
 
-    private List<Record> readValid(FileChannel channel, int shard, boolean repair) throws IOException {
-        List<Record> result = new ArrayList<>();
+    private void readValid(FileChannel channel, int shard, boolean repair, ReplayConsumer consumer) throws IOException {
         long position = 0, size = channel.size(), expected = 1;
         ByteBuffer header = ByteBuffer.allocate(HEADER).order(ByteOrder.BIG_ENDIAN);
         while (position < size) {
@@ -178,11 +194,10 @@ public final class CharacterWal implements AutoCloseable {
             crcData.put(id).put(payload);
             CRC32C crc = new CRC32C(); crc.update(crcData.array(), 0, crcData.position());
             if ((int) crc.getValue() != stored) throw new IOException("Character WAL checksum mismatch at byte " + position);
-            result.add(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload));
+            consumer.accept(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload));
             position += length; expected++;
         }
         if (repair && position != size) { channel.truncate(position); channel.force(true); }
-        return result;
     }
 
     private static ByteBuffer encode(long sequence, byte[] id, byte[] payload) {

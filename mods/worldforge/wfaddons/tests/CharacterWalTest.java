@@ -37,7 +37,12 @@ public final class CharacterWalTest {
             Files.write(shard(recovery, shardId), new byte[]{0x57, 0x46, 0x50}, StandardOpenOption.APPEND);
             try (CharacterWal recovered = new CharacterWal(recovery, 16)) {
                 List<CharacterWal.Record> records = recovered.replayAll();
-                ok(records.size() == 2, "recovery keeps complete records and discards only an incomplete trailing frame");
+                List<String> streamed = new ArrayList<>();
+                recovered.replayEach(record -> streamed.add(record.sequence() + ":" + new String(
+                        record.payload(), java.nio.charset.StandardCharsets.UTF_8)));
+                ok(records.size() == 2 && streamed.size() == 2
+                                && streamed.get(0).startsWith("1:") && streamed.get(1).startsWith("2:"),
+                        "streaming replay preserves deterministic shard/sequence order and crash-tail recovery");
                 CharacterWal.Record next = recovered.append(id, "{\"version\":3}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 ok(next.sequence() == 3 && recovered.replayAll().size() == 3, "repaired WAL resumes sequence without losing records");
                 recovered.checkpoint();
@@ -51,10 +56,15 @@ public final class CharacterWalTest {
                 for (int i = 0; i < 300; i++) writes.add(new CharacterWal.Write(id, ("record-" + i).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                 List<CharacterWal.Record> receipts = wal.appendBatch(writes);
                 List<CharacterWal.Record> replayed = wal.replayAll();
-                ok(receipts.size() == 300 && replayed.size() == 300
+                long[] streamedCount = {0L};
+                String[] lastStreamed = {""};
+                wal.replayEach(record -> { streamedCount[0]++; lastStreamed[0] = new String(
+                        record.payload(), java.nio.charset.StandardCharsets.UTF_8); });
+                ok(receipts.size() == 300 && replayed.size() == 300 && streamedCount[0] == 300
                                 && receipts.get(0).sequence() == 1 && receipts.get(299).sequence() == 300
-                                && new String(replayed.get(299).payload(), java.nio.charset.StandardCharsets.UTF_8).equals("record-299"),
-                        "batch append preserves per-shard order and every durable payload");
+                                && new String(replayed.get(299).payload(), java.nio.charset.StandardCharsets.UTF_8).equals("record-299")
+                                && lastStreamed[0].equals("record-299"),
+                        "batch append and streaming replay preserve every durable record in shard sequence");
             }
 
             Path corrupt = root.resolve("corrupt");
