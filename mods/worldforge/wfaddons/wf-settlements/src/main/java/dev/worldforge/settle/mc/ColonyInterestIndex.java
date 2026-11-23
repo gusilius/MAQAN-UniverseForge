@@ -56,6 +56,31 @@ final class ColonyInterestIndex {
         if (cells.isEmpty()) byDimension.remove(cell.dimension());
     }
 
+    /** Query one geographic neighborhood without walking the canonical registry. */
+    static synchronized List<Colony> nearbyAt(String dimension, double x, double z, double radius) {
+        if (dimension == null || dimension.isBlank() || !Double.isFinite(x) || !Double.isFinite(z)
+                || !Double.isFinite(radius) || radius < 0) return List.of();
+        Map<Long, Map<String, Colony>> cells = byDimension.get(dimension);
+        if (cells == null || cells.isEmpty()) return List.of();
+        double radiusSquared = radius * radius;
+        int minCellX = Math.floorDiv((int)Math.floor(x - radius), CELL_SIZE);
+        int maxCellX = Math.floorDiv((int)Math.floor(x + radius), CELL_SIZE);
+        int minCellZ = Math.floorDiv((int)Math.floor(z - radius), CELL_SIZE);
+        int maxCellZ = Math.floorDiv((int)Math.floor(z + radius), CELL_SIZE);
+        Map<String, Colony> found = new LinkedHashMap<>();
+        for (int cx = minCellX; cx <= maxCellX; cx++) {
+            for (int cz = minCellZ; cz <= maxCellZ; cz++) {
+                Map<String, Colony> members = cells.get(cellKey(cx, cz));
+                if (members == null) continue;
+                for (Colony colony : members.values()) {
+                    double dx = colony.cx - x, dz = colony.cz - z;
+                    if (dx * dx + dz * dz <= radiusSquared) found.putIfAbsent(colony.s.id, colony);
+                }
+            }
+        }
+        return List.copyOf(found.values());
+    }
+
     static synchronized List<Colony> nearby(MinecraftServer server, double radius) {
         if (server == null || !Double.isFinite(radius) || radius < 0) return List.of();
         double radiusSquared = radius * radius;
