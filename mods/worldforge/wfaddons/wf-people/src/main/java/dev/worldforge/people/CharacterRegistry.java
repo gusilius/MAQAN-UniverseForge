@@ -871,6 +871,8 @@ public final class CharacterRegistry {
         if (!Boolean.TRUE.equals(restored.props.get("death.bereavement.completed"))
                 && recipients instanceof List<?> && !pendingBereavement.contains(restored.globalId))
             pendingBereavement.addLast(restored.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.characterReplaced(this, previous, restored);
         if (previous == null) markMembershipMutation();
         recordDomainMutation();
     }
