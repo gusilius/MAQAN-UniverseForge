@@ -169,53 +169,35 @@ public final class CharacterAuthority {
         WorldId currentWorld = worldId;
         if (currentWorld == null) return;
 
-        // A registry restore is a partition-local event. Rebuilding six world-wide
-        // identity/family projections into temporary maps doubled peak memory for the
-        // entire population. Validate and replace only the changed partition instead.
+        // A wholesale restore is partition-local. Validate the incoming partition first,
+        // then replace only its identity projection. Never build a second world-sized
+        // (or partition-sized) collection of CharacterIdentity objects just to publish it.
         List<Map.Entry<String, CharacterRegistry>> changed = new ArrayList<>();
         for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
             Long indexed = indexedMembershipGenerations.get(entry.getKey());
             if (indexed == null || indexed.longValue() != entry.getValue().membershipGeneration())
                 changed.add(entry);
         }
-        if (indexedMembershipGenerations.size() != registries.size()) {
-            for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-                if (!indexedMembershipGenerations.containsKey(entry.getKey()) && !changed.contains(entry))
-                    changed.add(entry);
-            }
-        }
-        if (changed.isEmpty()) return;
+        if (changed.isEmpty() && indexedMembershipGenerations.size() == registries.size()) return;
 
-        // Validate every changed partition before publishing any of its identities.
-        // The temporary validation set is bounded by the largest changed partition,
-        // not by the complete world population plus a second copy of every index.
-        Map<String, List<CharacterIdentity>> validated = new LinkedHashMap<>();
+        // Pass 1: validate collisions without allocating a shadow identity map.
+        // CharacterRegistry validates duplicate local IDs and UUIDs while decoding a
+        // snapshot; incremental WAL replacement validates against its current UUID index.
         for (Map.Entry<String, CharacterRegistry> entry : changed) {
             String mapId = entry.getKey();
-            List<CharacterIdentity> identities = new ArrayList<>(entry.getValue().size());
-            Map<String, CharacterIdentity> localGlobals = new HashMap<>();
             for (Character character : entry.getValue().all()) {
-                CharacterIdentity identity = new CharacterIdentity(
-                        currentWorld, mapId, character.id, character.globalId);
-                CharacterIdentity duplicateLocal = localGlobals.putIfAbsent(character.globalId, identity);
-                if (duplicateLocal != null)
-                    throw new IllegalStateException("Duplicate Character UUID inside partition " + mapId
-                            + ": " + character.globalId);
-                CharacterIdentity globalOwner = byGlobalId.get(character.globalId);
-                if (globalOwner != null && !globalOwner.mapId().equals(mapId))
+                CharacterIdentity owner = byGlobalId.get(character.globalId);
+                if (owner != null && !owner.mapId().equals(mapId))
                     throw new IllegalStateException("Global Character UUID collision " + character.globalId
-                            + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
+                            + " between " + owner.mapId() + "/" + owner.characterId()
                             + " and " + mapId + "/" + character.id);
-                identities.add(identity);
             }
-            validated.put(mapId, identities);
         }
 
-        for (Map.Entry<String, List<CharacterIdentity>> replacement : validated.entrySet()) {
-            String mapId = replacement.getKey();
-
-            // Remove only the previous projection for this partition. Other maps'
-            // identity buckets remain live and are never copied or reallocated.
+        // Pass 2: remove and republish only changed partitions. Unchanged partitions'
+        // hash buckets, family state and UUID references are not copied or reallocated.
+        for (Map.Entry<String, CharacterRegistry> entry : changed) {
+            String mapId = entry.getKey();
             Iterator<CharacterIdentity> existing = byIdentity.iterator();
             while (existing.hasNext()) {
                 CharacterIdentity identity = existing.next();
@@ -229,18 +211,19 @@ public final class CharacterAuthority {
                 }
             }
 
-            for (CharacterIdentity identity : replacement.getValue()) {
+            CharacterRegistry registry = entry.getValue();
+            for (Character character : registry.all()) {
+                CharacterIdentity identity = new CharacterIdentity(
+                        currentWorld, mapId, character.id, character.globalId);
                 CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
                 if (collision != null && !collision.equals(identity))
                     throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
                 byIdentity.add(identity);
                 byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
             }
-            indexedMembershipGenerations.put(mapId, registries.get(mapId).membershipGeneration());
+            indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         }
 
-        // Family projections are day-scoped and are rebuilt on demand by
-        // rebuildFamilyIndex(); keeping them stale is unsafe after a partition restore.
         indexedMembershipGenerations.keySet().removeIf(mapId -> !registries.containsKey(mapId));
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
