@@ -123,6 +123,8 @@ public final class PopulationComputeBridge {
         public byte[] request(){return request.clone();}
     }
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
+    private static final Set<String> CANONICAL_NEEDS = Set.of("hunger", "rest", "safety", "social", "purpose", "leisure");
+    private static final List<String> REQUIRED_NEEDS = List.of("hunger", "rest", "social", "purpose", "leisure");
     private PopulationComputeBridge(){}
 
     /** Compatibility capture: elapsedDays is measured from world day zero. */
@@ -224,7 +226,7 @@ public final class PopulationComputeBridge {
                 ||captured.elapsedDays!=longNumber(frame.get("elapsed_days"),"elapsed_days")
                 ||captured.targetWorldDay!=decimalLong(frame.get("world_day"),"world_day"))
             throw new IllegalArgumentException("Population frame does not match captured request");
-        List<Update> updates=new ArrayList<>();Set<String> seen=new TreeSet<>();
+        List<Update> updates=new ArrayList<>();Set<String> seen=new HashSet<>(Math.max(16,captured.characters.size()*4/3));
         for(Object raw:list(frame.get("characters"),"characters")){
             Map<?,?> value=object(raw,"character update");String id=string(value.get("id"),"character id");
             if(!seen.add(id))throw new IllegalArgumentException("Duplicate population result ID: "+id);
@@ -235,12 +237,12 @@ public final class PopulationComputeBridge {
                 if(!Double.isFinite(numeric)||numeric!=Math.rint(numeric)
                         ||numeric<Integer.MIN_VALUE||numeric>Integer.MAX_VALUE)
                     throw new IllegalArgumentException("Need value must be a 32-bit integer: "+key);
-                boolean canonicalNeed=Set.of("hunger","rest","safety","social","purpose","leisure").contains(key);
+                boolean canonicalNeed=CANONICAL_NEEDS.contains(key);
                 if(canonicalNeed&&(numeric<0||numeric>100))
                     throw new IllegalArgumentException("Canonical need must be in [0,100]: "+key);
                 needs.put(key,(int)numeric);
             }
-            for(String required:List.of("hunger","rest","social","purpose","leisure"))
+            for(String required:REQUIRED_NEEDS)
                 if(!needs.containsKey(required))throw new IllegalArgumentException("Missing required need: "+required);
             String intent=string(value.get("intent"),"intent");PopulationSimulation.intentFromKey(intent);
             int age=integer(value.get("age_years"),"age_years");
