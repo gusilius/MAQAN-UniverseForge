@@ -867,6 +867,20 @@ public final class CharacterRegistry {
 
     /** Applies a WAL record while verifying its frame identity in the same parse pass. */
     public void applyJsonRecord(String json, String identityNamespace, String expectedGlobalId) {
+        applyJsonRecord(json, identityNamespace, expectedGlobalId, false);
+    }
+
+    /**
+     * Applies a checkpoint record only when the legacy snapshot has no record for its local ID.
+     * The snapshot is committed before its addressable checkpoint, so an existing snapshot
+     * member is at least as new as this record. WAL replay remains unconditional and runs later.
+     */
+    public void applyJsonRecordIfAbsent(String json, String identityNamespace, String expectedGlobalId) {
+        applyJsonRecord(json, identityNamespace, expectedGlobalId, true);
+    }
+
+    private void applyJsonRecord(String json, String identityNamespace, String expectedGlobalId,
+                                 boolean onlyIfLocalIdAbsent) {
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
                 || !(root.get("character") instanceof Map<?, ?> rawCharacter))
@@ -878,6 +892,7 @@ public final class CharacterRegistry {
             throw new IllegalArgumentException("Character WAL identity mismatch: frame="
                     + expectedGlobalId + " payload=" + restored.globalId);
 
+        if (onlyIfLocalIdAbsent && byId.containsKey(restored.id)) return;
         Character previous = byId.get(restored.id);
         String globalOwnerId = byGlobalId.get(restored.globalId);
         if (globalOwnerId != null && !globalOwnerId.equals(restored.id))
