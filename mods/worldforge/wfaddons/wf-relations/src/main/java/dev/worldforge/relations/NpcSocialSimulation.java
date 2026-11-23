@@ -200,7 +200,9 @@ public final class NpcSocialSimulation {
         int extraShare = MAX_GROUPS_PER_DAY % visitCount;
         int interactions = 0;
         Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
-        Map<CharacterRegistry, List<Character>> travelCandidates = new IdentityHashMap<>();
+        // Linked insertion order follows the stable canonical registry snapshot, keeping
+        // travel interactions deterministic across server restarts.
+        Map<CharacterRegistry, List<Character>> travelCandidates = new LinkedHashMap<>();
 
         for (int offset = 0; offset < visitCount; offset++) {
             CharacterRegistry registry = registries.get((start + offset) % registryCount);
