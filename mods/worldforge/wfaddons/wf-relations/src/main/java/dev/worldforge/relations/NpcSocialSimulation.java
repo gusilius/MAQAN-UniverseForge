@@ -65,6 +65,7 @@ public final class NpcSocialSimulation {
         // These maps remain private and are published through read-only views. Appends
         // extend their lists in place, so an index remains reusable during population growth.
         final Map<CharacterRegistry, NavigableMap<String, List<Character>>> groups = new IdentityHashMap<>();
+        final Map<CharacterRegistry, NavigableMap<String, List<Character>>> publishedGroups = new IdentityHashMap<>();
         int scanIndex;
         boolean published;
 
@@ -149,8 +150,17 @@ public final class NpcSocialSimulation {
                 if (polity.isBlank()) continue;
                 String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
                 if (band.isBlank()) band = polity;
-                build.groups.get(scan.registry)
-                        .computeIfAbsent(band, ignored -> new ArrayList<>()).add(person);
+                NavigableMap<String, List<Character>> byBand = build.groups.get(scan.registry);
+                List<Character> members = byBand.get(band);
+                if (members == null) {
+                    members = new ArrayList<>();
+                    byBand.put(band, members);
+                    if (build.published) {
+                        build.publishedGroups.get(scan.registry)
+                                .put(band, Collections.unmodifiableList(members));
+                    }
+                }
+                members.add(person);
             }
             if (scan.cursor >= scan.limit) build.scanIndex++;
         }
@@ -183,8 +193,11 @@ public final class NpcSocialSimulation {
         if (!build.published) {
             Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
             build.groups.forEach((registry, byBand) -> {
-                byBand.replaceAll((band, members) -> Collections.unmodifiableList(members));
-                frozen.put(registry, Collections.unmodifiableNavigableMap(byBand));
+                NavigableMap<String, List<Character>> readOnlyBands = new TreeMap<>();
+                byBand.forEach((band, members) ->
+                        readOnlyBands.put(band, Collections.unmodifiableList(members)));
+                build.publishedGroups.put(registry, readOnlyBands);
+                frozen.put(registry, Collections.unmodifiableNavigableMap(readOnlyBands));
             });
             contactsByRegistry = Collections.unmodifiableMap(frozen);
             build.published = true;
