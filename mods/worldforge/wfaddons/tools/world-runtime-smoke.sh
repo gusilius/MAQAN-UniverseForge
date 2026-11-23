@@ -284,6 +284,11 @@ checks = {
     "births": report.get("births", 0) > 0 and report.get("births") == report.get("conceptions"),
     "deaths": report.get("deaths", 0) > 0,
     "pregnancies_drained": report.get("pending_pregnancies", -1) == 0,
+    "family_links_present": report.get("family_links", 0) > 0,
+    "family_integrity": report.get("family_integrity_errors", -1) == 0,
+    "family_integrity_after_reload": report.get("restored_family_integrity_errors", -1) == 0,
+    "canonical_family_save_load": report.get("family_save_load_verified") is True,
+    "relations_save_load": report.get("relations_save_load_verified") is True,
     "registry": report.get("final_registry_size", 0) >= report.get("initial_registry_size", 0) + target + report.get("births", 0),
 }
 for key, passed in checks.items():
