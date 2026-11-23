@@ -1091,13 +1091,25 @@ public class PeopleMod {
         int start = Math.floorMod(populationFallbackRegistryCursor, count);
         int baseBudget = POPULATION_FALLBACK_BUDGET_PER_TICK / visitCount;
         int extra = POPULATION_FALLBACK_BUDGET_PER_TICK % visitCount;
-        boolean complete = visitCount == count;
         for (int offset = 0; offset < visitCount; offset++) {
             CharacterRegistry registry = registries.get((start + offset) % count);
             int budget = baseBudget + (offset < extra ? 1 : 0);
-            boolean registryComplete = PopulationSimulation.advanceToWorldDayBatch(
+            PopulationSimulation.advanceToWorldDayBatch(
                     registry, targetWorldDay, fallbackStartDay, year, budget);
-            complete &= registryComplete;
+        }
+        // Completion is global, not "all partitions visited this tick". This matters when
+        // there are more partitions than the per-tick window: completed cursors remain durable
+        // in memory while the sliding window advances through the remaining partitions.
+        boolean complete = true;
+        for (CharacterRegistry registry : registries) {
+            PopulationSimulation.WorldDayProgress progress =
+                    PopulationSimulation.worldDayProgress(registry);
+            if (progress == null || progress.targetDay() != targetWorldDay
+                    || progress.membershipGeneration() != registry.membershipGeneration()
+                    || progress.catchUpPass() || progress.nextIndex() < registry.size()) {
+                complete = false;
+                break;
+            }
         }
         // If every registry fits, revisit all of them next tick. Otherwise slide one position
         // so every partition is guaranteed to enter the bounded window.
