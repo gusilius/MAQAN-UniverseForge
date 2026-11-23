@@ -560,8 +560,11 @@ public final class NpcSocialSimulation {
         if (!Objects.equals(witnessPolity, polityId)) return List.of();
         String bandId = String.valueOf(witness.props.getOrDefault("emergence.band_id", polityId));
         if (bandId.isBlank()) bandId = polityId;
-        List<Character> members = contactIndex(RelationsMc.dayNumber())
-                .getOrDefault(registry, Map.of()).getOrDefault(bandId, List.of());
+        int day = RelationsMc.dayNumber();
+        int year = WorldForgeApi.clock().startYear + Math.floorDiv(day, 365);
+        Map<CharacterRegistry, Map<String, List<Character>>> index = contactIndex(day, year);
+        if (index == null) return List.of();
+        List<Character> members = index.getOrDefault(registry, Map.of()).getOrDefault(bandId, List.of());
         if (members.isEmpty()) return List.of();
         List<Contact> result = new ArrayList<>();
         for (Character candidate : members) {
