@@ -315,6 +315,20 @@ public final class CharacterStats {
         return stable;
     }
 
+    /**
+     * Allocation-free hot-path trait lookup. Canonical records use Character.traits directly;
+     * legacy records fall back to the once-derived immutable profile in props.
+     */
+    public static boolean hasTrait(Character c, String id) {
+        if (c.traits.contains(id)) return true;
+        Object cached = c.props.get("people.derived_traits");
+        if (cached instanceof List<?> values) {
+            for (Object value : values) if (id.equals(value)) return true;
+            return false;
+        }
+        return traits(c).contains(id);
+    }
+
     public static int bonus(Character c, String attr) {
         int b = 0;
         for (String id : traits(c)) { Trait t = TRAITS.get(id); if (t != null) b += t.mods.getOrDefault(attr, 0); }
