@@ -116,8 +116,11 @@ public final class SettlementStressLab {
             if (!source.getServer().getPlayerList().getPlayers().contains(player))
                 source.getServer().getPlayerList().getPlayers().add(player);
             if (!player.isAddedToWorld()) source.getLevel().addNewPlayer(player);
-            player.teleportTo(source.getLevel(), source.getPosition().x, source.getPosition().y,
-                    source.getPosition().z, Set.of(), source.getRotation().y, source.getRotation().x);
+            BlockPos spawn = source.getLevel().getSharedSpawnPos();
+            int spawnY = source.getLevel().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    spawn.getX(), spawn.getZ());
+            player.teleportTo(source.getLevel(), spawn.getX() + 0.5, spawnY,
+                    spawn.getZ() + 0.5, Set.of(), source.getRotation().y, source.getRotation().x);
         } catch (RuntimeException error) {
             source.sendFailure(Component.literal("Could not attach server-side test player: " + error));
             return 0;
