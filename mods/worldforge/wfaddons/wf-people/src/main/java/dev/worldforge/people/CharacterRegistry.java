@@ -938,18 +938,39 @@ public final class CharacterRegistry {
             if (only != null && !only.contains(c.id)) continue;
             if (!first) writer.write(',');
             first = false;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name);
-            m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
-            m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father);
-            m.put("mother", c.mother); m.put("spouse", c.spouse);
-            m.put("children", new ArrayList<Object>(c.children));
-            List<Object> posts = new ArrayList<>();
-            for (Character.Post post : c.posts) posts.add(new ArrayList<Object>(List.of(post.role, post.place)));
-            m.put("posts", posts);
-            m.put("traits", new ArrayList<Object>(c.traits));
-            m.put("props", c.props);
-            Json.write(m, writer);
+            // Emit fields directly: do not allocate a per-Character Map or duplicate
+            // children/posts/traits collections during a large checkpoint.
+            writer.write('{');
+            Json.writeString(writer, "id"); writer.write(':'); Json.writeString(writer, c.id); writer.write(',');
+            Json.writeString(writer, "global_id"); writer.write(':'); Json.writeString(writer, c.globalId); writer.write(',');
+            Json.writeString(writer, "name"); writer.write(':'); Json.writeString(writer, c.name); writer.write(',');
+            Json.writeString(writer, "house"); writer.write(':'); Json.writeString(writer, c.house); writer.write(',');
+            Json.writeString(writer, "culture"); writer.write(':'); Json.writeString(writer, c.culture); writer.write(',');
+            Json.writeString(writer, "gender"); writer.write(':'); Json.writeString(writer, c.gender); writer.write(',');
+            Json.writeString(writer, "birth"); writer.write(':'); Json.writeNumber(writer, c.birthYear); writer.write(',');
+            Json.writeString(writer, "alive"); writer.write(':'); writer.write(Boolean.toString(c.alive)); writer.write(',');
+            Json.writeString(writer, "father"); writer.write(':'); Json.writeString(writer, c.father); writer.write(',');
+            Json.writeString(writer, "mother"); writer.write(':'); Json.writeString(writer, c.mother); writer.write(',');
+            Json.writeString(writer, "spouse"); writer.write(':'); Json.writeString(writer, c.spouse); writer.write(',');
+            Json.writeString(writer, "children"); writer.write(':'); Json.write(c.children, writer); writer.write(',');
+            Json.writeString(writer, "posts"); writer.write(':'); writer.write('[');
+            for (int postIndex = 0; postIndex < c.posts.size(); postIndex++) {
+                if (postIndex > 0) writer.write(',');
+                Character.Post post = c.posts.get(postIndex);
+                writer.write('['); Json.writeString(writer, post.role); writer.write(',');
+                Json.writeString(writer, post.place); writer.write(']');
+            }
+            writer.write(']'); writer.write(',');
+            Json.writeString(writer, "traits"); writer.write(':'); writer.write('[');
+            boolean firstTrait = true;
+            for (String trait : c.traits) {
+                if (!firstTrait) writer.write(',');
+                firstTrait = false;
+                Json.writeString(writer, trait);
+            }
+            writer.write(']'); writer.write(',');
+            Json.writeString(writer, "props"); writer.write(':'); Json.write(c.props, writer);
+            writer.write('}');
         }
         writer.write("]}");
     }

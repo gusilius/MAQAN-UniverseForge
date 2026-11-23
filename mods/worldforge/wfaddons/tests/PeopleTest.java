@@ -415,6 +415,11 @@ public class PeopleTest {
         journal.writeJson(streamedSnapshot);
         ok(streamedSnapshot.toString().equals(journalSave),
                 "streamed Character snapshot is byte-for-byte compatible with canonical JSON String encoding");
+        CharacterRegistry emptySnapshot = new CharacterRegistry();
+        java.io.StringWriter emptyWriter = new java.io.StringWriter();
+        emptySnapshot.writeJson(emptyWriter);
+        ok(emptyWriter.toString().equals(emptySnapshot.toJson()),
+                "streaming Character snapshot handles an empty partition without format drift");
         CharacterRegistry journalReload = new CharacterRegistry();
         journalReload.fromJson(journalSave);
         List<Map<String, Object>> restoredHistory = journalReload.recentLifecycle(journalPerson.id, 20);
