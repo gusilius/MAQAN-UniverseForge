@@ -36,7 +36,9 @@ final class ColonyInterestIndex {
     static void invalidate() { dirty = true; }
 
     static synchronized void refresh(Collection<Colony> colonies, long tick) {
-        if (!dirty && builtAt != Long.MIN_VALUE && tick >= builtAt
+        // Coalesce bursts of registry mutations into at most one full rebuild
+        // per interval; a dirty flag never turns bulk genesis into per-tick O(C) work.
+        if (builtAt != Long.MIN_VALUE && tick >= builtAt
                 && tick - builtAt < REBUILD_INTERVAL_TICKS) return;
         Map<String, Map<Long, List<Colony>>> mutable = new HashMap<>();
         for (Colony colony : colonies) {
