@@ -65,6 +65,7 @@ public final class SettlementStressLab {
     private int capturedTerrainCells;
     private boolean roundTripVerified;
     private boolean durableSnapshotVerified;
+    private int canonicalWorkerLinks;
     private boolean teleportedFar;
     private boolean teleportedBack;
     private boolean failed;
@@ -230,6 +231,13 @@ public final class SettlementStressLab {
                 && restored.map.cells().size() == local.map.cells().size();
         if (!roundTripVerified)
             throw new IllegalStateException("Settlement worker/work-area/map round-trip failed");
+        var canonicalPeople = dev.worldforge.people.mc.PeopleMod.registryFor(level);
+        if (canonicalPeople != null) {
+            for (Worker worker : local.s.workers) {
+                if (worker.person != null && !worker.person.isBlank()
+                        && canonicalPeople.getByGlobalId(worker.person) != null) canonicalWorkerLinks++;
+            }
+        }
         durableSnapshotVerified = SettleMod.saveDurably(server);
         if (!durableSnapshotVerified)
             throw new IllegalStateException("The settlement snapshot could not be durably committed");
@@ -307,7 +315,8 @@ public final class SettlementStressLab {
                 && teleportedFar && teleportedBack && navigationSamples > 0;
         boolean performanceVerified = p95 <= 50.0 && p99 <= 100.0 && max <= 1000.0 && tps >= 15.0;
         boolean statusPass = !failed && created == targetRemoteColonies && roundTripVerified
-                && durableSnapshotVerified && remoteLoaded == 0 && lodVerified && performanceVerified;
+                && durableSnapshotVerified && canonicalWorkerLinks == local.s.workers.size()
+                && remoteLoaded == 0 && lodVerified && performanceVerified;
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schema_version", 1);
@@ -323,6 +332,8 @@ public final class SettlementStressLab {
         report.put("terrain_cells_captured_from_loaded_world", capturedTerrainCells);
         report.put("work_order_save_load_round_trip", roundTripVerified);
         report.put("durable_settlement_snapshot", durableSnapshotVerified);
+        report.put("canonical_worker_character_links", canonicalWorkerLinks);
+        report.put("canonical_worker_identity_verified", canonicalWorkerLinks == local.s.workers.size());
         report.put("physical_lod_verified", lodVerified);
         report.put("near_player_worker_bodies", nearBodies);
         report.put("far_player_worker_bodies", farBodies);
