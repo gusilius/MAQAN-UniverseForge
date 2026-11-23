@@ -230,7 +230,7 @@ public final class CharacterStats {
         if (next.contains(id)) return false;
         next.add(id);
         if (!compatibleTraits(next)) return false;
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             c.traits.clear();
             c.traits.addAll(next);
             c.props.remove("people.derived_traits");
@@ -240,7 +240,7 @@ public final class CharacterStats {
     }
 
     public static boolean removeTrait(Character c, String id) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             boolean changed = c.traits.remove(id);
             if (changed) {
                 c.props.remove("people.derived_traits");

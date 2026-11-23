@@ -60,11 +60,12 @@ public final class CharacterRegistry {
     private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
 
     private static final class MutationBatchState {
-        int depth;
-        boolean dirty;
+        final Deque<DomainMutationRevisions.Domain> scopes = new ArrayDeque<>();
+        final EnumMap<DomainMutationRevisions.Domain, DomainMutationRevisions.Mutation> mutations =
+                new EnumMap<>(DomainMutationRevisions.Domain.class);
+        final EnumSet<DomainMutationRevisions.Domain> dirty =
+                EnumSet.noneOf(DomainMutationRevisions.Domain.class);
         final Set<CharacterRegistry> membershipChanged = Collections.newSetFromMap(new IdentityHashMap<>());
-        final DomainMutationRevisions.Mutation mutation =
-                WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
     }
 
     /**
@@ -73,21 +74,29 @@ public final class CharacterRegistry {
      */
     public static final class MutationBatch implements AutoCloseable {
         private final MutationBatchState state;
+        private final DomainMutationRevisions.Domain domain;
         private boolean closed;
-        private MutationBatch(MutationBatchState state) { this.state = state; }
+        private MutationBatch(MutationBatchState state, DomainMutationRevisions.Domain domain) {
+            this.state = state;
+            this.domain = domain;
+        }
         @Override public void close() {
             if (closed) return;
+            if (state.scopes.peek() != domain)
+                throw new IllegalStateException("Character mutation scopes must close in LIFO order");
             closed = true;
-            if (--state.depth == 0) {
+            state.scopes.pop();
+            if (state.scopes.isEmpty()) {
                 MUTATION_BATCH.remove();
                 try {
                     for (CharacterRegistry registry : state.membershipChanged) {
                         registry.revision++;
                         GLOBAL_MEMBERSHIP_REVISION.incrementAndGet();
                     }
-                    if (state.dirty) state.mutation.commit();
+                    for (DomainMutationRevisions.Domain dirtyDomain : state.dirty)
+                        state.mutations.get(dirtyDomain).commit();
                 } finally {
-                    state.mutation.close();
+                    for (DomainMutationRevisions.Mutation mutation : state.mutations.values()) mutation.close();
                 }
             }
         }
@@ -95,12 +104,22 @@ public final class CharacterRegistry {
 
     public static MutationBatch beginMutationBatch() {
         MutationBatchState state = MUTATION_BATCH.get();
-        if (state == null) {
-            state = new MutationBatchState();
-            MUTATION_BATCH.set(state);
-        }
-        state.depth++;
-        return new MutationBatch(state);
+        DomainMutationRevisions.Domain domain = state == null || state.scopes.isEmpty()
+                ? DomainMutationRevisions.Domain.CHARACTERS : state.scopes.peek();
+        return beginMutationBatch(domain);
+    }
+
+    public static MutationBatch beginMutationBatch(DomainMutationRevisions.Domain domain) {
+        Objects.requireNonNull(domain, "domain");
+        MutationBatchState state = MUTATION_BATCH.get();
+        if (state == null) { state = new MutationBatchState(); MUTATION_BATCH.set(state); }
+        state.mutations.computeIfAbsent(domain, key -> WorldForgeApi.revisions().begin(key));
+        state.scopes.push(domain);
+        return new MutationBatch(state, domain);
+    }
+
+    public static MutationBatch beginSocialMutationBatch() {
+        return beginMutationBatch(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
     }
 
     /** Records one authoritative Character write, coalescing it inside an owning operation. */
@@ -463,20 +482,26 @@ public final class CharacterRegistry {
     /** Advances the shared lane after a canonical Character write has completed. */
     private void markMembershipMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
-        if (batch != null) batch.membershipChanged.add(this);
-        else {
-            revision++;
-            GLOBAL_MEMBERSHIP_REVISION.incrementAndGet();
-        }
+        if (batch != null) {
+            batch.membershipChanged.add(this);
+            recordDomainMutation(DomainMutationRevisions.Domain.CHARACTERS);
+        } else { revision++; GLOBAL_MEMBERSHIP_REVISION.incrementAndGet(); }
     }
 
     private static void recordDomainMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
-        if (batch != null) {
-            batch.dirty = true;
+        if (batch != null && !batch.scopes.isEmpty()) { batch.dirty.add(batch.scopes.peek()); return; }
+        commitDomainMutation();
+    }
+
+    private static void recordDomainMutation(DomainMutationRevisions.Domain domain) {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null && !batch.scopes.isEmpty()) {
+            batch.mutations.computeIfAbsent(domain, key -> WorldForgeApi.revisions().begin(key));
+            batch.dirty.add(domain);
             return;
         }
-        commitDomainMutation();
+        try (DomainMutationRevisions.Mutation mutation = WorldForgeApi.revisions().begin(domain)) { mutation.commit(); }
     }
 
     private static void commitDomainMutation() {
