@@ -37,6 +37,8 @@ capture_server_threads() {
   pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-$stamp.txt")"
   [ -n "$pid" ] || return 0
   jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || true
+  jcmd "$pid" GC.heap_info > "$OUTPUT/runtime-heap-$stamp.txt" 2>&1 || true
+  WF_METRIC_PID="$pid" powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/runtime-process-$stamp.json" 2>&1 || true
   THREAD_DUMP_COUNT=$((THREAD_DUMP_COUNT + 1))
   echo "RUNTIME_THREAD_DUMP=$stamp PID=$pid"
   # Keep the complete dump as an artifact and print the server plus chunk/IO
