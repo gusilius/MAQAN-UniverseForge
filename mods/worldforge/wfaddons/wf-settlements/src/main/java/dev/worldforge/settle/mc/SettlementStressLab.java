@@ -182,6 +182,9 @@ public final class SettlementStressLab {
             order.overlay = 0;
             local.workOrders.put(worker.id, order);
         }
+        // Exercise the production bridge: each settlement worker must receive
+        // one canonical Character identity before the physical entity is spawned.
+        SettleMod.syncPeople(local, server);
         capturedTerrainCells = local.captureTerrain(level, -16, -16, 16, 16);
     }
 
