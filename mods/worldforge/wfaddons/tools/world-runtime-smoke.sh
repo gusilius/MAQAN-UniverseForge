@@ -274,6 +274,12 @@ report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 target, days = int(sys.argv[2]), int(sys.argv[3])
 checks = {
     "status": report.get("status") == "PASS",
+    "runtime_kind": report.get("runtime_kind") == "dedicated_server_production_domain_api_stress",
+    "dedicated_server": report.get("dedicated_server") is True,
+    "required_mods_loaded": report.get("required_mods_loaded") is True,
+    "canonical_registry_population": report.get("canonical_registry_population") is True,
+    "physical_entity_scope_explicit": report.get("physical_npc_entity_spawn_verified") is False,
+    "server_restart_scope_explicit": report.get("server_restart_persistence_verified") is False,
     "created": report.get("created") == target,
     "days": report.get("days_completed") == days,
     "interactions": report.get("autonomous_interactions", 0) > 0,
