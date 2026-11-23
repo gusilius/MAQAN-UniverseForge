@@ -9,6 +9,8 @@ import dev.worldforge.settle.ResidentSocial;
 
 import java.nio.file.*;
 import java.util.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
 
 public class PeopleTest {
     static int fails;
@@ -438,6 +440,20 @@ public class PeopleTest {
                 "death bereavement reaches indexed siblings and reciprocal friends without notifying unrelated residents");
         ok(bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
                 "canonical global Character lookup resolves social event recipients directly");
+        try {
+            Field globalIndex = CharacterRegistry.class.getDeclaredField("byGlobalId");
+            Field orderIndex = CharacterRegistry.class.getDeclaredField("ordered");
+            boolean compactIndexes = globalIndex.getGenericType() instanceof ParameterizedType globalType
+                    && globalType.getActualTypeArguments()[1].getTypeName().equals("java.lang.String")
+                    && orderIndex.getGenericType() instanceof ParameterizedType orderType
+                    && orderType.getActualTypeArguments()[0].getTypeName().equals("java.lang.String");
+            ok(compactIndexes, "registry secondary indexes retain stable local IDs, not duplicate Character object references");
+            ok(bereavementRegistry.all().stream().anyMatch(person -> person == trustedFriend)
+                            && bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
+                    "ordered compatibility view and global UUID lookup resolve canonical Character objects");
+        } catch (ReflectiveOperationException reflectionFailure) {
+            ok(false, "registry compact index reflection check: " + reflectionFailure.getMessage());
+        }
 
         CharacterRegistry queuedBereavement = new CharacterRegistry();
         Character queuedDeceased = queuedBereavement.create("Умерший", "", "", "m", 0);

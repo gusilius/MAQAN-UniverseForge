@@ -31,13 +31,17 @@ public final class CharacterRegistry {
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
-    private final Map<String, Character> byGlobalId = new HashMap<>();
+    private final Map<String, String> byGlobalId = new HashMap<>();
     /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
     private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
-    private final List<Character> ordered = new ArrayList<>();
-    private final List<Character> orderedView = Collections.unmodifiableList(ordered);
+    private final List<String> ordered = new ArrayList<>();
+    /** Compatibility view resolves IDs on access and avoids a second retained Character reference per resident. */
+    private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
+        @Override public Character get(int index) { return byId.get(ordered.get(index)); }
+        @Override public int size() { return ordered.size(); }
+    });
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -136,8 +140,12 @@ public final class CharacterRegistry {
     public Character get(String id) { return byId.get(id); }
 
     /** Resolves a canonical global UUID without scanning the local registry. */
-    public Character getByGlobalId(String globalId) {
-        return globalId == null || globalId.isBlank() ? null : byGlobalId.get(globalId);
+    public Character getByGlobalId(String globalId) { return characterByGlobalId(globalId); }
+
+    private Character characterByGlobalId(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        return localId == null ? null : byId.get(localId);
     }
 
     /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
@@ -181,8 +189,8 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        byGlobalId.put(c.globalId, c);
-        ordered.add(c);
+        byGlobalId.put(c.globalId, c.id);
+        ordered.add(c.id);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterCreated(this, c);
         markMembershipMutation();
@@ -600,7 +608,7 @@ public final class CharacterRegistry {
                         || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
                 if (!(entry.getKey() instanceof String globalId)
                         || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
-                Character friend = byGlobalId.get(globalId);
+                Character friend = characterByGlobalId(globalId);
                 if (friend != null && friend.alive && friend != deceased
                         && relationshipScore(friend, deceased.globalId) >= 35)
                     recipients.add(friend.globalId);
@@ -633,7 +641,7 @@ public final class CharacterRegistry {
         try (MutationBatch ignored = beginMutationBatch()) {
             while (processed < maxRecipients && !pendingBereavement.isEmpty()) {
                 String deceasedGlobalId = pendingBereavement.peekFirst();
-                Character deceased = byGlobalId.get(deceasedGlobalId);
+                Character deceased = characterByGlobalId(deceasedGlobalId);
                 if (deceased == null) {
                     pendingBereavement.removeFirst();
                     continue;
@@ -654,7 +662,7 @@ public final class CharacterRegistry {
                     Object rawGlobalId = recipients.get(cursor++);
                     processed++;
                     if (!(rawGlobalId instanceof String survivorGlobalId)) continue;
-                    Character survivor = byGlobalId.get(survivorGlobalId);
+                    Character survivor = characterByGlobalId(survivorGlobalId);
                     if (survivor == null || !survivor.alive || survivor == deceased) continue;
                     int intensity = 0;
                     boolean directFamily = deceased.spouse.equals(survivor.id)
@@ -859,8 +867,8 @@ public final class CharacterRegistry {
         Character restored = decodeCharacter(rawCharacter, identityNamespace, globalOwners, entityOwners);
 
         Character previous = byId.get(restored.id);
-        Character globalOwner = byGlobalId.get(restored.globalId);
-        if (globalOwner != null && globalOwner != previous)
+        String globalOwnerId = byGlobalId.get(restored.globalId);
+        if (globalOwnerId != null && !globalOwnerId.equals(restored.id))
             throw new IllegalArgumentException("Duplicate canonical global Character identity: " + restored.globalId);
         for (String uuid : entityOwners.keySet()) {
             String owner = entityOwnerByUuid.get(uuid);
@@ -872,22 +880,14 @@ public final class CharacterRegistry {
         if (previous != null) {
             removeEntityBindings(previous);
             if (!previous.globalId.equals(restored.globalId)) {
-                byGlobalId.remove(previous.globalId, previous);
+                byGlobalId.remove(previous.globalId, previous.id);
                 pendingBereavement.remove(previous.globalId);
             }
         }
         byId.put(restored.id, restored);
-        byGlobalId.put(restored.globalId, restored);
+        byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
-        if (previous == null) ordered.add(restored);
-        else {
-            for (int index = 0; index < ordered.size(); index++) {
-                if (ordered.get(index) == previous) {
-                    ordered.set(index, restored);
-                    break;
-                }
-            }
-        }
+        if (previous == null) ordered.add(restored.id);
         if (restored.id.matches("c[0-9]+")) {
             try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
             catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
@@ -1077,7 +1077,7 @@ public final class CharacterRegistry {
         byGlobalId.clear();
         pendingBereavement.clear();
         for (Character character : loaded.values()) {
-            byGlobalId.put(character.globalId, character);
+            byGlobalId.put(character.globalId, character.id);
             if (!Boolean.TRUE.equals(character.props.get("death.bereavement.completed"))
                     && character.props.get("death.bereavement.recipients") instanceof List<?>)
                 pendingBereavement.addLast(character.globalId);
@@ -1085,7 +1085,7 @@ public final class CharacterRegistry {
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
         ordered.clear();
-        ordered.addAll(loaded.values());
+        ordered.addAll(loaded.keySet());
         membershipGeneration++;
         next = safeNext;
         markMembershipMutation();
