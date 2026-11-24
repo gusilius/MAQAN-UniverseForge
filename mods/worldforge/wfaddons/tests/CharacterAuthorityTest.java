@@ -21,11 +21,13 @@ public final class CharacterAuthorityTest {
 
     private static boolean authorityIdentityIndexStoresOnlyKeys() {
         try {
-            Field field = CharacterAuthority.class.getDeclaredField("byIdentity");
-            if (!java.util.Set.class.isAssignableFrom(field.getType())) return false;
+            Field field = CharacterAuthority.class.getDeclaredField("byGlobalId");
+            if (!java.util.Map.class.isAssignableFrom(field.getType())) return false;
             if (!(field.getGenericType() instanceof ParameterizedType generic)) return false;
-            String elementType = generic.getActualTypeArguments()[0].getTypeName();
-            return elementType.equals("dev.worldforge.people.CharacterIdentity");
+            java.lang.reflect.Type[] arguments = generic.getActualTypeArguments();
+            return arguments.length == 2
+                    && arguments[0].getTypeName().equals("java.lang.String")
+                    && arguments[1].getTypeName().equals("dev.worldforge.people.CharacterIdentity");
         } catch (ReflectiveOperationException ex) {
             return false;
         }
