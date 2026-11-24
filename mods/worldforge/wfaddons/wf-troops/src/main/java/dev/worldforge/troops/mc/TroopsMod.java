@@ -377,8 +377,9 @@ public class TroopsMod {
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
                 HIERARCHY.ensureArmy(ref, name, troop.ownerId(), realm);
-                if (strategic != null && !strategic.army().commander.isBlank())
-                    HIERARCHY.appointArmyCommander(ref, strategic.army().commander);
+                if (strategic != null && strategic.army().commanderGlobalId != null
+                        && !strategic.army().commanderGlobalId.isBlank())
+                    HIERARCHY.appointArmyCommander(ref, strategic.army().commanderGlobalId);
                 ArmyHierarchy.Corps assigned = HIERARCHY.corpsForSquad(squad.id);
                 if (assigned == null || !assigned.armyRef.equals(ref)) {
                     ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(ref);
