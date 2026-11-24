@@ -34,6 +34,8 @@ public final class CharacterRegistry {
 
     /** Canonical materialized objects for this partition; restore atomically swaps the parsed map. */
     private Map<String, Character> byId = new LinkedHashMap<>();
+    /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
+    private final Map<String, Integer> activeAccessLeases = new HashMap<>();
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, String> byGlobalId = new HashMap<>();
     /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
@@ -217,6 +219,43 @@ public final class CharacterRegistry {
     public void addListener(Listener l) { listeners.add(l); }
 
     public Character get(String id) { return byId.get(id); }
+
+    /**
+     * Acquires a scoped strong reference for operations that may overlap future eviction.
+     * Legacy get() remains for compatibility; new storage-aware code should prefer leases.
+     */
+    public synchronized CharacterAccessService.Lease acquire(String id) {
+        Character character = byId.get(id);
+        if (character == null) return null;
+        activeAccessLeases.merge(id, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, id, character);
+    }
+
+    synchronized void releaseAccess(String id, Character expected) {
+        Integer count = activeAccessLeases.get(id);
+        if (count == null || count <= 0)
+            throw new IllegalStateException("Character access lease underflow for " + id);
+        if (byId.get(id) != expected && count == 1) {
+            // A restore may replace the map while an old lease is still closing.
+            // The pin belongs to the lease, not to the replacement Character.
+        }
+        if (count == 1) activeAccessLeases.remove(id);
+        else activeAccessLeases.put(id, count - 1);
+    }
+
+    public synchronized boolean isAccessPinned(String id) {
+        return activeAccessLeases.containsKey(id);
+    }
+
+    public synchronized int activeAccessLeaseCount() {
+        int total = 0;
+        for (int count : activeAccessLeases.values()) total += count;
+        return total;
+    }
+
+    synchronized boolean isCurrentLease(String id, Character expected) {
+        return byId.get(id) == expected;
+    }
 
     /** Resolves a canonical global UUID without scanning the local registry. */
     public Character getByGlobalId(String globalId) { return characterByGlobalId(globalId); }
