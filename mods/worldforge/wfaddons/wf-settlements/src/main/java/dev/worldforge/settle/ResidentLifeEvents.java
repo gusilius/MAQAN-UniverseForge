@@ -162,16 +162,16 @@ public final class ResidentLifeEvents {
                     String localId = registry.idAt(index);
                     String globalId = registry.globalIdForLocalId(localId);
                     if (globalId == null) continue;
-                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
-                        if (lease == null) continue;
-                        Character person = lease.get();
+                    final String[] newbornId = {null};
+                    final boolean[] eligible = {false};
+                    registry.access().mutate(localId, person -> {
                         registry.refreshLifeStages(List.of(person), session.year);
-                        Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
-                        if (newborn != null) session.newbornIds.add(newborn.globalId);
-                        if (person.alive && (person.spouse == null || person.spouse.isBlank())
-                                && PopulationSimulation.age(person, session.year) >= 18)
-                            session.eligibleSingleIds.add(globalId);
-                    }
+                        newbornId[0] = processPregnancy(registry, person, session.year, session.worldDay, names);
+                        eligible[0] = person.alive && (person.spouse == null || person.spouse.isBlank())
+                                && PopulationSimulation.age(person, session.year) >= 18;
+                    });
+                    if (newbornId[0] != null) session.newbornIds.add(newbornId[0]);
+                    if (eligible[0]) session.eligibleSingleIds.add(globalId);
                 }
             } else if (session.phase == 1) {
                 for (int index = session.cursor; index < end; index++)
@@ -220,9 +220,7 @@ public final class ResidentLifeEvents {
             
             for (int index = refresh.cursor; index < end; index++) {
                 String localId = registry.idAt(index);
-                try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
-                    if (lease != null) registry.refreshLifeStages(List.of(lease.get()), year);
-                }
+                registry.access().mutate(localId, person -> registry.refreshLifeStages(List.of(person), year));
             }
             refresh.cursor = end;
         }
@@ -369,61 +367,82 @@ public final class ResidentLifeEvents {
         if (globalId == null || globalId.isBlank()) return;
         CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
         if (owner == null) return;
-        try (CharacterAccessService.Lease lease = owner.access().acquireGlobal(globalId)) {
-            if (lease != null) action.accept(lease.get());
-        }
+        owner.access().mutateGlobal(globalId, action);
     }
 
-    private static Character processPregnancy(CharacterRegistry registry, Character person, int year,
-                                               long worldDay, NameBank names) {
+    private static String processPregnancy(CharacterRegistry registry, Character person, int year,
+                                             long worldDay, NameBank names) {
         if (!person.alive || year <= number(person.props.get("social.last_family_year"), 0)) return null;
         person.props.put("social.last_family_year", year);
         if (!"f".equalsIgnoreCase(person.gender)) return null;
-        Character mother = person;
-        if (FamilyPlanning.isPregnant(mother)) {
-            if (FamilyPlanning.dueFatherId(mother, worldDay).isBlank()) return null;
-            return deliverDuePregnancy(registry, mother, year, worldDay, names);
+        if (FamilyPlanning.isPregnant(person)) {
+            if (FamilyPlanning.dueFatherId(person, worldDay).isBlank()) return null;
+            return deliverDuePregnancy(registry, person, year, worldDay, names);
         }
-        Character spouse = mother.spouse == null || mother.spouse.isBlank() ? null : registry.get(mother.spouse);
-        if (spouse != null && spouse.alive && mother.id.equals(spouse.spouse)
-                && FamilyPlanning.tryConceive(mother, spouse, year, worldDay,
-                        Objects.hash(mother.globalId, spouse.globalId)))
-            enqueuePregnancy(registry, mother);
+        String spouseLocalId = person.spouse;
+        String spouseGlobalId = spouseLocalId == null || spouseLocalId.isBlank()
+                ? null : registry.globalIdForLocalId(spouseLocalId);
+        if (spouseGlobalId == null) return null;
+        final boolean[] conceived = {false};
+        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
+                List.of(person.globalId, spouseGlobalId), people -> {
+                    Character mother = people.get(person.globalId), spouse = people.get(spouseGlobalId);
+                    if (mother == null || spouse == null || !mother.alive || !spouse.alive
+                            || !mother.id.equals(spouse.spouse)) return false;
+                    conceived[0] = FamilyPlanning.tryConceive(mother, spouse, year, worldDay,
+                            Objects.hash(mother.globalId, spouse.globalId));
+                    if (conceived[0]) enqueuePregnancy(registry, mother);
+                    return conceived[0];
+                });
         return null;
     }
 
-    private static Character deliverDuePregnancy(CharacterRegistry registry, Character mother, int year,
-                                                  long worldDay, NameBank names) {
-        String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
-        if (dueFatherId.isBlank()) return null;
-        Character biologicalFather = registry.get(dueFatherId);
-        if (biologicalFather == null || !biologicalFather.alive) {
-            FamilyPlanning.cancel(mother, biologicalFather, "father-unavailable", year);
+    private static String deliverDuePregnancy(CharacterRegistry registry, Character mother, int year,
+                                               long worldDay, NameBank names) {
+        String fatherLocalId = FamilyPlanning.dueFatherId(mother, worldDay);
+        if (fatherLocalId == null || fatherLocalId.isBlank()) return null;
+        String fatherGlobalId = registry.globalIdForLocalId(fatherLocalId);
+        if (fatherGlobalId == null) {
+            FamilyPlanning.cancel(mother, null, "father-unavailable", year);
             return null;
         }
-        String gender = Math.floorMod(Objects.hash(mother.id, biologicalFather.id, year, "gender"), 2) == 0 ? "f" : "m";
-        String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
-        if (names != null) {
-            String race = mother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
-                    : biologicalFather.props.get("origin.race") instanceof String fr ? fr : "";
-            String culture = mother.culture == null || mother.culture.isBlank() ? biologicalFather.culture : mother.culture;
-            try {
-                childName = names.pickGivenName(race, culture, gender,
-                        new Random(Objects.hash(mother.globalId, biologicalFather.globalId, year, "birth-name")));
-            } catch (IllegalStateException unavailablePool) {
-                // Preserve the stable fallback if a data pack has no compatible name pool.
-            }
-        }
-        Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
-        child.traits.add("curious");
-        child.props.put("family.father_name", biologicalFather.name);
-        child.props.put("family.mother_name", mother.name);
-        ResidentSocial.adjust(biologicalFather, child.globalId, 35);
-        ResidentSocial.adjust(mother, child.globalId, 35);
-        ResidentSocial.adjust(child, biologicalFather.globalId, 35);
-        ResidentSocial.adjust(child, mother.globalId, 35);
-        FamilyPlanning.complete(mother, biologicalFather, year, child.id);
-        return child;
+        final String[] childGlobalId = {null};
+        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
+                List.of(mother.globalId, fatherGlobalId), people -> {
+                    Character currentMother = people.get(mother.globalId);
+                    Character father = people.get(fatherGlobalId);
+                    if (currentMother == null || father == null || !currentMother.alive || !father.alive) {
+                        if (currentMother != null) FamilyPlanning.cancel(currentMother, father, "father-unavailable", year);
+                        return currentMother != null;
+                    }
+                    String gender = Math.floorMod(Objects.hash(currentMother.id, father.id, year, "gender"), 2) == 0 ? "f" : "m";
+                    String childName = "Дитя семьи " + (currentMother.house == null || currentMother.house.isBlank()
+                            ? currentMother.name : currentMother.house);
+                    if (names != null) {
+                        String race = currentMother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
+                                : father.props.get("origin.race") instanceof String fr ? fr : "";
+                        String culture = currentMother.culture == null || currentMother.culture.isBlank()
+                                ? father.culture : currentMother.culture;
+                        try {
+                            childName = names.pickGivenName(race, culture, gender,
+                                    new Random(Objects.hash(currentMother.globalId, father.globalId, year, "birth-name")));
+                        } catch (IllegalStateException unavailablePool) {
+                            // Keep deterministic fallback when no compatible name pool exists.
+                        }
+                    }
+                    Character child = registry.addChild(father, currentMother, childName, gender, year);
+                    child.traits.add("curious");
+                    child.props.put("family.father_name", father.name);
+                    child.props.put("family.mother_name", currentMother.name);
+                    ResidentSocial.adjust(father, child.globalId, 35);
+                    ResidentSocial.adjust(currentMother, child.globalId, 35);
+                    ResidentSocial.adjust(child, father.globalId, 35);
+                    ResidentSocial.adjust(child, currentMother.globalId, 35);
+                    FamilyPlanning.complete(currentMother, father, year, child.id);
+                    childGlobalId[0] = child.globalId;
+                    return true;
+                });
+        return childGlobalId[0];
     }
 
     private static void processMaritalConflict(CharacterRegistry registry, Character person, int year) {
