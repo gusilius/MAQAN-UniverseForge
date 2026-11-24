@@ -881,40 +881,10 @@ public final class CharacterInventory {
         }
     }
 
-    /** Estate succession resolves spouse and descendants across every registered world partition. */
+    /** Compatibility entry point; the actual succession is UUID-addressed and lease-scoped. */
     public static String settleEstate(CharacterAuthority authority, CharacterRegistry registry, Character deceased) {
-        Objects.requireNonNull(registry);Objects.requireNonNull(deceased);
-        // A recipient registry may have reached disk just before the deceased's registry.
-        // Its durable incoming marker is the commit record: finish clearing the source on recovery.
-        Object pendingRaw = deceased.props.get("estate.transfer_pending");
-        Object recipientRaw = deceased.props.get("estate.recipient_global_id");
-        if (authority != null && pendingRaw instanceof String pending && recipientRaw instanceof String recipientId) {
-            Character committedHeir = authority.getGlobal(recipientId);
-            if (committedHeir != null
-                    && deceased.globalId.equals(committedHeir.props.get("estate.incoming." + pending))) {
-                clearTransferredEstate(deceased, committedHeir);
-                return committedHeir.id;
-            }
-        }
-        if(Boolean.TRUE.equals(deceased.props.get("estate.settled")))return
-                String.valueOf(deceased.props.getOrDefault("estate.recipient",""));
-        Character heir=findHeir(authority, registry, deceased);
-        String home=String.valueOf(deceased.props.getOrDefault("population.location",
-                deceased.props.getOrDefault("population.home","")));
-        if(heir!=null) {
-            transferAll(deceased,heir);
-            deceased.props.put("estate.recipient",heir.id);
-            deceased.props.put("estate.recipient_global_id", heir.globalId);
-            deceased.props.put("estate.status","inherited");
-        } else {
-            // Keep every item on the persistent dead Character; it is a recoverable home estate,
-            // not a dropped entity stack that can despawn or be destroyed by chunk unload.
-            deceased.props.put("estate.status","awaiting_kin_or_home_claim");
-            deceased.props.put("estate.home",home);
-            deceased.props.put("estate.recipient","");
-        }
-        deceased.props.put("estate.settled",true);
-        return heir==null?"":heir.id;
+        Objects.requireNonNull(deceased, "deceased");
+        return settleEstateById(authority, registry, deceased.globalId);
     }
 
     /** A later-discovered descendant or household member can claim a pending estate exactly once. */
@@ -925,6 +895,8 @@ public final class CharacterInventory {
     /** Claims a pending estate using global family links, including relatives in another registry. */
     public static boolean claimEstate(CharacterAuthority authority, Character deceased, Character claimant) {
         Objects.requireNonNull(deceased);Objects.requireNonNull(claimant);
+        if (authority != null)
+            return claimEstateById(authority, null, deceased.globalId, claimant.globalId);
         if(deceased.alive||!claimant.alive||!isKin(deceased,claimant)
                 ||!Boolean.TRUE.equals(deceased.props.get("estate.settled"))
                 ||!"awaiting_kin_or_home_claim".equals(deceased.props.get("estate.status")))return false;
