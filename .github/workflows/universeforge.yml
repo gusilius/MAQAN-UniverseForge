@@ -265,28 +265,14 @@ jobs:
           if ($env:SETTLEMENT_OUTCOME -ne "success") {
             "Contour 04 failed; continuing to same-server dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
-      - name: Start one server with normal vanilla Overworld and image-derived dimension
+      # Dual-world Genesis is intentionally deferred while the four independent
+      # runtime contours are stabilized. Do not spend another multi-hour runner here.
+      - name: Dual-world Genesis — deferred by current acceptance scope
         id: dual_world_smoke
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "dual-world"
-          WF_MAP_ID: "real-map"
-          WF_RUNTIME_TIMEOUT_SECONDS: "3300"
-        run: |
-          bash tools/world-runtime-smoke.sh "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-dual-world-runtime"
-
-      - name: Aggregate same-server world genesis acceptance
-        if: always()
+        if: ${{ false }}
         shell: pwsh
-        env:
-          DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
         run: |
-          "SAME_SERVER_DUAL_WORLD_OUTCOME=$env:DUAL_WORLD_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:DUAL_WORLD_OUTCOME -ne "success") {
-            "Dual-world contour failed; all requested runtime contours have now been attempted." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
+          "SAME_SERVER_DUAL_WORLD_OUTCOME=deferred" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Upload same-server dual-world and acceptance diagnostics
         if: always()
@@ -294,7 +280,6 @@ jobs:
         with:
           name: maqan-world-runtime-server-acceptance
           path: |
-            ${{ runner.temp }}/maqan-dual-world-runtime/
             ${{ runner.temp }}/maqan-contour-01-server-core/
             ${{ runner.temp }}/maqan-contour-02-population/
             ${{ runner.temp }}/maqan-contour-03-social-*/
@@ -311,14 +296,12 @@ jobs:
           POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
           SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
           SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
-          DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
         run: |
           $outcomes = [ordered]@{
             "01 Server Core" = $env:SERVER_CORE_OUTCOME
             "02 Population" = $env:POPULATION_OUTCOME
             "03 Families / Social" = $env:SOCIAL_OUTCOME
             "04 Settlements / Labor" = $env:SETTLEMENT_OUTCOME
-            "Dual-world Genesis" = $env:DUAL_WORLD_OUTCOME
           }
           $failed = @()
           foreach ($entry in $outcomes.GetEnumerator()) {
