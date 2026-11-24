@@ -990,6 +990,19 @@ public final class CharacterInventory {
         from.props.remove(CONTAINERS_KEY);
     }
 
+    private static void clearTransferredEstate(Character deceased, Character heir, String transferId) {
+        write(deceased, List.of());
+        writeEquipment(deceased, Map.of());
+        deceased.props.remove(CONTAINERS_KEY);
+        if (transferId != null && !transferId.isBlank())
+            deceased.props.put("estate.transfer_receipt", transferId);
+        deceased.props.remove("estate.transfer_pending");
+        deceased.props.put("estate.recipient", heir.id);
+        deceased.props.put("estate.recipient_global_id", heir.globalId);
+        deceased.props.put("estate.status", "inherited");
+        deceased.props.put("estate.settled", true);
+    }
+
     private static void clearTransferredEstate(Character deceased, Character heir) {
         write(deceased, List.of());
         writeEquipment(deceased, Map.of());
@@ -1010,7 +1023,27 @@ public final class CharacterInventory {
         for (CharacterAuthority.EstateIncoming incoming : authority.pendingEstateIncoming()) {
             CharacterRegistry deceasedRegistry = authority.registryForGlobal(incoming.deceasedGlobalId());
             if (deceasedRegistry == null) continue;
-            settleEstateById(authority, deceasedRegistry, incoming.deceasedGlobalId());
+            CharacterAccessService.mutateScoped(authority, deceasedRegistry,
+                    List.of(incoming.deceasedGlobalId(), incoming.heirGlobalId()), people -> {
+                Character deceased = people.get(incoming.deceasedGlobalId());
+                Character heir = people.get(incoming.heirGlobalId());
+                String markerKey = null;
+                String transferId = null;
+                for (Map.Entry<String, Object> entry : heir.props.entrySet()) {
+                    if (entry.getKey().startsWith("estate.incoming.")
+                            && incoming.deceasedGlobalId().equals(entry.getValue())) {
+                        markerKey = entry.getKey();
+                        transferId = markerKey.substring("estate.incoming.".length());
+                        break;
+                    }
+                }
+                if (markerKey == null || transferId == null
+                        || transferId.equals(deceased.props.get("estate.transfer_receipt"))) return false;
+                deceased.alive = false;
+                clearTransferredEstate(deceased, heir, transferId);
+                heir.props.remove(markerKey);
+                return true;
+            });
             authority.clearEstateIncoming(incoming.heirGlobalId(), incoming.deceasedGlobalId());
         }
     }
