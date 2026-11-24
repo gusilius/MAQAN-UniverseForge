@@ -31,6 +31,7 @@ public final class CharacterDirtyQueue {
     private final Set<String> queued = new HashSet<>();
     private final Set<String> inFlight = new HashSet<>();
     private int consecutiveCriticalDeliveries;
+    private int criticalPending;
 
     public synchronized void enqueue(String globalId, long generation) {
         enqueue(globalId, generation, Priority.BACKGROUND);
@@ -44,10 +45,14 @@ public final class CharacterDirtyQueue {
                 && previous.priority() == Priority.CRITICAL ? Priority.CRITICAL : priority;
         if (previous != null && previous.generation() > generation) generation = previous.generation();
         pending.put(globalId, new Entry(globalId, generation, effective));
+        if (previous == null && effective == Priority.CRITICAL) criticalPending++;
+        else if (previous != null && previous.priority() != Priority.CRITICAL
+                && effective == Priority.CRITICAL) criticalPending++;
         if (!inFlight.contains(globalId) && queued.add(globalId)) appendReady(globalId, effective);
-        else if (queued.contains(globalId) && effective == Priority.CRITICAL) {
+        else if (queued.contains(globalId) && previous != null
+                && previous.priority() != Priority.CRITICAL && effective == Priority.CRITICAL) {
             backgroundReady.remove(globalId);
-            if (!criticalReady.contains(globalId)) criticalReady.addLast(globalId);
+            criticalReady.addLast(globalId);
         }
     }
 
@@ -55,6 +60,7 @@ public final class CharacterDirtyQueue {
         Entry current = pending.get(globalId);
         if (current == null || current.priority() == Priority.CRITICAL) return;
         pending.put(globalId, new Entry(globalId, current.generation(), Priority.CRITICAL));
+        criticalPending++;
         if (queued.contains(globalId)) {
             backgroundReady.remove(globalId);
             if (!criticalReady.contains(globalId)) criticalReady.addLast(globalId);
@@ -97,9 +103,13 @@ public final class CharacterDirtyQueue {
         if (current.generation() <= durableGeneration) {
             pending.remove(globalId);
             inFlight.remove(globalId);
-            queued.remove(globalId);
-            criticalReady.remove(globalId);
-            backgroundReady.remove(globalId);
+            // In-flight IDs were already removed from the deques. Avoid an O(backlog)
+            // linear remove on every durable receipt at million-character scale.
+            if (queued.remove(globalId)) {
+                criticalReady.remove(globalId);
+                backgroundReady.remove(globalId);
+            }
+            if (current.priority() == Priority.CRITICAL) criticalPending--;
         } else {
             inFlight.remove(globalId);
             requeue(globalId);
@@ -123,11 +133,7 @@ public final class CharacterDirtyQueue {
     public synchronized int pendingCount() { return pending.size(); }
     public synchronized int readyCount() { return criticalReady.size() + backgroundReady.size(); }
     public synchronized int inFlightCount() { return inFlight.size(); }
-    public synchronized int criticalCount() {
-        int count = 0;
-        for (Entry entry : pending.values()) if (entry.priority() == Priority.CRITICAL) count++;
-        return count;
-    }
+    public synchronized int criticalCount() { return criticalPending; }
     public synchronized boolean contains(String globalId) { return pending.containsKey(globalId); }
     public synchronized long generation(String globalId) {
         Entry entry = pending.get(globalId);
