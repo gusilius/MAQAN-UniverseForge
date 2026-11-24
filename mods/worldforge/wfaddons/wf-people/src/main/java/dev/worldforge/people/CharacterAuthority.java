@@ -437,11 +437,9 @@ public final class CharacterAuthority {
                 if (identity != null) matches.add(identity);
             }
         } else {
-            addFamilyMatches(matches, familyByParentLegacy, person.id);
-            for (String childId : person.children) {
-                Set<CharacterIdentity> identities = byLegacyId.get(childId);
-                if (identities != null) matches.addAll(identities);
-            }
+            addFamilyMatchesLegacyLocal(matches, familyByParentLegacy, person.id, localMap);
+            for (String childId : person.children)
+                addLegacyIdentityMatchesLocal(matches, childId, localMap);
         }
 
         if (!spouseGlobal.isBlank()) {
@@ -455,8 +453,6 @@ public final class CharacterAuthority {
         // no spouse field of its own. Preserve that reverse relationship by canonical UUID.
         addFamilyMatches(matches, familyBySpouseGlobal, person.globalId);
 
-        CharacterIdentity owner = byGlobalId.get(person.globalId);
-        String localMap = owner == null ? "" : owner.mapId();
         List<CharacterIdentity> ordered = new ArrayList<>(matches);
         ordered.removeIf(identity -> !identity.equals(byGlobalId.get(identity.globalCharacterId())));
         ordered.sort(Comparator
