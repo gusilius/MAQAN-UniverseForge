@@ -76,18 +76,24 @@ public final class ResidentInteraction {
         String profession = colony.s.defs.professionName(data.profession);
         String status = data.status == null || data.status.isBlank() ? "Повседневная жизнь" : data.status;
         int age = Math.max(0, PeopleMod.YEAR - person.birthYear);
+        // Network menu factories may run after this method returns. Capture immutable
+        // presentation data, never the leased Character object itself.
+        String personName = person.name;
+        String profile = residentProfile(person);
+        String relation = relationship(person, player);
+        String entityUuid = worker.getUUID().toString();
         net.minecraftforge.network.NetworkHooks.openScreen(player,
                 new net.minecraft.world.SimpleMenuProvider((windowId, inventory, viewer) ->
-                        new ResidentDialogueMenu(windowId, inventory, worker.getUUID().toString(), person.name, profession,
-                                status, residentProfile(person), relationship(person, player), questText, age),
-                        Component.literal("Диалог · " + person.name)),
+                        new ResidentDialogueMenu(windowId, inventory, entityUuid, personName, profession,
+                                status, profile, relation, questText, age),
+                        Component.literal("Диалог · " + personName)),
                 buffer -> {
-                    buffer.writeUtf(worker.getUUID().toString(), 128);
-                    buffer.writeUtf(person.name, 128);
+                    buffer.writeUtf(entityUuid, 128);
+                    buffer.writeUtf(personName, 128);
                     buffer.writeUtf(profession, 128);
                     buffer.writeUtf(status, 256);
-                    buffer.writeUtf(residentProfile(person), 512);
-                    buffer.writeUtf(relationship(person, player), 128);
+                    buffer.writeUtf(profile, 512);
+                    buffer.writeUtf(relation, 128);
                     buffer.writeUtf(questText, 512);
                     buffer.writeVarInt(age);
                 });
