@@ -82,12 +82,28 @@ public final class CharacterRegistry {
      * Used only to recover a scheduler iterator invalidated by an append between ticks.
      */
     public Iterator<Character> iteratorAfter(String exclusiveId) {
-        Iterator<Character> iterator = byId.values().iterator();
-        if (exclusiveId == null || exclusiveId.isEmpty()) return iterator;
-        while (iterator.hasNext()) {
-            if (exclusiveId.equals(iterator.next().id)) return iterator;
+        int start = 0;
+        if (exclusiveId != null && !exclusiveId.isEmpty()) {
+            int anchor = orderedIds.indexOf(exclusiveId);
+            if (anchor < 0)
+                throw new IllegalStateException("Population cursor anchor is no longer in this registry: " + exclusiveId);
+            start = anchor + 1;
         }
-        throw new IllegalStateException("Population cursor anchor is no longer in this registry: " + exclusiveId);
+        // Capture the synchronous traversal boundary. Appends do not invalidate this
+        // iterator or change its insertion order; a later pass will observe the new tail.
+        final int end = orderedIds.size();
+        return new Iterator<>() {
+            private int index = start;
+            @Override public boolean hasNext() { return index < end; }
+            @Override public Character next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                String id = orderedIds.get(index++);
+                Character character = byId.get(id);
+                if (character == null)
+                    throw new ConcurrentModificationException("Character is not materialized during registry traversal: " + id);
+                return character;
+            }
+        };
     }
 
     /**
@@ -405,7 +421,7 @@ public final class CharacterRegistry {
         byGlobalId.put(c.globalId, c.id);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterCreated(this, c);
-        markMembershipMutation();
+        markMembershipAppend();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
