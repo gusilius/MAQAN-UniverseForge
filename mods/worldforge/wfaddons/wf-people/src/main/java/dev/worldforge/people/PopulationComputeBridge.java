@@ -86,17 +86,24 @@ public final class PopulationComputeBridge {
 
         private CharacterRegistry registry(int index) { return registries.get(index); }
 
-        /** Resolves a Character by indexed ID; no map iterator survives this call. */
-        public Character nextCharacter(int registryIndex, int memberIndex) {
+        /** Resolves and pins one Character for the duration of a capture operation. */
+        public CharacterAccessService.Lease nextCharacterLease(int registryIndex, int memberIndex) {
             CharacterRegistry registry = registries.get(registryIndex);
             List<String> ids = memberIds[registryIndex];
             if (ids == null || memberIndex < starts[registryIndex] || memberIndex >= limits[registryIndex]
                     || memberIndex >= ids.size())
                 throw new ConcurrentModificationException("Character ID snapshot is unavailable or out of bounds");
-            Character character = registry.get(ids.get(memberIndex));
-            if (character == null)
+            CharacterAccessService.Lease lease = registry.access().acquire(ids.get(memberIndex));
+            if (lease == null)
                 throw new ConcurrentModificationException("Character disappeared during population scan");
-            return character;
+            return lease;
+        }
+
+        /** Compatibility resolver; prefer nextCharacterLease when reading mutable state. */
+        public Character nextCharacter(int registryIndex, int memberIndex) {
+            try (CharacterAccessService.Lease lease = nextCharacterLease(registryIndex, memberIndex)) {
+                return lease.get();
+            }
         }
 
         /** Releases all population-sized ID reference arrays once the bounded scan is complete. */
@@ -209,24 +216,27 @@ public final class PopulationComputeBridge {
             CharacterRegistry registry=scan.registry(registryCursor);
             int end=scan.limit(registryCursor);
             while(memberCursor<end&&inspected<scanLimit){
-                Character character=scan.nextCharacter(registryCursor,memberCursor++);
+                int currentMemberIndex=memberCursor++;
                 inspected++;
-                if(!character.alive)continue;
-                Object rawWorldDay=character.props.get("population.last_simulated_world_day");
-                long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
-                long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
-                if(elapsed==0)continue;
-                String id=character.globalId;
-                Map<String,Object> person=new LinkedHashMap<>();
-                person.put("id",id);person.put("birth_year",character.birthYear);person.put("alive",true);
-                person.put("needs",needsSnapshot(character));person.put("duties",new ArrayList<>(PopulationSimulation.duties(character)));
-                person.put("profession",PopulationSimulation.profession(character));person.put("training_target",PopulationSimulation.trainingTarget(character));
-                person.put("command",String.valueOf(character.props.getOrDefault("population.command","")));
-                person.put("can_work",PopulationSimulation.canWork(character,year));person.put("elapsed_days",elapsed);
-                long days=PopulationSimulation.persistedNonNegativeLong(character.props.get("population.simulated_days"));
-                person.put("simulated_days",Long.toString(days));people.add(person);ids.add(id);
-                characters.put(id,new CapturedCharacter(registry,character.birthYear,days,elapsed));
-                batchElapsed=Math.max(batchElapsed,elapsed);
+                try (CharacterAccessService.Lease lease = scan.nextCharacterLease(registryCursor,currentMemberIndex)) {
+                    Character character=lease.get();
+                    if(!character.alive)continue;
+                    Object rawWorldDay=character.props.get("population.last_simulated_world_day");
+                    long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
+                    long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
+                    if(elapsed==0)continue;
+                    String id=character.globalId;
+                    Map<String,Object> person=new LinkedHashMap<>();
+                    person.put("id",id);person.put("birth_year",character.birthYear);person.put("alive",true);
+                    person.put("needs",needsSnapshot(character));person.put("duties",new ArrayList<>(PopulationSimulation.duties(character)));
+                    person.put("profession",PopulationSimulation.profession(character));person.put("training_target",PopulationSimulation.trainingTarget(character));
+                    person.put("command",String.valueOf(character.props.getOrDefault("population.command","")));
+                    person.put("can_work",PopulationSimulation.canWork(character,year));person.put("elapsed_days",elapsed);
+                    long days=PopulationSimulation.persistedNonNegativeLong(character.props.get("population.simulated_days"));
+                    person.put("simulated_days",Long.toString(days));people.add(person);ids.add(id);
+                    characters.put(id,new CapturedCharacter(registry,character.birthYear,days,elapsed));
+                    batchElapsed=Math.max(batchElapsed,elapsed);
+                }
             }
             if(memberCursor>=end){
                 registryCursor++;
