@@ -15,17 +15,19 @@ public final class PopulationSimulation {
         final long targetDay;
         final long fallbackDay;
         final int year;
-        final long membershipGeneration;
+        final long membershipResetGeneration;
+        long membershipAppendGeneration;
         int snapshotSize;
         int nextIndex;
         boolean complete;
         boolean catchUpPass;
-        WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
-                       int snapshotSize, int nextIndex, boolean catchUpPass) {
+        WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipResetGeneration,
+                       long membershipAppendGeneration, int snapshotSize, int nextIndex, boolean catchUpPass) {
             this.targetDay = targetDay;
             this.fallbackDay = fallbackDay;
             this.year = year;
-            this.membershipGeneration = membershipGeneration;
+            this.membershipResetGeneration = membershipResetGeneration;
+            this.membershipAppendGeneration = membershipAppendGeneration;
             this.snapshotSize = snapshotSize;
             this.nextIndex = nextIndex;
             this.catchUpPass = catchUpPass;
@@ -560,36 +562,42 @@ public final class PopulationSimulation {
             throw new IllegalArgumentException("invalid world-day range");
         if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
         synchronized (WORLD_DAY_CURSORS) {
-            long generation = registry.membershipGeneration();
+            long resetGeneration = registry.membershipResetGeneration();
+            long appendGeneration = registry.membershipAppendGeneration();
             int currentSize = registry.size();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
-            if (cursor != null && cursor.membershipGeneration == generation && currentSize > cursor.snapshotSize) {
-                // Append-only membership: extend the logical boundary, not an O(population) ID snapshot.
+            if (cursor != null && cursor.membershipResetGeneration == resetGeneration
+                    && appendGeneration > cursor.membershipAppendGeneration) {
+                // New IDs are appended only; extend the logical boundary without replaying
+                // the acknowledged prefix or rebuilding a population-sized snapshot.
                 cursor.snapshotSize = currentSize;
+                cursor.membershipAppendGeneration = appendGeneration;
                 cursor.complete = false;
             }
             if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
-                    && cursor.year == year && cursor.membershipGeneration == generation
+                    && cursor.year == year && cursor.membershipResetGeneration == resetGeneration
                     && cursor.targetDay == targetWorldDay) return true;
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
-                    || cursor.membershipGeneration != generation) {
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        currentSize, 0, false);
+                    || cursor.membershipResetGeneration != resetGeneration) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                        appendGeneration, currentSize, 0, false);
             } else if (cursor.targetDay != targetWorldDay) {
                 if (cursor.nextIndex >= cursor.snapshotSize) {
-                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            currentSize, 0, false);
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, currentSize, 0, false);
                 } else {
-                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.snapshotSize, cursor.nextIndex, true);
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, cursor.snapshotSize, cursor.nextIndex, true);
                 }
             }
             if (cursor.nextIndex >= cursor.snapshotSize) {
                 if (cursor.catchUpPass) {
-                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.snapshotSize, 0, false);
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, cursor.snapshotSize, 0, false);
                 } else {
-                    WORLD_DAY_CURSORS.remove(registry);
+                    cursor.complete = true;
+                    cursor.membershipAppendGeneration = appendGeneration;
+                    WORLD_DAY_CURSORS.put(registry, cursor);
                     return true;
                 }
             }
@@ -613,18 +621,19 @@ public final class PopulationSimulation {
                     }
                 }
             }
-            if (registry.membershipGeneration() != generation) {
+            if (registry.membershipResetGeneration() != resetGeneration) {
                 WORLD_DAY_CURSORS.remove(registry);
                 return false;
             }
             boolean complete = cursor.nextIndex >= cursor.snapshotSize;
             if (complete && cursor.catchUpPass) {
                 WORLD_DAY_CURSORS.put(registry,
-                        new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                                cursor.snapshotSize, 0, false));
+                        new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                                registry.membershipAppendGeneration(), cursor.snapshotSize, 0, false));
                 return false;
             }
             cursor.complete = complete;
+            cursor.membershipAppendGeneration = registry.membershipAppendGeneration();
             WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
