@@ -119,7 +119,15 @@ public final class CharacterRegistry {
                 throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
             start = anchor + 1;
         }
-        return orderedIds.subList(start, orderedIds.size()).iterator();
+        final int end = orderedIds.size();
+        return new Iterator<>() {
+            private int index = start;
+            @Override public boolean hasNext() { return index < end; }
+            @Override public String next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                return orderedIds.get(index++);
+            }
+        };
     }
 
     /** Legacy compatibility snapshot; avoid for large populations because it is O(population) RAM. */
@@ -159,11 +167,13 @@ public final class CharacterRegistry {
         }
         @Override public int size() { return orderedIds.size(); }
         @Override public Iterator<Character> iterator() {
-            Iterator<String> ids = orderedIds.iterator();
+            final int end = orderedIds.size();
             return new Iterator<>() {
-                @Override public boolean hasNext() { return ids.hasNext(); }
+                private int index;
+                @Override public boolean hasNext() { return index < end; }
                 @Override public Character next() {
-                    String id = ids.next();
+                    if (!hasNext()) throw new NoSuchElementException();
+                    String id = orderedIds.get(index++);
                     Character character = byId.get(id);
                     if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
                     return character;
