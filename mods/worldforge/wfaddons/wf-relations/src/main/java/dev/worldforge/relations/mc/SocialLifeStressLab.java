@@ -393,8 +393,10 @@ public final class SocialLifeStressLab {
         if (run.familyCodecCursor % 4096 == 0 || run.familyCodecCursor == run.familyCodecTarget)
             RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_progress characters={}/{} heapBytes={}",
                     run.familyCodecCursor, run.familyCodecTarget, usedHeapBytes());
-        if (run.familyCodecCursor >= run.familyCodecTarget && run.registry.size() == run.familyCodecTarget)
+        if (run.familyCodecCursor >= run.familyCodecTarget && run.registry.size() == run.familyCodecTarget) {
+            run.restoredRegistry.reconcileFamilyLinksAfterRecordRestore();
             run.phase = "VERIFYING_FAMILY_RESULT";
+        }
     }
 
     private static void verifyFamilyResult(Run run) {
