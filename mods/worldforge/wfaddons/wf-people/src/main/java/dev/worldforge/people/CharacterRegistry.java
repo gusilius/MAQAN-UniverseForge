@@ -913,6 +913,10 @@ public final class CharacterRegistry {
     public List<Character.Post> kill(String id) {
         String globalId = globalIdForLocalId(id);
         if (globalId == null) throw new IllegalArgumentException("Нет персонажа " + id);
+        try (CharacterAccessService.Lease lease = access().acquire(id)) {
+            if (lease == null) throw new IllegalArgumentException("Нет персонажа " + id);
+            if (Boolean.TRUE.equals(lease.get().props.get("death.lifecycle.completed"))) return List.of();
+        }
         CharacterInventory.settleEstateById(authority, this, globalId);
         @SuppressWarnings("unchecked")
         List<Character.Post>[] result = new List[] { List.of() };
