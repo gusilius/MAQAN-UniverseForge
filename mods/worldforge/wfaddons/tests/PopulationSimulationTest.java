@@ -572,12 +572,14 @@ public final class PopulationSimulationTest {
         ok(firstAll == cursorA && allCount == 6,
                 "legacy all() iterator has a stable boundary and does not fail on append");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
+        int capturedIdCount = stableIds.size();
         Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
-        ok(stableIds.equals(cursorRegistry.idPage(0, 6))
-                        && stableIds.size() == 6 && cursorRegistry.size() == 7,
+        ok(stableIds.size() == capturedIdCount && !stableIds.contains(cursorLater.id)
+                        && stableIds.equals(cursorRegistry.idPage(0, capturedIdCount))
+                        && cursorRegistry.size() == capturedIdCount + 1,
                 "ID snapshot is detached from Character values and remains stable when new members are appended");
         ok(cursorRegistry.idPage(1, 2).equals(java.util.List.of(cursorB.id, cursorC.id))
-                        && cursorRegistry.idAt(4).equals(cursorLater.id)
+                        && cursorRegistry.idAt(capturedIdCount).equals(cursorLater.id)
                         && cursorRegistry.idPage(cursorRegistry.size(), 8).isEmpty(),
                 "bounded ID pages and indexed ID lookup avoid full-population snapshots");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
@@ -594,6 +596,11 @@ public final class PopulationSimulationTest {
         bridgeRegistry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { bridgeEvents.add(event); }
         });
+        // Other test registries were intentionally mutated above. Capture again only after
+        // fixture construction so this validation test exercises frame rejection/application,
+        // not the independent global revision fence for unrelated prior mutations.
+        captured = PopulationComputeBridge.capture(
+                "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
         java.util.Map<String, Object> invalidRoot = new java.util.LinkedHashMap<>(resultRoot);
         java.util.Map<String, Object> invalidPerson = new java.util.LinkedHashMap<>(resultPerson);
         java.util.Map<String, Object> invalidNeeds = new java.util.LinkedHashMap<>(resultNeeds);
