@@ -1142,6 +1142,7 @@ public class PeopleMod {
                     if (sourceRegistry == null) return false;
                     deceased.props.put("estate.transfer_receipt", transferId);
                     deceased.props.remove("estate.transfer_pending");
+                    AUTHORITY.clearEstateIncoming(heir.globalId, sourceGlobalId);
                     changed.computeIfAbsent(sourceRegistry, ignored -> new ArrayList<>()).add(deceased);
                 }
             }
