@@ -719,22 +719,24 @@ public class TroopsMod {
     public static boolean demobilizeToSettlement(TroopEntity troop, String colonyId) {
         if (troop == null || troop.level().isClientSide || server == null
                 || !ModList.get().isLoaded("wf_settle") || colonyId == null || colonyId.isBlank()) return false;
-        PersonBinding binding = bindPerson(troop, false);
-        if (binding == null || !binding.character().alive) return false;
-        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
-                binding.character().globalId, troop.getUUID().toString(),
-                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DEMOBILIZATION,
-                Math.max(1, PeopleMod.YEAR), colonyId);
-        try {
-            troop.setInvulnerable(true);
-            TRANSITIONS.stage(pending);
-            if (!saveDurably()) { actionPersistenceBlocked = true; return false; }
-            return completePendingTransition(pending, troop);
-        } catch (RuntimeException error) {
-            actionPersistenceBlocked = true;
-            LOGGER.error("wf_troops: demobilization transition could not be staged for {}: {}",
-                    binding.character().globalId, error.toString(), error);
-            return false;
+        try (PersonBinding binding = bindPerson(troop, false)) {
+            if (binding == null || !binding.character().alive) return false;
+            String globalId = binding.character().globalId;
+            var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                    globalId, troop.getUUID().toString(),
+                    dev.worldforge.troops.MilitaryTransitionLedger.Kind.DEMOBILIZATION,
+                    Math.max(1, PeopleMod.YEAR), colonyId);
+            try {
+                troop.setInvulnerable(true);
+                TRANSITIONS.stage(pending);
+                if (!saveDurably()) { actionPersistenceBlocked = true; return false; }
+                return completePendingTransition(pending, troop);
+            } catch (RuntimeException error) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: demobilization transition could not be staged for {}: {}",
+                        globalId, error.toString(), error);
+                return false;
+            }
         }
     }
 
@@ -956,35 +958,35 @@ public class TroopsMod {
     /** Unpaid soldiers desert through a durable transition outbox. */
     private static void onDesertion(TroopEntity troop) {
         if (troop == null || server == null || !ModList.get().isLoaded("wf_people")) return;
-        PersonBinding binding = bindPerson(troop, false);
-        if (binding == null || !binding.character().alive) {
-            actionPersistenceBlocked = true;
-            LOGGER.error("wf_troops: cannot desert troop {} without its living canonical Character", troop.getUUID());
-            return;
-        }
-        String destination = "";
-        if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
-            var nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
-            if (nearest != null) destination = nearest.s.id;
-        }
-        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
-                binding.character().globalId, troop.getUUID().toString(),
-                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION,
-                Math.max(1, PeopleMod.YEAR), destination);
-        try {
-            TRANSITIONS.stage(pending);
-            troop.setInvulnerable(true);
-            if (!saveDurably()) {
+        try (PersonBinding binding = bindPerson(troop, false)) {
+            if (binding == null || !binding.character().alive) {
                 actionPersistenceBlocked = true;
-                LOGGER.error("wf_troops: desertion intent for {} is not durable; retaining physical soldier",
-                        binding.character().globalId);
+                LOGGER.error("wf_troops: cannot desert troop {} without its living canonical Character", troop.getUUID());
                 return;
             }
-            completePendingTransition(pending, troop);
-        } catch (RuntimeException error) {
-            actionPersistenceBlocked = true;
-            LOGGER.error("wf_troops: desertion transition failed for {}: {}",
-                    binding.character().globalId, error.toString(), error);
+            String globalId = binding.character().globalId;
+            String destination = "";
+            if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
+                var nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
+                if (nearest != null) destination = nearest.s.id;
+            }
+            var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                    globalId, troop.getUUID().toString(),
+                    dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION,
+                    Math.max(1, PeopleMod.YEAR), destination);
+            try {
+                TRANSITIONS.stage(pending);
+                troop.setInvulnerable(true);
+                if (!saveDurably()) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: desertion intent for {} is not durable; retaining physical soldier", globalId);
+                    return;
+                }
+                completePendingTransition(pending, troop);
+            } catch (RuntimeException error) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: desertion transition failed for {}: {}", globalId, error.toString(), error);
+            }
         }
     }
 
@@ -2621,15 +2623,17 @@ public class TroopsMod {
 
     /** Removes a physical troop body without killing the underlying person (return, rollback or disband). */
     private static void releaseBody(TroopEntity troop) {
-        PersonBinding binding = bindPerson(troop, false);
-        if (binding != null) {
-            Character person = binding.character();
-            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-            person.props.remove("wf_troop_uuid");
-            person.props.remove("wf_troop_unit");
-            person.props.remove("wf_army_id");
-            person.props.remove("wf_combat_xp");
-            person.props.remove("wf_veteran_rank");
+        try (PersonBinding binding = bindPerson(troop, false)) {
+            if (binding != null) {
+                Character person = binding.character();
+                binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+                person.props.remove("wf_troop_uuid");
+                person.props.remove("wf_troop_unit");
+                person.props.remove("wf_army_id");
+                person.props.remove("wf_combat_xp");
+                person.props.remove("wf_veteran_rank");
+                binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+            }
         }
         String id = troop.getUUID().toString();
         removeLive(id);
