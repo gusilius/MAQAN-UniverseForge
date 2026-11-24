@@ -228,7 +228,7 @@ public class ArmyTest {
         ok(Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
                 "wf-army/1 legacy gold migrates into the shared treasury on first access");
         String upgradedLegacySave = legacyReload.toJson();
-        ok(upgradedLegacySave.contains("wf-army/3") && !upgradedLegacySave.contains("\"gold\"")
+        ok(upgradedLegacySave.contains("wf-army/4") && !upgradedLegacySave.contains("\"gold\"")
                         && Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
                 "legacy army save upgrades without persisting or importing its gold balance twice");
 
