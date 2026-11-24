@@ -518,7 +518,7 @@ public final class CharacterAuthority {
 
     private static String legacyFamilyKey(String mapId, String legacyId) {
         if (mapId == null || mapId.isBlank() || legacyId == null || legacyId.isBlank()) return "";
-        return mapId + '\u001f' + legacyId;
+        return mapId.length() + ":" + mapId + legacyId;
     }
 
     private static void addFamilyEdge(Map<String, Set<String>> index, String first, String second) {
