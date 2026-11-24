@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,6 +26,8 @@ public final class CharacterAccessService {
     private static final Map<CharacterRegistry, CharacterPersistenceCoordinator> PERSISTENCE =
             new WeakHashMap<>();
     private final CharacterRegistry registry;
+    /** IDs created before persistence attaches (bootstrap); never retains Character objects. */
+    private final Set<String> pendingRegistrationIds = new HashSet<>();
 
     public CharacterAccessService(CharacterRegistry registry) {
         this.registry = Objects.requireNonNull(registry, "registry");
@@ -37,7 +41,11 @@ public final class CharacterAccessService {
                 throw new IllegalStateException("CharacterRegistry already has a persistence coordinator");
             PERSISTENCE.put(registry, coordinator);
         }
-        for (Character character : registry.all()) coordinator.register(character.globalId);
+        for (Character character : registry.all()) {
+            if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
+            else coordinator.registerPersisted(character.globalId);
+        }
+        pendingRegistrationIds.clear();
     }
 
     /** Registers newly-created canonical identities without scanning the registry. */
@@ -45,6 +53,7 @@ public final class CharacterAccessService {
         Objects.requireNonNull(character, "character");
         CharacterPersistenceCoordinator persistence = coordinator();
         if (persistence != null) persistence.register(character.globalId);
+        else synchronized (pendingRegistrationIds) { pendingRegistrationIds.add(character.globalId); }
     }
 
     public void replacePersistenceWriter(CharacterWalWriter writer) {
