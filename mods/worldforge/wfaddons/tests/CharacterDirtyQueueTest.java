@@ -54,6 +54,18 @@ public final class CharacterDirtyQueueTest {
             queue.enqueue("00000000-0000-0000-0000-" + String.format("%012d", i + 10), 1);
         check(queue.pendingCount() == 4096 && queue.takeBatch(37).size() == 37,
                 "large backlog retains every identity while each service pass remains bounded");
+
+        CharacterDirtyQueue priority = new CharacterDirtyQueue();
+        for (int i = 0; i < 12; i++)
+            priority.enqueue("critical-" + i, 1, CharacterDirtyQueue.Priority.CRITICAL);
+        priority.enqueue("background", 1, CharacterDirtyQueue.Priority.BACKGROUND);
+        List<CharacterDirtyQueue.Entry> priorityBatch = priority.takeBatch(12);
+        check(priorityBatch.get(0).priority() == CharacterDirtyQueue.Priority.CRITICAL
+                        && priorityBatch.get(8).globalId().equals("background"),
+                "critical work leads, but background work is served after a bounded critical burst");
+        priority.acknowledge("background", 1);
+        check(priority.pendingCount() == 12,
+                "acknowledging one class does not erase other pending priorities");
         System.out.println("CharacterDirtyQueueTest: OK");
     }
 }
