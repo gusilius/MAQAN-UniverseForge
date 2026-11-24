@@ -112,16 +112,20 @@ public final class SettlementStressLab {
             UUID botId = UUID.nameUUIDFromBytes((source.getServer().getWorldData().getLevelName()
                     + ":" + BOT_NAME).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             player = FakePlayerFactory.get(source.getLevel(), new GameProfile(botId, BOT_NAME));
-            if (!source.getServer().getPlayerList().getPlayers().contains(player))
-                source.getServer().getPlayerList().getPlayers().add(player);
+            // FakePlayerFactory owns fake-player lifecycle. PlayerList#getPlayers() is
+            // a read-only view on this Forge/Minecraft build; mutating it throws
+            // UnsupportedOperationException and used to abort contour 04 before setup.
             if (!player.isAddedToWorld()) source.getLevel().addNewPlayer(player);
+            if (!player.isAddedToWorld())
+                throw new IllegalStateException("Forge did not attach the acceptance FakePlayer to its ServerLevel");
             BlockPos spawn = source.getLevel().getSharedSpawnPos();
             int spawnY = source.getLevel().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     spawn.getX(), spawn.getZ());
             player.teleportTo(source.getLevel(), spawn.getX() + 0.5, spawnY,
                     spawn.getZ() + 0.5, Set.of(), source.getRotation().y, source.getRotation().x);
         } catch (RuntimeException error) {
-            source.sendFailure(Component.literal("Could not attach server-side test player: " + error));
+            SettleMod.LOGGER.error("WF_STRESS contour=04_settlements setup_failed stage=fake_player_attach", error);
+            source.sendFailure(Component.literal("WF_STRESS_CONTOUR04_SETUP_FAILED stage=fake_player_attach: " + error));
             return 0;
         }
         if (SettleMod.DEFS == null) {
@@ -304,7 +308,7 @@ public final class SettlementStressLab {
     private void finish() {
         MinecraftForge.EVENT_BUS.unregister(this);
         if (fakePlayer.isAddedToWorld()) {
-            server.getPlayerList().getPlayers().remove(fakePlayer);
+            // Do not mutate PlayerList#getPlayers(): it is a read-only collection.
             fakePlayer.serverLevel().removePlayerImmediately(fakePlayer,
                     net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
         }
