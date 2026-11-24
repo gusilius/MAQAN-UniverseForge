@@ -554,6 +554,23 @@ public final class PopulationSimulationTest {
         java.util.Iterator<Character> afterAnchor = cursorRegistry.iteratorAfter(anchorId);
         ok(afterAnchor.hasNext() && afterAnchor.next().id.equals(cursorC.id),
                 "iteratorAfter resumes from the ordered ID directory rather than HashMap iteration");
+        java.util.Iterator<String> idCursor = cursorRegistry.idIteratorAfter(cursorA.id);
+        String firstAfterA = idCursor.next();
+        cursorRegistry.create("ID Iterator Appended", "", "north", "m", 290);
+        java.util.List<String> idCursorTail = new java.util.ArrayList<>();
+        idCursorTail.add(firstAfterA);
+        while (idCursor.hasNext()) idCursorTail.add(idCursor.next());
+        ok(idCursorTail.equals(java.util.List.of(cursorB.id, cursorC.id,
+                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
+                        && !idCursor.hasNext(),
+                "key iterator remains stable when an NPC is appended mid-pass");
+        java.util.Iterator<Character> allCursor = cursorRegistry.all().iterator();
+        Character firstAll = allCursor.next();
+        cursorRegistry.create("All View Appended", "", "north", "f", 291);
+        int allCount = 1;
+        while (allCursor.hasNext()) { allCursor.next(); allCount++; }
+        ok(firstAll == cursorA && allCount == 5,
+                "legacy all() iterator has a stable boundary and does not fail on append");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
         Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
         ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
