@@ -236,16 +236,24 @@ public final class CharacterWal implements AutoCloseable {
                 throw new IOException("Corrupt Character WAL frame header at byte " + position);
             long length = HEADER + (long) idLength + payloadLength + Integer.BYTES;
             if (length > size - position) break;
-            ByteBuffer body = ByteBuffer.allocate(idLength + payloadLength + Integer.BYTES);
-            if (!readFully(channel, body, position + HEADER)) break;
-            body.flip();
-            byte[] id = new byte[idLength], payload = new byte[payloadLength];
-            body.get(id); body.get(payload); int stored = body.getInt();
+            // Read ID and payload into their final owned arrays. A combined body buffer would
+            // temporarily retain a second payload-sized byte array during large-record replay.
+            ByteBuffer idBuffer = ByteBuffer.allocate(idLength);
+            ByteBuffer payloadBuffer = ByteBuffer.allocate(payloadLength);
+            ByteBuffer crcBuffer = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN);
+            if (!readFully(channel, idBuffer, position + HEADER)
+                    || !readFully(channel, payloadBuffer, position + HEADER + idLength)
+                    || !readFully(channel, crcBuffer, position + HEADER + (long) idLength + payloadLength)) break;
+            byte[] id = idBuffer.array();
+            byte[] payload = payloadBuffer.array();
+            crcBuffer.flip();
+            int stored = crcBuffer.getInt();
             // CRC covers the original frame header (excluding magic) and body (excluding stored CRC).
-            // Feed both existing buffers directly; do not allocate a third payload-sized CRC buffer.
+            // Update directly from the final ID and payload arrays without a duplicate body buffer.
             CRC32C crc = new CRC32C();
             crc.update(header.array(), Integer.BYTES, HEADER - Integer.BYTES);
-            crc.update(body.array(), 0, idLength + payloadLength);
+            crc.update(id, 0, id.length);
+            crc.update(payload, 0, payload.length);
             if ((int) crc.getValue() != stored) throw new IOException("Character WAL checksum mismatch at byte " + position);
             consumer.accept(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload, true));
             position += length; expected++;
