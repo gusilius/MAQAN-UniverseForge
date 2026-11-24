@@ -207,11 +207,12 @@ public final class ResidentEquipment {
     }
 
     public static void sync(WFWorker body) {
-        Character person = SettleMod.residentCharacter(body);
-        if (person == null) return;
-        ItemStack stored = load(person);
-        if (!ItemStack.matches(body.getItemBySlot(EquipmentSlot.MAINHAND), stored))
-            body.setItemSlot(EquipmentSlot.MAINHAND, stored.copy());
+        SettleMod.withResidentCharacter(body, person -> {
+            ItemStack stored = load(person);
+            if (!ItemStack.matches(body.getItemBySlot(EquipmentSlot.MAINHAND), stored))
+                body.setItemSlot(EquipmentSlot.MAINHAND, stored.copy());
+            return null;
+        }, null);
     }
 
     public static String summary(Character person, Colony colony, Worker worker) {
@@ -237,34 +238,35 @@ public final class ResidentEquipment {
     }
 
     private static ActionResult craftActionDirect(WFWorker body) {
-        Colony colony = body.colony();
-        Worker worker = body.worker();
-        Character person = SettleMod.residentCharacter(body);
-        if (colony == null || worker == null || person == null) return ActionResult.fail("Не удалось проверить данные жителя.");
-        Tool tool = tool(requiredRole(worker, colony));
-        if (tool == null) return ActionResult.fail("Для текущей профессии специальный инструмент не предусмотрен.");
-        int allowed = maxTier(person, colony, worker, tool);
-        ItemStack current = load(person);
-        int currentTier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : -1;
-        int chosen = -1;
-        for (int tier = allowed; tier >= 0; tier--) {
-            if (tier <= currentTier) continue;
-            String resource = materialForTier(tier);
-            int cost = tool.cost[tier];
-            if (colony.s.amount(resource) >= cost) { chosen = tier; break; }
-        }
-        if (chosen < 0) return ActionResult.fail(current.isEmpty()
-                ? "Нет подходящих материалов для инструмента. Нужны ресурсы и навык " + tool.skill + "."
-                : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.");
-        String resource = materialForTier(chosen);
-        int cost = tool.cost[chosen];
-        if (!colony.s.consumeResource(resource, cost)) return ActionResult.fail("Материалы уже использованы другим заказом; изготовление отменено.");
-        ItemStack crafted = tool.tiers[chosen].copy();
-        if (!current.isEmpty()) CharacterInventory.unequip(person, "mainhand");
-        save(person, crafted, chosen, requiredRole(worker, colony));
-        body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
-        person.props.put("equipment.last_craft", colony.s.year());
-        return ActionResult.ok("Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".");
+        return SettleMod.withResidentCharacter(body, person -> {
+            Colony colony = body.colony();
+            Worker worker = body.worker();
+            if (colony == null || worker == null) return ActionResult.fail("Не удалось проверить данные жителя.");
+            Tool tool = tool(requiredRole(worker, colony));
+            if (tool == null) return ActionResult.fail("Для текущей профессии специальный инструмент не предусмотрен.");
+            int allowed = maxTier(person, colony, worker, tool);
+            ItemStack current = load(person);
+            int currentTier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : -1;
+            int chosen = -1;
+            for (int tier = allowed; tier >= 0; tier--) {
+                if (tier <= currentTier) continue;
+                String resource = materialForTier(tier);
+                if (colony.s.amount(resource) >= tool.cost[tier]) { chosen = tier; break; }
+            }
+            if (chosen < 0) return ActionResult.fail(current.isEmpty()
+                    ? "Нет подходящих материалов для инструмента. Нужны ресурсы и навык " + tool.skill + "."
+                    : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.");
+            String resource = materialForTier(chosen);
+            int cost = tool.cost[chosen];
+            if (!colony.s.consumeResource(resource, cost))
+                return ActionResult.fail("Материалы уже использованы другим заказом; изготовление отменено.");
+            ItemStack crafted = tool.tiers[chosen].copy();
+            if (!current.isEmpty()) CharacterInventory.unequip(person, "mainhand");
+            save(person, crafted, chosen, requiredRole(worker, colony));
+            body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
+            person.props.put("equipment.last_craft", colony.s.year());
+            return ActionResult.ok("Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".");
+        }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
 
 
@@ -276,23 +278,24 @@ public final class ResidentEquipment {
     }
 
     private static ActionResult repairActionDirect(WFWorker body) {
-        Colony colony = body.colony();
-        Character person = SettleMod.residentCharacter(body);
-        if (colony == null || person == null) return ActionResult.fail("Не удалось проверить поселение или персонажа.");
-        ItemStack stack = load(person);
-        if (stack.isEmpty()) return ActionResult.fail("Нечего ремонтировать: инструмент отсутствует.");
-        if (stack.getMaxDamage() <= 0 || stack.getDamageValue() <= 0) return ActionResult.fail("Инструмент не повреждён.");
-        int tier = person.props.get(TIER_KEY) instanceof Number n ? Math.max(0, Math.min(4, n.intValue())) : 0;
-        String material = materialForTier(tier);
-        int cost = tier >= 3 ? 2 : 1;
-        if (!colony.s.consumeResource(material, cost))
-            return ActionResult.fail("Не хватает " + material + " для ремонта (нужно " + cost + ").");
-        int oldDamage = stack.getDamageValue();
-        stack.setDamageValue(0);
-        save(person, stack, tier, String.valueOf(person.props.getOrDefault(ROLE_KEY, "worker")));
-        body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-        person.props.put("equipment.last_repair", colony.s.year());
-        return ActionResult.ok("Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".");
+        return SettleMod.withResidentCharacter(body, person -> {
+            Colony colony = body.colony();
+            if (colony == null) return ActionResult.fail("Не удалось проверить поселение или персонажа.");
+            ItemStack stack = load(person);
+            if (stack.isEmpty()) return ActionResult.fail("Нечего ремонтировать: инструмент отсутствует.");
+            if (stack.getMaxDamage() <= 0 || stack.getDamageValue() <= 0) return ActionResult.fail("Инструмент не повреждён.");
+            int tier = person.props.get(TIER_KEY) instanceof Number n ? Math.max(0, Math.min(4, n.intValue())) : 0;
+            String material = materialForTier(tier);
+            int cost = tier >= 3 ? 2 : 1;
+            if (!colony.s.consumeResource(material, cost))
+                return ActionResult.fail("Не хватает " + material + " для ремонта (нужно " + cost + ").");
+            int oldDamage = stack.getDamageValue();
+            stack.setDamageValue(0);
+            save(person, stack, tier, String.valueOf(person.props.getOrDefault(ROLE_KEY, "worker")));
+            body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
+            person.props.put("equipment.last_repair", colony.s.year());
+            return ActionResult.ok("Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".");
+        }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
 
     /** All resident tool mutations share the world action journal and its receipts/idempotency. */
@@ -300,31 +303,28 @@ public final class ResidentEquipment {
                                                    java.util.function.Supplier<ActionResult> mutation) {
         if (body == null || body.level().getServer() == null)
             return ActionResult.fail("Инструмент можно изменить только на сервере.");
-        Colony colony = body.colony();
-        Worker worker = body.worker();
-        Character person = SettleMod.residentCharacter(body);
-        if (colony == null || worker == null || person == null || !person.alive)
-            return ActionResult.fail("Не удалось подтвердить владельца инструмента или рабочего.");
-        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "resident-tool:" + body.getUUID().toString().replace("-", "")
-                + ":" + operation + ":" + minute;
-        dev.worldforge.mod.api.ActionExecutionService.Request request =
-                new dev.worldforge.mod.api.ActionExecutionService.Request(
-                        requestId, "settlement.resident_tool_" + operation,
-                        "character:" + person.globalId, Integer.toString(worker.id),
-                        List.of(person.globalId, requiredRole(worker, colony), Long.toString(minute)), minute);
-        dev.worldforge.mod.api.ActionExecutionService.Task task =
-                dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
-                        request,
-                        req -> {
-                            Character current = SettleMod.residentCharacter(body);
-                            return current == person && person.alive && body.isAlive()
-                                    ? null : "Resident Character ownership or body is no longer valid";
-                        },
-                        (req, attempt) -> mutation.get(),
-                        null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
-        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
-                ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
+        return SettleMod.withResidentCharacter(body, person -> {
+            Colony colony = body.colony();
+            Worker worker = body.worker();
+            if (colony == null || worker == null || !person.alive)
+                return ActionResult.fail("Не удалось подтвердить владельца инструмента или рабочего.");
+            long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+            String requestId = "resident-tool:" + body.getUUID().toString().replace("-", "")
+                    + ":" + operation + ":" + minute;
+            dev.worldforge.mod.api.ActionExecutionService.Request request =
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "settlement.resident_tool_" + operation,
+                            "character:" + person.globalId, Integer.toString(worker.id),
+                            List.of(person.globalId, requiredRole(worker, colony), Long.toString(minute)), minute);
+            dev.worldforge.mod.api.ActionExecutionService.Task task =
+                    dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                            request,
+                            req -> body.isAlive() ? null : "Resident body is no longer valid",
+                            (req, attempt) -> mutation.get(),
+                            null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
+                    ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
+        }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
 
     /** Refuse physical extraction when the required tool is missing or of the wrong type. */
@@ -341,55 +341,59 @@ public final class ResidentEquipment {
 
     /** Autonomous maintenance: a resident crafts/upgrades a tool from settlement stock when work needs one. */
     public static void autoMaintain(WFWorker body) {
-        Colony colony = body.colony();
-        Worker worker = body.worker();
-        Character person = SettleMod.residentCharacter(body);
-        if (colony == null || worker == null || person == null || worker.manualFollow || worker.manualOrder) return;
-        if (worker.building <= 0 && !colony.workOrders.containsKey(worker.id)) return;
-        long now = (long) Math.floor(colony.s.time);
-        Object last = person.props.get("equipment.craft_attempt");
-        if (last instanceof Number n && now - n.longValue() < 120) return;
-        person.props.put("equipment.craft_attempt", now);
-        ItemStack before = load(person);
-        if (!before.isEmpty() && before.getMaxDamage() > 0 && before.getDamageValue() > 0) {
-            ActionResult repaired = repairAction(body);
-            if (repaired.ok) { worker.status = repaired.message.toLowerCase(Locale.ROOT); return; }
-        }
-        ActionResult result = craftAction(body);
-        if (result.ok) worker.status = "самостоятельно " + result.message.toLowerCase(Locale.ROOT);
-        else if (before.isEmpty()) worker.status = "нужен инструмент: " + result.message;
+        SettleMod.withResidentCharacter(body, person -> {
+            Colony colony = body.colony();
+            Worker worker = body.worker();
+            if (colony == null || worker == null || worker.manualFollow || worker.manualOrder) return null;
+            if (worker.building <= 0 && !colony.workOrders.containsKey(worker.id)) return null;
+            long now = (long) Math.floor(colony.s.time);
+            Object last = person.props.get("equipment.craft_attempt");
+            if (last instanceof Number n && now - n.longValue() < 120) return null;
+            person.props.put("equipment.craft_attempt", now);
+            ItemStack before = load(person);
+            if (!before.isEmpty() && before.getMaxDamage() > 0 && before.getDamageValue() > 0) {
+                ActionResult repaired = repairAction(body);
+                if (repaired.ok) { worker.status = repaired.message.toLowerCase(Locale.ROOT); return null; }
+            }
+            ActionResult result = craftAction(body);
+            if (result.ok) worker.status = "самостоятельно " + result.message.toLowerCase(Locale.ROOT);
+            else if (before.isEmpty()) worker.status = "нужен инструмент: " + result.message;
+            return null;
+        }, null);
     }
 
     /** Wear is applied only after the owning work-order confirms a successful world action. */
     public static void onWork(WFWorker body, Colony colony, String mode) {
-        Character person = SettleMod.residentCharacter(body);
-        Worker worker = body.worker();
-        if (person == null || worker == null) return;
-        Tool used = tool(requiredRole(worker, colony));
-        if (used != null && !worker.generalist()) {
-            String canonicalProfession = PopulationSimulation.profession(person);
-            if (canonicalProfession.isBlank()) {
-                PopulationSimulation.assignProfession(person, worker.permanentProfession(), colony.s.year());
-                canonicalProfession = worker.permanentProfession();
+        SettleMod.withResidentCharacter(body, person -> {
+            Worker worker = body.worker();
+            if (worker == null) return null;
+            Tool used = tool(requiredRole(worker, colony));
+            if (used != null && !worker.generalist()) {
+                String canonicalProfession = PopulationSimulation.profession(person);
+                if (canonicalProfession.isBlank()) {
+                    PopulationSimulation.assignProfession(person, worker.permanentProfession(), colony.s.year());
+                    canonicalProfession = worker.permanentProfession();
+                }
+                if (canonicalProfession.equals(worker.permanentProfession())) {
+                    try { PopulationSimulation.train(person, used.skill, 1); }
+                    catch (IllegalStateException ignored) { }
+                }
             }
-            if (canonicalProfession.equals(worker.permanentProfession())) {
-                try { PopulationSimulation.train(person, used.skill, 1); }
-                catch (IllegalStateException ignored) { /* A profession transition or maxed skill may reject practice. */ }
+            ItemStack stack = body.getItemBySlot(EquipmentSlot.MAINHAND);
+            if (!stack.isEmpty() && stack.getMaxDamage() > 0) {
+                stack.hurtAndBreak(1, body, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
+                if (stack.isEmpty()) {
+                    CharacterInventory.discardEquipment(person, "mainhand");
+                    person.props.remove(ITEM_KEY);
+                    person.props.remove(TIER_KEY);
+                    person.props.remove(ROLE_KEY);
+                } else {
+                    int tier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : 0;
+                    save(person, stack, tier, requiredRole(worker, colony));
+                }
             }
-        }
-        ItemStack stack = body.getItemBySlot(EquipmentSlot.MAINHAND);
-        if (!stack.isEmpty() && stack.getMaxDamage() > 0) {
-            stack.hurtAndBreak(1, body, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
-            if (stack.isEmpty()) {
-                CharacterInventory.discardEquipment(person, "mainhand");
-                person.props.remove(ITEM_KEY);
-                person.props.remove(TIER_KEY);
-                person.props.remove(ROLE_KEY);
-            } else {
-                int tier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : 0;
-                save(person, stack, tier, requiredRole(worker, colony));
-            }
-        }
+            return null;
+        }, null);
     }
 
     /** Accept a real player-supplied tool. It must match the resident's current work role. */
@@ -398,53 +402,56 @@ public final class ResidentEquipment {
     public static ActionResult receiveAction(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
         if (body == null || player == null || body.level().getServer() == null)
             return ActionResult.fail("Передача инструмента доступна только на сервере.");
-        Character person = SettleMod.residentCharacter(body);
-        if (person == null || !person.alive) return ActionResult.fail("Персонаж рабочего недоступен.");
-        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "toolrecv:" + java.util.UUID.nameUUIDFromBytes(
-                (player.getUUID() + "|" + body.getUUID() + "|" + minute).getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                .toString().replace("-", "");
-        dev.worldforge.mod.api.ActionExecutionService.Request request =
-                new dev.worldforge.mod.api.ActionExecutionService.Request(
-                        requestId, "settlement.resident_tool_receive",
-                        "player:" + player.getUUID(), person.globalId,
-                        List.of(person.globalId, Long.toString(minute)), minute);
-        dev.worldforge.mod.api.ActionExecutionService.Task task =
-                dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
-                        request,
-                        req -> SettleMod.residentCharacter(body) == person && person.alive
-                                && player.isAlive() && player.getServer() == body.level().getServer()
-                                ? null : "Player or resident Character is no longer authorized",
-                        (req, attempt) -> receiveActionDirect(body, player),
-                        null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
-        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
-                ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
+        return SettleMod.withResidentCharacter(body, person -> {
+            if (!person.alive) return ActionResult.fail("Персонаж рабочего недоступен.");
+            long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+            String requestId = "toolrecv:" + java.util.UUID.nameUUIDFromBytes(
+                    (player.getUUID() + "|" + body.getUUID() + "|" + minute).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .toString().replace("-", "");
+            dev.worldforge.mod.api.ActionExecutionService.Request request =
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "settlement.resident_tool_receive",
+                            "player:" + player.getUUID(), person.globalId,
+                            List.of(person.globalId, Long.toString(minute)), minute);
+            dev.worldforge.mod.api.ActionExecutionService.Task task =
+                    dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                            request,
+                            req -> player.isAlive() && body.isAlive()
+                                    && player.getServer() == body.level().getServer()
+                                    ? null : "Player or resident body is no longer authorized",
+                            (req, attempt) -> receiveActionDirect(body, player),
+                            null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
+                    ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
+        }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
 
     private static ActionResult receiveActionDirect(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
-        Worker worker = body.worker();
-        Colony colony = body.colony();
-        Character person = SettleMod.residentCharacter(body);
-        if (worker == null || colony == null || person == null)
-            return ActionResult.fail("Данные жителя или поселения недоступны.");
-        String role = requiredRole(worker, colony);
-        Tool expected = tool(role);
-        if (expected == null) return ActionResult.fail("Эта профессия не использует переносимый инструмент.");
-        ItemStack offered = player.getMainHandItem();
-        if (!matches(offered, expected.kind))
-            return ActionResult.fail("Нужен инструмент подходящего типа для профессии " + role + ".");
-        ItemStack copy = offered.copy();
-        copy.setCount(1);
-        int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
-        if (tier > maxTier(person, colony, worker, expected))
-            return ActionResult.fail("Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.");
-        ItemStack previous = load(person);
-        if (!previous.isEmpty() && !player.getInventory().add(previous.copy()))
-            return ActionResult.fail("Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.");
-        save(person, copy, tier, role);
-        body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
-        offered.shrink(1);
-        return ActionResult.ok("Принял инструмент от игрока: " + copy.getHoverName().getString()
-                + (previous.isEmpty() ? "." : "; прежний инструмент возвращён в ваш инвентарь."));
+        return SettleMod.withResidentCharacter(body, person -> {
+            Worker worker = body.worker();
+            Colony colony = body.colony();
+            if (worker == null || colony == null)
+                return ActionResult.fail("Данные жителя или поселения недоступны.");
+            String role = requiredRole(worker, colony);
+            Tool expected = tool(role);
+            if (expected == null) return ActionResult.fail("Эта профессия не использует переносимый инструмент.");
+            ItemStack offered = player.getMainHandItem();
+            if (!matches(offered, expected.kind))
+                return ActionResult.fail("Нужен инструмент подходящего типа для профессии " + role + ".");
+            ItemStack copy = offered.copy();
+            copy.setCount(1);
+            int tier = copy.getItem() instanceof TieredItem tiered
+                    ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
+            if (tier > maxTier(person, colony, worker, expected))
+                return ActionResult.fail("Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.");
+            ItemStack previous = load(person);
+            if (!previous.isEmpty() && !player.getInventory().add(previous.copy()))
+                return ActionResult.fail("Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.");
+            save(person, copy, tier, role);
+            body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
+            offered.shrink(1);
+            return ActionResult.ok("Принял инструмент от игрока: " + copy.getHoverName().getString()
+                    + (previous.isEmpty() ? "." : "; прежний инструмент возвращён в ваш инвентарь."));
+        }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
 }
