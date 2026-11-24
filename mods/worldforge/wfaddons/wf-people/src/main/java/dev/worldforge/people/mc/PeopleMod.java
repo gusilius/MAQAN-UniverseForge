@@ -1219,7 +1219,7 @@ public class PeopleMod {
         int partitionVisits = Math.min(DIRTY_SAVE_MAX_PARTITIONS_PER_PASS, registries.size());
         int remainingCharacters = DIRTY_SAVE_MAX_CHARACTERS_PER_PASS;
         long remainingBytes = DIRTY_SAVE_MAX_BYTES_PER_PASS;
-        long acceptedThisPass = 0L;
+        long submittedThisPass = 0L;
         long failedThisPass = 0L;
         long pendingObserved = 0L;
         long bytesUsed = 0L;
@@ -1264,7 +1264,7 @@ public class PeopleMod {
             bytesUsed += writtenBytes;
             remainingBytes -= writtenBytes;
             remainingCharacters -= accepted;
-            acceptedThisPass += accepted;
+            submittedThisPass += accepted;
             CharacterPersistenceCoordinator.DirtyMetrics after = persistence.dirtyMetrics();
             long observedFailures = dirtySaveFailureObserved.getOrDefault(registry, before.failed());
             failedThisPass += Math.max(0L, after.failed() - observedFailures);
@@ -1275,8 +1275,8 @@ public class PeopleMod {
 
         if (ticks - dirtySaveLastLogTick >= 1200) {
             dirtySaveLastLogTick = ticks;
-            LOGGER.info("wf_people: dirty-save scheduler passes={} partitions={} accepted={} failed={} pendingObserved={} bytes={} maxCharacters={} maxBytes={} cursor={}",
-                    dirtySavePasses, partitionVisits, acceptedThisPass, failedThisPass, pendingObserved,
+            LOGGER.info("wf_people: dirty-save scheduler passes={} partitions={} submitted={} failed={} pendingObserved={} bytes={} maxCharacters={} maxBytes={} cursor={}",
+                    dirtySavePasses, partitionVisits, submittedThisPass, failedThisPass, pendingObserved,
                     bytesUsed, DIRTY_SAVE_MAX_CHARACTERS_PER_PASS, DIRTY_SAVE_MAX_BYTES_PER_PASS,
                     dirtySavePartitionCursor);
         }
