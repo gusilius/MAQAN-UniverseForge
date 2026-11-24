@@ -17,7 +17,7 @@ public final class PopulationComputeBridge {
         // Reuse one insertion-order iterator across successive server-tick slices. Repeated
         // List.get(index) would restart from the head for every Character and become O(n^2).
         @SuppressWarnings("unchecked")
-        private final Iterator<Character>[] memberIterators;
+        private final Iterator<String>[] memberIterators;
         private final int[] iteratorPositions;
 
         private Scan(Collection<CharacterRegistry> source, int[] starts, int[] limits) {
@@ -31,7 +31,7 @@ public final class PopulationComputeBridge {
             this.membershipGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
-            this.memberIterators = (Iterator<Character>[]) new Iterator<?>[ordered.size()];
+            this.memberIterators = (Iterator<String>[]) new Iterator<?>[ordered.size()];
             this.iteratorPositions = new int[ordered.size()];
             Arrays.fill(this.iteratorPositions, -1);
             if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
@@ -95,9 +95,9 @@ public final class PopulationComputeBridge {
          */
         public Character nextCharacter(int registryIndex, int memberIndex) {
             CharacterRegistry registry = registries.get(registryIndex);
-            Iterator<Character> iterator = memberIterators[registryIndex];
+            Iterator<String> iterator = memberIterators[registryIndex];
             if (iterator == null || iteratorPositions[registryIndex] != memberIndex) {
-                iterator = registry.all().iterator();
+                iterator = registry.idIteratorAfter("");
                 for (int skipped = 0; skipped < memberIndex; skipped++) {
                     if (!iterator.hasNext())
                         throw new ConcurrentModificationException("Character population changed during cursor recovery");
@@ -109,11 +109,14 @@ public final class PopulationComputeBridge {
             try {
                 if (!iterator.hasNext())
                     throw new ConcurrentModificationException("Character population changed during cursor scan");
-                Character character = iterator.next();
+                String characterId = iterator.next();
                 iteratorPositions[registryIndex] = memberIndex + 1;
+                Character character = registry.get(characterId);
+                if (character == null)
+                    throw new ConcurrentModificationException("Character disappeared during population scan");
                 return character;
             } catch (ConcurrentModificationException changed) {
-                iterator = registry.all().iterator();
+                iterator = registry.idIteratorAfter("");
                 for (int skipped = 0; skipped < memberIndex; skipped++) {
                     if (!iterator.hasNext())
                         throw new ConcurrentModificationException("Character population changed during cursor recovery");
@@ -121,7 +124,10 @@ public final class PopulationComputeBridge {
                 }
                 if (!iterator.hasNext())
                     throw new ConcurrentModificationException("Character population changed during cursor recovery");
-                Character character = iterator.next();
+                String characterId = iterator.next();
+                Character character = registry.get(characterId);
+                if (character == null)
+                    throw new ConcurrentModificationException("Character disappeared during population scan");
                 memberIterators[registryIndex] = iterator;
                 iteratorPositions[registryIndex] = memberIndex + 1;
                 return character;
