@@ -133,6 +133,35 @@ public final class CharacterAuthorityTest {
                         && !familyCandidates.contains(unrelatedC1),
                 "canonical global parent UUIDs prevent false relatives from colliding legacy IDs across maps");
 
+        CharacterRegistry legacyFamilyRegistry = new CharacterRegistry();
+        Character legacyFather = legacyFamilyRegistry.create("Legacy father", "", "", "m", 0);
+        Character legacyMother = legacyFamilyRegistry.create("Legacy mother", "", "", "f", 0);
+        Character legacyChild = legacyFamilyRegistry.create("Legacy child", "", "", "m", 1);
+        legacyChild.father = legacyFather.id;
+        legacyChild.mother = legacyMother.id;
+        legacyFather.children.add(legacyChild.id);
+        legacyMother.children.add(legacyChild.id);
+        CharacterAuthority legacyFamilyAuthority = new CharacterAuthority();
+        legacyFamilyAuthority.beginWorld(world);
+        CharacterRegistry collidingLegacyRegistry = new CharacterRegistry();
+        Character collidingLegacy = collidingLegacyRegistry.create("Other map c1", "", "", "m", 0);
+        legacyFamilyAuthority.registerMap("legacy-family", legacyFamilyRegistry);
+        legacyFamilyAuthority.registerMap("legacy-collision", collidingLegacyRegistry);
+        var legacyKin = legacyFamilyAuthority.kinCandidates(legacyChild);
+        check(legacyKin.contains(legacyFather) && legacyKin.contains(legacyMother)
+                        && !legacyKin.contains(collidingLegacy),
+                "legacy-only parent and child links remain local to their map when cN IDs collide");
+
+        CharacterRegistry legacyMarriageRegistry = new CharacterRegistry();
+        Character legacyPartner = legacyMarriageRegistry.create("Legacy partner", "", "", "f", 0);
+        Character legacySpouse = legacyMarriageRegistry.create("Legacy spouse", "", "", "m", 0);
+        legacySpouse.spouse = legacyPartner.id; // old one-sided spouse pointer
+        CharacterAuthority legacyMarriageAuthority = new CharacterAuthority();
+        legacyMarriageAuthority.beginWorld(world);
+        legacyMarriageAuthority.registerMap("legacy-marriage", legacyMarriageRegistry);
+        check(legacyMarriageAuthority.kinCandidates(legacyPartner).contains(legacySpouse),
+                "one-sided legacy spouse links remain discoverable through the reverse family index");
+
 
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);
