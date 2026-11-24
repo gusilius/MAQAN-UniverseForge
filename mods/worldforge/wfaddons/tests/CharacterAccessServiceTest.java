@@ -86,7 +86,7 @@ public final class CharacterAccessServiceTest {
                             && registry.activeAccessLeaseCount() == 0,
                     "multi-character mutation deduplicates UUIDs and dirties every canonical participant");
 
-            long generationBeforeNoop = gate.generation(original.globalId);
+            long generationBeforeNoop = gate.capture(original.globalId).generation();
             boolean noOpChanged = CharacterAccessService.mutateGlobalsIfChanged(authority,
                     java.util.List.of(original.globalId), participants -> false);
             check(!noOpChanged && gate.generation(original.globalId) == generationBeforeNoop,
