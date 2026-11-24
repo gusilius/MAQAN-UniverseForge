@@ -89,7 +89,7 @@ public final class CharacterAccessServiceTest {
             long generationBeforeNoop = gate.capture(original.globalId).generation();
             boolean noOpChanged = CharacterAccessService.mutateGlobalsIfChanged(authority,
                     java.util.List.of(original.globalId), participants -> false);
-            check(!noOpChanged && gate.generation(original.globalId) == generationBeforeNoop,
+            check(!noOpChanged && gate.capture(original.globalId).generation() == generationBeforeNoop,
                     "successful scoped no-op does not advance dirty generation");
             boolean failedScopedMutation = false;
             try {
