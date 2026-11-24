@@ -603,51 +603,66 @@ public final class ResidentLifeEvents {
             child.props.remove("family.guardian_id");
             return;
         }
-        Character father = child.father.isBlank() ? null : registry.get(child.father);
-        Character mother = child.mother.isBlank() ? null : registry.get(child.mother);
-        boolean fatherAlive = father != null && father.alive;
-        boolean motherAlive = mother != null && mother.alive;
-        Character guardian = null;
-        if (fatherAlive && motherAlive)
-            guardian = ResidentSocial.score(child, father.globalId) >= ResidentSocial.score(child, mother.globalId) ? father : mother;
-        else if (fatherAlive) guardian = father;
-        else if (motherAlive) guardian = mother;
-        else guardian = findKinGuardian(registry, child, year);
-        child.props.put("family.guardian_id", guardian == null ? "" : guardian.id);
-        child.props.put("family.care_status", guardian == null ? "orphaned" :
-                fatherAlive && motherAlive ? "two_parent_home" :
-                fatherAlive || motherAlive ? "single_parent_home" : "kin_guardianship");
-        CharacterDevelopment.upbringingTick(child, father, mother, guardian, year);
-        child.props.put("family.development_year", year);
-        child.props.put("family.age_stage", PopulationSimulation.lifeStage(child, year).name().toLowerCase(Locale.ROOT));
-        if (age >= 6 && age < 18) {
-            int education = number(child.props.get("family.education_level"), 0);
-            int progress = guardian == null ? 1 : 2;
-            if (guardian != null && number(guardian.props.get("family.education_level"), 0) >= 5) progress++;
-            int nextEducation = Math.min(100, education + progress);
-            child.props.put("family.education_level", nextEducation);
-            child.props.put("family.education_last_year", year);
-            int milestone = nextEducation / 25;
-            int priorMilestone = number(child.props.get("family.education.psychology_milestone"), 0);
-            if (milestone > priorMilestone) {
-                child.props.put("family.education.psychology_milestone", milestone);
-                CharacterDevelopment.recordExperience(child, CharacterDevelopment.Experience.EDUCATION,
-                        "family:education-milestone:" + child.globalId + ":" + milestone,
-                        "reached education milestone " + (milestone * 25), Math.max(0L, year * 525600L), 1);
-            }
-            if (guardian != null) {
-                ResidentSocial.adjust(child, guardian.globalId, 1);
-                ResidentSocial.adjust(guardian, child.globalId, 1);
-                if (age >= 10) {
-                    int annualXp = age >= 13 ? 10 : 5;
-                    PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
-                            .filter(entry -> entry.getValue() > 0)
-                            .sorted(Map.Entry.comparingByKey()).limit(5)
-                            .forEach(entry -> {
-                                int childRank = PopulationSimulation.skillRank(child, entry.getKey());
-                                if (childRank < Math.min(3, entry.getValue()))
-                                    PopulationSimulation.train(child, entry.getKey(), annualXp);
-                            });
+
+        String fatherId = child.father == null || child.father.isBlank() ? null : child.father;
+        String motherId = child.mother == null || child.mother.isBlank() ? null : child.mother;
+        try (CharacterAccessService.Lease fatherLease = fatherId == null ? null : registry.access().acquire(fatherId);
+             CharacterAccessService.Lease motherLease = motherId == null ? null : registry.access().acquire(motherId)) {
+            Character father = fatherLease == null ? null : fatherLease.get();
+            Character mother = motherLease == null ? null : motherLease.get();
+            boolean fatherAlive = father != null && father.alive;
+            boolean motherAlive = mother != null && mother.alive;
+            String guardianId;
+            if (fatherAlive && motherAlive)
+                guardianId = ResidentSocial.score(child, father.globalId) >= ResidentSocial.score(child, mother.globalId)
+                        ? father.id : mother.id;
+            else if (fatherAlive) guardianId = father.id;
+            else if (motherAlive) guardianId = mother.id;
+            else guardianId = findKinGuardianId(registry, child, year);
+
+            try (CharacterAccessService.Lease guardianLease = guardianId == null ? null
+                    : registry.access().acquire(guardianId)) {
+                Character guardian = guardianLease == null ? null : guardianLease.get();
+                if (guardian != null && (!guardian.alive || PopulationSimulation.age(guardian, year) < 18))
+                    guardian = null;
+                child.props.put("family.guardian_id", guardian == null ? "" : guardian.id);
+                child.props.put("family.care_status", guardian == null ? "orphaned" :
+                        fatherAlive && motherAlive ? "two_parent_home" :
+                        fatherAlive || motherAlive ? "single_parent_home" : "kin_guardianship");
+                CharacterDevelopment.upbringingTick(child, father, mother, guardian, year);
+                child.props.put("family.development_year", year);
+                child.props.put("family.age_stage",
+                        PopulationSimulation.lifeStage(child, year).name().toLowerCase(Locale.ROOT));
+                if (age >= 6 && age < 18) {
+                    int education = number(child.props.get("family.education_level"), 0);
+                    int progress = guardian == null ? 1 : 2;
+                    if (guardian != null && number(guardian.props.get("family.education_level"), 0) >= 5) progress++;
+                    int nextEducation = Math.min(100, education + progress);
+                    child.props.put("family.education_level", nextEducation);
+                    child.props.put("family.education_last_year", year);
+                    int milestone = nextEducation / 25;
+                    int priorMilestone = number(child.props.get("family.education.psychology_milestone"), 0);
+                    if (milestone > priorMilestone) {
+                        child.props.put("family.education.psychology_milestone", milestone);
+                        CharacterDevelopment.recordExperience(child, CharacterDevelopment.Experience.EDUCATION,
+                                "family:education-milestone:" + child.globalId + ":" + milestone,
+                                "reached education milestone " + (milestone * 25), Math.max(0L, year * 525600L), 1);
+                    }
+                    if (guardian != null) {
+                        ResidentSocial.adjust(child, guardian.globalId, 1);
+                        registry.access().mutate(guardian.id, current -> ResidentSocial.adjust(current, child.globalId, 1));
+                        if (age >= 10) {
+                            int annualXp = age >= 13 ? 10 : 5;
+                            PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
+                                    .filter(entry -> entry.getValue() > 0)
+                                    .sorted(Map.Entry.comparingByKey()).limit(5)
+                                    .forEach(entry -> {
+                                        int childRank = PopulationSimulation.skillRank(child, entry.getKey());
+                                        if (childRank < Math.min(3, entry.getValue()))
+                                            PopulationSimulation.train(child, entry.getKey(), annualXp);
+                                    });
+                        }
+                    }
                 }
             }
         }
@@ -656,43 +671,58 @@ public final class ResidentLifeEvents {
         if (age == 18) child.props.put("family.adulthood_year", year);
     }
 
-    private static Character findKinGuardian(CharacterRegistry registry, Character child, int year) {
+    private static String findKinGuardianId(CharacterRegistry registry, Character child, int year) {
         Set<String> candidateIds = new HashSet<>();
         addGrandparents(registry, child.father, candidateIds);
         addGrandparents(registry, child.mother, candidateIds);
         addParentSiblings(registry, child.father, candidateIds);
         addParentSiblings(registry, child.mother, candidateIds);
-        return candidateIds.stream().map(registry::get).filter(Objects::nonNull)
-                .filter(candidate -> candidate.alive && PopulationSimulation.age(candidate, year) >= 18)
-                .min(Comparator.comparingInt(candidate -> Math.abs(PopulationSimulation.age(candidate, year) - 35)))
-                .orElse(null);
+        String bestId = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (String candidateId : candidateIds) {
+            try (CharacterAccessService.Lease lease = registry.access().acquire(candidateId)) {
+                if (lease == null) continue;
+                Character candidate = lease.get();
+                if (!candidate.alive || PopulationSimulation.age(candidate, year) < 18) continue;
+                int distance = Math.abs(PopulationSimulation.age(candidate, year) - 35);
+                if (distance < bestDistance || (distance == bestDistance
+                        && (bestId == null || candidateId.compareTo(bestId) < 0))) {
+                    bestId = candidateId;
+                    bestDistance = distance;
+                }
+            }
+        }
+        return bestId;
     }
 
     private static void addGrandparents(CharacterRegistry registry, String parentId, Set<String> candidates) {
         if (parentId == null || parentId.isBlank()) return;
-        Character parent = registry.get(parentId);
-        if (parent == null) return;
-        if (!parent.father.isBlank()) candidates.add(parent.father);
-        if (!parent.mother.isBlank()) candidates.add(parent.mother);
+        try (CharacterAccessService.Lease lease = registry.access().acquire(parentId)) {
+            if (lease == null) return;
+            Character parent = lease.get();
+            if (parent.father != null && !parent.father.isBlank()) candidates.add(parent.father);
+            if (parent.mother != null && !parent.mother.isBlank()) candidates.add(parent.mother);
+        }
     }
 
     private static void addParentSiblings(CharacterRegistry registry, String parentId, Set<String> candidates) {
         if (parentId == null || parentId.isBlank()) return;
-        Character parent = registry.get(parentId);
-        if (parent == null) return;
-        // Parent links already own their canonical child lists. Walk only the two
-        // grandparent households instead of building a population-sized reverse index each year.
-        addChildrenOf(registry, parent.father, parentId, candidates);
-        addChildrenOf(registry, parent.mother, parentId, candidates);
+        try (CharacterAccessService.Lease lease = registry.access().acquire(parentId)) {
+            if (lease == null) return;
+            Character parent = lease.get();
+            addChildrenOf(registry, parent.father, parentId, candidates);
+            addChildrenOf(registry, parent.mother, parentId, candidates);
+        }
     }
 
     private static void addChildrenOf(CharacterRegistry registry, String grandparentId,
                                       String parentId, Set<String> candidates) {
         if (grandparentId == null || grandparentId.isBlank()) return;
-        Character grandparent = registry.get(grandparentId);
-        if (grandparent == null) return;
-        for (String siblingId : grandparent.children)
-            if (siblingId != null && !siblingId.equals(parentId)) candidates.add(siblingId);
+        try (CharacterAccessService.Lease lease = registry.access().acquire(grandparentId)) {
+            if (lease == null) return;
+            for (String siblingId : lease.get().children)
+                if (siblingId != null && !siblingId.equals(parentId)) candidates.add(siblingId);
+        }
     }
 
     private static boolean closeFamily(CharacterRegistry registry, Character a, Character b) {
@@ -711,8 +741,12 @@ public final class ResidentLifeEvents {
             Set<String> next = new HashSet<>();
             for (String id : frontier) {
                 if (id == null || id.isBlank() || !result.add(id)) continue;
-                Character ancestor = registry.get(id);
-                if (ancestor != null) { next.add(ancestor.father); next.add(ancestor.mother); }
+                try (CharacterAccessService.Lease lease = registry.access().acquire(id)) {
+                    if (lease != null) {
+                        next.add(lease.get().father);
+                        next.add(lease.get().mother);
+                    }
+                }
             }
             frontier = next;
         }
