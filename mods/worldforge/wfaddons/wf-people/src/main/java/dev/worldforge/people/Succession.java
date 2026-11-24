@@ -127,8 +127,10 @@ public final class Succession {
         }
         sort(sibs, law);
         if (!sibs.isEmpty()) return sibs.get(0);
-        List<Character> nobles = new ArrayList<>();                    // придворная знать того же места
-        for (Character c : reg.all()) if (c.alive && !c.house.isEmpty() && c.posts.stream().anyMatch(po -> po.place.equals(place))) nobles.add(c);
+        // Use the registry's reverse location index instead of scanning the population.
+        List<Character> nobles = new ArrayList<>();
+        for (Character c : reg.holdersAtPlace(place))
+            if (!c.house.isEmpty()) nobles.add(c);
         nobles.sort(Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.id));
         return nobles.isEmpty() ? null : nobles.get(0);
     }

@@ -40,6 +40,9 @@ public final class CharacterRegistry {
     private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
+    /** Reverse post index: succession and office queries must not scan the population. */
+    private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
+
     /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
@@ -187,6 +190,35 @@ public final class CharacterRegistry {
 
     public int size() { return byId.size(); }
 
+    /** Returns living office holders at one place using the reverse post index. */
+    public List<Character> holdersAtPlace(String place) {
+        if (place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByPostPlace.get(place);
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<Character> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Character character = byId.get(id);
+            if (character != null && character.alive
+                    && character.posts.stream().anyMatch(post -> post.place.equals(place))) result.add(character);
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    private void indexPosts(Character character) {
+        for (Character.Post post : character.posts)
+            characterIdsByPostPlace.computeIfAbsent(post.place, ignored -> new LinkedHashSet<>()).add(character.id);
+    }
+
+    private void unindexPosts(Character character) {
+        for (Character.Post post : character.posts) {
+            LinkedHashSet<String> ids = characterIdsByPostPlace.get(post.place);
+            if (ids == null) continue;
+            ids.remove(character.id);
+            if (ids.isEmpty()) characterIdsByPostPlace.remove(post.place);
+        }
+    }
+
+
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
             return createBatched(name, house, culture, gender, birthYear);
@@ -229,6 +261,7 @@ public final class CharacterRegistry {
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
         c.posts.add(new Character.Post(role, place));
+        characterIdsByPostPlace.computeIfAbsent(place, ignored -> new LinkedHashSet<>()).add(c.id);
         for (Listener l : listeners) l.appointed(c, role, place);
         publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
     }
@@ -244,6 +277,10 @@ public final class CharacterRegistry {
     private void dismissBatched(String id, String role, String place, int year) {
         Character c = require(id);
         if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
+            if (c.posts.stream().noneMatch(post -> post.place.equals(place))) {
+                LinkedHashSet<String> ids = characterIdsByPostPlace.get(place);
+                if (ids != null) { ids.remove(c.id); if (ids.isEmpty()) characterIdsByPostPlace.remove(place); }
+            }
             for (Listener l : listeners) l.dismissed(c, role, place);
             publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
         }
@@ -576,6 +613,7 @@ public final class CharacterRegistry {
         if (Boolean.TRUE.equals(c.props.get("death.lifecycle.completed"))) return List.of();
 
         List<Character.Post> vacated = new ArrayList<>(c.posts);
+        unindexPosts(c);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         Object deathBindings = c.props.remove("population.entity_bindings");
@@ -918,6 +956,7 @@ public final class CharacterRegistry {
         }
 
         if (previous != null) {
+            unindexPosts(previous);
             removeEntityBindings(previous);
             if (!previous.globalId.equals(restored.globalId)) {
                 byGlobalId.remove(previous.globalId, previous.id);
@@ -925,6 +964,7 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
+        indexPosts(restored);
         byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
         if (restored.id.matches("c[0-9]+")) {
@@ -1169,6 +1209,8 @@ public final class CharacterRegistry {
 
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
+        characterIdsByPostPlace.clear();
+        for (Character character : loaded.values()) indexPosts(character);
         byGlobalId.clear();
         pendingBereavement.clear();
         for (Character character : loaded.values()) {
