@@ -139,6 +139,8 @@ public class PeopleMod {
     private static long dirtySaveRegistryGeneration = Long.MIN_VALUE;
     private static long dirtySavePasses;
     private static long dirtySaveLastLogTick;
+    /** Last observed cumulative async failure count per visited partition (not a population scan). */
+    private static final Map<CharacterRegistry, Long> dirtySaveFailureObserved = new java.util.IdentityHashMap<>();
     private static int populationFallbackRegistryCursor;
     private static long populationFallbackCursorGeneration = Long.MIN_VALUE;
     /** Stable partition snapshot; rebuilt only when the canonical registry set changes. */
@@ -196,6 +198,7 @@ public class PeopleMod {
         dirtySaveRegistryGeneration = Long.MIN_VALUE;
         dirtySavePasses = 0L;
         dirtySaveLastLogTick = 0L;
+        dirtySaveFailureObserved.clear();
         populationProcessedDay = Long.MIN_VALUE;
         populationBaselineDay = Long.MIN_VALUE;
         populationRegistryGeneration = 0L;
@@ -1210,6 +1213,7 @@ public class PeopleMod {
         if (dirtySaveRegistryGeneration != registryGeneration) {
             dirtySaveRegistryGeneration = registryGeneration;
             dirtySavePartitionCursor = 0;
+            dirtySaveFailureObserved.clear();
         }
 
         int partitionVisits = Math.min(DIRTY_SAVE_MAX_PARTITIONS_PER_PASS, registries.size());
@@ -1227,6 +1231,9 @@ public class PeopleMod {
             if (persistence == null) continue;
 
             CharacterPersistenceCoordinator.DirtyMetrics before = persistence.dirtyMetrics();
+            long previouslyObservedFailures = dirtySaveFailureObserved.getOrDefault(registry, 0L);
+            failedThisPass += Math.max(0L, before.failed() - previouslyObservedFailures);
+            dirtySaveFailureObserved.put(registry, before.failed());
             pendingObserved += before.pending();
             if (before.pending() == 0) continue;
 
@@ -1259,7 +1266,9 @@ public class PeopleMod {
             remainingCharacters -= accepted;
             acceptedThisPass += accepted;
             CharacterPersistenceCoordinator.DirtyMetrics after = persistence.dirtyMetrics();
-            failedThisPass += Math.max(0L, after.failed() - before.failed());
+            long observedFailures = dirtySaveFailureObserved.getOrDefault(registry, before.failed());
+            failedThisPass += Math.max(0L, after.failed() - observedFailures);
+            dirtySaveFailureObserved.put(registry, after.failed());
         }
         dirtySavePartitionCursor = (dirtySavePartitionCursor + partitionVisits) % registries.size();
         dirtySavePasses++;
