@@ -445,89 +445,98 @@ public final class ResidentLifeEvents {
                                                        int index, int year) {
         String firstId = eligibleIds.get(index);
         if (firstId == null || firstId.isBlank()) return;
-        try (CharacterAccessService.Lease lease = PeopleMod.authority().registryForGlobal(firstId)
-                .access().acquireGlobal(firstId)) {
+        CharacterRegistry firstOwner = PeopleMod.authority().registryForGlobal(firstId);
+        if (firstOwner == null) return;
+        try (CharacterAccessService.Lease lease = firstOwner.access().acquireGlobal(firstId)) {
             if (lease == null) return;
-            processRelationshipReview(registry, eligibleIds, index, year, lease.get());
+            Character first = lease.get();
+            if (year <= number(first.props.get("family.relationship_review_year"), 0)) return;
+            firstOwner.access().mutateGlobal(firstId,
+                    current -> current.props.put("family.relationship_review_year", year));
         }
-    }
 
-    private static void processRelationshipReview(CharacterRegistry registry, List<String> eligibleIds,
-                                                    int index, int year, Character first) {
-                                                   int index, int year) {
-        Character first = eligibleSingles.get(index);
-        if (year <= number(first.props.get("family.relationship_review_year"), 0)) return;
-        first.props.put("family.relationship_review_year", year);
         int available = eligibleIds.size() - index - 1;
         if (available <= 0) return;
         int checks = Math.min(available, MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR);
-        int startOffset = Math.floorMod(Objects.hash(first.id, year, "relationship-review"), available);
+        int startOffset = Math.floorMod(Objects.hash(firstId, year, "relationship-review"), available);
         for (int probe = 0; probe < checks; probe++) {
             String secondId = eligibleIds.get(index + 1 + ((startOffset + probe) % available));
-            Character second = registry.getByGlobalId(secondId);
-            if (second == null) continue;
-            if (!second.alive || second.spouse != null && !second.spouse.isBlank()
-                    || closeFamily(registry, first, second)) continue;
-            int affinity = Math.min(ResidentSocial.score(first, second.globalId), ResidentSocial.score(second, first.globalId));
-            String firstDating = string(first.props.get("family.dating"));
-            String secondDating = string(second.props.get("family.dating"));
-            boolean mutualDating = second.id.equals(firstDating) && first.id.equals(secondDating);
-            if (mutualDating && affinity < 20) {
-                FamilyPlanning.cancelEngagement(first, second, year, "relationship-ended");
-                first.props.remove("family.dating"); second.props.remove("family.dating");
-                first.props.remove("family.dating_name"); second.props.remove("family.dating_name");
-                first.props.put("family.last_event", "separated:" + second.id);
-                second.props.put("family.last_event", "separated:" + first.id);
-                long minute = Math.max(0L, year * 525600L);
-                CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.SOCIAL_REJECTION,
-                        "family:dating-separation:" + first.globalId + ":" + second.globalId, "relationship ended with " + second.name, minute, 1);
-                CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.SOCIAL_REJECTION,
-                        "family:dating-separation:" + second.globalId + ":" + first.globalId, "relationship ended with " + first.name, minute, 1);
-                CharacterDevelopment.remember(first, "family:dating-separation-memory:" + first.globalId + ":" + second.globalId,
-                        "relationship_separation", second.globalId, "mutual relationship ended", -35, minute);
-                CharacterDevelopment.remember(second, "family:dating-separation-memory:" + second.globalId + ":" + first.globalId,
-                        "relationship_separation", first.globalId, "mutual relationship ended", -35, minute);
-                continue;
-            }
-            if (!firstDating.isBlank() && !firstDating.equals(second.id)
-                    || !secondDating.isBlank() && !secondDating.equals(first.id)) continue;
-            if (!mutualDating && affinity >= 50
-                    && Math.floorMod(Objects.hash(first.id, second.id, year, "dating"), 3) == 0) {
-                first.props.put("family.dating", second.id); second.props.put("family.dating", first.id);
-                first.props.put("family.dating_name", second.name); second.props.put("family.dating_name", first.name);
-                first.props.put("family.last_event", "dating:" + second.id);
-                second.props.put("family.last_event", "dating:" + first.id);
-                mutualDating = true;
-            }
-            if (mutualDating && affinity >= 65 && !FamilyPlanning.engagedTo(first, second)
-                    && Math.floorMod(Objects.hash(first.id, second.id, year, "engagement"), 3) == 0)
-                FamilyPlanning.engage(first, second, year);
-            int engagementYear = number(first.props.get("family.engagement_year"), year);
-            if (Objects.equals(first.gender, second.gender) || affinity < 75
-                    || !FamilyPlanning.engagedTo(first, second) || year - engagementYear < 1
-                    || Math.floorMod(Objects.hash(first.id, second.id, year, "marriage"), 4) != 0) continue;
-            try {
-                registry.marry(first.id, second.id, year);
-                FamilyPlanning.completeMarriage(first, second);
-                first.props.remove("family.dating"); second.props.remove("family.dating");
-                first.props.remove("family.dating_name"); second.props.remove("family.dating_name");
-                first.props.put("family.spouse_name", second.name); second.props.put("family.spouse_name", first.name);
-                first.props.put("family.last_event", "married:" + second.id);
-                second.props.put("family.last_event", "married:" + first.id);
-                long minute = Math.max(0L, year * 525600L);
-                CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.MARRIAGE,
-                        "family:marriage:" + first.globalId + ":" + second.globalId, "married " + second.name, minute, 1);
-                CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.MARRIAGE,
-                        "family:marriage:" + second.globalId + ":" + first.globalId, "married " + first.name, minute, 1);
-                CharacterDevelopment.remember(first, "family:marriage-memory:" + first.globalId + ":" + second.globalId,
-                        "marriage", second.globalId, "married " + second.name, 70, minute);
-                CharacterDevelopment.remember(second, "family:marriage-memory:" + second.globalId + ":" + first.globalId,
-                        "marriage", first.globalId, "married " + first.name, 70, minute);
-            } catch (RuntimeException ignored) {
-                // A concurrent title/lifecycle transition may have changed either partner this year.
-            }
-            break;
+            if (secondId == null || secondId.isBlank() || firstId.equals(secondId)) continue;
+            CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(), List.of(firstId, secondId), people -> {
+                Character first = people.get(firstId), second = people.get(secondId);
+                return reviewRelationshipPair(registry, first, second, year);
+            });
         }
+    }
+
+    private static boolean reviewRelationshipPair(CharacterRegistry registry, Character first,
+                                                  Character second, int year) {
+        if (!first.alive || !second.alive || (second.spouse != null && !second.spouse.isBlank())
+                || closeFamily(registry, first, second)) return false;
+        int affinity = Math.min(ResidentSocial.score(first, second.globalId),
+                ResidentSocial.score(second, first.globalId));
+        String firstDating = string(first.props.get("family.dating"));
+        String secondDating = string(second.props.get("family.dating"));
+        boolean mutualDating = second.id.equals(firstDating) && first.id.equals(secondDating);
+        if (mutualDating && affinity < 20) {
+            FamilyPlanning.cancelEngagement(first, second, year, "relationship-ended");
+            first.props.remove("family.dating"); second.props.remove("family.dating");
+            first.props.remove("family.dating_name"); second.props.remove("family.dating_name");
+            first.props.put("family.last_event", "separated:" + second.id);
+            second.props.put("family.last_event", "separated:" + first.id);
+            long minute = Math.max(0L, year * 525600L);
+            CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.SOCIAL_REJECTION,
+                    "family:dating-separation:" + first.globalId + ":" + second.globalId,
+                    "relationship ended with " + second.name, minute, 1);
+            CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.SOCIAL_REJECTION,
+                    "family:dating-separation:" + second.globalId + ":" + first.globalId,
+                    "relationship ended with " + first.name, minute, 1);
+            CharacterDevelopment.remember(first, "family:dating-separation-memory:" + first.globalId + ":" + second.globalId,
+                    "relationship_separation", second.globalId, "mutual relationship ended", -35, minute);
+            CharacterDevelopment.remember(second, "family:dating-separation-memory:" + second.globalId + ":" + first.globalId,
+                    "relationship_separation", first.globalId, "mutual relationship ended", -35, minute);
+            return true;
+        }
+        if ((!firstDating.isBlank() && !firstDating.equals(second.id))
+                || (!secondDating.isBlank() && !secondDating.equals(first.id))) return false;
+        boolean changed = false;
+        if (!mutualDating && affinity >= 50
+                && Math.floorMod(Objects.hash(first.id, second.id, year, "dating"), 3) == 0) {
+            first.props.put("family.dating", second.id); second.props.put("family.dating", first.id);
+            first.props.put("family.dating_name", second.name); second.props.put("family.dating_name", first.name);
+            first.props.put("family.last_event", "dating:" + second.id);
+            second.props.put("family.last_event", "dating:" + first.id);
+            mutualDating = true;
+            changed = true;
+        }
+        if (mutualDating && affinity >= 65 && !FamilyPlanning.engagedTo(first, second)
+                && Math.floorMod(Objects.hash(first.id, second.id, year, "engagement"), 3) == 0) {
+            FamilyPlanning.engage(first, second, year);
+            changed = true;
+        }
+        int engagementYear = number(first.props.get("family.engagement_year"), year);
+        if (!Objects.equals(first.gender, second.gender) && affinity >= 75
+                && FamilyPlanning.engagedTo(first, second) && year - engagementYear >= 1
+                && Math.floorMod(Objects.hash(first.id, second.id, year, "marriage"), 4) == 0) {
+            registry.marry(first.id, second.id, year);
+            FamilyPlanning.completeMarriage(first, second);
+            first.props.remove("family.dating"); second.props.remove("family.dating");
+            first.props.remove("family.dating_name"); second.props.remove("family.dating_name");
+            first.props.put("family.spouse_name", second.name); second.props.put("family.spouse_name", first.name);
+            first.props.put("family.last_event", "married:" + second.id);
+            second.props.put("family.last_event", "married:" + first.id);
+            long minute = Math.max(0L, year * 525600L);
+            CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.MARRIAGE,
+                    "family:marriage:" + first.globalId + ":" + second.globalId, "married " + second.name, minute, 1);
+            CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.MARRIAGE,
+                    "family:marriage:" + second.globalId + ":" + first.globalId, "married " + first.name, minute, 1);
+            CharacterDevelopment.remember(first, "family:marriage-memory:" + first.globalId + ":" + second.globalId,
+                    "marriage", second.globalId, "married " + second.name, 70, minute);
+            CharacterDevelopment.remember(second, "family:marriage-memory:" + second.globalId + ":" + first.globalId,
+                    "marriage", first.globalId, "married " + first.name, 70, minute);
+            changed = true;
+        }
+        return changed;
     }
 
     private static void advanceChildhoodPerson(CharacterRegistry registry, Character child, int year) {
