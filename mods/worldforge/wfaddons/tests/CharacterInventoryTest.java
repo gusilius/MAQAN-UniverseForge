@@ -468,11 +468,14 @@ public final class CharacterInventoryTest {
         recoveredTransferAuthority.beginWorld(new WorldId(UUID.fromString("55555555-5555-4555-8555-555555555555")));
         recoveredTransferAuthority.registerMap("__players__", recoveredTransferSource);
         recoveredTransferAuthority.registerMap("settlement:recovery", recoveredTransferDestination);
+        ok(recoveredTransferAuthority.pendingInventoryTransfers().size() == 1,
+                "inventory WAL recovery indexes only the pending cross-partition UUID transaction");
         boolean transferRecovered = CharacterInventoryTransactions.reconcile(
                 recoveredTransferAuthority, character -> true);
         Character recoveredTransferPlayer = recoveredTransferAuthority.getGlobal(crashTransferPlayer.globalId);
         Character recoveredTransferOwner = recoveredTransferAuthority.getGlobal(crashTransferOwner.globalId);
         ok(!interruptedTransfer && transferRecovered
+                        && recoveredTransferAuthority.pendingInventoryTransfers().isEmpty()
                         && CharacterInventory.items(recoveredTransferPlayer).stream().mapToInt(CharacterInventory.Item::count).sum() == 4
                         && CharacterInventory.containerItems(recoveredTransferOwner, "recovery_store").stream()
                         .mapToInt(CharacterInventory.Item::count).sum() == 3
