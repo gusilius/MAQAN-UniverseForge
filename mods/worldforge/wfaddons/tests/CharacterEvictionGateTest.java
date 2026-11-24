@@ -17,6 +17,11 @@ public final class CharacterEvictionGateTest {
         check(gate.decision(id) == CharacterEvictionGate.Decision.NEVER_PERSISTED,
                 "new identity cannot be evicted before first durable persistence");
 
+        String recovered = "00000000-0000-0000-0000-000000000099";
+        gate.registerPersisted(recovered);
+        check(gate.canEvict(recovered),
+                "identity recovered from an existing durable snapshot starts clean without a redundant rewrite");
+
         CharacterEvictionGate.PersistenceTicket first = gate.capture(id);
         check(gate.markPersisted(first) && gate.canEvict(id),
                 "successful persistence receipt makes the exact generation clean");
