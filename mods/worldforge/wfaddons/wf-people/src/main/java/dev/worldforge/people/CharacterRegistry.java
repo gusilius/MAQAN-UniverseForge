@@ -36,6 +36,7 @@ public final class CharacterRegistry {
     private Map<String, Character> byId = new LinkedHashMap<>();
     /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
     private final Map<String, Integer> activeAccessLeases = new HashMap<>();
+    private final CharacterAccessService accessService = new CharacterAccessService(this);
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, String> byGlobalId = new HashMap<>();
     /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
@@ -230,6 +231,19 @@ public final class CharacterRegistry {
         activeAccessLeases.merge(id, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, id, character);
     }
+
+    /** Resolves and pins a world-wide UUID atomically within this registry. */
+    public synchronized CharacterAccessService.Lease acquireGlobal(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        if (localId == null) return null;
+        Character character = byId.get(localId);
+        if (character == null) return null;
+        activeAccessLeases.merge(localId, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, localId, character);
+    }
+
+    public CharacterAccessService access() { return accessService; }
 
     synchronized void releaseAccess(String id, Character expected) {
         Integer count = activeAccessLeases.get(id);
