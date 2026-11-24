@@ -83,6 +83,19 @@ public final class CharacterRegistry {
     }
 
     /**
+     * Key-only insertion-order cursor. Unlike a values/entry iterator, it retains only the
+     * last local ID between bounded slices, never the last Character object.
+     */
+    public Iterator<String> idIteratorAfter(String exclusiveId) {
+        Iterator<String> iterator = byId.keySet().iterator();
+        if (exclusiveId == null || exclusiveId.isEmpty()) return iterator;
+        while (iterator.hasNext()) {
+            if (exclusiveId.equals(iterator.next())) return iterator;
+        }
+        throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
+    }
+
+    /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
      * array alone costs tens of megabytes. Iteration walks the canonical map directly.
