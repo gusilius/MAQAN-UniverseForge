@@ -42,6 +42,8 @@ public final class CharacterRegistry {
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     /** Reverse post index: succession and office queries must not scan the population. */
     private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
+    /** Exact role/place projection for bounded office-holder queries. */
+    private final Map<String, LinkedHashSet<String>> characterIdsByRolePlace = new HashMap<>();
 
     /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
@@ -205,19 +207,42 @@ public final class CharacterRegistry {
     }
 
     private void indexPosts(Character character) {
-        for (Character.Post post : character.posts)
-            characterIdsByPostPlace.computeIfAbsent(post.place, ignored -> new LinkedHashSet<>()).add(character.id);
+        for (Character.Post post : character.posts) indexPost(character, post);
     }
 
     private void unindexPosts(Character character) {
-        for (Character.Post post : character.posts) {
-            LinkedHashSet<String> ids = characterIdsByPostPlace.get(post.place);
-            if (ids == null) continue;
-            ids.remove(character.id);
-            if (ids.isEmpty()) characterIdsByPostPlace.remove(post.place);
-        }
+        for (Character.Post post : character.posts) unindexPost(character, post);
     }
 
+
+    private static String postIndexKey(String role, String place) {
+        return role.length() + ":" + role + place;
+    }
+
+    private void indexPost(Character character, Character.Post post) {
+        characterIdsByPostPlace.computeIfAbsent(post.place, ignored -> new LinkedHashSet<>()).add(character.id);
+        characterIdsByRolePlace.computeIfAbsent(postIndexKey(post.role, post.place), ignored -> new LinkedHashSet<>()).add(character.id);
+    }
+
+    private void unindexPost(Character character, Character.Post post) {
+        LinkedHashSet<String> byPlace = characterIdsByPostPlace.get(post.place);
+        if (byPlace != null) { byPlace.remove(character.id); if (byPlace.isEmpty()) characterIdsByPostPlace.remove(post.place); }
+        LinkedHashSet<String> byRolePlace = characterIdsByRolePlace.get(postIndexKey(post.role, post.place));
+        if (byRolePlace != null) { byRolePlace.remove(character.id); if (byRolePlace.isEmpty()) characterIdsByRolePlace.remove(postIndexKey(post.role, post.place)); }
+    }
+
+    /** Returns living holders of one exact role/place pair without a population scan. */
+    public List<Character> holders(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<Character> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Character character = byId.get(id);
+            if (character != null && character.alive && character.has(role, place)) result.add(character);
+        }
+        return Collections.unmodifiableList(result);
+    }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
@@ -260,8 +285,9 @@ public final class CharacterRegistry {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
-        c.posts.add(new Character.Post(role, place));
-        characterIdsByPostPlace.computeIfAbsent(place, ignored -> new LinkedHashSet<>()).add(c.id);
+        Character.Post post = new Character.Post(role, place);
+        c.posts.add(post);
+        indexPost(c, post);
         for (Listener l : listeners) l.appointed(c, role, place);
         publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
     }
@@ -276,11 +302,11 @@ public final class CharacterRegistry {
 
     private void dismissBatched(String id, String role, String place, int year) {
         Character c = require(id);
-        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
-            if (c.posts.stream().noneMatch(post -> post.place.equals(place))) {
-                LinkedHashSet<String> ids = characterIdsByPostPlace.get(place);
-                if (ids != null) { ids.remove(c.id); if (ids.isEmpty()) characterIdsByPostPlace.remove(place); }
-            }
+        Character.Post removedPost = null;
+        for (Character.Post post : c.posts)
+            if (post.role.equals(role) && post.place.equals(place)) { removedPost = post; break; }
+        if (removedPost != null && c.posts.remove(removedPost)) {
+            unindexPost(c, removedPost);
             for (Listener l : listeners) l.dismissed(c, role, place);
             publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
         }
@@ -766,12 +792,6 @@ public final class CharacterRegistry {
         return value instanceof Number n?Math.max(-100,Math.min(100,n.intValue())):0;
     }
 
-    public List<Character> holders(String role, String place) {
-        List<Character> out = new ArrayList<>();
-        for (Character c : byId.values()) if (c.alive && c.has(role, place)) out.add(c);
-        return out;
-    }
-
     public Character holder(String role, String place) {
         List<Character> l = holders(role, place);
         return l.isEmpty() ? null : l.get(0);
@@ -1210,6 +1230,7 @@ public final class CharacterRegistry {
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         characterIdsByPostPlace.clear();
+        characterIdsByRolePlace.clear();
         for (Character character : loaded.values()) indexPosts(character);
         byGlobalId.clear();
         pendingBereavement.clear();
