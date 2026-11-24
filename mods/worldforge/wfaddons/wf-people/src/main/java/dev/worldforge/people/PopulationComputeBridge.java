@@ -14,11 +14,7 @@ public final class PopulationComputeBridge {
         private final List<CharacterRegistry> registries;
         private final long[] membershipGenerations;
         private final int[] starts, limits;
-        @SuppressWarnings("unchecked")
-        private final List<String>[] memberIds;
-        // Retain only String IDs across slices. LinkedHashMap iterators retain a node whose
-        // value is a Character; key-only snapshots trade a bounded reference array for safe
-        // asynchronous lifetimes and O(1) indexed access per member.
+        // Store only integer range boundaries. IDs are resolved by index on demand.
 
         private Scan(Collection<CharacterRegistry> source, int[] starts, int[] limits) {
             List<CharacterRegistry> ordered = new ArrayList<>();
@@ -31,14 +27,12 @@ public final class PopulationComputeBridge {
             this.membershipGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
-            this.memberIds = new ArrayList[ordered.size()];
-            if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
+                        if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
                 throw new IllegalArgumentException("Population scan partition shape changed");
             for (int i = 0; i < ordered.size(); i++) {
                 CharacterRegistry registry = ordered.get(i);
                 membershipGenerations[i] = registry.membershipGeneration();
-                this.memberIds[i] = registry.idSnapshot();
-                if (starts == null) this.starts[i] = 0;
+                                if (starts == null) this.starts[i] = 0;
                 if (limits == null) this.limits[i] = registry.size();
                 if (this.starts[i] < 0 || this.limits[i] < this.starts[i]
                         || this.limits[i] > registry.size())
@@ -89,11 +83,10 @@ public final class PopulationComputeBridge {
         /** Resolves and pins one Character for the duration of a capture operation. */
         public CharacterAccessService.Lease nextCharacterLease(int registryIndex, int memberIndex) {
             CharacterRegistry registry = registries.get(registryIndex);
-            List<String> ids = memberIds[registryIndex];
-            if (ids == null || memberIndex < starts[registryIndex] || memberIndex >= limits[registryIndex]
-                    || memberIndex >= ids.size())
-                throw new ConcurrentModificationException("Character ID snapshot is unavailable or out of bounds");
-            CharacterAccessService.Lease lease = registry.access().acquire(ids.get(memberIndex));
+            if (memberIndex < starts[registryIndex] || memberIndex >= limits[registryIndex]
+                    || memberIndex >= registry.size())
+                throw new ConcurrentModificationException("Character ID page is unavailable or out of bounds");
+            CharacterAccessService.Lease lease = registry.access().acquire(registry.idAt(memberIndex));
             if (lease == null)
                 throw new ConcurrentModificationException("Character disappeared during population scan");
             return lease;
@@ -106,10 +99,8 @@ public final class PopulationComputeBridge {
             }
         }
 
-        /** Releases all population-sized ID reference arrays once the bounded scan is complete. */
-        private void releaseSnapshots() {
-            Arrays.fill(memberIds, null);
-        }
+        /** No snapshot arrays are retained; the scan owns only bounded integer cursors. */
+        private void releaseSnapshots() { }
 
         private int limit(int index) { return limits[index]; }
         /** Number of stable Character partitions in this scan. */
