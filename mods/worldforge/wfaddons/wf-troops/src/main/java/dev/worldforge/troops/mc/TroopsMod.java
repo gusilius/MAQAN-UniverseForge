@@ -1132,8 +1132,6 @@ public class TroopsMod {
             SQUADS.remove(pending.troopEntityId());
             body.discard();
             return true;
-            }
-
         } catch (RuntimeException error) {
             LOGGER.error("wf_troops: strategic return transition for {} will retry: {}",
                     pending.characterGlobalId(), error.toString(), error);
@@ -1204,8 +1202,6 @@ public class TroopsMod {
             SQUADS.remove(id);
             body.discard();
             return true;
-            }
-
         } catch (RuntimeException error) {
             LOGGER.error("wf_troops: pending {} transition for Character {} will retry: {}",
                     pending.kind(), pending.characterGlobalId(), error.toString(), error);
