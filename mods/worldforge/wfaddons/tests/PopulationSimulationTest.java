@@ -879,6 +879,20 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.need(scheduledD, Need.HUNGER) == 10,
                 "population scheduler resumes after append and simulates each new Character exactly once");
 
+        CharacterRegistry completedAppendRegistry = new CharacterRegistry();
+        Character completedAppendA = completedAppendRegistry.create("Completed Append A", "", "", "n", 270);
+        Character completedAppendB = completedAppendRegistry.create("Completed Append B", "", "", "n", 270);
+        boolean initialPassComplete = PopulationSimulation.advanceToWorldDayBatch(
+                completedAppendRegistry, 1, 0, 301, 8);
+        Character completedAppendC = completedAppendRegistry.create("Completed Append C", "", "", "n", 270);
+        boolean appendedPassComplete = PopulationSimulation.advanceToWorldDayBatch(
+                completedAppendRegistry, 1, 0, 301, 8);
+        ok(initialPassComplete && appendedPassComplete
+                        && PopulationSimulation.need(completedAppendA, Need.HUNGER) == 10
+                        && PopulationSimulation.need(completedAppendB, Need.HUNGER) == 10
+                        && PopulationSimulation.need(completedAppendC, Need.HUNGER) == 10,
+                "completed population cursor releases its snapshot and resumes at the appended tail without replaying the acknowledged prefix");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }
