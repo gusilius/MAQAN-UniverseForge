@@ -193,6 +193,7 @@ public final class CharacterAccessService {
                 closeLeases(leases);
             }
         }
+        return changed;
     }
 
     private static void closePins(List<CharacterEvictionGate.Pin> pins) {
