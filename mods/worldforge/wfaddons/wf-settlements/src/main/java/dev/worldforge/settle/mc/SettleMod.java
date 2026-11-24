@@ -844,7 +844,8 @@ public class SettleMod {
     /** Resolve and pin the canonical resident for the entire domain operation. Never return a bare registry pointer. */
     private static PersonBinding resolvePersonBinding(CharacterRegistry fallbackRegistry, String id) {
         if (id == null || id.isBlank()) return null;
-        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
+        dev.worldforge.people.CharacterAuthority authority = PeopleMod.authority();
+        CharacterRegistry owner = authority == null ? null : authority.registryForGlobal(id);
         if (owner != null) {
             dev.worldforge.people.CharacterAccessService.Lease lease = owner.acquireGlobal(id);
             return lease == null ? null : new PersonBinding(owner, lease);
