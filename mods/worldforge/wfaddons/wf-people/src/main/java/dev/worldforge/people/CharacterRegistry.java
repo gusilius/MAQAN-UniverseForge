@@ -431,6 +431,8 @@ public final class CharacterRegistry {
         byId.put(c.id, c);
         orderedIds.add(c.id);
         byGlobalId.put(c.globalId, c.id);
+        // Register the new identity directly; no population-wide scan is needed.
+        accessService.registerCreated(c);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterCreated(this, c);
         markMembershipAppend();
