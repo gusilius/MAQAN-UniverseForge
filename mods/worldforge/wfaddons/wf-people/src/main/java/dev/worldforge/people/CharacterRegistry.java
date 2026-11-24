@@ -58,9 +58,7 @@ public final class CharacterRegistry {
     private final Map<String, LinkedHashSet<String>> characterIdsByRolePlace = new HashMap<>();
 
     /**
-     * Copies only the requested insertion-order window. Unlike AbstractList.subList,
-     * this walks the backing LinkedHashMap iterator directly; orderedView.get(index)
-     * is intentionally O(index) to avoid a second population-sized reference array.
+     * Copies only the requested insertion-order window by indexed ID lookup.
      * The returned batch is bounded by the caller's requested range.
      */
     public List<Character> range(int fromInclusive, int toExclusive) {
@@ -133,9 +131,8 @@ public final class CharacterRegistry {
     }
 
     /**
-     * Compatibility view over LinkedHashMap insertion order. Do not retain a second
-     * population-sized list of IDs: at multi-million scale that duplicate reference
-     * array alone costs tens of megabytes. Iteration walks the canonical map directly.
+     * Compatibility view over the ordered ID directory. Do not retain a second
+     * population-sized list of Character references; each value is resolved on demand.
      */
     private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
         @Override public Character get(int index) {
