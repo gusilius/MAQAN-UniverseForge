@@ -32,13 +32,24 @@ public final class CharacterRecordStore implements AutoCloseable {
     private static final int MAX_ID_BYTES = 128;
     private static final int MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
-    public record Record(String globalId, byte[] payload) {
-        public Record {
-            Objects.requireNonNull(globalId, "globalId");
-            Objects.requireNonNull(payload, "payload");
-            payload = payload.clone();
+    public static final class Record {
+        private final String globalId;
+        private final byte[] payload;
+
+        /** Public construction takes a defensive copy because the caller retains the array. */
+        public Record(String globalId, byte[] payload) {
+            this(globalId, payload, false);
         }
-        @Override public byte[] payload() { return payload.clone(); }
+
+        /** Decoding owns its freshly allocated payload and can adopt it without a second copy. */
+        private Record(String globalId, byte[] payload, boolean takeOwnership) {
+            this.globalId = Objects.requireNonNull(globalId, "globalId");
+            Objects.requireNonNull(payload, "payload");
+            this.payload = takeOwnership ? payload : payload.clone();
+        }
+
+        public String globalId() { return globalId; }
+        public byte[] payload() { return payload.clone(); }
         public String payloadUtf8() { return new String(payload, StandardCharsets.UTF_8); }
     }
 
@@ -212,7 +223,7 @@ public final class CharacterRecordStore implements AutoCloseable {
             throw new IOException("Character record checksum mismatch: " + file);
         String globalId = new String(id, StandardCharsets.UTF_8);
         if (globalId.isBlank()) throw new IOException("Blank Character record identity: " + file);
-        return new Record(globalId, payload);
+        return new Record(globalId, payload, true);
     }
 
     private static void forceDirectory(Path directory) throws IOException {
