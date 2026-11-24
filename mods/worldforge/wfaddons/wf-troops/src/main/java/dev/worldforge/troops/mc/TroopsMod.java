@@ -905,14 +905,14 @@ public class TroopsMod {
     private static boolean completePendingDeath(MilitaryDeathLedger.Pending pending, boolean discardPhysicalBody) {
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
         try {
-            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
-            if (person == null || owner == null || !pending.characterGlobalId().equals(person.globalId)) {
-                LOGGER.debug("wf_troops: pending death {} waits for the owning Character partition",
-                        pending.characterGlobalId());
-                return false;
-            }
-
+            try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
+                if (binding == null) {
+                    LOGGER.debug("wf-troops: pending death {} waits for the owning Character partition",
+                            pending.characterGlobalId());
+                    return false;
+                }
+                Character person = binding.character();
+                CharacterRegistry owner = binding.registry();
             owner.unbindEntity(person.id, "troop", pending.troopEntityId());
             if (person.alive) {
                 PopulationSimulation.die(owner, person.id, pending.year(), pending.cause());
@@ -941,6 +941,8 @@ public class TroopsMod {
             SQUADS.remove(pending.troopEntityId());
             if (discardPhysicalBody) discardPendingPhysicalBody(pending.troopEntityId());
             return true;
+            }
+
         } catch (RuntimeException error) {
             LOGGER.error("wf_troops: pending Character death {} failed and will retry: {}",
                     pending.characterGlobalId(), error.toString(), error);
