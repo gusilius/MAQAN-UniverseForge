@@ -436,11 +436,12 @@ public final class CharacterAuthority {
                 CharacterIdentity identity = byGlobalId.get(id);
                 if (identity != null) matches.add(identity);
             }
-        } else {
-            addFamilyMatchesLegacyLocal(matches, familyByParentLegacy, person.id, localMap);
-            for (String childId : person.children)
-                addLegacyIdentityMatchesLocal(matches, childId, localMap);
         }
+        // Mixed-version saves can contain both global child UUIDs and legacy child IDs.
+        // Merge both projections, but keep legacy resolution inside the owning partition.
+        addFamilyMatchesLegacyLocal(matches, familyByParentLegacy, person.id, localMap);
+        for (String childId : person.children)
+            addLegacyIdentityMatchesLocal(matches, childId, localMap);
 
         if (!spouseGlobal.isBlank()) {
             addFamilyMatches(matches, familyBySpouseGlobal, spouseGlobal);
