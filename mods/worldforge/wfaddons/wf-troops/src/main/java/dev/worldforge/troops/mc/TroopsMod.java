@@ -317,16 +317,23 @@ public class TroopsMod {
         return matches.size() == 1 ? matches.get(0).name : null;
     }
 
-    /** Finds the canonical Character bound to this physical troop UUID using the partition reverse indexes. */
+    /** Resolves and pins the canonical Character bound to this physical troop UUID. */
     private static PersonBinding findCharacterForTroopEntity(String entityId) {
         if (entityId == null || entityId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
-        String globalId = PeopleMod.authority().globalIdForEntityBinding(entityId);
+        var authority = PeopleMod.authority();
+        if (authority == null) return null;
+        String globalId = authority.globalIdForEntityBinding(entityId);
         if (globalId == null) return null;
-        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+        CharacterRegistry owner = authority.registryForGlobal(globalId);
         if (owner == null) return null;
-        Character person = PeopleMod.authority().getGlobal(globalId);
-        if (person == null || !person.alive || !globalId.equals(person.globalId)) return null;
-        return new PersonBinding(owner, person);
+        dev.worldforge.people.CharacterAccessService.Lease lease = owner.access().acquireGlobal(globalId);
+        if (lease == null) return null;
+        Character person = lease.get();
+        if (!person.alive || !globalId.equals(person.globalId)) {
+            lease.close();
+            return null;
+        }
+        return new PersonBinding(owner, lease);
     }
 
     private static ArmyRef armyRef(MapData map, int armyId) {
@@ -512,22 +519,51 @@ public class TroopsMod {
         applySupplyReadiness(troop);
     }
 
-    private record PersonBinding(CharacterRegistry registry, Character character) {}
-
-    private static Character resolvePerson(CharacterRegistry registry, String id) {
-        if (registry == null || id == null || id.isBlank()) return null;
-        Character global = PeopleMod.authority().getGlobal(id);
-        if (global != null) return global; // physical troop bodies may travel away from the Character's storage map
-        return registry.get(id); // compatibility with pre-global-UUID troop NBT in its original map
+    private record PersonBinding(CharacterRegistry registry,
+                                 dev.worldforge.people.CharacterAccessService.Lease lease)
+            implements AutoCloseable {
+        Character character() { return lease.get(); }
+        @Override public void close() { lease.close(); }
     }
 
-    /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
+    /** Resolves a physical soldier to its canonical UUID and pins that Character for the caller's scope. */
     private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
         if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_people")) return null;
-        if ((troop.characterId == null || troop.characterId.isBlank()) && create) {
+        var authority = PeopleMod.authority();
+        if (authority == null) return null;
+        if (troop.characterId == null || troop.characterId.isBlank()) {
             PersonBinding previouslyBound = findCharacterForTroopEntity(troop.getUUID().toString());
-            if (previouslyBound != null) troop.setCharacterId(previouslyBound.character().globalId);
+            if (previouslyBound != null) {
+                try { troop.setCharacterId(previouslyBound.character().globalId); }
+                finally { previouslyBound.close(); }
+            }
         }
+        boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
+        CharacterRegistry ownerRegistry = null;
+        dev.worldforge.people.CharacterAccessService.Lease lease = null;
+        if (hasIdentity) {
+            ownerRegistry = authority.registryForGlobal(troop.characterId);
+            if (ownerRegistry != null) lease = ownerRegistry.access().acquireGlobal(troop.characterId);
+            // Backward compatibility: old troop NBT may contain a map-local cN identifier.
+            if (lease == null) {
+                for (MapData map : WorldForgeMod.loadedMaps().values()) {
+                    CharacterRegistry candidate = PeopleMod.registry(map);
+                    if (candidate == null) continue;
+                    lease = candidate.access().acquire(troop.characterId);
+                    if (lease != null) { ownerRegistry = candidate; break; }
+                }
+            }
+            if (lease == null) return null;
+            Character person = lease.get();
+            if (!person.alive) { lease.close(); return null; }
+            troop.setCharacterId(person.globalId);
+            if (!authority.bindEntity(person.globalId, "troop", troop.getUUID().toString())) {
+                lease.close();
+                return null;
+            }
+            return new PersonBinding(ownerRegistry, lease);
+        }
+        if (!create) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             TitleData.Realm realm = troop.realm == null || troop.realm.isBlank() ? null : map.titles.realms.get(troop.realm);
@@ -539,28 +575,18 @@ public class TroopsMod {
             if (realm == null) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
-            boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
-            Character person = hasIdentity ? resolvePerson(registry, troop.characterId) : null;
-            CharacterRegistry ownerRegistry = registry;
-            if (hasIdentity && person != null && PeopleMod.authority().getGlobal(troop.characterId) != null) {
-                ownerRegistry = PeopleMod.authority().registryForGlobal(troop.characterId);
-                if (ownerRegistry == null) return null;
-            }
-            if (hasIdentity && (person == null || !person.alive)) {
-                // A missing/dead foreign key is a data-integrity fault, not permission to invent a replacement person.
+            String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
+            String name = troop.def() == null ? troop.unitId() : troop.def().name();
+            Character created = registry.create(name + " " + troop.getUUID().toString().substring(0, 4),
+                    "", culture, "m", PeopleMod.YEAR - 20);
+            troop.setCharacterId(created.globalId);
+            lease = registry.access().acquireGlobal(created.globalId);
+            if (lease == null) return null;
+            if (!authority.bindEntity(created.globalId, "troop", troop.getUUID().toString())) {
+                lease.close();
                 return null;
             }
-            if (!hasIdentity) {
-                if (!create) return null;
-                String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
-                String name = troop.def() == null ? troop.unitId() : troop.def().name();
-                person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
-                troop.setCharacterId(person.globalId);
-                ownerRegistry = registry;
-            }
-            troop.setCharacterId(person.globalId); // canonicalize legacy local ID before saving the entity
-            if (!PeopleMod.authority().bindEntity(person.globalId, "troop", troop.getUUID().toString())) return null;
-            return new PersonBinding(ownerRegistry, person);
+            return new PersonBinding(registry, lease);
         }
         return null;
     }
