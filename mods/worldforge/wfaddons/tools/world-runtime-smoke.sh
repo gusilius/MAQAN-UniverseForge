@@ -308,6 +308,12 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]; then
       echo "SETTLEMENT_STRESS_ELAPSED_SECONDS=$second"
       grep 'WF_STRESS contour=04_settlements' server.log | tail -5 || true
     fi
+    if grep -Fq "WF_STRESS_CONTOUR04_SETUP_FAILED" server.log; then
+      echo "ERROR: contour 04 command rejected its setup; refusing to wait for a report that cannot be produced"
+      grep -F "WF_STRESS_CONTOUR04_SETUP_FAILED" server.log | tail -20 || true
+      tail -120 server.log
+      exit 54
+    fi
     if [ -f "$REPORT" ]; then
       cp "$REPORT" "$OUTPUT/contour-04-settlements.json"
       SETTLEMENT_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","INVALID"))' "$REPORT")"
