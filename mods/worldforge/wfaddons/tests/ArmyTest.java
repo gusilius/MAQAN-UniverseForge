@@ -74,7 +74,7 @@ public class ArmyTest {
         double p0 = e.pool(A);
         Army ar = e.raise(A, "levy", 50);
         ar.commander = "Marshal";
-        ar.commanderGlobalId = "11111111-1111-4111-8111-111111111111";
+        ar.setCommanderGlobalId("11111111-1111-4111-8111-111111111111");
         ok(ar.men() == 50 && e.pool(A) == p0 - 50, "ополчение берётся из запаса");
         ok(Math.abs(e.gold(A) - ArmyEngine.START_GOLD) < 1e-8, "new realm receives its opening treasury balance exactly once");
         ok(fails(() -> e.raise(A, "levy", 1_000_000)), "нельзя набрать больше запаса");
@@ -95,6 +95,11 @@ public class ArmyTest {
         Army separated = e.split(ar.id, "archer", 20, A);
         ok(separated.commanderGlobalId.equals(ar.commanderGlobalId),
                 "army split preserves canonical commander UUID without retaining a Character reference");
+        boolean malformedCommanderRejected = false;
+        try { separated.setCommanderGlobalId("not-a-global-id"); }
+        catch (IllegalArgumentException expected) { malformedCommanderRejected = true; }
+        ok(malformedCommanderRejected && separated.commanderGlobalId.equals(ar.commanderGlobalId),
+                "malformed commander identity is rejected without corrupting the army");
         e.merge(ar.id, separated.id, A);
         ok(ar.count("archer") == 20 && ar.commanderGlobalId.equals("11111111-1111-4111-8111-111111111111"),
                 "split+merge restore roster and canonical commander identity");
@@ -200,7 +205,7 @@ public class ArmyTest {
         ArmyEngine commanderReload = fresh(a[0], ids);
         commanderReload.ai = false;
         Army commanderArmy = commanderReload.raise(ids[0], "levy", 5);
-        commanderArmy.commanderGlobalId = "22222222-2222-4222-8222-222222222222";
+        commanderArmy.setCommanderGlobalId("22222222-2222-4222-8222-222222222222");
         ArmyEngine commanderRestored = new ArmyEngine(commanderReload.war);
         commanderRestored.fromJson(commanderReload.toJson());
         ok(commanderRestored.army(commanderArmy.id).commanderGlobalId.equals(commanderArmy.commanderGlobalId),
