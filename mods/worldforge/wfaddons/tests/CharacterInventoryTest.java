@@ -103,6 +103,24 @@ public final class CharacterInventoryTest {
         ok(!CharacterInventory.transfer(owner, spouse, "minecraft:bread", 0),
                 "invalid transfer amount is rejected");
 
+        CharacterAuthority inventoryAuthority = new CharacterAuthority();
+        inventoryAuthority.beginWorld(new WorldId(UUID.fromString("66666666-6666-4666-8666-666666666666")));
+        CharacterRegistry inventorySource = new CharacterRegistry();
+        CharacterRegistry inventoryDestination = new CharacterRegistry();
+        Character transferSource = inventorySource.create("UUID Source", "", "north", "m", 260);
+        Character transferDestination = inventoryDestination.create("UUID Destination", "", "north", "f", 260);
+        CharacterInventory.add(transferSource, "minecraft:gold_ingot", 5);
+        inventoryAuthority.registerMap("inventory-source", inventorySource);
+        inventoryAuthority.registerMap("inventory-destination", inventoryDestination);
+        ok(CharacterInventory.transferByGlobalId(inventoryAuthority, transferSource.globalId,
+                        transferDestination.globalId, "minecraft:gold_ingot", 3)
+                        && CharacterInventory.count(transferSource, "minecraft:gold_ingot") == 2
+                        && CharacterInventory.count(transferDestination, "minecraft:gold_ingot") == 3
+                        && inventorySource.activeAccessLeaseCount() == 0
+                        && inventoryDestination.activeAccessLeaseCount() == 0,
+                "cross-partition inventory movement resolves UUIDs, commits both ledgers and releases ordered leases");
+        inventoryAuthority.clear();
+
         Character equipped = registry.create("Garrick", "", "north", "m", 260);
         CharacterInventory.add(equipped, "minecraft:iron_sword", 2, "{Damage:4}");
         ok(CharacterInventory.equip(equipped, "mainhand", "minecraft:iron_sword")
