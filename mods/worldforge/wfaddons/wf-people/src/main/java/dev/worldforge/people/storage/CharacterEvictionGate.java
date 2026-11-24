@@ -59,6 +59,15 @@ public final class CharacterEvictionGate {
         }
     }
 
+    /** Returns the current unsaved generation, or null when this identity is clean. */
+    public PersistenceTicket dirtyTicket(String globalId) {
+        State state = state(globalId);
+        synchronized (state) {
+            return state.persistedGeneration == state.generation
+                    ? null : new PersistenceTicket(globalId, state.generation);
+        }
+    }
+
     /** Captures the exact version a persistence operation is responsible for writing. */
     public PersistenceTicket capture(String globalId) {
         State state = state(globalId);
