@@ -294,7 +294,8 @@ public final class CharacterAccessService {
                 String localId = owner.localIdForGlobalId(id);
                 if (localId == null) throw new IllegalArgumentException("Unknown Character UUID: " + id);
                 Lease lease = owner.access().acquire(localId);
-                if (lease == null || !id.equals(lease.get().globalId)) {
+                if (lease == null || !id.equals(lease.get().globalId)
+                        || (authority != null && authority.getGlobal(id) != lease.get())) {
                     if (lease != null) lease.close();
                     throw new IllegalStateException("Character identity changed while acquiring " + id);
                 }
