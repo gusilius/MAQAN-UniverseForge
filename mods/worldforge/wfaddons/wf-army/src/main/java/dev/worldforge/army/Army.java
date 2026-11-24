@@ -8,6 +8,8 @@ public final class Army {
     public final int id;
     public final String realm;
     public String name, commander = "";
+    /** Canonical People UUID; deliberately stores no Character object or registry reference. */
+    public String commanderGlobalId = "";
     public int martial;                                       // военное умение командира (+3% силы за единицу)
     public int location;                                      // id титула-баронства
     public double morale = 1.0, moveAcc, supply = 1.0;
