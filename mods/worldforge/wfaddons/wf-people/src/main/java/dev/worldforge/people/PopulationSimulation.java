@@ -16,15 +16,17 @@ public final class PopulationSimulation {
         final long fallbackDay;
         final int year;
         final long membershipGeneration;
+        final List<String> ids;
         int nextIndex;
         boolean catchUpPass;
         String lastProcessedId = "";
         WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
-                       int nextIndex, boolean catchUpPass, String lastProcessedId) {
+                       List<String> ids, int nextIndex, boolean catchUpPass, String lastProcessedId) {
             this.targetDay = targetDay;
             this.fallbackDay = fallbackDay;
             this.year = year;
             this.membershipGeneration = membershipGeneration;
+            this.ids = ids;
             this.nextIndex = nextIndex;
             this.catchUpPass = catchUpPass;
             this.lastProcessedId = lastProcessedId == null ? "" : lastProcessedId;
@@ -560,30 +562,32 @@ public final class PopulationSimulation {
         if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
-            int memberCount = registry.size();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
                     || cursor.membershipGeneration != generation) {
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false, "");
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                        registry.idSnapshot(), 0, false, "");
             } else if (cursor.targetDay != targetWorldDay) {
                 // Keep the unfinished suffix. Once drained, a second pass catches up the prefix.
-                if (cursor.nextIndex >= memberCount) {
-                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false, "");
+                if (cursor.nextIndex >= cursor.ids.size()) {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                            cursor.ids, 0, false, "");
                 } else {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.nextIndex, true, cursor.lastProcessedId);
+                            cursor.ids, cursor.nextIndex, true, cursor.lastProcessedId);
                 }
             }
-            if (cursor.nextIndex >= memberCount) {
+            if (cursor.nextIndex >= cursor.ids.size()) {
                 if (cursor.catchUpPass) {
-                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false, "");
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                            cursor.ids, 0, false, "");
                 } else {
                     WORLD_DAY_CURSORS.put(registry, cursor);
                     return true;
                 }
             }
-            int pageEnd = Math.min(memberCount, cursor.nextIndex + maxCharacters);
-            List<String> page = registry.idRange(cursor.nextIndex, pageEnd);
+            int pageEnd = Math.min(cursor.ids.size(), cursor.nextIndex + maxCharacters);
+            List<String> page = cursor.ids.subList(cursor.nextIndex, pageEnd);
             int processed = 0;
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 for (String characterId : page) {
@@ -606,13 +610,15 @@ public final class PopulationSimulation {
                 WORLD_DAY_CURSORS.remove(registry);
                 return false;
             }
-            boolean complete = cursor.nextIndex >= memberCount;
+            boolean complete = cursor.nextIndex >= cursor.ids.size();
             if (complete && cursor.catchUpPass) {
                 WORLD_DAY_CURSORS.put(registry,
-                        new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false, ""));
+                        new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                                cursor.ids, 0, false, ""));
                 return false;
             }
-            WORLD_DAY_CURSORS.put(registry, cursor);
+            if (complete) WORLD_DAY_CURSORS.remove(registry);
+            else WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
     }
