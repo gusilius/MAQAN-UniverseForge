@@ -116,6 +116,14 @@ public final class ResidentLifeEvents {
             state = REGISTRY_PASSES.computeIfAbsent(registry, ignored -> new RegistryPassState());
         }
         YearSession session = state.session;
+        if (session != null && session.membershipResetGeneration != registry.membershipResetGeneration()) {
+            state.session = null;
+            state.stageRefresh = null;
+            session = null;
+        }
+        if (state.stageRefresh != null
+                && state.stageRefresh.membershipResetGeneration != registry.membershipResetGeneration())
+            state.stageRefresh = null;
         if (session != null && session.year != year) year = session.year;
         // Guard callback routes, including stage refresh, against same-tick duplicate work.
         if (state.lastCallYear == year && state.lastCallToken == tickToken) return state.lastCallResult;
@@ -238,8 +246,7 @@ public final class ResidentLifeEvents {
         synchronized (PREGNANCY_SCHEDULES) {
             schedule = PREGNANCY_SCHEDULES.computeIfAbsent(registry, ignored -> new PregnancySchedule());
         }
-        List<Character> people = registry.all();
-        int size = Math.min(registry.size(), people.size());
+        int size = registry.size();
         if (size == 0) return 0;
 
         // Reserve half the budget for due deliveries, while still discovering legacy pregnancies.
@@ -247,8 +254,11 @@ public final class ResidentLifeEvents {
         int start = Math.floorMod(schedule.scanCursor, size);
         int scanned = Math.min(scanBudget, size);
         for (int i = 0; i < scanned; i++) {
-            Character person = people.get((start + i) % size);
-            if (FamilyPlanning.isPregnant(person)) enqueuePregnancy(registry, person);
+            String localId = registry.idAt((start + i) % size);
+            try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                if (lease != null && FamilyPlanning.isPregnant(lease.get()))
+                    enqueuePregnancy(registry, lease.get());
+            }
         }
         schedule.scanCursor = (start + scanned) % size;
 
@@ -260,18 +270,17 @@ public final class ResidentLifeEvents {
             Long activeDueDay = schedule.queued.get(due.motherGlobalId());
             if (activeDueDay == null || activeDueDay.longValue() != due.dueDay()) continue;
             schedule.queued.remove(due.motherGlobalId());
-            Character mother = registry.getByGlobalId(due.motherGlobalId());
-            if (mother == null || !FamilyPlanning.isPregnant(mother)
-                    || FamilyPlanning.dueDay(mother) != due.dueDay()) {
-                continue;
-            }
-            if (mother.alive) {
-                if (!FamilyPlanning.dueFatherId(mother, worldDay).isBlank())
-                    deliverDuePregnancy(registry, mother, year, worldDay, names);
-                else
-                    FamilyPlanning.cancel(mother, null, "father-unavailable", year);
-            } else {
-                FamilyPlanning.cancel(mother, null, "mother-unavailable", year);
+            try (CharacterAccessService.Lease motherLease = registry.access().acquireGlobal(due.motherGlobalId())) {
+                if (motherLease == null) continue;
+                Character mother = motherLease.get();
+                if (!FamilyPlanning.isPregnant(mother) || FamilyPlanning.dueDay(mother) != due.dueDay()) continue;
+                if (mother.alive) {
+                    if (!FamilyPlanning.dueFatherId(mother, worldDay).isBlank())
+                        deliverDuePregnancy(registry, mother, year, worldDay, names);
+                    else registry.access().mutate(mother.id,
+                            current -> FamilyPlanning.cancel(current, null, "father-unavailable", year));
+                } else registry.access().mutate(mother.id,
+                        current -> FamilyPlanning.cancel(current, null, "mother-unavailable", year));
             }
         }
         return processed;
@@ -284,16 +293,19 @@ public final class ResidentLifeEvents {
         synchronized (HEALTH_SCHEDULES) {
             schedule = HEALTH_SCHEDULES.computeIfAbsent(registry, ignored -> new HealthSchedule());
         }
-        List<Character> people = registry.all();
-        int size = Math.min(registry.size(), people.size());
+        int size = registry.size();
         if (size == 0) return 0;
         int scanBudget = schedule.due.isEmpty() ? budget : Math.max(1, budget / 2);
         int start = Math.floorMod(schedule.scanCursor, size);
         int scanned = Math.min(scanBudget, size);
         for (int i = 0; i < scanned; i++) {
-            Character person = people.get((start + i) % size);
-            long dueDay = CharacterHealth.nextEventDay(person);
-            if (dueDay >= 0) enqueueHealth(registry, person, dueDay);
+            String localId = registry.idAt((start + i) % size);
+            try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                if (lease == null) continue;
+                Character person = lease.get();
+                long dueDay = CharacterHealth.nextEventDay(person);
+                if (dueDay >= 0) enqueueHealth(registry, person, dueDay);
+            }
         }
         schedule.scanCursor = (start + scanned) % size;
         int processed = scanned;
@@ -303,11 +315,18 @@ public final class ResidentLifeEvents {
             Long active = schedule.queued.get(due.characterGlobalId());
             if (active == null || active.longValue() != due.dueDay()) continue;
             schedule.queued.remove(due.characterGlobalId());
-            Character person = registry.getByGlobalId(due.characterGlobalId());
-            if (person == null || !person.alive || CharacterHealth.nextEventDay(person) != due.dueDay()) continue;
-            CharacterHealth.advance(person, worldDay);
-            long next = CharacterHealth.nextEventDay(person);
-            if (next >= 0) enqueueHealth(registry, person, next);
+            try (CharacterAccessService.Lease lease = registry.access().acquireGlobal(due.characterGlobalId())) {
+                if (lease == null) continue;
+                Character person = lease.get();
+                if (!person.alive || CharacterHealth.nextEventDay(person) != due.dueDay()) continue;
+                registry.access().mutate(person.id, current -> CharacterHealth.advance(current, worldDay));
+                try (CharacterAccessService.Lease refreshed = registry.access().acquire(person.id)) {
+                    if (refreshed != null) {
+                        long next = CharacterHealth.nextEventDay(refreshed.get());
+                        if (next >= 0) enqueueHealth(registry, refreshed.get(), next);
+                    }
+                }
+            }
         }
         return processed;
     }
