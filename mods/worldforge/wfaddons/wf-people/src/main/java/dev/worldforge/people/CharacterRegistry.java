@@ -47,6 +47,18 @@ public final class CharacterRegistry {
     private long membershipResetGeneration;
     /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
     private final Map<String, Integer> activeAccessLeases = new HashMap<>();
+    /** Optional eviction work index; one compact token per recently released identity. */
+    private static final int MAX_EVICTION_CANDIDATES = 65_536;
+    private static final class EvictionCandidate {
+        final String localId;
+        final long eligibleAfterNanos;
+        EvictionCandidate(String localId, long eligibleAfterNanos) {
+            this.localId = localId;
+            this.eligibleAfterNanos = eligibleAfterNanos;
+        }
+    }
+    private final ArrayDeque<EvictionCandidate> evictionCandidates = new ArrayDeque<>();
+    private final Map<String, EvictionCandidate> evictionCandidateById = new HashMap<>();
     private final CharacterAccessService accessService = new CharacterAccessService(this);
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, String> byGlobalId = new HashMap<>();
@@ -325,6 +337,9 @@ public final class CharacterRegistry {
     public synchronized CharacterAccessService.Lease acquire(String id) {
         Character character = resolveMaterialized(id);
         if (character == null) return null;
+        // A newly active access invalidates any queued idle candidate. Stale deque
+        // tokens are harmless and are discarded by identity comparison when polled.
+        evictionCandidateById.remove(id);
         activeAccessLeases.merge(id, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, id, character);
     }
@@ -336,6 +351,7 @@ public final class CharacterRegistry {
         if (localId == null) return null;
         Character character = resolveMaterialized(localId);
         if (character == null) return null;
+        evictionCandidateById.remove(localId);
         activeAccessLeases.merge(localId, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, localId, character);
     }
@@ -346,9 +362,55 @@ public final class CharacterRegistry {
         Integer count = activeAccessLeases.get(id);
         if (count == null || count <= 0)
             throw new IllegalStateException("Character access lease underflow for " + id);
-        if (count == 1) activeAccessLeases.remove(id);
-        else activeAccessLeases.put(id, count - 1);
+        if (count == 1) {
+            activeAccessLeases.remove(id);
+            enqueueEvictionCandidate(id, System.nanoTime());
+        } else activeAccessLeases.put(id, count - 1);
     }
+
+    private void enqueueEvictionCandidate(String localId, long nowNanos) {
+        if (evictionCandidateById.containsKey(localId)
+                || evictionCandidateById.size() >= MAX_EVICTION_CANDIDATES) return;
+        EvictionCandidate candidate = new EvictionCandidate(localId, nowNanos);
+        evictionCandidateById.put(localId, candidate);
+        evictionCandidates.addLast(candidate);
+    }
+
+    /**
+     * Returns at most {@code limit} identities idle for at least {@code minIdleNanos}.
+     * Work is driven by lease-release events; this method never scans the population.
+     * A full candidate index may omit hints safely: persistence/identity state is never lost.
+     */
+    public synchronized List<String> pollEvictionCandidates(int limit, long minIdleNanos) {
+        if (limit < 1 || minIdleNanos < 0) throw new IllegalArgumentException("Invalid eviction candidate budget");
+        List<String> result = new ArrayList<>(limit);
+        int examined = evictionCandidates.size();
+        long now = System.nanoTime();
+        while (examined-- > 0 && result.size() < limit) {
+            EvictionCandidate candidate = evictionCandidates.pollFirst();
+            if (candidate == null) break;
+            if (evictionCandidateById.get(candidate.localId) != candidate) continue;
+            if (activeAccessLeases.containsKey(candidate.localId)) {
+                evictionCandidateById.remove(candidate.localId, candidate);
+                continue;
+            }
+            if (now - candidate.eligibleAfterNanos < minIdleNanos) {
+                evictionCandidates.addFirst(candidate);
+                break; // FIFO timestamps: later candidates cannot be older.
+            }
+            evictionCandidateById.remove(candidate.localId, candidate);
+            result.add(candidate.localId);
+        }
+        return List.copyOf(result);
+    }
+
+    /** Requeues a candidate after a conservative eviction refusal. */
+    public synchronized void requeueEvictionCandidate(String localId) {
+        if (localId != null && !localId.isBlank() && !activeAccessLeases.containsKey(localId))
+            enqueueEvictionCandidate(localId, System.nanoTime());
+    }
+
+    public synchronized int evictionCandidateCount() { return evictionCandidateById.size(); }
 
     public synchronized boolean isAccessPinned(String id) {
         return activeAccessLeases.containsKey(id);
