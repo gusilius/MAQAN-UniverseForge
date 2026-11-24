@@ -47,7 +47,7 @@ public final class CharacterAccessService {
         public boolean isClosed() { return closed.get(); }
 
         @Override public void close() {
-            if (closed.compareAndSet(false, true)) registry.releaseAccess(localId, character);
+            if (closed.compareAndSet(false, true)) registry.releaseAccess(localId);
         }
     }
 }
