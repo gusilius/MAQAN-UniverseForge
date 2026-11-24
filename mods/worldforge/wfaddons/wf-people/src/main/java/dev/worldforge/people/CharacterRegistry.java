@@ -822,6 +822,38 @@ public final class CharacterRegistry {
         parent.props.put("family.children_global_ids", children);
     }
 
+    /**
+     * Rebuilds the derived, reciprocal family indexes after replaying independent
+     * Character records. A record is intentionally self-contained; unlike a full
+     * registry snapshot, replaying one record cannot see its parent object yet.
+     * Run once after the complete checkpoint/WAL stream has been applied.
+     */
+    public void reconcileFamilyLinksAfterRecordRestore() {
+        for (Character child : orderedView) {
+            Character father = child.father == null || child.father.isBlank() ? null : byId.get(child.father);
+            Character mother = child.mother == null || child.mother.isBlank() ? null : byId.get(child.mother);
+            Character spouse = child.spouse == null || child.spouse.isBlank() ? null : byId.get(child.spouse);
+            if (father != null) {
+                child.props.put("family.father_global_id", father.globalId);
+                if (!father.children.contains(child.id)) father.children.add(child.id);
+                addGlobalChild(father, child.globalId);
+            }
+            if (mother != null) {
+                child.props.put("family.mother_global_id", mother.globalId);
+                if (!mother.children.contains(child.id)) mother.children.add(child.id);
+                addGlobalChild(mother, child.globalId);
+            }
+            if (spouse != null) {
+                child.props.put("family.spouse_global_id", spouse.globalId);
+                if (spouse.spouse == null || spouse.spouse.isBlank()) spouse.spouse = child.id;
+                else if (!child.id.equals(spouse.spouse))
+                    throw new IllegalStateException("Conflicting spouse links after Character record replay: "
+                            + child.globalId + " -> " + spouse.globalId + " but reverse link points to " + spouse.spouse);
+            }
+        }
+        recordDomainMutation();
+    }
+
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
         publish(c, new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year));
     }
