@@ -20,12 +20,29 @@ public final class CharacterWal implements AutoCloseable {
     private static final int MAX_ID = 128;
     private static final int MAX_PAYLOAD = 16 * 1024 * 1024;
 
-    public record Record(int shard, long sequence, String globalId, byte[] payload) {
-        public Record { payload = payload.clone(); }
+    public static final class Record {
+        private final int shard;
+        private final long sequence;
+        private final String globalId;
+        private final byte[] payload;
+
+        /** Public construction always takes ownership through a defensive copy. */
+        public Record(int shard, long sequence, String globalId, byte[] payload) {
+            this(shard, sequence, globalId, payload, false);
+        }
+
+        private Record(int shard, long sequence, String globalId, byte[] payload, boolean takeOwnership) {
+            this.shard = shard;
+            this.sequence = sequence;
+            this.globalId = Objects.requireNonNull(globalId, "globalId");
+            this.payload = takeOwnership ? Objects.requireNonNull(payload, "payload") : Objects.requireNonNull(payload, "payload").clone();
+        }
+
+        public int shard() { return shard; }
+        public long sequence() { return sequence; }
+        public String globalId() { return globalId; }
         @Override public byte[] payload() { return payload.clone(); }
-        /** Decodes the private immutable frame payload without allocating defensive byte-array copies. */
         public String payloadUtf8() { return new String(payload, StandardCharsets.UTF_8); }
-        // Package-private zero-copy handoff to CharacterRecordStore, which consumes bytes synchronously.
         byte[] payloadView() { return payload; }
     }
     @FunctionalInterface
@@ -224,12 +241,13 @@ public final class CharacterWal implements AutoCloseable {
             body.flip();
             byte[] id = new byte[idLength], payload = new byte[payloadLength];
             body.get(id); body.get(payload); int stored = body.getInt();
-            ByteBuffer crcData = ByteBuffer.allocate(HEADER - 4 + idLength + payloadLength).order(ByteOrder.BIG_ENDIAN);
-            crcData.putShort(version).putShort(reserved).putLong(sequence).putInt(idLength).putInt(payloadLength);
-            crcData.put(id).put(payload);
-            CRC32C crc = new CRC32C(); crc.update(crcData.array(), 0, crcData.position());
+            // CRC covers the original frame header (excluding magic) and body (excluding stored CRC).
+            // Feed both existing buffers directly; do not allocate a third payload-sized CRC buffer.
+            CRC32C crc = new CRC32C();
+            crc.update(header.array(), Integer.BYTES, HEADER - Integer.BYTES);
+            crc.update(body.array(), 0, idLength + payloadLength);
             if ((int) crc.getValue() != stored) throw new IOException("Character WAL checksum mismatch at byte " + position);
-            consumer.accept(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload));
+            consumer.accept(new Record(shard, sequence, new String(id, StandardCharsets.UTF_8), payload, true));
             position += length; expected++;
         }
         if (repair && position != size) { channel.truncate(position); channel.force(true); }
