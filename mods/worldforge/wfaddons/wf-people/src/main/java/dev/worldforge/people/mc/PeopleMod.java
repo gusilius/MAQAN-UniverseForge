@@ -1023,25 +1023,15 @@ public class PeopleMod {
                 indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
         }
 
-        // Inventory transactions require destination-first writes just like estate succession.
-        // Their write-ahead markers are stored on both endpoint Characters and carry global IDs.
-        for (CharacterRegistry registry : registries) {
-            for (Character character : registry.all()) {
-                for (Map.Entry<String, Object> property : character.props.entrySet()) {
-                    if (!property.getKey().startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)
-                            || !(property.getValue() instanceof Map<?, ?> marker)) continue;
-                    Object sourceRaw = marker.get("source_global_id");
-                    Object destinationRaw = marker.get("destination_global_id");
-                    if (!(sourceRaw instanceof String sourceId)
-                            || !(destinationRaw instanceof String destinationId)) continue;
-                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceId);
-                    CharacterRegistry destinationRegistry = AUTHORITY.registryForGlobal(destinationId);
-                    if (sourceRegistry != null && destinationRegistry != null
-                            && sourceRegistry != destinationRegistry
-                            && outgoing.get(destinationRegistry).add(sourceRegistry))
-                        indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
-                }
-            }
+        // Inventory WAL dependencies are also sparse UUID pairs. Avoid a second
+        // population-wide Character scan during coordinated world saves.
+        for (CharacterAuthority.InventoryTransfer transfer : AUTHORITY.pendingInventoryTransfers()) {
+            CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(transfer.sourceGlobalId());
+            CharacterRegistry destinationRegistry = AUTHORITY.registryForGlobal(transfer.destinationGlobalId());
+            if (sourceRegistry == null || destinationRegistry == null) return false;
+            if (sourceRegistry != destinationRegistry
+                    && outgoing.get(destinationRegistry).add(sourceRegistry))
+                indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
         }
 
         java.util.ArrayDeque<CharacterRegistry> ready = new java.util.ArrayDeque<>();
