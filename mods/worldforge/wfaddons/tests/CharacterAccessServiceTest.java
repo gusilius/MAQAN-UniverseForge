@@ -54,6 +54,7 @@ public final class CharacterAccessServiceTest {
         CharacterRecordStore store = new CharacterRecordStore(root.resolve("records"));
         CharacterPersistenceCoordinator coordinator =
                 new CharacterPersistenceCoordinator(gate, wal, writer, store);
+        String secondId = null;
         try {
             access.attachPersistenceCoordinator(coordinator);
             try (CharacterAccessService.Lease lease = access.acquireGlobal(original.globalId)) {
@@ -70,7 +71,7 @@ public final class CharacterAccessServiceTest {
 
 
             Character second = registry.create("Multi Subject", "", "test", "f", 2);
-            String secondId = second.id;
+            secondId = second.id;
             dev.worldforge.people.CharacterAuthority authority = new dev.worldforge.people.CharacterAuthority();
             authority.beginWorld(WorldId.parse("00000000-0000-0000-0000-000000000001"));
             authority.registerMap("overworld", registry);
