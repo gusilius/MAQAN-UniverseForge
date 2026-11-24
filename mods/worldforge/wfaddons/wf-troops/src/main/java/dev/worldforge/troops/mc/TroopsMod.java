@@ -1028,7 +1028,8 @@ public class TroopsMod {
         try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
             if (binding == null) return false;
             Character person = binding.character();
-            CharacterRegistry owner = binding.registry();            if (person == null || owner == null || !person.alive) return false;
+            CharacterRegistry owner = binding.registry();
+            if (person == null || owner == null || !person.alive) return false;
             if (body == null) {
                 UUID entityId = UUID.fromString(pending.troopEntityId());
                 for (ServerLevel level : server.getAllLevels()) {
@@ -1369,16 +1370,17 @@ public class TroopsMod {
                     }
                     troop.deferCharacterBinding = false;
                     syncPerson(troop);
-                    PersonBinding binding = bindPerson(troop, false);
-                    if (binding == null || !PeopleMod.persistCharacter(binding.character(), server)) {
-                        troop.deferCharacterBinding = true;
-                        waitingForChunks = true;
-                        continue;
-                    }
-                    if (!MUSTERS.recordCharacter(operation.id(), spawn.entityId(), binding.character().globalId)
-                            || !saveDurably()) {
-                        actionPersistenceBlocked = true;
-                        return false;
+                    try (PersonBinding binding = bindPerson(troop, false)) {
+                        if (binding == null || !PeopleMod.persistCharacter(binding.character(), server)) {
+                            troop.deferCharacterBinding = true;
+                            waitingForChunks = true;
+                            continue;
+                        }
+                        if (!MUSTERS.recordCharacter(operation.id(), spawn.entityId(), binding.character().globalId)
+                                || !saveDurably()) {
+                            actionPersistenceBlocked = true;
+                            return false;
+                        }
                     }
                 } else {
                     troop.deferCharacterBinding = false;
@@ -2604,32 +2606,31 @@ public class TroopsMod {
         for (TroopEntity troop : stagedReturns) {
             boolean released;
             if (ModList.get().isLoaded("wf_people")) {
-                PersonBinding binding = bindPerson(troop, false);
-                if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
-                    binding = findCharacterForTroopEntity(troop.getUUID().toString());
-                if (binding == null) {
-                    actionPersistenceBlocked = true;
-                    src.sendFailure(Component.literal("Не удалось разрешить Character перед возвратом; физический солдат сохранён"));
-                    continue;
-                }
-                var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
-                        binding.character().globalId, troop.getUUID().toString(),
-                        dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN,
-                        Math.max(1, PeopleMod.YEAR), "");
-                try {
-                    troop.setInvulnerable(true);
-                    TRANSITIONS.stage(pending);
-                    if (!saveDurably()) {
+                try (PersonBinding binding = bindPerson(troop, false)) {
+                    if (binding == null) {
                         actionPersistenceBlocked = true;
-                        src.sendFailure(Component.literal("Не удалось сохранить терминальную квитанцию возврата; солдат оставлен в мире"));
+                        src.sendFailure(Component.literal("Не удалось разрешить Character перед возвратом; физический солдат сохранён"));
                         continue;
                     }
-                    released = completeStrategicReturnTransition(pending, troop);
-                } catch (RuntimeException error) {
-                    actionPersistenceBlocked = true;
-                    LOGGER.error("wf_troops: could not stage strategic return for {}: {}",
-                            binding.character().globalId, error.toString(), error);
-                    released = false;
+                    String globalId = binding.character().globalId;
+                    var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                            globalId, troop.getUUID().toString(),
+                            dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN,
+                            Math.max(1, PeopleMod.YEAR), "");
+                    try {
+                        troop.setInvulnerable(true);
+                        TRANSITIONS.stage(pending);
+                        if (!saveDurably()) {
+                            actionPersistenceBlocked = true;
+                            src.sendFailure(Component.literal("Не удалось сохранить терминальную квитанцию возврата; солдат оставлен в мире"));
+                            continue;
+                        }
+                        released = completeStrategicReturnTransition(pending, troop);
+                    } catch (RuntimeException error) {
+                        actionPersistenceBlocked = true;
+                        LOGGER.error("wf-troops: could not stage strategic return for {}: {}", globalId, error.toString(), error);
+                        released = false;
+                    }
                 }
             } else {
                 released = releaseBodyDurably(troop);
