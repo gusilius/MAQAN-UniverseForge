@@ -855,16 +855,20 @@ public class TroopsMod {
             Character fallen = fallenBinding == null ? null : fallenBinding.character();
             if (fallen != null) {
                 Entity attackerEntity = source == null ? null : source.getEntity();
-                if (attackerEntity != null)
+                if (attackerEntity != null) {
                     MilitaryPsychology.recordBattleOutcome(fallen, false,
                             "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
+                    fallenBinding.registry().access().mutateGlobal(fallen.globalId, ignored -> { });
+                }
                 recordComradeLosses(troop, fallen, worldMinute);
                 if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
                     try (PersonBinding killer = bindPerson(attacker, false)) {
-                        if (killer != null && killer.character().alive)
+                        if (killer != null && killer.character().alive) {
                             MilitaryPsychology.recordBattleOutcome(killer.character(), true,
                                     "battle:kill:" + fallen.globalId + ":" + killer.character().globalId,
                                     worldMinute, 2);
+                            killer.registry().access().mutateGlobal(killer.character().globalId, ignored -> { });
+                        }
                     }
                 }
             }
@@ -1069,6 +1073,7 @@ public class TroopsMod {
             person.props.remove("wf_army_id");
             person.props.remove("wf_combat_xp");
             person.props.remove("wf_veteran_rank");
+            owner.access().mutateGlobal(person.globalId, ignored -> { });
             if (!PeopleMod.persistCharacter(person, server)) return false;
 
             if (!TRANSITIONS.complete(pending.characterGlobalId())
