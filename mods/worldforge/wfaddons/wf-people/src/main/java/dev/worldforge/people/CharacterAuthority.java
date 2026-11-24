@@ -17,6 +17,8 @@ public final class CharacterAuthority {
     private final Map<String, Set<String>> pendingEstateIncoming = new HashMap<>();
     /** Sparse cross-partition inventory WAL index; keys and endpoints are UUIDs only. */
     private final Map<String, InventoryTransfer> pendingInventoryTransfers = new HashMap<>();
+    /** Malformed persisted WAL markers are indexed sparsely and block recovery until repaired. */
+    private final Set<String> malformedInventoryTransferMarkers = new HashSet<>();
     public record InventoryTransfer(String transactionId, String sourceGlobalId, String destinationGlobalId) { }
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
@@ -47,6 +49,7 @@ public final class CharacterAuthority {
         familyBySpouseGlobal.clear();
         pendingEstateIncoming.clear();
         pendingInventoryTransfers.clear();
+        malformedInventoryTransferMarkers.clear();
         indexedMembershipGenerations.clear();
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
@@ -121,6 +124,7 @@ public final class CharacterAuthority {
         if (mapId == null || currentWorld == null) return;
         if (previous != null) {
             removeEstateIncomingForHeir(previous.globalId);
+            removeMalformedInventoryMarkers(previous.globalId);
             CharacterIdentity oldIdentity = new CharacterIdentity(
                     currentWorld, mapId, previous.id, previous.globalId);
             if (!previous.globalId.equals(replacement.globalId)) {
@@ -229,6 +233,7 @@ public final class CharacterAuthority {
                 if (!identity.mapId().equals(mapId)) continue;
                 existing.remove();
                 removeEstateIncomingForHeir(identity.globalCharacterId());
+                removeMalformedInventoryMarkers(identity.globalCharacterId());
                 Set<CharacterIdentity> legacy = byLegacyId.get(identity.characterId());
                 if (legacy != null) {
                     legacy.remove(identity);
@@ -414,16 +419,32 @@ public final class CharacterAuthority {
         return List.copyOf(pendingInventoryTransfers.values());
     }
 
+    /** Any malformed durable marker blocks reconciliation; callers must not silently skip it. */
+    public synchronized boolean hasMalformedInventoryTransferMarkers() {
+        return !malformedInventoryTransferMarkers.isEmpty();
+    }
+
+    private void removeMalformedInventoryMarkers(String globalId) {
+        String prefix = globalId + "|";
+        malformedInventoryTransferMarkers.removeIf(key -> key.startsWith(prefix));
+    }
+
     private void indexInventoryTransferMarkers(Character person) {
         for (Map.Entry<String, Object> entry : person.props.entrySet()) {
-            if (!entry.getKey().startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)
-                    || !(entry.getValue() instanceof Map<?, ?> marker)) continue;
+            String key = entry.getKey();
+            if (!key.startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)) continue;
+            if (!(entry.getValue() instanceof Map<?, ?> marker)) {
+                malformedInventoryTransferMarkers.add(person.globalId + "|" + key);
+                continue;
+            }
             Object tx = marker.get("transaction_id");
             Object source = marker.get("source_global_id");
             Object destination = marker.get("destination_global_id");
-            if (tx instanceof String transactionId && source instanceof String sourceId
-                    && destination instanceof String destinationId)
+            if (tx instanceof String transactionId && !transactionId.isBlank()
+                    && source instanceof String sourceId && !sourceId.isBlank()
+                    && destination instanceof String destinationId && !destinationId.isBlank())
                 noteInventoryTransfer(transactionId, sourceId, destinationId);
+            else malformedInventoryTransferMarkers.add(person.globalId + "|" + key);
         }
     }
 
