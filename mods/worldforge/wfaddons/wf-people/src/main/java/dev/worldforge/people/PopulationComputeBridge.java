@@ -14,11 +14,11 @@ public final class PopulationComputeBridge {
         private final List<CharacterRegistry> registries;
         private final long[] membershipGenerations;
         private final int[] starts, limits;
-        // Reuse one insertion-order iterator across successive server-tick slices. Repeated
-        // List.get(index) would restart from the head for every Character and become O(n^2).
         @SuppressWarnings("unchecked")
-        private final Iterator<String>[] memberIterators;
-        private final int[] iteratorPositions;
+        private final List<String>[] memberIds;
+        // Retain only String IDs across slices. LinkedHashMap iterators retain a node whose
+        // value is a Character; key-only snapshots trade a bounded reference array for safe
+        // asynchronous lifetimes and O(1) indexed access per member.
 
         private Scan(Collection<CharacterRegistry> source, int[] starts, int[] limits) {
             List<CharacterRegistry> ordered = new ArrayList<>();
@@ -31,14 +31,13 @@ public final class PopulationComputeBridge {
             this.membershipGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
-            this.memberIterators = (Iterator<String>[]) new Iterator<?>[ordered.size()];
-            this.iteratorPositions = new int[ordered.size()];
-            Arrays.fill(this.iteratorPositions, -1);
+            this.memberIds = new ArrayList[ordered.size()];
             if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
                 throw new IllegalArgumentException("Population scan partition shape changed");
             for (int i = 0; i < ordered.size(); i++) {
                 CharacterRegistry registry = ordered.get(i);
                 membershipGenerations[i] = registry.membershipGeneration();
+                this.memberIds[i] = registry.idSnapshot();
                 if (starts == null) this.starts[i] = 0;
                 if (limits == null) this.limits[i] = registry.size();
                 if (this.starts[i] < 0 || this.limits[i] < this.starts[i]
@@ -87,57 +86,22 @@ public final class PopulationComputeBridge {
 
         private CharacterRegistry registry(int index) { return registries.get(index); }
 
-        /**
-         * Returns the next Character at the requested stable cursor. Sequential slices reuse
-         * their iterator, so scanning N residents costs O(N), not O(N * numberOfSlices).
-         * If a registry append invalidates LinkedHashMap's fail-fast iterator, rebuild it once
-         * at the requested cursor; a failed/stale slice can use the same recovery path.
-         */
+        /** Resolves a Character by indexed ID; no map iterator survives this call. */
         public Character nextCharacter(int registryIndex, int memberIndex) {
             CharacterRegistry registry = registries.get(registryIndex);
-            Iterator<String> iterator = memberIterators[registryIndex];
-            if (iterator == null || iteratorPositions[registryIndex] != memberIndex) {
-                iterator = registry.idIteratorAfter("");
-                for (int skipped = 0; skipped < memberIndex; skipped++) {
-                    if (!iterator.hasNext())
-                        throw new ConcurrentModificationException("Character population changed during cursor recovery");
-                    iterator.next();
-                }
-                memberIterators[registryIndex] = iterator;
-                iteratorPositions[registryIndex] = memberIndex;
-            }
-            try {
-                if (!iterator.hasNext())
-                    throw new ConcurrentModificationException("Character population changed during cursor scan");
-                String characterId = iterator.next();
-                iteratorPositions[registryIndex] = memberIndex + 1;
-                Character character = registry.get(characterId);
-                if (character == null)
-                    throw new ConcurrentModificationException("Character disappeared during population scan");
-                return character;
-            } catch (ConcurrentModificationException changed) {
-                iterator = registry.idIteratorAfter("");
-                for (int skipped = 0; skipped < memberIndex; skipped++) {
-                    if (!iterator.hasNext())
-                        throw new ConcurrentModificationException("Character population changed during cursor recovery");
-                    iterator.next();
-                }
-                if (!iterator.hasNext())
-                    throw new ConcurrentModificationException("Character population changed during cursor recovery");
-                String characterId = iterator.next();
-                Character character = registry.get(characterId);
-                if (character == null)
-                    throw new ConcurrentModificationException("Character disappeared during population scan");
-                memberIterators[registryIndex] = iterator;
-                iteratorPositions[registryIndex] = memberIndex + 1;
-                return character;
-            }
+            List<String> ids = memberIds[registryIndex];
+            if (ids == null || memberIndex < starts[registryIndex] || memberIndex >= limits[registryIndex]
+                    || memberIndex >= ids.size())
+                throw new ConcurrentModificationException("Character ID snapshot is unavailable or out of bounds");
+            Character character = registry.get(ids.get(memberIndex));
+            if (character == null)
+                throw new ConcurrentModificationException("Character disappeared during population scan");
+            return character;
         }
 
-        /** Releases the final LinkedHashMap nodes retained by exhausted scan iterators. */
-        private void releaseIterators() {
-            Arrays.fill(memberIterators, null);
-            Arrays.fill(iteratorPositions, -1);
+        /** Releases all population-sized ID reference arrays once the bounded scan is complete. */
+        private void releaseSnapshots() {
+            Arrays.fill(memberIds, null);
         }
 
         private int limit(int index) { return limits[index]; }
@@ -270,7 +234,7 @@ public final class PopulationComputeBridge {
             }
         }
         boolean complete=registryCursor>=scan.registryCount();
-        if (complete) scan.releaseIterators();
+        if (complete) scan.releaseSnapshots();
         Map<String,Object> request=new LinkedHashMap<>();
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);
