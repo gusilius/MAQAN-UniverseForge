@@ -852,14 +852,9 @@ public final class CharacterInventory {
                 String living = livingCandidate(authority, registry, id);
                 if (living != null) return living;
             }
-        } else {
-            for (int index = 0, count = registry.size(); index < count; index++) {
-                String localId = registry.idAt(index);
-                String globalId = registry.globalIdForLocalId(localId);
-                String living = livingCandidate(null, registry, globalId);
-                if (living != null && !living.equals(deceasedGlobalId)) return living;
-            }
         }
+        // Without a world authority, do not fall back to a population-wide kin scan.
+        // Direct spouse/descendant/parent links above remain available in isolated registries.
         return null;
     }
 
