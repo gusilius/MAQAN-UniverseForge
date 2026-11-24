@@ -78,8 +78,20 @@ public final class CharacterPersistenceCoordinatorTest {
                 failedWriteRejected = true;
             }
             check(failedWriteRejected
-                            && gate.decision(id) == CharacterEvictionGate.Decision.DIRTY,
-                    "failed WAL submission keeps identity dirty and releases persistence transaction pin");
+                            && gate.decision(id) == CharacterEvictionGate.Decision.DIRTY
+                            && coordinator.dirtyQueue().contains(id),
+                    "failed WAL submission keeps identity dirty and queued for retry");
+
+            String batchId = "00000000-0000-0000-0000-000000000088";
+            coordinator.register(batchId);
+            int batchAccepted = coordinator.persistDirtyBatch(
+                    key -> ("{\\"id\\":\\""+key+"\\"}").getBytes(StandardCharsets.UTF_8), 2, 1024);
+            long batchDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (coordinator.dirtyQueue().pendingCount() != 0 && System.nanoTime() < batchDeadline)
+                Thread.sleep(5);
+            check(batchAccepted == 2 && coordinator.dirtyQueue().pendingCount() == 0
+                            && coordinator.canEvict(id) && coordinator.canEvict(batchId),
+                    "bounded dirty service retries pending UUIDs and clears them only after durable WAL receipts");
 
             coordinator.checkpointLatest();
             CharacterRecordStore.Record stored = coordinator.load(id);
