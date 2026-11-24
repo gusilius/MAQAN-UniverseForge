@@ -94,11 +94,14 @@ public final class CharacterWalTest {
                 ok(latestRecords.size() == 1 && latestRecords.get(0).globalId().equals(id)
                                 && latestRecords.get(0).payloadUtf8().equals("{\"version\":2}"),
                         "latest-only WAL replay collapses repeated mutations to one durable record per Character");
-                wal.checkpoint(() -> wal.replayEach(record -> store.put(record.globalId(), record.payload())));
+                wal.checkpoint(() -> wal.replayLatestEach(store::put));
                 CharacterRecordStore.Record stored = store.get(id);
+                byte[] defensiveStorePayload = stored.payload();
+                defensiveStorePayload[0] ^= 0x01;
                 ok(wal.replayAll().isEmpty() && stored != null
-                                && stored.payloadUtf8().equals("{\"version\":2}"),
-                        "serialized WAL compaction persists the newest per-character record before truncation");
+                                && stored.payloadUtf8().equals("{\"version\":2}")
+                                && store.get(id).payloadUtf8().equals("{\"version\":2}"),
+                        "zero-copy WAL record handoff persists the newest record while public store payloads remain defensive");
             }
 
             Path corrupt = root.resolve("corrupt");
