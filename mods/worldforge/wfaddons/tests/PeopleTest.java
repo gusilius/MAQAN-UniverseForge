@@ -570,6 +570,7 @@ public class PeopleTest {
         deceasedResident.props.put("social.relationships", new LinkedHashMap<>(Map.of(trustedFriend.globalId, 85)));
         trustedFriend.props.put("social.relationships", new LinkedHashMap<>(Map.of(deceasedResident.globalId, 85)));
         PopulationSimulation.die(bereavementRegistry, deceasedResident.id, 40, "natural");
+        bereavementRegistry.processPendingBereavementBatch(32);
         ok(CharacterDevelopment.memories(siblingResident, 32).stream()
                         .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
                         && CharacterDevelopment.memories(trustedFriend, 32).stream()
