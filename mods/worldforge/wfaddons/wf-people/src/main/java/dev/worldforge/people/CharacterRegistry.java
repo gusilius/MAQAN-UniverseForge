@@ -96,6 +96,29 @@ public final class CharacterRegistry {
     }
 
     /**
+     * Copies a bounded insertion-order page of IDs. The map iterator is strictly local to
+     * this call and is discarded before returning, so its internal LinkedHashMap.Node cannot
+     * keep a Character value reachable across ticks or asynchronous compute slices.
+     */
+    public List<String> idRange(int fromInclusive, int toExclusive) {
+        int size = byId.size();
+        if (fromInclusive < 0 || toExclusive < fromInclusive || toExclusive > size)
+            throw new IndexOutOfBoundsException("ID range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
+        if (fromInclusive == toExclusive) return List.of();
+        List<String> result = new ArrayList<>(toExclusive - fromInclusive);
+        Iterator<String> iterator = byId.keySet().iterator();
+        for (int skipped = 0; skipped < fromInclusive; skipped++) {
+            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during ID page capture");
+            iterator.next();
+        }
+        for (int index = fromInclusive; index < toExclusive; index++) {
+            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during ID page capture");
+            result.add(iterator.next());
+        }
+        return result;
+    }
+
+    /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
      * array alone costs tens of megabytes. Iteration walks the canonical map directly.
