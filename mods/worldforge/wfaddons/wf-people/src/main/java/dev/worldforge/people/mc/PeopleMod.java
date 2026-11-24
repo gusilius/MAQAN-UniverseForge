@@ -780,8 +780,13 @@ public class PeopleMod {
                 // One authoritative route: the coordinator captures the dirty generation,
                 // queues through the bounded writer, and acknowledges it only after the
                 // matching forced WAL receipt. Waiting preserves this method's durable-true contract.
-                persistence.persistMutation(character.globalId,
-                        () -> owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8)).get();
+                try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                             owner.access().acquireGlobal(character.globalId)) {
+                    if (lease == null || lease.get() != character)
+                        throw new IllegalStateException("Character identity changed before persistence");
+                    persistence.persistMutation(character.globalId,
+                            () -> owner.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8)).get();
+                }
                 return true;
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
