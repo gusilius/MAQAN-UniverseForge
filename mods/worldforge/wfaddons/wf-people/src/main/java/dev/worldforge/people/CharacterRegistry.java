@@ -32,8 +32,13 @@ public final class CharacterRegistry {
         default void lifecycle(Character c, LifecycleEvent event) { }
     }
 
-    /** Canonical materialized objects for this partition; restore atomically swaps the parsed map. */
-    private Map<String, Character> byId = new LinkedHashMap<>();
+    /**
+     * Canonical materialized objects. HashMap avoids LinkedHashMap's two extra per-entry
+     * order pointers; insertion order is held by the compact ID directory below.
+     */
+    private Map<String, Character> byId = new HashMap<>();
+    /** Append-only insertion-order directory. It stores IDs, never Character references. */
+    private List<String> orderedIds = new ArrayList<>();
     /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
     private final Map<String, Integer> activeAccessLeases = new HashMap<>();
     private final CharacterAccessService accessService = new CharacterAccessService(this);
@@ -60,14 +65,12 @@ public final class CharacterRegistry {
             throw new IndexOutOfBoundsException("range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
         if (fromInclusive == toExclusive) return List.of();
         List<Character> result = new ArrayList<>(toExclusive - fromInclusive);
-        Iterator<Character> iterator = byId.values().iterator();
-        for (int skipped = 0; skipped < fromInclusive; skipped++) {
-            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during range capture");
-            iterator.next();
-        }
         for (int index = fromInclusive; index < toExclusive; index++) {
-            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during range capture");
-            result.add(iterator.next());
+            String id = orderedIds.get(index);
+            Character character = byId.get(id);
+            if (character == null)
+                throw new ConcurrentModificationException("Character membership changed during range capture");
+            result.add(character);
         }
         return result;
     }
@@ -91,17 +94,31 @@ public final class CharacterRegistry {
      * Long-lived population work must use idSnapshot() instead.
      */
     public Iterator<String> idIteratorAfter(String exclusiveId) {
-        Iterator<String> iterator = byId.keySet().iterator();
-        if (exclusiveId == null || exclusiveId.isEmpty()) return iterator;
-        while (iterator.hasNext()) {
-            if (exclusiveId.equals(iterator.next())) return iterator;
+        int start = 0;
+        if (exclusiveId != null && !exclusiveId.isEmpty()) {
+            int anchor = orderedIds.indexOf(exclusiveId);
+            if (anchor < 0)
+                throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
+            start = anchor + 1;
         }
-        throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
+        return orderedIds.subList(start, orderedIds.size()).iterator();
     }
 
-    /** One insertion-order snapshot of IDs only; safe to retain across bounded processing slices. */
+    /** Legacy compatibility snapshot. New population schedulers should use idPage(). */
     public List<String> idSnapshot() {
-        return new ArrayList<>(byId.keySet());
+        return new ArrayList<>(orderedIds);
+    }
+
+    /**
+     * Copies at most {@code limit} IDs from the insertion-order directory in O(limit) time.
+     * No full-population snapshot or Character reference is created.
+     */
+    public List<String> idPage(int fromInclusive, int limit) {
+        if (fromInclusive < 0 || limit < 0 || fromInclusive > orderedIds.size())
+            throw new IndexOutOfBoundsException("invalid ID page");
+        int toExclusive = (int) Math.min((long) orderedIds.size(), (long) fromInclusive + limit);
+        if (fromInclusive == toExclusive) return List.of();
+        return new ArrayList<>(orderedIds.subList(fromInclusive, toExclusive));
     }
 
     /**
@@ -111,17 +128,23 @@ public final class CharacterRegistry {
      */
     private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
         @Override public Character get(int index) {
-            if (index < 0 || index >= byId.size()) throw new IndexOutOfBoundsException(index);
-            Iterator<Character> iterator = byId.values().iterator();
-            for (int current = 0; iterator.hasNext(); current++) {
-                Character character = iterator.next();
-                if (current == index) return character;
-            }
-            throw new IndexOutOfBoundsException(index);
+            if (index < 0 || index >= orderedIds.size()) throw new IndexOutOfBoundsException(index);
+            Character character = byId.get(orderedIds.get(index));
+            if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
+            return character;
         }
-        @Override public int size() { return byId.size(); }
+        @Override public int size() { return orderedIds.size(); }
         @Override public Iterator<Character> iterator() {
-            return Collections.unmodifiableCollection(byId.values()).iterator();
+            Iterator<String> ids = orderedIds.iterator();
+            return new Iterator<>() {
+                @Override public boolean hasNext() { return ids.hasNext(); }
+                @Override public Character next() {
+                    String id = ids.next();
+                    Character character = byId.get(id);
+                    if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
+                    return character;
+                }
+            };
         }
     });
     private final List<Listener> listeners = new ArrayList<>();
@@ -364,6 +387,7 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
+        orderedIds.add(c.id);
         byGlobalId.put(c.globalId, c.id);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterCreated(this, c);
@@ -436,7 +460,7 @@ public final class CharacterRegistry {
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
-        refreshLifeStages(byId.values(), year);
+        refreshLifeStages(orderedView, year);
     }
 
     /** Refreshes only the supplied stable batch; safe for resumable server-tick processing. */
@@ -1154,7 +1178,7 @@ public final class CharacterRegistry {
         Json.writeNumber(writer, next);
         writer.write(",\"characters\":[");
         boolean first = true;
-        for (Character c : byId.values()) {
+        for (Character c : orderedView) {
             if (only != null && !only.contains(c.id)) continue;
             if (!first) writer.write(',');
             first = false;
@@ -1361,7 +1385,8 @@ public final class CharacterRegistry {
         }
 
         // Publish only after every record, identity and entity binding has passed validation.
-        byId = loaded;
+        byId = new HashMap<>(loaded);
+        orderedIds = new ArrayList<>(loaded.keySet());
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
         for (Character character : loaded.values()) indexPosts(character);
@@ -1379,7 +1404,7 @@ public final class CharacterRegistry {
         next = safeNext;
         markMembershipMutation();
         recordDomainMutation();
-        for (Character character : byId.values()) {
+        for (Character character : orderedView) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);
         }
