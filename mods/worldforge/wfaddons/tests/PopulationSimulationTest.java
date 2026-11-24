@@ -540,6 +540,20 @@ public final class PopulationSimulationTest {
         Character cursorThird = cursorScan.nextCharacter(0, 2);
         ok(cursorFirst == cursorA && cursorSecond == cursorB && cursorThird == cursorC,
                 "population scan resolves stable key-only ID snapshots after registry append");
+        java.util.Iterator<Character> orderedBeforeAppend = cursorRegistry.iteratorAfter("");
+        Character iteratorFirst = orderedBeforeAppend.next();
+        cursorRegistry.create("Iterator Appended", "", "north", "m", 289);
+        java.util.List<String> iteratorPrefix = new java.util.ArrayList<>();
+        iteratorPrefix.add(iteratorFirst.id);
+        while (orderedBeforeAppend.hasNext()) iteratorPrefix.add(orderedBeforeAppend.next().id);
+        ok(iteratorPrefix.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id,
+                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
+                        && !orderedBeforeAppend.hasNext(),
+                "HashMap-backed registry traversal preserves insertion order and excludes mid-pass appends");
+        String anchorId = cursorRegistry.idAt(1);
+        java.util.Iterator<Character> afterAnchor = cursorRegistry.iteratorAfter(anchorId);
+        ok(afterAnchor.hasNext() && afterAnchor.next().id.equals(cursorC.id),
+                "iteratorAfter resumes from the ordered ID directory rather than HashMap iteration");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
         Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
         ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
