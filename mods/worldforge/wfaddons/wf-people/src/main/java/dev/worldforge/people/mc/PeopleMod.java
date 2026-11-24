@@ -131,7 +131,7 @@ public class PeopleMod {
     /** Dirty persistence is serviced every five server ticks under one global CPU/byte budget. */
     private static final int DIRTY_SAVE_INTERVAL_TICKS = 5;
     private static final int DIRTY_SAVE_MAX_PARTITIONS_PER_PASS = 8;
-    private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION = 8;
+    private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION = 64;
     private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PASS = 64;
     private static final long DIRTY_SAVE_MAX_BYTES_PER_PASS = 1L << 20;
     private static final long DIRTY_SAVE_MAX_BYTES_PER_PARTITION = 256L << 10;
@@ -1230,7 +1230,9 @@ public class PeopleMod {
             pendingObserved += before.pending();
             if (before.pending() == 0) continue;
 
-            int countBudget = Math.min(DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION, remainingCharacters);
+            int remainingVisits = partitionVisits - visit;
+            int fairCharacterShare = (remainingCharacters + remainingVisits - 1) / remainingVisits;
+            int countBudget = Math.min(DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION, fairCharacterShare);
             long byteBudget = Math.min(DIRTY_SAVE_MAX_BYTES_PER_PARTITION, remainingBytes);
             java.util.concurrent.atomic.AtomicLong partitionBytes = new java.util.concurrent.atomic.AtomicLong();
             java.util.concurrent.atomic.AtomicLong passBytes = new java.util.concurrent.atomic.AtomicLong(bytesUsed);
