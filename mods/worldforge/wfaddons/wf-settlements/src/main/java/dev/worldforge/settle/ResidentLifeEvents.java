@@ -167,7 +167,7 @@ public final class ResidentLifeEvents {
                     if (globalId == null) continue;
                     final String[] newbornId = {null};
                     final boolean[] eligible = {false};
-                    registry.access().mutate(localId, person -> {
+                    mutateSingle(registry, localId, person -> {
                         registry.refreshLifeStages(List.of(person), passYear);
                         newbornId[0] = processPregnancy(registry, person, passYear, passWorldDay, names);
                         eligible[0] = person.alive && (person.spouse == null || person.spouse.isBlank())
@@ -224,7 +224,7 @@ public final class ResidentLifeEvents {
             
             for (int index = refresh.cursor; index < end; index++) {
                 String localId = registry.idAt(index);
-                registry.access().mutate(localId, person -> registry.refreshLifeStages(List.of(person), refreshYear));
+                mutateSingle(registry, localId, person -> registry.refreshLifeStages(List.of(person), refreshYear));
             }
             refresh.cursor = end;
         }
@@ -279,9 +279,9 @@ public final class ResidentLifeEvents {
                 if (mother.alive) {
                     if (!FamilyPlanning.dueFatherId(mother, worldDay).isBlank())
                         deliverDuePregnancy(registry, mother, year, worldDay, names);
-                    else registry.access().mutate(mother.id,
+                    else mutateSingle(registry, mother.id,
                             current -> FamilyPlanning.cancel(current, null, "father-unavailable", year));
-                } else registry.access().mutate(mother.id,
+                } else mutateSingle(registry, mother.id,
                         current -> FamilyPlanning.cancel(current, null, "mother-unavailable", year));
             }
         }
@@ -321,7 +321,7 @@ public final class ResidentLifeEvents {
                 if (lease == null) continue;
                 Character person = lease.get();
                 if (!person.alive || CharacterHealth.nextEventDay(person) != due.dueDay()) continue;
-                registry.access().mutate(person.id, current -> CharacterHealth.advance(current, worldDay));
+                mutateSingle(registry, person.id, current -> CharacterHealth.advance(current, worldDay));
                 try (CharacterAccessService.Lease refreshed = registry.access().acquire(person.id)) {
                     if (refreshed != null) {
                         long next = CharacterHealth.nextEventDay(refreshed.get());
@@ -374,7 +374,7 @@ public final class ResidentLifeEvents {
         if (owner == null) return;
         if (authority == null) {
             String localId = owner.localIdForGlobalId(globalId);
-            if (localId != null) owner.access().mutate(localId, action);
+            if (localId != null) mutateSingle(owner, localId, action);
         } else owner.access().mutateGlobal(globalId, action);
     }
 
@@ -658,8 +658,7 @@ public final class ResidentLifeEvents {
                     if (guardian != null) {
                         String guardianGlobalId = guardian.globalId;
                         ResidentSocial.adjust(child, guardianGlobalId, 1);
-                        registry.access().mutate(guardian.id,
-                                current -> ResidentSocial.adjust(current, child.globalId, 1));
+                        mutateSingle(registry, guardian.id, current -> ResidentSocial.adjust(current, child.globalId, 1));
                         if (age >= 10) {
                             int annualXp = age >= 13 ? 10 : 5;
                             PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
@@ -760,6 +759,17 @@ public final class ResidentLifeEvents {
             frontier = next;
         }
         return result;
+    }
+
+    private static void mutateSingle(CharacterRegistry registry, String localId,
+                                      java.util.function.Consumer<Character> mutation) {
+        if (PeopleMod.authority() != null) {
+            registry.access().mutate(localId, mutation);
+            return;
+        }
+        try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+            if (lease != null) mutation.accept(lease.get());
+        }
     }
 
     /**
