@@ -403,7 +403,7 @@ public class PeopleTest {
         ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
                 "lifecycle event bus notifies each listener exactly once per transition");
         Map<String, Object> writerProbe = new LinkedHashMap<>();
-        writerProbe.put("escaped", "quote \\" slash \\\\ newline\\n control\\u0001");
+        writerProbe.put("escaped", "quote \" slash \\ newline\n control" + (char) 1);
         writerProbe.put("nested", Arrays.asList(1, 2.5d, true, null));
         writerProbe.put("float", 1.25f);
         java.io.StringWriter jsonWriterProbe = new java.io.StringWriter();
@@ -411,9 +411,12 @@ public class PeopleTest {
         ok(jsonWriterProbe.toString().equals(Json.write(writerProbe)),
                 "streaming JSON writer matches legacy encoder for escaping, nested values and numeric types");
 
-        String streamedJson = "{\\"format\\":\\"wf-people/3\\",\\"next\\":3,\\"characters\\":["
-                + "{\\"id\\":\\"c1\\",\\"props\\":{\\"nested\\":[1,2,{\\"text\\":\\"a,b]c\\"}]}}"
-                + ",{\\"id\\":\\"c2\\",\\"props\\":null}]}";
+        String streamedJson = """
+                {"format":"wf-people/3","next":3,"characters":[
+                  {"id":"c1","props":{"nested":[1,2,{"text":"a,b]c"}]}},
+                  {"id":"c2","props":null}
+                ]}
+                """;
         List<Object> streamedRecords = new ArrayList<>();
         Json.StreamedArray streamedRoot = Json.readObjectArray(
                 new java.io.StringReader(streamedJson), "characters", streamedRecords::add);
@@ -426,7 +429,9 @@ public class PeopleTest {
         boolean duplicateRootFieldRejected = false;
         try {
             Json.readObjectArray(new java.io.StringReader(
-                    "{\\"format\\":\\"wf-people/3\\",\\"next\\":1,\\"next\\":2,\\"characters\\":[]}"),
+                    """
+                    {"format":"wf-people/3","next":1,"next":2,"characters":[]}
+                    """),
                     "characters", ignoredRecord -> { });
         } catch (IllegalArgumentException expected) { duplicateRootFieldRejected = true; }
         ok(duplicateRootFieldRejected,
