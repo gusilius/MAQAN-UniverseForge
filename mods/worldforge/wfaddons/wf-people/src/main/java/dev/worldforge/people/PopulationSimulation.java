@@ -17,6 +17,7 @@ public final class PopulationSimulation {
         final int year;
         final long membershipGeneration;
         List<String> ids;
+        final int snapshotSize;
         int nextIndex;
         boolean complete;
         boolean catchUpPass;
@@ -28,6 +29,7 @@ public final class PopulationSimulation {
             this.year = year;
             this.membershipGeneration = membershipGeneration;
             this.ids = ids;
+            this.snapshotSize = ids.size();
             this.nextIndex = nextIndex;
             this.catchUpPass = catchUpPass;
             this.lastProcessedId = lastProcessedId == null ? "" : lastProcessedId;
@@ -564,6 +566,16 @@ public final class PopulationSimulation {
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            if (cursor != null && cursor.membershipGeneration == generation
+                    && registry.size() > cursor.snapshotSize) {
+                // Membership is append-only within a generation. Extend the ID snapshot and
+                // resume strictly after the last acknowledged ID, including completed passes.
+                List<String> extendedIds = registry.idSnapshot();
+                int anchor = cursor.lastProcessedId.isEmpty() ? -1 : extendedIds.indexOf(cursor.lastProcessedId);
+                int resumeAt = anchor < 0 ? 0 : anchor + 1;
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                        extendedIds, resumeAt, cursor.catchUpPass, cursor.lastProcessedId);
+            }
             if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
                     && cursor.year == year && cursor.membershipGeneration == generation
                     && cursor.targetDay == targetWorldDay) return true;
@@ -573,7 +585,7 @@ public final class PopulationSimulation {
                         registry.idSnapshot(), 0, false, "");
             } else if (cursor.targetDay != targetWorldDay) {
                 // Keep the unfinished suffix. Once drained, a second pass catches up the prefix.
-                if (cursor.nextIndex >= cursor.ids.size()) {
+                if (cursor.nextIndex >= cursor.snapshotSize) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
                             registry.idSnapshot(), 0, false, "");
                 } else {
