@@ -469,6 +469,20 @@ public final class CharacterAuthority {
         return Collections.unmodifiableList(result);
     }
 
+    /** Returns canonical UUIDs of indexed relatives without hydrating Character objects. */
+    public synchronized List<String> kinCandidateGlobalIds(String globalId) {
+        if (globalId == null || globalId.isBlank()) return List.of();
+        refreshIndex();
+        LinkedHashSet<String> matches = new LinkedHashSet<>();
+        Set<String> related = familyGlobal.get(globalId);
+        if (related != null) matches.addAll(related);
+        Set<String> spouses = familyBySpouseGlobal.get(globalId);
+        if (spouses != null) matches.addAll(spouses);
+        matches.remove(globalId);
+        matches.removeIf(id -> !byGlobalId.containsKey(id));
+        return List.copyOf(matches);
+    }
+
     private void addLegacyIdentityMatchLocal(Set<CharacterIdentity> target, String legacyId, String mapId) {
         CharacterIdentity identity = legacyIdentity(legacyId, mapId);
         if (identity != null) target.add(identity);
