@@ -758,7 +758,8 @@ public final class CharacterInventory {
             }
         }
 
-        String heirGlobalId = findHeirGlobalId(authority, registry, deceasedGlobalId);
+        String heirGlobalId = pending[0] != null && priorRecipient[0] != null
+                ? priorRecipient[0] : findHeirGlobalId(authority, registry, deceasedGlobalId);
         String home;
         try (CharacterAccessService.Lease lease = registry.access().acquire(deceasedLocalId)) {
             if (lease == null) return "";
@@ -772,15 +773,19 @@ public final class CharacterInventory {
                     List.of(deceasedGlobalId, heirGlobalId), people -> {
                 Character deceased = people.get(deceasedGlobalId);
                 Character heir = people.get(heirGlobalId);
-                if (deceased.alive && heir.alive && !Boolean.TRUE.equals(deceased.props.get("estate.settled"))) {
+                if (heir.alive && (deceased.alive || pending[0] != null)) {
                     deceased.alive = false;
-                    transferAll(deceased, heir);
+                    boolean incomingCommitted = pending[0] != null
+                            && deceased.globalId.equals(heir.props.get("estate.incoming." + pending[0]));
+                    if (incomingCommitted) clearTransferredEstate(deceased, heir);
+                    else transferAll(deceased, heir);
                     deceased.props.put("estate.recipient", heir.id);
                     deceased.props.put("estate.recipient_global_id", heir.globalId);
                     deceased.props.put("estate.status", "inherited");
                     deceased.props.put("estate.settled", true);
+                    return true;
                 }
-                return true;
+                throw new IllegalStateException("Estate heir is no longer available: " + heirGlobalId);
             });
             return heirGlobalId;
         }
