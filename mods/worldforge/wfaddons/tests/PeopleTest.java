@@ -433,7 +433,7 @@ public class PeopleTest {
                     {"format":"wf-people/3","next":1,"next":2,"characters":[]}
                     """),
                     "characters", ignoredRecord -> { });
-        } catch (IllegalArgumentException expected) { duplicateRootFieldRejected = true; }
+        } catch (IllegalArgumentException ignoredException) { duplicateRootFieldRejected = true; }
         ok(duplicateRootFieldRejected,
                 "streaming snapshot parser rejects duplicate root metadata instead of silently accepting ambiguous save data");
         boolean trailingSnapshotDataRejected = false;
@@ -441,7 +441,7 @@ public class PeopleTest {
             Json.readObjectArray(new java.io.StringReader(
                     "{\"format\":\"wf-people/3\",\"next\":1,\"characters\":[]} trailing"),
                     "characters", ignoredRecord -> { });
-        } catch (IllegalArgumentException expected) { trailingSnapshotDataRejected = true; }
+        } catch (IllegalArgumentException ignoredException) { trailingSnapshotDataRejected = true; }
         ok(trailingSnapshotDataRejected,
                 "streaming snapshot parser rejects trailing bytes after the root object");
 
@@ -546,8 +546,8 @@ public class PeopleTest {
         try {
             incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
                     "00000000-0000-0000-0000-000000000000");
-        } catch (IllegalArgumentException expected) {
-            mismatchedFrameRejected = expected.getMessage().contains("WAL identity mismatch");
+        } catch (IllegalArgumentException mismatch) {
+            mismatchedFrameRejected = mismatch.getMessage().contains("WAL identity mismatch");
         }
         ok(mismatchedFrameRejected,
                 "incremental WAL restore rejects a frame whose UUID does not match its Character payload");
