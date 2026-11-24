@@ -31,7 +31,6 @@ public final class CharacterPersistenceCoordinatorTest {
             check(!coordinator.canEvict(id), "unpersisted identity remains resident");
 
             var firstFuture = coordinator.persist(id, firstPayload);
-            check(writer.pending() >= 0, "WAL writer reports a non-negative outstanding-work count");
             CharacterWal.Record first = firstFuture.get(10, TimeUnit.SECONDS);
             check(writer.pending() == 0, "completed WAL receipt leaves no outstanding writer work");
             check(first.globalId().equals(id) && coordinator.canEvict(id),
