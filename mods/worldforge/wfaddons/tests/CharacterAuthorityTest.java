@@ -108,6 +108,32 @@ public final class CharacterAuthorityTest {
                         && authority.kinCandidates(b).contains(lateChild),
                 "append-only births update global identity and succession candidates without rebuilding the world index");
 
+        // Legacy cN identifiers collide across map partitions. Once global parent links
+        // exist, an unrelated c1 from a third map must never enter the child's kin set.
+        CharacterAuthority familyAuthority = new CharacterAuthority();
+        familyAuthority.beginWorld(world);
+        CharacterRegistry familyFatherRegistry = new CharacterRegistry();
+        CharacterRegistry familyMotherRegistry = new CharacterRegistry();
+        CharacterRegistry unrelatedRegistry = new CharacterRegistry();
+        CharacterRegistry familyChildRegistry = new CharacterRegistry();
+        Character familyFather = familyFatherRegistry.create("Family father", "", "", "m", 0);
+        Character familyMother = familyMotherRegistry.create("Family mother", "", "", "f", 0);
+        Character unrelatedC1 = unrelatedRegistry.create("Unrelated c1", "", "", "m", 0);
+        familyAuthority.registerMap("family-father", familyFatherRegistry);
+        familyAuthority.registerMap("family-mother", familyMotherRegistry);
+        familyAuthority.registerMap("unrelated", unrelatedRegistry);
+        familyAuthority.registerMap("family-child", familyChildRegistry);
+        Character familyChild = familyChildRegistry.addChild(
+                familyFather, familyMother, "Family child", "m", 1);
+        var familyCandidates = familyAuthority.kinCandidates(familyChild);
+        check(familyFather.id.equals("c1") && familyMother.id.equals("c1")
+                        && unrelatedC1.id.equals("c1")
+                        && familyCandidates.contains(familyFather)
+                        && familyCandidates.contains(familyMother)
+                        && !familyCandidates.contains(unrelatedC1),
+                "canonical global parent UUIDs prevent false relatives from colliding legacy IDs across maps");
+
+
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);
         authority.registerMap("reload", reload);
