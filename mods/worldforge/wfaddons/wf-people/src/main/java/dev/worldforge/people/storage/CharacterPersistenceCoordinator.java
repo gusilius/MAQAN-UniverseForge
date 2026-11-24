@@ -54,6 +54,9 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         CharacterEvictionGate.PersistenceTicket dirty = evictionGate.dirtyTicket(globalId);
         if (dirty != null) dirtyQueue.enqueue(globalId, dirty.generation());
     }
+    public void registerPersisted(String globalId) {
+        evictionGate.registerPersisted(globalId);
+    }
     public long markDirty(String globalId) {
         long generation = evictionGate.markDirty(globalId);
         dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.BACKGROUND);
