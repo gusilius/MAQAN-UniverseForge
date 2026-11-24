@@ -772,7 +772,8 @@ public final class CharacterInventory {
                     List.of(deceasedGlobalId, heirGlobalId), people -> {
                 Character deceased = people.get(deceasedGlobalId);
                 Character heir = people.get(heirGlobalId);
-                if (!deceased.alive && heir.alive && !Boolean.TRUE.equals(deceased.props.get("estate.settled"))) {
+                if (deceased.alive && heir.alive && !Boolean.TRUE.equals(deceased.props.get("estate.settled"))) {
+                    deceased.alive = false;
                     transferAll(deceased, heir);
                     deceased.props.put("estate.recipient", heir.id);
                     deceased.props.put("estate.recipient_global_id", heir.globalId);
@@ -786,6 +787,7 @@ public final class CharacterInventory {
         CharacterAccessService.mutateScoped(authority, registry, List.of(deceasedGlobalId), people -> {
             Character deceased = people.get(deceasedGlobalId);
             if (!Boolean.TRUE.equals(deceased.props.get("estate.settled"))) {
+                deceased.alive = false;
                 deceased.props.put("estate.status", "awaiting_kin_or_home_claim");
                 deceased.props.put("estate.home", home);
                 deceased.props.put("estate.recipient", "");
