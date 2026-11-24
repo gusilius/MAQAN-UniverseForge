@@ -858,10 +858,19 @@ public final class CharacterRegistry {
         clearDeceasedSpouse(y);
         if (!x.spouse.isEmpty()) throw new IllegalStateException(x.name + " уже состоит в браке");
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
+        String oldXSpouse = x.spouse;
+        String oldXSpouseGlobal = optionalFamilyId(x, "family.spouse_global_id");
+        String oldYSpouse = y.spouse;
+        String oldYSpouseGlobal = optionalFamilyId(y, "family.spouse_global_id");
         x.spouse = y.id;
         y.spouse = x.id;
         x.props.put("family.spouse_global_id", y.globalId);
         y.props.put("family.spouse_global_id", x.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) {
+            currentAuthority.familyChanged(x, oldXSpouse, oldXSpouseGlobal);
+            currentAuthority.familyChanged(y, oldYSpouse, oldYSpouseGlobal);
+        }
         emit(x, LifecycleKind.MARRIED, "", y.id, year);
         emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
@@ -871,12 +880,22 @@ public final class CharacterRegistry {
         if (character.spouse.isEmpty()) return;
         Character spouse = byId.get(character.spouse);
         if (spouse != null && spouse.alive) return;
+        String previousSpouse = character.spouse;
+        String previousSpouseGlobal = optionalFamilyId(character, "family.spouse_global_id");
         if (spouse != null && character.id.equals(spouse.spouse)) {
+            String reciprocalPrevious = spouse.spouse;
+            String reciprocalGlobal = optionalFamilyId(spouse, "family.spouse_global_id");
             spouse.spouse = "";
             spouse.props.remove("family.spouse_global_id");
+            CharacterAuthority currentAuthority = authority;
+            if (currentAuthority != null)
+                currentAuthority.familyChanged(spouse, reciprocalPrevious, reciprocalGlobal);
         }
         character.spouse = "";
         character.props.remove("family.spouse_global_id");
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null)
+            currentAuthority.familyChanged(character, previousSpouse, previousSpouseGlobal);
     }
 
     /** Ends a reciprocal marriage while preserving both Character identities and family links. */
@@ -889,10 +908,19 @@ public final class CharacterRegistry {
     private boolean divorceBatched(String firstId, String secondId, int year) {
         Character first = require(firstId), second = require(secondId);
         if (first == second || !first.id.equals(second.spouse) || !second.id.equals(first.spouse)) return false;
+        String firstPreviousGlobal = optionalFamilyId(first, "family.spouse_global_id");
+        String secondPreviousGlobal = optionalFamilyId(second, "family.spouse_global_id");
+        String firstPrevious = first.spouse;
+        String secondPrevious = second.spouse;
         first.spouse = "";
         second.spouse = "";
         first.props.remove("family.spouse_global_id");
         second.props.remove("family.spouse_global_id");
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) {
+            currentAuthority.familyChanged(first, firstPrevious, firstPreviousGlobal);
+            currentAuthority.familyChanged(second, secondPrevious, secondPreviousGlobal);
+        }
         first.props.remove("family.spouse_name");
         second.props.remove("family.spouse_name");
         emit(first, LifecycleKind.MARRIAGE_DISSOLVED, second.id, "", year);
@@ -926,6 +954,11 @@ public final class CharacterRegistry {
         CharacterDevelopment.inheritPsychology(c, father, mother, Math.max(0L, year * 525600L));
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
+    }
+
+    private static String optionalFamilyId(Character character, String key) {
+        Object value = character.props.get(key);
+        return value instanceof String id ? id : "";
     }
 
     private Character require(String id) {
