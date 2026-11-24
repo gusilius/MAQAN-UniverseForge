@@ -1855,12 +1855,18 @@ public class TroopsMod {
                 }
                 Squads.Squad squad = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
                 if (squad != null) {
+                    boolean selectedCommanderIsInTarget = false;
                     if (!multipleSelectedCommanders && !selectedCommanderId.isBlank()
-                            && !squad.id.equals(selectedCommanderSourceSquad)
-                            && squad.members.stream().anyMatch(id -> {
-                                TroopEntity member = LIVE.get(id);
-                                return member != null && selectedCommanderId.equals(member.characterId);
-                            })) {
+                            && !squad.id.equals(selectedCommanderSourceSquad)) {
+                        for (String memberId : squad.members) {
+                            TroopEntity member = LIVE.get(memberId);
+                            if (member != null && selectedCommanderId.equals(member.characterId)) {
+                                selectedCommanderIsInTarget = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (selectedCommanderIsInTarget) {
                         squad.leaderCharacterId = selectedCommanderId;
                         squad.leaderHero = selectedCommanderHero;
                         squad.leadershipRank = selectedCommanderRank;
