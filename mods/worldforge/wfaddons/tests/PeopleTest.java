@@ -581,7 +581,7 @@ public class PeopleTest {
                 "canonical global Character lookup resolves social event recipients directly");
         try {
             Field globalIndex = CharacterRegistry.class.getDeclaredField("byGlobalId");
-            Field orderIndex = CharacterRegistry.class.getDeclaredField("ordered");
+            Field orderIndex = CharacterRegistry.class.getDeclaredField("orderedIds");
             boolean compactIndexes = globalIndex.getGenericType() instanceof ParameterizedType globalType
                     && globalType.getActualTypeArguments()[1].getTypeName().equals("java.lang.String")
                     && orderIndex.getGenericType() instanceof ParameterizedType orderType
