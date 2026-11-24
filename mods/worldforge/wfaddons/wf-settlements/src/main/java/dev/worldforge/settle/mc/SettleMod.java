@@ -2313,12 +2313,12 @@ public class SettleMod {
                         if (!targetProfession.equals(PopulationSimulation.profession(current)))
                             PopulationSimulation.assignProfession(current, targetProfession, PeopleMod.YEAR);
                         current.props.remove("population.pre_military_profession");
-                        registry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-                        registry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
+                        ownerRegistry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                        ownerRegistry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
                         current.props.put("population.location", colony.s.id);
                         current.props.put("population.employer", place);
                         if (!current.has("settlement_worker", place))
-                            registry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
+                            ownerRegistry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
                     });
                 }
             } catch (RuntimeException | Error failure) {
