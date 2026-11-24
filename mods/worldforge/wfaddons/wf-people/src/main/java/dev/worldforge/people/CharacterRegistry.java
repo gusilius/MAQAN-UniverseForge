@@ -91,9 +91,10 @@ public final class CharacterRegistry {
         }
         // Capture the synchronous traversal boundary. Appends do not invalidate this
         // iterator or change its insertion order; a later pass will observe the new tail.
+        final int startIndex = start;
         final int end = orderedIds.size();
         return new Iterator<>() {
-            private int index = start;
+            private int index = startIndex;
             @Override public boolean hasNext() { return index < end; }
             @Override public Character next() {
                 if (!hasNext()) throw new NoSuchElementException();
@@ -119,9 +120,10 @@ public final class CharacterRegistry {
                 throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
             start = anchor + 1;
         }
+        final int startIndex = start;
         final int end = orderedIds.size();
         return new Iterator<>() {
-            private int index = start;
+            private int index = startIndex;
             @Override public boolean hasNext() { return index < end; }
             @Override public String next() {
                 if (!hasNext()) throw new NoSuchElementException();
