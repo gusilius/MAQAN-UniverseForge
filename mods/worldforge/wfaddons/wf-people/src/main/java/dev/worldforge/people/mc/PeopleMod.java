@@ -559,21 +559,23 @@ public class PeopleMod {
             long membership = registry.membershipGeneration();
             boolean fullBootstrap = !Boolean.TRUE.equals(CHARACTER_RECORD_STORE_COMPLETE.get(registry))
                     || !Objects.equals(CHARACTER_RECORD_STORE_MEMBERSHIP.get(registry), membership);
-            if (fullBootstrap) {
-                // First checkpoint, legacy migration, or new/deleted membership: establish
-                // a complete durable baseline before allowing WAL-only incremental passes.
-                for (Character character : registry.all()) {
-                    records.put(character.globalId,
-                            registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+            // Hold the WAL monitor across both record-store writes and shard truncation.
+            // This prevents a concurrent synchronous append from landing between replay
+            // and truncation and being retired without reaching the checkpoint store.
+            wal.checkpoint(() -> {
+                if (fullBootstrap) {
+                    // First checkpoint, legacy migration, or new/deleted membership:
+                    // establish a complete durable baseline before WAL-only passes.
+                    for (Character character : registry.all()) {
+                        records.put(character.globalId,
+                                registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+                    }
+                } else {
+                    // Existing records are already durable. Only journaled changes need
+                    // compaction; do not serialize or scan unchanged Characters.
+                    wal.replayEach(record -> records.put(record.globalId(), record.payload()));
                 }
-            } else {
-                // Existing records are already durable. Only journaled changes need to be
-                // compacted; do not serialize or scan every unchanged Character.
-                wal.replayEach(record -> records.put(record.globalId(), record.payload()));
-            }
-            // Never retire the WAL until every corresponding record-store replacement
-            // has completed its forced write and atomic rename.
-            wal.checkpoint();
+            });
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
         } finally {
