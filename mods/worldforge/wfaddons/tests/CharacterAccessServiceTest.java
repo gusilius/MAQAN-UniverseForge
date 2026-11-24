@@ -179,9 +179,10 @@ public final class CharacterAccessServiceTest {
         Character secondCharacter = registry.create("Second Subject", "", "test", "f", 2);
         CharacterRegistry restored = new CharacterRegistry();
         restored.fromJson(registry.toJson(), "lease-restore-test");
-        check(restored.size() == 3 && restored.idAt(0).equals(original.id)
-                        && restored.idAt(1).equals(secondId) && restored.idAt(2).equals(secondCharacter.id) && restored.get(original.id) != null,
-                "streamed restore publishes staged objects and identity order");
+        check(restored.size() == 4 && restored.idAt(0).equals(original.id)
+                        && restored.idAt(1).equals(secondId) && restored.idAt(2).equals(evictableLocalId)
+                        && restored.idAt(3).equals(secondCharacter.id) && restored.get(original.id) != null,
+                "streamed restore preserves the complete identity directory, including lazily evicted NPCs");
         original.traits.add("resilient");
         String validRecord = registry.toJsonRecord(original);
         String duplicateTraitRecord = validRecord.replace(
