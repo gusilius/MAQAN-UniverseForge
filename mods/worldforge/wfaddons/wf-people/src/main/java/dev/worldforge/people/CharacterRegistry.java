@@ -70,6 +70,19 @@ public final class CharacterRegistry {
     }
 
     /**
+     * Creates a short-lived insertion-order iterator positioned after a durable local ID.
+     * Used only to recover a scheduler iterator invalidated by an append between ticks.
+     */
+    public Iterator<Character> iteratorAfter(String exclusiveId) {
+        Iterator<Character> iterator = byId.values().iterator();
+        if (exclusiveId == null || exclusiveId.isEmpty()) return iterator;
+        while (iterator.hasNext()) {
+            if (exclusiveId.equals(iterator.next().id)) return iterator;
+        }
+        throw new IllegalStateException("Population cursor anchor is no longer in this registry: " + exclusiveId);
+    }
+
+    /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
      * array alone costs tens of megabytes. Iteration walks the canonical map directly.

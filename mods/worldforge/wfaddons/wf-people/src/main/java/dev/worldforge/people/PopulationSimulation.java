@@ -11,8 +11,26 @@ import java.util.*;
  */
 public final class PopulationSimulation {
     private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
-    private record WorldDayCursor(long targetDay, long fallbackDay, int year,
-                                   long membershipGeneration, int nextIndex, boolean catchUpPass) { }
+    private static final class WorldDayCursor {
+        final long targetDay;
+        final long fallbackDay;
+        final int year;
+        final long membershipGeneration;
+        Iterator<Character> iterator;
+        int nextIndex;
+        boolean catchUpPass;
+        String lastProcessedId = "";
+        WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
+                       Iterator<Character> iterator, int nextIndex, boolean catchUpPass) {
+            this.targetDay = targetDay;
+            this.fallbackDay = fallbackDay;
+            this.year = year;
+            this.membershipGeneration = membershipGeneration;
+            this.iterator = iterator;
+            this.nextIndex = nextIndex;
+            this.catchUpPass = catchUpPass;
+        }
+    }
     /** Read-only scheduler progress for diagnostics; does not advance or mutate the cursor. */
     public record WorldDayProgress(long targetDay, long membershipGeneration,
                                    int nextIndex, boolean catchUpPass) { }
@@ -530,8 +548,8 @@ public final class PopulationSimulation {
         Objects.requireNonNull(registry, "registry");
         synchronized (WORLD_DAY_CURSORS) {
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
-            return cursor == null ? null : new WorldDayProgress(cursor.targetDay(),
-                    cursor.membershipGeneration(), cursor.nextIndex(), cursor.catchUpPass());
+            return cursor == null ? null : new WorldDayProgress(cursor.targetDay,
+                    cursor.membershipGeneration, cursor.nextIndex, cursor.catchUpPass);
         }
     }
 
@@ -543,51 +561,62 @@ public final class PopulationSimulation {
         if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
+            int memberCount = registry.size();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
-            List<Character> members = registry.all();
-            // Capture membership once; a batch never expands during this server tick.
-            int memberCount = members.size();
-            if (cursor == null || cursor.fallbackDay() != fallbackStartDay || cursor.year() != year
-                    || cursor.membershipGeneration() != generation) {
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation, 0, false);
-            } else if (cursor.targetDay() != targetWorldDay) {
-                // Preserve the unfinished suffix when the world-day target rolls over.
-                // Then make a full pass so the already-visited prefix also reaches the
-                // newest target before the scheduler acknowledges completion.
-                int next = cursor.nextIndex() >= memberCount ? 0 : cursor.nextIndex();
+            if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
+                    || cursor.membershipGeneration != generation) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        next, next > 0);
-            }
-            int start = Math.min(cursor.nextIndex(), memberCount);
-            if (start >= memberCount) {
-                WORLD_DAY_CURSORS.put(registry, cursor);
-                return true;
-            }
-            int end = (int) Math.min((long) memberCount, (long) start + maxCharacters);
-            if (start < end) {
-                List<Character> batch = registry.range(start, end);
-                try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-                    for (Character character : batch) {
-                        if (!character.alive) continue;
-                        int currentAge = age(character, year);
-                        registry.applyLifeStageResult(character, currentAge,
-                                lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
-                        Object raw = character.props.get("population.last_simulated_world_day");
-                        long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
-                        if (previous >= targetWorldDay) continue;
-                        advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
-                    }
+                        registry.iteratorAfter(""), 0, false);
+            } else if (cursor.targetDay != targetWorldDay) {
+                // Keep the unfinished suffix. Once it is drained, a second pass catches up
+                // the already-visited prefix to the newest world-day target.
+                if (cursor.nextIndex >= memberCount) {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                            registry.iteratorAfter(""), 0, false);
+                } else {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                            cursor.iterator, cursor.nextIndex, true);
+                    cursor.lastProcessedId = lastProcessedId(cursor);
                 }
             }
-            if (end >= memberCount && cursor.catchUpPass()) {
-                WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
-                        year, generation, 0, false));
+            int processed = 0;
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+                while (processed < maxCharacters && cursor.iterator.hasNext()) {
+                    Character character;
+                    try {
+                        character = cursor.iterator.next();
+                    } catch (ConcurrentModificationException appendedBetweenTicks) {
+                        cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+                        continue;
+                    }
+                    cursor.lastProcessedId = character.id;
+                    cursor.nextIndex++;
+                    processed++;
+                    if (!character.alive) continue;
+                    int currentAge = age(character, year);
+                    registry.applyLifeStageResult(character, currentAge,
+                            lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
+                    Object raw = character.props.get("population.last_simulated_world_day");
+                    long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
+                    if (previous >= targetWorldDay) continue;
+                    advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                }
+            } catch (ConcurrentModificationException appendedDuringBatch) {
+                cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+            }
+            if (!cursor.iterator.hasNext() && cursor.catchUpPass) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                        registry.iteratorAfter(""), 0, false);
+                WORLD_DAY_CURSORS.put(registry, cursor);
                 return false;
             }
-            WORLD_DAY_CURSORS.put(registry, new WorldDayCursor(targetWorldDay, fallbackStartDay,
-                    year, generation, end, cursor.catchUpPass()));
-            return end >= memberCount;
+            WORLD_DAY_CURSORS.put(registry, cursor);
+            return !cursor.iterator.hasNext();
         }
+    }
+
+    private static String lastProcessedId(WorldDayCursor cursor) {
+        return cursor.lastProcessedId;
     }
 
     /** Exclusive Java fallback with per-Character durable world-day receipts. */

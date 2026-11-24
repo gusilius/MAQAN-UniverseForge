@@ -814,6 +814,21 @@ public final class PopulationSimulationTest {
         catch (IndexOutOfBoundsException expected) { invalidRangeRejected = true; }
         ok(invalidRangeRejected, "bounded registry range rejects a window beyond captured membership");
 
+        CharacterRegistry iteratorRegistry = new CharacterRegistry();
+        Character iteratorA = iteratorRegistry.create("Iterator A", "", "", "n", 270);
+        Character iteratorB = iteratorRegistry.create("Iterator B", "", "", "n", 270);
+        Character iteratorC = iteratorRegistry.create("Iterator C", "", "", "n", 270);
+        java.util.Iterator<Character> stableCursor = iteratorRegistry.iteratorAfter("");
+        ok(stableCursor.next() == iteratorA && stableCursor.next() == iteratorB,
+                "registry scheduler iterator advances in canonical insertion order");
+        Character iteratorD = iteratorRegistry.create("Iterator D", "", "", "n", 270);
+        boolean appendInvalidates = false;
+        try { stableCursor.hasNext(); }
+        catch (java.util.ConcurrentModificationException expected) { appendInvalidates = true; }
+        java.util.Iterator<Character> resumedCursor = iteratorRegistry.iteratorAfter(iteratorB.id);
+        ok(appendInvalidates && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,
+                "scheduler iterator recovers after append without replaying acknowledged Characters");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }
