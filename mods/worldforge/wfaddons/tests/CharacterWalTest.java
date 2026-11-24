@@ -96,11 +96,14 @@ public final class CharacterWalTest {
                         "latest-only WAL replay collapses repeated mutations to one durable record per Character");
                 wal.checkpoint(() -> wal.replayLatestEach(store::put));
                 CharacterRecordStore.Record stored = store.get(id);
-                byte[] defensiveStorePayload = stored.payload();
-                defensiveStorePayload[0] ^= 0x01;
-                ok(wal.replayAll().isEmpty() && stored != null
-                                && stored.payloadUtf8().equals("{\"version\":2}")
-                                && store.get(id).payloadUtf8().equals("{\"version\":2}"),
+                boolean storedPayloadIsDefensive = false;
+                if (stored != null) {
+                    byte[] defensiveStorePayload = stored.payload();
+                    defensiveStorePayload[0] ^= 0x01;
+                    storedPayloadIsDefensive = stored.payloadUtf8().equals("{\"version\":2}")
+                            && store.get(id).payloadUtf8().equals("{\"version\":2}");
+                }
+                ok(wal.replayAll().isEmpty() && stored != null && storedPayloadIsDefensive,
                         "zero-copy WAL record handoff persists the newest record while public store payloads remain defensive");
             }
 
