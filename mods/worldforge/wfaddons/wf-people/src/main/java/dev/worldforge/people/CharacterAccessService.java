@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Scoped access to canonical Characters. A lease pins the exact materialized object
@@ -113,6 +114,21 @@ public final class CharacterAccessService {
         Objects.requireNonNull(authority, "authority");
         Objects.requireNonNull(globalIds, "globalIds");
         Objects.requireNonNull(mutation, "mutation");
+        mutateGlobalsIfChanged(authority, globalIds, characters -> {
+            mutation.accept(characters);
+            return true;
+        });
+    }
+
+    /**
+     * Like mutateGlobals, but a successful no-op can return false and avoid advancing
+     * dirty generations. If the callback throws, every participant is conservatively dirty.
+     */
+    public static boolean mutateGlobalsIfChanged(CharacterAuthority authority, Collection<String> globalIds,
+                                                 Function<Map<String, Character>, Boolean> mutation) {
+        Objects.requireNonNull(authority, "authority");
+        Objects.requireNonNull(globalIds, "globalIds");
+        Objects.requireNonNull(mutation, "mutation");
         TreeSet<String> orderedIds = new TreeSet<>();
         for (String id : globalIds) {
             if (id == null || id.isBlank())
@@ -126,6 +142,8 @@ public final class CharacterAccessService {
         Map<String, Character> characters = new LinkedHashMap<>();
         Map<String, CharacterPersistenceCoordinator> coordinators = new LinkedHashMap<>();
         boolean callbackStarted = false;
+        boolean changed = false;
+        boolean callbackFailed = false;
         try {
             for (String id : orderedIds) {
                 CharacterRegistry owner = authority.registryForGlobal(id);
@@ -146,11 +164,16 @@ public final class CharacterAccessService {
             for (String id : orderedIds)
                 transactions.add(coordinators.get(id).beginTransaction(id));
             callbackStarted = true;
-            mutation.accept(Collections.unmodifiableMap(characters));
+            try {
+                changed = Boolean.TRUE.equals(mutation.apply(Collections.unmodifiableMap(characters)));
+            } catch (RuntimeException | Error failure) {
+                callbackFailed = true;
+                throw failure;
+            }
         } finally {
             if (callbackStarted) {
                 RuntimeException dirtyFailure = null;
-                for (String id : orderedIds) {
+                if (changed || callbackFailed) for (String id : orderedIds) {
                     try { coordinators.get(id).markDirty(id); }
                     catch (RuntimeException failure) {
                         if (dirtyFailure == null) dirtyFailure = failure;

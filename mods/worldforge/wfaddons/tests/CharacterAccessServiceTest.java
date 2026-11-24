@@ -85,6 +85,26 @@ public final class CharacterAccessServiceTest {
                             && gate.decision(second.globalId) == CharacterEvictionGate.Decision.DIRTY
                             && registry.activeAccessLeaseCount() == 0,
                     "multi-character mutation deduplicates UUIDs and dirties every canonical participant");
+
+            long generationBeforeNoop = gate.generation(original.globalId);
+            boolean noOpChanged = CharacterAccessService.mutateGlobalsIfChanged(authority,
+                    java.util.List.of(original.globalId), participants -> false);
+            check(!noOpChanged && gate.generation(original.globalId) == generationBeforeNoop,
+                    "successful scoped no-op does not advance dirty generation");
+            boolean failedScopedMutation = false;
+            try {
+                CharacterAccessService.mutateGlobalsIfChanged(authority,
+                        java.util.List.of(original.globalId, second.globalId), participants -> {
+                            participants.get(original.globalId).name = "Failed Batch";
+                            throw new IllegalStateException("simulated batch failure");
+                        });
+            } catch (IllegalStateException expected) { failedScopedMutation = true; }
+            check(failedScopedMutation
+                            && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && gate.decision(second.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && registry.activeAccessLeaseCount() == 0,
+                    "failed scoped mutation dirties every participant and releases all pins");
+
             boolean invalidBatchRejected = false;
             try { CharacterAccessService.mutateGlobals(authority, java.util.List.of(original.globalId, " "),
                     ignored -> { }); }
