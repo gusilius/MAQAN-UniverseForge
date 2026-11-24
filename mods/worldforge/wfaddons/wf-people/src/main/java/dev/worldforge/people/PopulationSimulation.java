@@ -612,15 +612,19 @@ public final class PopulationSimulation {
                 for (String characterId : page) {
                     cursor.lastProcessedId = characterId;
                     cursor.nextIndex++;
-                    Character character = registry.get(characterId);
-                    if (character == null || !character.alive) continue;
-                    int currentAge = age(character, year);
-                    registry.applyLifeStageResult(character, currentAge,
-                            lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
-                    Object raw = character.props.get("population.last_simulated_world_day");
-                    long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
-                    if (previous >= targetWorldDay) continue;
-                    advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                    CharacterAccessService.Lease lease = registry.access().acquire(characterId);
+                    if (lease == null) continue;
+                    try (lease) {
+                        Character character = lease.get();
+                        if (!character.alive) continue;
+                        int currentAge = age(character, year);
+                        registry.applyLifeStageResult(character, currentAge,
+                                lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
+                        Object raw = character.props.get("population.last_simulated_world_day");
+                        long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
+                        if (previous >= targetWorldDay) continue;
+                        advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                    }
                 }
             }
             // If membership changed during processing, restart from a fresh key-only page.
