@@ -148,26 +148,18 @@ public final class PopulationComputeBridge {
         private final DomainMutationRevisions.Snapshot revisions;
         private final Scan scan;
         private final List<String> characterIds;
-        private final Map<String,Integer> birthYears;
-        private final Map<String,Long> priorDays, elapsedById;
-        private final Map<String,Character> characters;
-        private final Map<String,CharacterRegistry> owners;
+        /** One compact per-character entry replaces five parallel maps and boxed values. */
+        private final Map<String,CapturedCharacter> characters;
         private final int nextRegistryCursor, nextMemberCursor;
         private final boolean scanComplete;
         private final byte[] request;
         private Captured(String worldId,int year,long elapsedDays,long targetWorldDay,DomainMutationRevisions.Snapshot revisions,
-                         Scan scan,List<String> ids,Map<String,Integer> birthYears,Map<String,Long> priorDays,
-                         Map<String,Long> elapsedById,Map<String,Character> characters,
-                         Map<String,CharacterRegistry> owners,int nextRegistryCursor,int nextMemberCursor,
-                         boolean scanComplete,byte[] request){
+                         Scan scan,List<String> ids,Map<String,CapturedCharacter> characters,
+                         int nextRegistryCursor,int nextMemberCursor,boolean scanComplete,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.targetWorldDay=targetWorldDay;this.revisions=revisions;
             this.scan=scan;this.characterIds=Collections.unmodifiableList(ids);
-            // These maps and the byte array are freshly allocated inside captureForWorldDay,
-            // transferred only to this private constructor, and never mutated or exposed.
-            // Taking ownership avoids a second full set of per-character hash-table entries
-            // and a second copy of the serialized request at the end of every capture.
-            this.birthYears=birthYears;this.priorDays=priorDays;this.elapsedById=elapsedById;
-            this.characters=characters;this.owners=owners;
+            // All collections and bytes are privately owned by this capture.
+            this.characters=characters;
             this.nextRegistryCursor=nextRegistryCursor;this.nextMemberCursor=nextMemberCursor;this.scanComplete=scanComplete;
             this.request=request;
         }
@@ -188,6 +180,7 @@ public final class PopulationComputeBridge {
             return Objects.requireNonNull(runtime, "runtime").submit(ticket, request, secondary, operation);
         }
     }
+    private record CapturedCharacter(Character character, CharacterRegistry owner, int birthYear, long priorDays, long elapsedDays) {}
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
     private static final Set<String> CANONICAL_NEEDS = Set.of("hunger", "rest", "safety", "social", "purpose", "leisure");
     private static final List<String> REQUIRED_NEEDS = List.of("hunger", "rest", "social", "purpose", "leisure");
@@ -230,10 +223,8 @@ public final class PopulationComputeBridge {
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
         List<Object> people=new ArrayList<>(Math.min(scanLimit,1024));
         List<String> ids=new ArrayList<>(Math.min(scanLimit,1024));
-        Map<String,Integer> birthYears=new HashMap<>();
-        Map<String,Long> priorDays=new HashMap<>(),elapsedById=new HashMap<>();
-        Map<String,Character> characters=new HashMap<>();
-        Map<String,CharacterRegistry> owners=new HashMap<>();
+        int captureCapacity=Math.max(16,Math.min(1024,Math.min(scanLimit,768)*4/3));
+        Map<String,CapturedCharacter> characters=new HashMap<>(captureCapacity);
         long batchElapsed=0L;
         int registryCursor=startRegistryCursor;
         int memberCursor=startMemberCursor;
@@ -258,8 +249,7 @@ public final class PopulationComputeBridge {
                 person.put("can_work",PopulationSimulation.canWork(character,year));person.put("elapsed_days",elapsed);
                 long days=PopulationSimulation.persistedNonNegativeLong(character.props.get("population.simulated_days"));
                 person.put("simulated_days",Long.toString(days));people.add(person);ids.add(id);
-                birthYears.put(id,character.birthYear);priorDays.put(id,days);elapsedById.put(id,elapsed);
-                characters.put(id,character);owners.put(id,registry);
+                characters.put(id,new CapturedCharacter(character,registry,character.birthYear,days,elapsed));
                 batchElapsed=Math.max(batchElapsed,elapsed);
             }
             if(memberCursor>=end){
@@ -277,8 +267,8 @@ public final class PopulationComputeBridge {
         if(!WorldForgeApi.revisions().isCurrent(before,DomainMutationRevisions.Domain.CHARACTERS))
             throw new IllegalStateException("Population domain changed during population capture");
         if(!scan.current())throw new IllegalStateException("Character registry was restored during population capture");
-        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,scan,ids,birthYears,priorDays,
-                elapsedById,characters,owners,registryCursor,memberCursor,complete,bytes);
+        return new Captured(worldId,year,batchElapsed,targetWorldDay,before,scan,ids,characters,
+                registryCursor,memberCursor,complete,bytes);
     }
 
     /** Validates the complete frame before the first write. False means stale and requires retry. */
@@ -313,13 +303,14 @@ public final class PopulationComputeBridge {
                 if(!needs.containsKey(required))throw new IllegalArgumentException("Missing required need: "+required);
             String intent=string(value.get("intent"),"intent");PopulationSimulation.intentFromKey(intent);
             int age=integer(value.get("age_years"),"age_years");
-            Integer birthYear=captured.birthYears.get(id);
-            if(birthYear==null||age!=Math.max(0,captured.year-birthYear))throw new IllegalArgumentException("Population age does not match captured birth year: "+id);
+            CapturedCharacter source=captured.characters.get(id);
+            if(source==null||age!=Math.max(0,captured.year-source.birthYear()))
+                throw new IllegalArgumentException("Population age does not match captured birth year: "+id);
             String stage=string(value.get("life_stage"),"life_stage");
             String expectedStage=age<6?"infant":age<13?"child":age<18?"adolescent":age<60?"adult":"elder";
             if(!stage.equals(expectedStage))throw new IllegalArgumentException("Population life stage does not match age: "+id);
             long days=decimalLong(value.get("simulated_days"),"simulated_days");
-            long prior=captured.priorDays.get(id),elapsed=captured.elapsedById.get(id);
+            long prior=source.priorDays(),elapsed=source.elapsedDays();
             long expectedDays=elapsed>Long.MAX_VALUE-prior?Long.MAX_VALUE:prior+elapsed;
             if(days!=expectedDays)throw new IllegalArgumentException("Population elapsed-day acknowledgement mismatch: "+id);
             int lastYear=integer(value.get("last_simulated_year"),"last_simulated_year");
@@ -332,16 +323,17 @@ public final class PopulationComputeBridge {
         if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS)
                 ||!captured.scan.matches(registries))return false;
         for(Update update:updates){
-            Character character=captured.characters.get(update.id);
-            CharacterRegistry owner=captured.owners.get(update.id);
+            CapturedCharacter source=captured.characters.get(update.id);
+            Character character=source==null?null:source.character();
+            CharacterRegistry owner=source==null?null:source.owner();
             if(character==null||owner==null||!character.alive||owner.getByGlobalId(update.id)!=character)return false;
         }
         if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for(Update update:updates){
-                Character character=captured.characters.get(update.id);
-                CharacterRegistry owner=captured.owners.get(update.id);
-                owner.applyLifeStageResult(character,update.age,update.stage,captured.year);
+                CapturedCharacter source=captured.characters.get(update.id);
+                Character character=source.character();
+                source.owner().applyLifeStageResult(character,update.age,update.stage,captured.year);
                 PopulationSimulation.applyComputedResult(character,update.needs,update.intent,update.simulatedDays,update.lastYear,update.worldDay);
             }
         }
