@@ -935,6 +935,27 @@ public final class CharacterInventory {
         return true;
     }
 
+    /** Claims a pending estate using only canonical UUIDs and a UUID-ordered lease transaction. */
+    public static boolean claimEstateById(CharacterAuthority authority, CharacterRegistry fallback,
+                                          String deceasedGlobalId, String claimantGlobalId) {
+        if (deceasedGlobalId == null || deceasedGlobalId.isBlank()
+                || claimantGlobalId == null || claimantGlobalId.isBlank()
+                || deceasedGlobalId.equals(claimantGlobalId)) return false;
+        return CharacterAccessService.mutateScoped(authority, fallback,
+                List.of(deceasedGlobalId, claimantGlobalId), people -> {
+            Character deceased = people.get(deceasedGlobalId);
+            Character claimant = people.get(claimantGlobalId);
+            if (deceased.alive || !claimant.alive || !isKin(deceased, claimant)
+                    || !Boolean.TRUE.equals(deceased.props.get("estate.settled"))
+                    || !"awaiting_kin_or_home_claim".equals(deceased.props.get("estate.status"))) return false;
+            transferAll(deceased, claimant);
+            deceased.props.put("estate.recipient", claimant.id);
+            deceased.props.put("estate.recipient_global_id", claimant.globalId);
+            deceased.props.put("estate.status", "inherited");
+            return true;
+        });
+    }
+
     private static void transferAll(Character from,Character to) {
         if (from == to) throw new IllegalArgumentException("estate recipient must differ from deceased");
         List<Item> source = items(from);
