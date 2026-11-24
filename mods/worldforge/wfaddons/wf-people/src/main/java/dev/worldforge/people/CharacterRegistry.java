@@ -121,6 +121,12 @@ public final class CharacterRegistry {
         return new ArrayList<>(orderedIds.subList(fromInclusive, toExclusive));
     }
 
+    /** O(1) insertion-order ID lookup for resumable scans without population-sized snapshots. */
+    public String idAt(int index) {
+        if (index < 0 || index >= orderedIds.size()) throw new IndexOutOfBoundsException(index);
+        return orderedIds.get(index);
+    }
+
     /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
