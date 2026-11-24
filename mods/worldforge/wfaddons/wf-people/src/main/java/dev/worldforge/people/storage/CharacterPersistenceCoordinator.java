@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
 public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private final CharacterEvictionGate evictionGate;
     private final CharacterWal wal;
-    private final CharacterWalWriter writer;
+    private volatile CharacterWalWriter writer;
     private final CharacterRecordStore records;
 
     public CharacterPersistenceCoordinator(CharacterEvictionGate evictionGate,
@@ -25,6 +25,11 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         this.wal = Objects.requireNonNull(wal, "wal");
         this.writer = Objects.requireNonNull(writer, "writer");
         this.records = Objects.requireNonNull(records, "records");
+    }
+
+    /** Replace the writer after the server's coordinated checkpoint cycle rotates it. */
+    public synchronized void replaceWriter(CharacterWalWriter replacement) {
+        this.writer = Objects.requireNonNull(replacement, "replacement");
     }
 
     public void register(String globalId) { evictionGate.register(globalId); }

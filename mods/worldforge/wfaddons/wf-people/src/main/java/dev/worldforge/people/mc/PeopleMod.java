@@ -587,8 +587,12 @@ public class PeopleMod {
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
         } finally {
-            if (restartWriter) CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192,
-                    "wf-character-wal-checkpoint-" + Integer.toHexString(System.identityHashCode(registry))));
+            if (restartWriter) {
+                CharacterWalWriter replacement = new CharacterWalWriter(wal, 8192,
+                        "wf-character-wal-checkpoint-" + Integer.toHexString(System.identityHashCode(registry)));
+                CHARACTER_WAL_WRITERS.put(registry, replacement);
+                registry.access().replacePersistenceWriter(replacement);
+            }
         }
     }
 

@@ -38,6 +38,11 @@ public final class CharacterAccessService {
         for (Character character : registry.all()) coordinator.register(character.globalId);
     }
 
+    public void replacePersistenceWriter(CharacterWalWriter writer) {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        if (persistence != null) persistence.replaceWriter(writer);
+    }
+
     private CharacterPersistenceCoordinator coordinator() {
         synchronized (PERSISTENCE) { return PERSISTENCE.get(registry); }
     }
