@@ -276,18 +276,28 @@ public final class ResidentLifeEvents {
             Long activeDueDay = schedule.queued.get(due.motherGlobalId());
             if (activeDueDay == null || activeDueDay.longValue() != due.dueDay()) continue;
             schedule.queued.remove(due.motherGlobalId());
-            try (CharacterAccessService.Lease motherLease = registry.access().acquireGlobal(due.motherGlobalId())) {
+            String motherLocalId = registry.localIdForGlobalId(due.motherGlobalId());
+            if (motherLocalId == null) continue;
+            final boolean[] dueAndAlive = {false};
+            final boolean[] motherAlive = {false};
+            final String[] fatherGlobalId = {null};
+            try (CharacterAccessService.Lease motherLease = registry.access().acquire(motherLocalId)) {
                 if (motherLease == null) continue;
                 Character mother = motherLease.get();
                 if (!FamilyPlanning.isPregnant(mother) || FamilyPlanning.dueDay(mother) != due.dueDay()) continue;
+                motherAlive[0] = mother.alive;
                 if (mother.alive) {
-                    if (!FamilyPlanning.dueFatherId(mother, worldDay).isBlank())
-                        deliverDuePregnancy(registry, mother, year, worldDay, names);
-                    else mutateSingle(registry, mother.id,
-                            current -> FamilyPlanning.cancel(current, null, "father-unavailable", year));
-                } else mutateSingle(registry, mother.id,
-                        current -> FamilyPlanning.cancel(current, null, "mother-unavailable", year));
+                    String fatherLocalId = FamilyPlanning.dueFatherId(mother, worldDay);
+                    fatherGlobalId[0] = fatherLocalId == null || fatherLocalId.isBlank()
+                            ? null : registry.globalIdForLocalId(fatherLocalId);
+                    dueAndAlive[0] = true;
+                }
             }
+            if (motherAlive[0] && fatherGlobalId[0] != null)
+                deliverDuePregnancy(registry, due.motherGlobalId(), fatherGlobalId[0], year, names);
+            else mutateSingle(registry, motherLocalId, current ->
+                    FamilyPlanning.cancel(current, null,
+                            motherAlive[0] ? "father-unavailable" : "mother-unavailable", year));
         }
         return processed;
     }
@@ -407,9 +417,7 @@ public final class ResidentLifeEvents {
         if (!eligibleForFamily[0]) return null;
         if (pregnant[0]) {
             if (dueFatherGlobalId[0] == null) return null;
-            try (CharacterAccessService.Lease lease = registry.access().acquireGlobal(motherGlobalId)) {
-                return lease == null ? null : deliverDuePregnancy(registry, lease.get(), year, worldDay, names);
-            }
+            return deliverDuePregnancy(registry, motherGlobalId, dueFatherGlobalId[0], year, names);
         }
         String spouseId = spouseGlobalId[0];
         if (spouseId != null) {
@@ -436,8 +444,8 @@ public final class ResidentLifeEvents {
             return null;
         }
         final String[] childGlobalId = {null};
-        mutatePair(registry, List.of(mother.globalId, fatherGlobalId), people -> {
-                    Character currentMother = people.get(mother.globalId);
+        mutatePair(registry, List.of(motherGlobalId, fatherGlobalId), people -> {
+                    Character currentMother = people.get(motherGlobalId);
                     Character father = people.get(fatherGlobalId);
                     if (currentMother == null || father == null || !currentMother.alive || !father.alive) {
                         if (currentMother != null) FamilyPlanning.cancel(currentMother, father, "father-unavailable", year);
