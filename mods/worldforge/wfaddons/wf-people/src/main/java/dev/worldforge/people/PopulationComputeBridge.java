@@ -179,7 +179,8 @@ public final class PopulationComputeBridge {
             return Objects.requireNonNull(runtime, "runtime").submit(ticket, request, secondary, operation);
         }
     }
-    private record CapturedCharacter(Character character, CharacterRegistry owner, int birthYear, long priorDays, long elapsedDays) {}
+    /** Detached acknowledgement metadata; never retain a mutable Character across async compute. */
+    private record CapturedCharacter(CharacterRegistry owner, int birthYear, long priorDays, long elapsedDays) {}
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
     private static final Set<String> CANONICAL_NEEDS = Set.of("hunger", "rest", "safety", "social", "purpose", "leisure");
     private static final List<String> REQUIRED_NEEDS = List.of("hunger", "rest", "social", "purpose", "leisure");
@@ -248,7 +249,7 @@ public final class PopulationComputeBridge {
                 person.put("can_work",PopulationSimulation.canWork(character,year));person.put("elapsed_days",elapsed);
                 long days=PopulationSimulation.persistedNonNegativeLong(character.props.get("population.simulated_days"));
                 person.put("simulated_days",Long.toString(days));people.add(person);ids.add(id);
-                characters.put(id,new CapturedCharacter(character,registry,character.birthYear,days,elapsed));
+                characters.put(id,new CapturedCharacter(registry,character.birthYear,days,elapsed));
                 batchElapsed=Math.max(batchElapsed,elapsed);
             }
             if(memberCursor>=end){
@@ -323,16 +324,19 @@ public final class PopulationComputeBridge {
                 ||!captured.scan.matches(registries))return false;
         for(Update update:updates){
             CapturedCharacter source=captured.characters.get(update.id);
-            Character character=source==null?null:source.character();
             CharacterRegistry owner=source==null?null:source.owner();
-            if(character==null||owner==null||!character.alive||owner.getByGlobalId(update.id)!=character)return false;
+            Character character=owner==null?null:owner.getByGlobalId(update.id);
+            if(character==null||!character.alive||character.birthYear!=source.birthYear())return false;
         }
         if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for(Update update:updates){
                 CapturedCharacter source=captured.characters.get(update.id);
-                Character character=source.character();
-                source.owner().applyLifeStageResult(character,update.age,update.stage,captured.year);
+                CharacterRegistry owner=source.owner();
+                Character character=owner.getByGlobalId(update.id);
+                if(character==null||!character.alive||character.birthYear!=source.birthYear())
+                    throw new IllegalStateException("Canonical Character changed after population frame validation: "+update.id);
+                owner.applyLifeStageResult(character,update.age,update.stage,captured.year);
                 PopulationSimulation.applyComputedResult(character,update.needs,update.intent,update.simulatedDays,update.lastYear,update.worldDay);
             }
         }
