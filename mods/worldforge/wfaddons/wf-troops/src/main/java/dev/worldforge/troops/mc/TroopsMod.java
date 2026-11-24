@@ -919,7 +919,10 @@ public class TroopsMod {
             if (memberId.equals(fallenBody.getUUID().toString())) continue;
             TroopEntity body = LIVE.get(memberId);
             if (body == null || !body.isAlive()) continue;
-            String globalId = body.characterId == null ? "" : body.characterId;
+            String globalId = "";
+            try (PersonBinding binding = bindPerson(body, false)) {
+                if (binding != null) globalId = binding.character().globalId;
+            }
             if (globalId.isBlank()) {
                 try (PersonBinding binding = findCharacterForTroopEntity(memberId)) {
                     if (binding != null) globalId = binding.character().globalId;
