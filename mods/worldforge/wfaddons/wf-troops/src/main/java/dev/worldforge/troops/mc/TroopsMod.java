@@ -1150,7 +1150,8 @@ public class TroopsMod {
         try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
             if (binding == null) return false;
             Character person = binding.character();
-            CharacterRegistry owner = binding.registry();            if (person == null || owner == null || !person.alive) return false;
+            CharacterRegistry owner = binding.registry();
+            if (person == null || owner == null || !person.alive) return false;
             if (body == null) {
                 try {
                     UUID entityId = UUID.fromString(pending.troopEntityId());
