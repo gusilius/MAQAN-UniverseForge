@@ -911,9 +911,18 @@ public final class CharacterRegistry {
 
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
-        try (MutationBatch ignored = beginMutationBatch()) {
-            return killBatched(id);
-        }
+        String globalId = globalIdForLocalId(id);
+        if (globalId == null) throw new IllegalArgumentException("Нет персонажа " + id);
+        CharacterInventory.settleEstateById(authority, this, globalId);
+        @SuppressWarnings("unchecked")
+        List<Character.Post>[] result = new List[] { List.of() };
+        CharacterAccessService.mutateScoped(authority, this, List.of(globalId), people -> {
+            try (MutationBatch ignored = beginMutationBatch()) {
+                result[0] = killBatched(id);
+            }
+            return true;
+        });
+        return result[0];
     }
 
     private List<Character.Post> killBatched(String id) {
@@ -937,7 +946,6 @@ public final class CharacterRegistry {
                 entityOwnerByUuid.remove(value, c.id);
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         recordBereavement(c, deathYear);
-        processPendingBereavementBatch(DEFAULT_BEREAVEMENT_BATCH_SIZE);
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         c.props.put("death.lifecycle.completed", true);
