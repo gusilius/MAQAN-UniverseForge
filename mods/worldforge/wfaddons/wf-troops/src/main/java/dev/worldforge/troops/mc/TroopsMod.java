@@ -2267,14 +2267,37 @@ public class TroopsMod {
         return 1;
     }
 
-    private static Character findArmyCharacter(ArmyHierarchy.ArmyNode army, String characterId) {
+    /** Resolves a command-supplied global UUID (or legacy map-local ID) without leaking a raw Character reference. */
+    private static PersonBinding acquireInRegistry(CharacterRegistry registry, String characterId) {
+        if (registry == null || characterId == null || characterId.isBlank()) return null;
+        var lease = registry.access().acquireGlobal(characterId);
+        if (lease == null) lease = registry.access().acquire(characterId);
+        if (lease == null) return null;
+        Character person = lease.get();
+        if (!person.alive) {
+            lease.close();
+            return null;
+        }
+        return new PersonBinding(registry, lease);
+    }
+
+    private static PersonBinding findArmyCharacter(ArmyHierarchy.ArmyNode army, String characterId) {
         if (!ModList.get().isLoaded("wf_people") || army == null) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (!map.name.equals(army.ref.mapId()) || map.titles == null
                     || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
-            CharacterRegistry registry = PeopleMod.registry(map);
-            Character candidate = resolvePerson(registry, characterId);
-            if (candidate != null && candidate.alive) return candidate;
+            PersonBinding candidate = acquireInRegistry(PeopleMod.registry(map), characterId);
+            if (candidate != null) return candidate;
+        }
+        return null;
+    }
+
+    private static PersonBinding findRealmCharacter(String realmId, String characterId) {
+        if (!ModList.get().isLoaded("wf_people") || realmId == null || realmId.isBlank()) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || !map.titles.realms.containsKey(realmId)) continue;
+            PersonBinding candidate = acquireInRegistry(PeopleMod.registry(map), characterId);
+            if (candidate != null) return candidate;
         }
         return null;
     }
@@ -2290,16 +2313,25 @@ public class TroopsMod {
         syncArmyHierarchy();
         ArmyRef ref = armyRef(player.serverLevel(), armyId);
         ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
-        Character character = findArmyCharacter(army, characterId);
-        if (army == null || !army.owner.equals(player.getUUID().toString()) || character == null
-                || !HIERARCHY.appointArmyCommander(ref, characterId)) {
-            src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
+        if (army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
-        ArmyLink.Found strategic = ArmyLink.find(armyId, army.realm, army.ref.mapId());
-        if (strategic != null) strategic.army().commander = characterId;
-        save();
-        src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
-        return 1;
+        try (PersonBinding binding = findArmyCharacter(army, characterId)) {
+            if (binding == null) {
+                src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
+            }
+            Character character = binding.character();
+            String commanderGlobalId = character.globalId;
+            if (!HIERARCHY.appointArmyCommander(ref, commanderGlobalId)) {
+                src.sendFailure(Component.literal("Не удалось назначить командующего")); return 0;
+            }
+            ArmyLink.Found strategic = ArmyLink.find(armyId, army.realm, army.ref.mapId());
+            if (strategic != null) strategic.army().commander = commanderGlobalId;
+            save();
+            String commanderName = character.name;
+            src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + commanderName), false);
+            return 1;
+        }
     }
 
     private static int appointCorpsCommander(CommandSourceStack src, String corpsId, String characterId) {
@@ -2313,14 +2345,22 @@ public class TroopsMod {
         syncArmyHierarchy();
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
         ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
-        Character character = findArmyCharacter(army, characterId);
-        if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())
-                || character == null || !HIERARCHY.appointCorpsCommander(corpsId, characterId)) {
+        if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
         }
-        save();
-        src.sendSuccess(() -> Component.literal("Командир корпуса «" + corps.name + "»: " + character.name), false);
-        return 1;
+        try (PersonBinding binding = findArmyCharacter(army, characterId)) {
+            if (binding == null) {
+                src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
+            }
+            Character character = binding.character();
+            if (!HIERARCHY.appointCorpsCommander(corpsId, character.globalId)) {
+                src.sendFailure(Component.literal("Не удалось назначить командира корпуса")); return 0;
+            }
+            save();
+            String commanderName = character.name;
+            src.sendSuccess(() -> Component.literal("Командир корпуса «" + corps.name + "»: " + commanderName), false);
+            return 1;
+        }
     }
 
     /** Appoints a living canonical wf-people Character who is physically present in the squad. */
@@ -2345,41 +2385,36 @@ public class TroopsMod {
             src.sendFailure(Component.literal("У отряда не определено государство/регион для разрешения Character ID"));
             return 0;
         }
-        boolean member = false;
-        for (String unitId : squad.members) {
-            TroopEntity troop = LIVE.get(unitId);
-            if (troop != null && characterId.equals(troop.characterId)) { member = true; break; }
+        try (PersonBinding binding = findRealmCharacter(squad.realm, characterId)) {
+            if (binding == null) {
+                src.sendFailure(Component.literal("Живой персонаж с таким Character ID не найден"));
+                return 0;
+            }
+            Character person = binding.character();
+            String personGlobalId = person.globalId;
+            boolean member = false;
+            for (String unitId : squad.members) {
+                TroopEntity troop = LIVE.get(unitId);
+                if (troop != null && personGlobalId.equals(troop.characterId)) { member = true; break; }
+            }
+            if (!member) {
+                src.sendFailure(Component.literal("Персонаж должен состоять в этом отряде"));
+                return 0;
+            }
+            if (hero && !PopulationSimulation.hasDuty(person, Duty.HERO)) {
+                src.sendFailure(Component.literal("Герой должен иметь роль HERO в общей симуляции населения"));
+                return 0;
+            }
+            if (!SQUADS.appointLeader(squadId, personGlobalId, hero, rank)) {
+                src.sendFailure(Component.literal("Не удалось назначить командира"));
+                return 0;
+            }
+            String appointedName = person.name;
+            src.sendSuccess(() -> Component.literal("Командир отряда «" + squad.name + "»: " + appointedName
+                    + (hero ? " (герой)" : "") + ", навык лидерства " + rank), false);
+            save();
+            return 1;
         }
-        if (!member) {
-            src.sendFailure(Component.literal("Персонаж должен состоять в этом отряде"));
-            return 0;
-        }
-        Character person = null;
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null) continue;
-            if (!squad.realm.isEmpty() && !map.titles.realms.containsKey(squad.realm)) continue;
-            CharacterRegistry registry = PeopleMod.registry(map);
-            if (registry == null) continue;
-            Character candidate = resolvePerson(registry, characterId);
-            if (candidate != null) { person = candidate; break; }
-        }
-        if (person == null || !person.alive) {
-            src.sendFailure(Component.literal("Живой персонаж с таким Character ID не найден"));
-            return 0;
-        }
-        if (hero && !PopulationSimulation.hasDuty(person, Duty.HERO)) {
-            src.sendFailure(Component.literal("Герой должен иметь роль HERO в общей симуляции населения"));
-            return 0;
-        }
-        if (!SQUADS.appointLeader(squadId, characterId, hero, rank)) {
-            src.sendFailure(Component.literal("Не удалось назначить командира"));
-            return 0;
-        }
-        Character appointed = person;
-        src.sendSuccess(() -> Component.literal("Командир отряда «" + squad.name + "»: " + appointed.name
-                + (hero ? " (герой)" : "") + ", навык лидерства " + rank), false);
-        save();
-        return 1;
     }
 
     /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
