@@ -573,7 +573,7 @@ public final class PopulationSimulation {
                 List<String> extendedIds = registry.idSnapshot();
                 int anchor = cursor.lastProcessedId.isEmpty() ? -1 : extendedIds.indexOf(cursor.lastProcessedId);
                 int resumeAt = anchor < 0 ? 0 : anchor + 1;
-                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
+                cursor = new WorldDayCursor(cursor.targetDay, fallbackStartDay, year, generation,
                         extendedIds, resumeAt, cursor.catchUpPass, cursor.lastProcessedId);
             }
             if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
