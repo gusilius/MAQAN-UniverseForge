@@ -530,6 +530,11 @@ public class TroopsMod {
     }
 
     private static PersonBinding acquirePersonGlobal(String globalId) {
+        return acquirePersonGlobal(globalId, true);
+    }
+
+    /** Death recovery must also resolve an already-dead Character so it can finish its estate receipt. */
+    private static PersonBinding acquirePersonGlobal(String globalId, boolean requireAlive) {
         if (globalId == null || globalId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
         var authority = PeopleMod.authority();
         if (authority == null) return null;
@@ -538,7 +543,7 @@ public class TroopsMod {
         var lease = owner.access().acquireGlobal(globalId);
         if (lease == null) return null;
         Character person = lease.get();
-        if (!person.alive || !globalId.equals(person.globalId)) {
+        if ((requireAlive && !person.alive) || !globalId.equals(person.globalId)) {
             lease.close();
             return null;
         }
@@ -1016,7 +1021,7 @@ public class TroopsMod {
     private static boolean completePendingDeath(MilitaryDeathLedger.Pending pending, boolean discardPhysicalBody) {
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
         try {
-            try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
+            try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId(), false)) {
                 if (binding == null) {
                     LOGGER.debug("wf-troops: pending death {} waits for the owning Character partition",
                             pending.characterGlobalId());
