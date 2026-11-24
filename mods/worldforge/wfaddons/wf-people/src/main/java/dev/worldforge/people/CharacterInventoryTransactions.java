@@ -226,6 +226,9 @@ public final class CharacterInventoryTransactions {
     public static boolean reconcile(CharacterAuthority authority, Persister persister) {
         Objects.requireNonNull(authority);
         Objects.requireNonNull(persister);
+        // A malformed marker is not represented in the UUID transaction index. Never report
+        // recovery success while such durable state remains attached to a canonical Character.
+        if (authority.hasMalformedInventoryTransferMarkers()) return false;
         for (CharacterAuthority.InventoryTransfer transfer : authority.pendingInventoryTransfers()) {
             String transactionId = transfer.transactionId();
             String sourceId = transfer.sourceGlobalId();
