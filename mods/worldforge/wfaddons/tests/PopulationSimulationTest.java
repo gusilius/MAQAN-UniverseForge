@@ -545,6 +545,10 @@ public final class PopulationSimulationTest {
         ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
                         && stableIds.size() == 4 && cursorRegistry.size() == 5,
                 "ID snapshot is detached from Character values and remains stable when new members are appended");
+        ok(cursorRegistry.idPage(1, 2).equals(java.util.List.of(cursorB.id, cursorC.id))
+                        && cursorRegistry.idAt(4).equals(stableIds.get(3 + 1))
+                        && cursorRegistry.idPage(cursorRegistry.size(), 8).isEmpty(),
+                "bounded ID pages and indexed ID lookup avoid full-population snapshots");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
         resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
         resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);
