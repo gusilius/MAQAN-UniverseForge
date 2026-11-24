@@ -159,6 +159,7 @@ public final class CharacterAuthorityTest {
         CharacterAuthority legacyMarriageAuthority = new CharacterAuthority();
         legacyMarriageAuthority.beginWorld(world);
         legacyMarriageAuthority.registerMap("legacy-marriage", legacyMarriageRegistry);
+        legacyMarriageAuthority.rebuildFamilyIndex(0);
         check(legacyMarriageAuthority.kinCandidates(legacyPartner).contains(legacySpouse),
                 "one-sided legacy spouse links remain discoverable through the reverse family index");
 
