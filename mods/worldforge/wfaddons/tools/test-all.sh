@@ -2,6 +2,10 @@
 # Pure Java domain tests. Forge/Minecraft adapters are compiled by each addon's
 # real Gradle build above; this harness compiles only framework-independent logic.
 set -euo pipefail
+# Resolve all harness paths from wfaddons regardless of the caller working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WFADDONS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$WFADDONS_ROOT"
 CORE="${1:-../wfmod}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
