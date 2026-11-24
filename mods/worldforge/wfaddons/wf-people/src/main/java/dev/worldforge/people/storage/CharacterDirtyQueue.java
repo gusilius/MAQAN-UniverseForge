@@ -30,6 +30,7 @@ public final class CharacterDirtyQueue {
     private final ArrayDeque<String> backgroundReady = new ArrayDeque<>();
     private final Set<String> queued = new HashSet<>();
     private final Set<String> inFlight = new HashSet<>();
+    private int consecutiveCriticalDeliveries;
 
     public synchronized void enqueue(String globalId, long generation) {
         enqueue(globalId, generation, Priority.BACKGROUND);
@@ -70,7 +71,16 @@ public final class CharacterDirtyQueue {
         if (maxCount < 1) throw new IllegalArgumentException("maxCount must be positive");
         List<Entry> batch = new ArrayList<>(Math.min(maxCount, readyCount()));
         while (batch.size() < maxCount) {
-            String id = !criticalReady.isEmpty() ? criticalReady.pollFirst() : backgroundReady.pollFirst();
+            boolean takeCritical = !criticalReady.isEmpty()
+                    && (backgroundReady.isEmpty() || consecutiveCriticalDeliveries < 8);
+            String id;
+            if (takeCritical) {
+                id = criticalReady.pollFirst();
+                consecutiveCriticalDeliveries++;
+            } else {
+                id = backgroundReady.pollFirst();
+                consecutiveCriticalDeliveries = 0;
+            }
             if (id == null) break;
             queued.remove(id);
             Entry entry = pending.get(id);
