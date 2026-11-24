@@ -527,6 +527,22 @@ public class TroopsMod {
         @Override public void close() { lease.close(); }
     }
 
+    private static PersonBinding acquirePersonGlobal(String globalId) {
+        if (globalId == null || globalId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
+        var authority = PeopleMod.authority();
+        if (authority == null) return null;
+        CharacterRegistry owner = authority.registryForGlobal(globalId);
+        if (owner == null) return null;
+        var lease = owner.access().acquireGlobal(globalId);
+        if (lease == null) return null;
+        Character person = lease.get();
+        if (!person.alive || !globalId.equals(person.globalId)) {
+            lease.close();
+            return null;
+        }
+        return new PersonBinding(owner, lease);
+    }
+
     /** Resolves a physical soldier to its canonical UUID and pins that Character for the caller's scope. */
     private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
         if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_people")) return null;
@@ -691,28 +707,29 @@ public class TroopsMod {
         if (!troop.deferCharacterBinding && (troop.characterId == null || troop.characterId.isBlank())) return false;
         String previousId = troop.characterId;
         troop.setCharacterId(characterId);
-        PersonBinding binding = bindPerson(troop, false);
-        if (binding == null) { troop.setCharacterId(previousId); return false; }
-        Character person = binding.character();
-        boolean workerDuty = PopulationSimulation.hasDuty(person, Duty.WORKER);
-        // Preserve the civilian profession for every recruit, not only current settlement workers.
-        // A specialist without a worker duty must also be able to return to their former life.
-        boolean hadSavedProfession = person.props.containsKey("population.pre_military_profession");
-        if (!hadSavedProfession) person.props.put("population.pre_military_profession",
-                PopulationSimulation.profession(person));
-        if (workerDuty) {
-            if (!ModList.get().isLoaded("wf_settle")
-                    || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.globalId)) {
-                binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-                troop.characterId = previousId;
-                if (!hadSavedProfession) person.props.remove("population.pre_military_profession");
-                return false;
+        try (PersonBinding binding = bindPerson(troop, false)) {
+            if (binding == null) { troop.setCharacterId(previousId); return false; }
+            Character person = binding.character();
+            boolean workerDuty = PopulationSimulation.hasDuty(person, Duty.WORKER);
+            // Preserve the civilian profession for every recruit, including non-worker specialists.
+            boolean hadSavedProfession = person.props.containsKey("population.pre_military_profession");
+            if (!hadSavedProfession) person.props.put("population.pre_military_profession",
+                    PopulationSimulation.profession(person));
+            if (workerDuty) {
+                if (!ModList.get().isLoaded("wf_settle")
+                        || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.globalId)) {
+                    binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+                    troop.characterId = previousId;
+                    if (!hadSavedProfession) person.props.remove("population.pre_military_profession");
+                    return false;
+                }
+                binding.registry().setDuty(person.id, Duty.WORKER, false, PeopleMod.YEAR);
             }
-            binding.registry().setDuty(person.id, Duty.WORKER, false, PeopleMod.YEAR);
+            binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+            binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+            syncPerson(troop);
+            return true;
         }
-        binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
-        syncPerson(troop);
-        return true;
     }
 
     /** Demobilizes a soldier through a durable, replayable Character transition. */
