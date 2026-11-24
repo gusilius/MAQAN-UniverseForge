@@ -408,27 +408,28 @@ public final class CharacterAuthority {
         // Global UUID links are authoritative. Legacy cN IDs are map-local and can collide
         // across partitions; consult their reverse indexes only when the corresponding
         // canonical link is absent, otherwise unrelated people can become false relatives.
+        CharacterIdentity personIdentity = byGlobalId.get(person.globalId);
+        String localMap = personIdentity == null ? "" : personIdentity.mapId();
         if (!fatherGlobal.isBlank()) {
             addFamilyMatches(matches, familyByParentGlobal, fatherGlobal);
             addGlobalIdentityMatch(matches, fatherGlobal);
         } else {
-            addFamilyMatches(matches, familyByParentLegacy, person.father);
-            addLegacyIdentityMatches(matches, person.father);
+            addFamilyMatchesLegacyLocal(matches, familyByParentLegacy, person.father, localMap);
+            addLegacyIdentityMatchesLocal(matches, person.father, localMap);
         }
         if (!motherGlobal.isBlank()) {
             addFamilyMatches(matches, familyByParentGlobal, motherGlobal);
             addGlobalIdentityMatch(matches, motherGlobal);
         } else {
-            addFamilyMatches(matches, familyByParentLegacy, person.mother);
-            addLegacyIdentityMatches(matches, person.mother);
+            addFamilyMatchesLegacyLocal(matches, familyByParentLegacy, person.mother, localMap);
+            addLegacyIdentityMatchesLocal(matches, person.mother, localMap);
         }
 
         // The current Character's global UUID is stable and unambiguous in both directions.
         addFamilyMatches(matches, familyByParentGlobal, person.globalId);
         addFamilyMatches(matches, familyByChildGlobal, person.globalId);
-        if (fatherGlobal.isBlank() && motherGlobal.isBlank()) {
-            addFamilyMatches(matches, familyByChildLegacy, person.id);
-        }
+        if (fatherGlobal.isBlank() && motherGlobal.isBlank())
+            addFamilyMatchesLegacyLocal(matches, familyByChildLegacy, person.id, localMap);
         if (hasGlobalChildren) {
             Object globalChildren = person.props.get("family.children_global_ids");
             for (Object rawId : (List<?>) globalChildren) if (rawId instanceof String id) {
@@ -447,9 +448,12 @@ public final class CharacterAuthority {
             addFamilyMatches(matches, familyBySpouseGlobal, spouseGlobal);
             addGlobalIdentityMatch(matches, spouseGlobal);
         } else {
-            addFamilyMatches(matches, familyBySpouseLegacy, person.id);
-            addLegacyIdentityMatches(matches, person.spouse);
+            addFamilyMatchesLegacyLocal(matches, familyBySpouseLegacy, person.id, localMap);
+            addLegacyIdentityMatchesLocal(matches, person.spouse, localMap);
         }
+        // A one-sided spouse pointer may exist in old saves even when this Character has
+        // no spouse field of its own. Preserve that reverse relationship by canonical UUID.
+        addFamilyMatches(matches, familyBySpouseGlobal, person.globalId);
 
         CharacterIdentity owner = byGlobalId.get(person.globalId);
         String localMap = owner == null ? "" : owner.mapId();
@@ -473,6 +477,27 @@ public final class CharacterAuthority {
         if (legacyId == null || legacyId.isBlank()) return;
         Set<CharacterIdentity> found = byLegacyId.get(legacyId);
         if (found != null) target.addAll(found);
+    }
+
+    /** Legacy IDs are partition-local; never resolve their reverse edges across other maps. */
+    private void addLegacyIdentityMatchesLocal(Set<CharacterIdentity> target, String legacyId, String mapId) {
+        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return;
+        Set<CharacterIdentity> found = byLegacyId.get(legacyId);
+        if (found == null) return;
+        for (CharacterIdentity identity : found)
+            if (mapId.equals(identity.mapId())) target.add(identity);
+    }
+
+    private void addFamilyMatchesLegacyLocal(Set<CharacterIdentity> target,
+                                             Map<String, Set<String>> index,
+                                             String legacyId, String mapId) {
+        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return;
+        Set<String> found = index.get(legacyId);
+        if (found == null) return;
+        for (String globalId : found) {
+            CharacterIdentity identity = byGlobalId.get(globalId);
+            if (identity != null && mapId.equals(identity.mapId())) target.add(identity);
+        }
     }
 
     private void addGlobalIdentityMatch(Set<CharacterIdentity> target, String globalId) {
