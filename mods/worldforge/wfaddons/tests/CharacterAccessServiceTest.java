@@ -124,11 +124,20 @@ public final class CharacterAccessServiceTest {
                     "failed partial mutation remains dirty and releases lease/transaction pins");
 
             Character evictable = registry.create("Eviction Subject", "", "test", "f", 12);
-            String evictablePayload = registry.toJsonRecord(evictable);
-            store.put(evictable.globalId, evictablePayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            coordinator.registerPersisted(evictable.globalId);
             String evictableLocalId = evictable.id;
             String evictableGlobalId = evictable.globalId;
+            int acceptedDirty = coordinator.persistDirtyBatch(globalId -> {
+                try (CharacterAccessService.Lease lease = access.acquireGlobal(globalId)) {
+                    if (lease == null) throw new IllegalStateException("missing Character during test flush");
+                    return registry.toJsonRecord(lease.get()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }, 32, 1L << 20);
+            check(acceptedDirty > 0, "dirty Characters are submitted through the canonical WAL before checkpoint");
+            writer.close();
+            wal.checkpoint(() -> wal.replayLatestEach(store::put));
+            long checkpointEpoch = coordinator.dirtyEpoch();
+            check(coordinator.markCheckpointCompleted(checkpointEpoch),
+                    "eviction becomes eligible only after all dirty UUIDs are durably checkpointed");
             check(registry.evictMaterialized(evictableGlobalId)
                             && registry.materializedSize() == registry.size() - 1,
                     "durably checkpointed unleased Character can leave the materialized object map");
