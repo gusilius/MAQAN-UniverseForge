@@ -107,11 +107,9 @@ public final class CharacterRecordStore implements AutoCloseable {
         put(record.globalId(), record.payloadView());
     }
 
-    /** O(1) filesystem existence check for an addressable checkpoint key. */
+    /** Checks addressability and validates the record checksum/key before treating it as durable. */
     public synchronized boolean contains(String globalId) throws IOException {
-        ensureOpen();
-        encodeId(globalId);
-        return Files.isRegularFile(pathFor(globalId));
+        return get(globalId) != null;
     }
 
     /** Returns null when the key is absent; checksum or key/path mismatches fail closed. */
