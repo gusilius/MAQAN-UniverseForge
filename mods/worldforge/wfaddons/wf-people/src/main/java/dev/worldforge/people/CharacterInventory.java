@@ -127,6 +127,17 @@ public final class CharacterInventory {
         write(person,next);
     }
 
+    /** UUID-addressed Character-to-Character inventory transfer with ordered leases and dirty generations. */
+    public static boolean transferByGlobalId(CharacterAuthority authority, String sourceGlobalId,
+                                             String destinationGlobalId, String itemId, int amount) {
+        if (authority == null || sourceGlobalId == null || destinationGlobalId == null
+                || sourceGlobalId.isBlank() || destinationGlobalId.isBlank()
+                || sourceGlobalId.equals(destinationGlobalId)) return false;
+        return CharacterAccessService.mutateGlobalsIfChanged(authority,
+                List.of(sourceGlobalId, destinationGlobalId), people ->
+                        transfer(people.get(sourceGlobalId), people.get(destinationGlobalId), itemId, amount));
+    }
+
     /** Removes exactly amount or leaves the inventory untouched. */
     public static boolean remove(Character person,String itemId,int amount) {
         Objects.requireNonNull(person);
