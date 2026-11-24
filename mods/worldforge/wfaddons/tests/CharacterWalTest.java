@@ -105,6 +105,12 @@ public final class CharacterWalTest {
                 }
                 ok(wal.replayAll().isEmpty() && stored != null && storedPayloadIsDefensive,
                         "zero-copy WAL record handoff persists the newest record while public store payloads remain defensive");
+                byte[] largePayload = new byte[1024 * 1024];
+                for (int i = 0; i < largePayload.length; i++) largePayload[i] = (byte) (i * 31);
+                store.put(id, largePayload);
+                CharacterRecordStore.Record largeStored = store.get(id);
+                ok(largeStored != null && java.util.Arrays.equals(largePayload, largeStored.payload()),
+                        "large addressable record round-trips with in-place CRC verification");
             }
 
             Path corrupt = root.resolve("corrupt");
