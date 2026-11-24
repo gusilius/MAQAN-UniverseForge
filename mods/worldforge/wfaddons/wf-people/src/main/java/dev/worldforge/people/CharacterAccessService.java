@@ -22,9 +22,7 @@ public final class CharacterAccessService {
     }
 
     public Lease acquireGlobal(String globalId) {
-        if (globalId == null || globalId.isBlank()) return null;
-        Character character = registry.getByGlobalId(globalId);
-        return character == null ? null : registry.acquire(character.id);
+        return registry.acquireGlobal(globalId);
     }
 
     public static final class Lease implements AutoCloseable {
