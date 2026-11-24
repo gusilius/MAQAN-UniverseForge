@@ -1059,55 +1059,6 @@ public final class CharacterInventory {
         }
     }
 
-    private static Character findHeir(CharacterAuthority authority, CharacterRegistry registry, Character deceased) {
-        Character spouse = related(authority, registry, deceased.props.get("family.spouse_global_id"), deceased.spouse);
-        if (spouse != null && spouse.alive) return spouse;
-
-        // Prefer living descendants, oldest first. Global links cross map/player registry boundaries.
-        List<Character> descendants = new ArrayList<>();
-        Object globalChildren = deceased.props.get("family.children_global_ids");
-        if (globalChildren instanceof List<?> ids) for (Object id : ids) {
-            Character child = related(authority, registry, id, "");
-            if (child != null && child.alive) descendants.add(child);
-        }
-        for (String id : deceased.children) {
-            Character child = registry.get(id);
-            if (child != null && child.alive && !descendants.contains(child)) descendants.add(child);
-        }
-        descendants.sort(Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.globalId));
-        if (!descendants.isEmpty()) return descendants.get(0);
-
-        Character father = related(authority, registry, deceased.props.get("family.father_global_id"), deceased.father);
-        if (father != null && father.alive) return father;
-        Character mother = related(authority, registry, deceased.props.get("family.mother_global_id"), deceased.mother);
-        if (mother != null && mother.alive) return mother;
-
-        if (authority != null) {
-            // The yearly CourtSim pass prepares this world-wide relationship index once.
-            // Estate settlement now visits only relatives, never every Character per death.
-            for (Character candidate : registry.kinCandidates(deceased))
-                if (candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
-        } else {
-            // Standalone registries used by tools/tests have no world authority.
-            for (Character candidate : registry.all())
-                if (candidate.alive && candidate != deceased && isKin(deceased, candidate)) return candidate;
-        }
-        return null;
-    }
-
-    private static Character related(CharacterAuthority authority, CharacterRegistry local, Object globalId, String legacyId) {
-        if (globalId instanceof String id && !id.isBlank() && authority != null) {
-            Character found = authority.getGlobal(id);
-            if (found != null) return found;
-        }
-        if (legacyId != null && !legacyId.isBlank()) {
-            Character found = local.get(legacyId);
-            if (found != null) return found;
-            if (authority != null) return authority.getLegacy(legacyId);
-        }
-        return null;
-    }
-
     private static boolean isKin(Character a,Character b) {
         if(a.id.equals(b.spouse)||b.id.equals(a.spouse)
                 ||a.globalId.equals(b.props.get("family.spouse_global_id"))
