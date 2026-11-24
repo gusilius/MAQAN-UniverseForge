@@ -446,7 +446,6 @@ public class PeopleTest {
                 "streaming snapshot parser rejects trailing bytes after the root object");
 
         Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
-        Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
         try (dev.worldforge.people.storage.CharacterRecordStore store =
                      new dev.worldforge.people.storage.CharacterRecordStore(recordStorePath)) {
             String storeId = "00000000-0000-0000-0000-000000000123";
