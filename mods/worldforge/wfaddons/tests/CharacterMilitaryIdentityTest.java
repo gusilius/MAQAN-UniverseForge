@@ -64,6 +64,18 @@ public final class CharacterMilitaryIdentityTest {
         check(restoredPerson.props.get("population.profession").equals(formerProfession)
                         && !restoredPerson.props.containsKey("population.entity_bindings"),
                 "civilian profession is restored and troop body binding is released");
+
+        Character fallen = restored.create("Fallen Soldier", "", "north", "m", 280);
+        String fallenGlobalId = fallen.globalId;
+        restored.kill(fallen.id);
+        try (var deathRecoveryLease = restored.access().acquireGlobal(fallenGlobalId)) {
+            check(deathRecoveryLease != null && deathRecoveryLease.get() == fallen
+                            && !deathRecoveryLease.get().alive,
+                    "death recovery can lease the canonical Character after its alive flag is cleared");
+        }
+        check(restored.activeAccessLeaseCount() == 0,
+                "dead Character recovery lease is released without leaving an eviction pin");
+
         if (failures > 0) throw new AssertionError(failures + " CharacterMilitaryIdentity tests failed");
         System.out.println("CharacterMilitaryIdentity: ALL OK");
     }
