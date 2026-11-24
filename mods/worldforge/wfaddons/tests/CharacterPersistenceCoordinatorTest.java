@@ -84,8 +84,13 @@ public final class CharacterPersistenceCoordinatorTest {
 
             String batchId = "00000000-0000-0000-0000-000000000088";
             coordinator.register(batchId);
-            int batchAccepted = coordinator.persistDirtyBatch(
-                    key -> dev.worldforge.mod.Json.write(java.util.Map.of("id", key)).getBytes(StandardCharsets.UTF_8), 2, 1024);
+            int batchAccepted = coordinator.persistDirtyBatch(key -> {
+                // The queue still contains the previously dirtied Character. A production
+                // scheduler serializes the current canonical record for every UUID; keep
+                // this fixture equivalent instead of overwriting it with a synthetic payload.
+                if (id.equals(key)) return "{\\"v\\":\\"2-final\\"}".getBytes(StandardCharsets.UTF_8);
+                return dev.worldforge.mod.Json.write(java.util.Map.of("id", key)).getBytes(StandardCharsets.UTF_8);
+            }, 2, 1024);
             long batchDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (coordinator.dirtyQueue().pendingCount() != 0 && System.nanoTime() < batchDeadline)
                 Thread.sleep(5);
