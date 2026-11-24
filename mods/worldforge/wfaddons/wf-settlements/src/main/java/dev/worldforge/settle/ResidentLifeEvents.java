@@ -432,15 +432,10 @@ public final class ResidentLifeEvents {
         return null;
     }
 
-    private static String deliverDuePregnancy(CharacterRegistry registry, Character mother, int year,
-                                               long worldDay, NameBank names) {
-        String fatherLocalId = FamilyPlanning.dueFatherId(mother, worldDay);
-        if (fatherLocalId == null || fatherLocalId.isBlank()) return null;
-        String fatherGlobalId = registry.globalIdForLocalId(fatherLocalId);
-        if (fatherGlobalId == null) {
-            FamilyPlanning.cancel(mother, null, "father-unavailable", year);
-            return null;
-        }
+    private static String deliverDuePregnancy(CharacterRegistry registry, String motherGlobalId,
+                                               String fatherGlobalId, int year, NameBank names) {
+        if (motherGlobalId == null || motherGlobalId.isBlank()
+                || fatherGlobalId == null || fatherGlobalId.isBlank()) return null;
         final String[] childGlobalId = {null};
         mutatePair(registry, List.of(motherGlobalId, fatherGlobalId), people -> {
                     Character currentMother = people.get(motherGlobalId);
@@ -540,8 +535,10 @@ public final class ResidentLifeEvents {
             if (lease == null) return;
             Character first = lease.get();
             if (year <= number(first.props.get("family.relationship_review_year"), 0)) return;
-            firstOwner.access().mutateGlobal(firstId,
-                    current -> current.props.put("family.relationship_review_year", year));
+            String firstLocalId = firstOwner.localIdForGlobalId(firstId);
+            if (firstLocalId != null)
+                mutateSingle(firstOwner, firstLocalId,
+                        current -> current.props.put("family.relationship_review_year", year));
         }
 
         int available = eligibleIds.size() - index - 1;
