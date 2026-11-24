@@ -39,6 +39,10 @@ public final class CharacterRegistry {
     private Map<String, Character> byId = new HashMap<>();
     /** Append-only insertion-order directory. It stores IDs, never Character references. */
     private List<String> orderedIds = new ArrayList<>();
+    /** O(1) membership test: hydration must not append a second directory entry. */
+    private Set<String> orderedIdSet = new HashSet<>();
+    /** Retained identity routing for evicted objects; values are compact strings only. */
+    private final Map<String, String> globalIdByLocalId = new HashMap<>();
     /** Monotonic append counter; distinct from full identity-directory replacement. */
     private long membershipAppendGeneration;
     /** Changes only when restore replaces the ordered identity directory wholesale. */
@@ -62,16 +66,16 @@ public final class CharacterRegistry {
      * The returned batch is bounded by the caller's requested range.
      */
     public List<Character> range(int fromInclusive, int toExclusive) {
-        int size = byId.size();
+        int size = orderedIds.size();
         if (fromInclusive < 0 || toExclusive < fromInclusive || toExclusive > size)
             throw new IndexOutOfBoundsException("range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
         if (fromInclusive == toExclusive) return List.of();
         List<Character> result = new ArrayList<>(toExclusive - fromInclusive);
         for (int index = fromInclusive; index < toExclusive; index++) {
             String id = orderedIds.get(index);
-            Character character = byId.get(id);
+            Character character = resolveMaterialized(id);
             if (character == null)
-                throw new ConcurrentModificationException("Character membership changed during range capture");
+                throw new ConcurrentModificationException("Character identity could not be hydrated during range capture: " + id);
             result.add(character);
         }
         return result;
@@ -99,9 +103,9 @@ public final class CharacterRegistry {
             @Override public Character next() {
                 if (!hasNext()) throw new NoSuchElementException();
                 String id = orderedIds.get(index++);
-                Character character = byId.get(id);
+                Character character = resolveMaterialized(id);
                 if (character == null)
-                    throw new ConcurrentModificationException("Character is not materialized during registry traversal: " + id);
+                    throw new ConcurrentModificationException("Character identity could not be hydrated during registry traversal: " + id);
                 return character;
             }
         };
@@ -163,7 +167,7 @@ public final class CharacterRegistry {
     private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
         @Override public Character get(int index) {
             if (index < 0 || index >= orderedIds.size()) throw new IndexOutOfBoundsException(index);
-            Character character = byId.get(orderedIds.get(index));
+            Character character = resolveMaterialized(orderedIds.get(index));
             if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
             return character;
         }
@@ -176,7 +180,7 @@ public final class CharacterRegistry {
                 @Override public Character next() {
                     if (!hasNext()) throw new NoSuchElementException();
                     String id = orderedIds.get(index++);
-                    Character character = byId.get(id);
+                    Character character = resolveMaterialized(id);
                     if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
                     return character;
                 }
@@ -284,14 +288,44 @@ public final class CharacterRegistry {
 
     public void addListener(Listener l) { listeners.add(l); }
 
-    public Character get(String id) { return byId.get(id); }
+    public Character get(String id) { return resolveMaterialized(id); }
+
+    /** Internal non-hydrating lookup used by the storage/access boundary. */
+    synchronized Character peekMaterialized(String localId) { return byId.get(localId); }
+
+    synchronized String globalIdForLocalId(String localId) { return globalIdByLocalId.get(localId); }
+
+    private Character resolveMaterialized(String localId) {
+        Character current = byId.get(localId);
+        if (current != null) return current;
+        if (!orderedIdSet.contains(localId)) return null;
+        return accessService.hydrate(localId);
+    }
+
+    /**
+     * Removes only the Java object. Identity directory and compact reverse indexes stay
+     * resident so UUID routing, family links and insertion order remain stable.
+     * Caller must have migrated the relevant operation to scoped leases before enabling
+     * automatic eviction; legacy raw references cannot be revoked by Java.
+     */
+    public synchronized boolean evictMaterialized(String globalId) throws java.io.IOException {
+        String localId = byGlobalId.get(globalId);
+        if (localId == null || activeAccessLeases.containsKey(localId)) return false;
+        Character current = byId.get(localId);
+        if (current == null) return false;
+        if (!accessService.canEvict(globalId)) return false;
+        CharacterRecordStore.Record checkpoint = accessService.loadCheckpoint(globalId);
+        if (checkpoint == null || !globalId.equals(checkpoint.globalId())) return false;
+        if (!globalId.equals(current.globalId)) throw new java.io.IOException("Canonical Character UUID mismatch");
+        return byId.remove(localId, current);
+    }
 
     /**
      * Acquires a scoped strong reference for operations that may overlap future eviction.
      * Legacy get() remains for compatibility; new storage-aware code should prefer leases.
      */
     public synchronized CharacterAccessService.Lease acquire(String id) {
-        Character character = byId.get(id);
+        Character character = resolveMaterialized(id);
         if (character == null) return null;
         activeAccessLeases.merge(id, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, id, character);
@@ -302,7 +336,7 @@ public final class CharacterRegistry {
         if (globalId == null || globalId.isBlank()) return null;
         String localId = byGlobalId.get(globalId);
         if (localId == null) return null;
-        Character character = byId.get(localId);
+        Character character = resolveMaterialized(localId);
         if (character == null) return null;
         activeAccessLeases.merge(localId, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, localId, character);
@@ -334,7 +368,7 @@ public final class CharacterRegistry {
     private Character characterByGlobalId(String globalId) {
         if (globalId == null || globalId.isBlank()) return null;
         String localId = byGlobalId.get(globalId);
-        return localId == null ? null : byId.get(localId);
+        return localId == null ? null : resolveMaterialized(localId);
     }
 
     /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
@@ -356,7 +390,10 @@ public final class CharacterRegistry {
      */
     public List<Character> all() { return orderedView; }
 
-    public int size() { return byId.size(); }
+    public int size() { return orderedIds.size(); }
+
+    /** Number of full Character objects currently resident in this registry. */
+    public int materializedSize() { return byId.size(); }
 
     /** Returns living office holders at one place using the reverse post index. */
     public List<Character> holdersAtPlace(String place) {
@@ -429,8 +466,9 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        orderedIds.add(c.id);
+        if (orderedIdSet.add(c.id)) orderedIds.add(c.id);
         byGlobalId.put(c.globalId, c.id);
+        globalIdByLocalId.put(c.id, c.globalId);
         // Register the new identity directly; no population-wide scan is needed.
         accessService.registerCreated(c);
         CharacterAuthority currentAuthority = authority;
@@ -1196,7 +1234,8 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
-        if (previous == null) orderedIds.add(restored.id);
+        if (orderedIdSet.add(restored.id)) orderedIds.add(restored.id);
+        globalIdByLocalId.put(restored.id, restored.globalId);
         indexPosts(restored);
         byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
@@ -1456,6 +1495,9 @@ public final class CharacterRegistry {
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         orderedIds = loadedIds;
+        orderedIdSet = new HashSet<>(loadedIds);
+        globalIdByLocalId.clear();
+        byGlobalId.forEach((globalId, localId) -> globalIdByLocalId.put(localId, globalId));
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
