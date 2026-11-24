@@ -39,13 +39,16 @@ public final class CharacterAccessService {
             CharacterPersistenceCoordinator previous = PERSISTENCE.get(registry);
             if (previous != null && previous != coordinator)
                 throw new IllegalStateException("CharacterRegistry already has a persistence coordinator");
+            if (previous == coordinator) return;
             PERSISTENCE.put(registry, coordinator);
         }
-        for (Character character : registry.all()) {
-            if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
-            else coordinator.registerPersisted(character.globalId);
+        synchronized (pendingRegistrationIds) {
+            for (Character character : registry.all()) {
+                if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
+                else coordinator.registerPersisted(character.globalId);
+            }
+            pendingRegistrationIds.clear();
         }
-        pendingRegistrationIds.clear();
     }
 
     /** Registers newly-created canonical identities without scanning the registry. */
