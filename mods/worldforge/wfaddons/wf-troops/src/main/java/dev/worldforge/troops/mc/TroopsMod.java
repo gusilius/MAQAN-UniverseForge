@@ -1832,8 +1832,45 @@ public class TroopsMod {
                                 : ActionResult.fail(reason);
                     }
                 }
+                // Preserve the canonical commander when a partial selection splits its source squad.
+                String selectedCommanderId = "";
+                String selectedCommanderSourceSquad = "";
+                boolean selectedCommanderHero = false;
+                int selectedCommanderRank = 0;
+                boolean multipleSelectedCommanders = false;
+                for (String selectedId : selectedTroops) {
+                    TroopEntity selected = LIVE.get(selectedId);
+                    Squads.Squad sourceSquad = SQUADS.squadOf(selectedId);
+                    if (selected == null || sourceSquad == null || sourceSquad.leaderCharacterId.isBlank()
+                            || !sourceSquad.leaderCharacterId.equals(selected.characterId)) continue;
+                    if (!selectedCommanderId.isBlank()
+                            && !selectedCommanderId.equals(sourceSquad.leaderCharacterId)) {
+                        multipleSelectedCommanders = true;
+                        break;
+                    }
+                    selectedCommanderId = sourceSquad.leaderCharacterId;
+                    selectedCommanderSourceSquad = sourceSquad.id;
+                    selectedCommanderHero = sourceSquad.leaderHero;
+                    selectedCommanderRank = sourceSquad.leadershipRank;
+                }
                 Squads.Squad squad = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
                 if (squad != null) {
+                    if (!multipleSelectedCommanders && !selectedCommanderId.isBlank()
+                            && !squad.id.equals(selectedCommanderSourceSquad)
+                            && squad.members.stream().anyMatch(id -> {
+                                TroopEntity member = LIVE.get(id);
+                                return member != null && selectedCommanderId.equals(member.characterId);
+                            })) {
+                        squad.leaderCharacterId = selectedCommanderId;
+                        squad.leaderHero = selectedCommanderHero;
+                        squad.leadershipRank = selectedCommanderRank;
+                        Squads.Squad sourceSquad = SQUADS.get(selectedCommanderSourceSquad);
+                        if (sourceSquad != null && selectedCommanderId.equals(sourceSquad.leaderCharacterId)) {
+                            sourceSquad.leaderCharacterId = "";
+                            sourceSquad.leaderHero = false;
+                            sourceSquad.leadershipRank = 0;
+                        }
+                    }
                     // Direct player selection is an explicit takeover of this squad.
                     DELEGATION.reclaim(squad.id);
                     String message = squad.name + " (" + squad.members.size() + "): " + ord.kind().title;
