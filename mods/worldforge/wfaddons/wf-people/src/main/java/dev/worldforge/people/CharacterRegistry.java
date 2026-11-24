@@ -52,12 +52,15 @@ public final class CharacterRegistry {
     private static final class EvictionCandidate {
         final String localId;
         final long eligibleAfterNanos;
+        EvictionCandidate previous;
+        EvictionCandidate next;
         EvictionCandidate(String localId, long eligibleAfterNanos) {
             this.localId = localId;
             this.eligibleAfterNanos = eligibleAfterNanos;
         }
     }
-    private final ArrayDeque<EvictionCandidate> evictionCandidates = new ArrayDeque<>();
+    private EvictionCandidate evictionCandidateHead;
+    private EvictionCandidate evictionCandidateTail;
     private final Map<String, EvictionCandidate> evictionCandidateById = new HashMap<>();
     private final CharacterAccessService accessService = new CharacterAccessService(this);
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
@@ -339,7 +342,7 @@ public final class CharacterRegistry {
         if (character == null) return null;
         // A newly active access invalidates any queued idle candidate. Stale deque
         // tokens are harmless and are discarded by identity comparison when polled.
-        evictionCandidateById.remove(id);
+        removeEvictionCandidate(id);
         activeAccessLeases.merge(id, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, id, character);
     }
@@ -351,7 +354,7 @@ public final class CharacterRegistry {
         if (localId == null) return null;
         Character character = resolveMaterialized(localId);
         if (character == null) return null;
-        evictionCandidateById.remove(localId);
+        removeEvictionCandidate(localId);
         activeAccessLeases.merge(localId, 1, Integer::sum);
         return new CharacterAccessService.Lease(this, localId, character);
     }
@@ -368,12 +371,29 @@ public final class CharacterRegistry {
         } else activeAccessLeases.put(id, count - 1);
     }
 
+    private void unlinkEvictionCandidate(EvictionCandidate candidate) {
+        if (candidate.previous == null) evictionCandidateHead = candidate.next;
+        else candidate.previous.next = candidate.next;
+        if (candidate.next == null) evictionCandidateTail = candidate.previous;
+        else candidate.next.previous = candidate.previous;
+        candidate.previous = null;
+        candidate.next = null;
+    }
+
+    private void removeEvictionCandidate(String localId) {
+        EvictionCandidate candidate = evictionCandidateById.remove(localId);
+        if (candidate != null) unlinkEvictionCandidate(candidate);
+    }
+
     private void enqueueEvictionCandidate(String localId, long nowNanos) {
         if (evictionCandidateById.containsKey(localId)
                 || evictionCandidateById.size() >= MAX_EVICTION_CANDIDATES) return;
         EvictionCandidate candidate = new EvictionCandidate(localId, nowNanos);
+        candidate.previous = evictionCandidateTail;
+        if (evictionCandidateTail == null) evictionCandidateHead = candidate;
+        else evictionCandidateTail.next = candidate;
+        evictionCandidateTail = candidate;
         evictionCandidateById.put(localId, candidate);
-        evictionCandidates.addLast(candidate);
     }
 
     /**
@@ -384,21 +404,14 @@ public final class CharacterRegistry {
     public synchronized List<String> pollEvictionCandidates(int limit, long minIdleNanos) {
         if (limit < 1 || minIdleNanos < 0) throw new IllegalArgumentException("Invalid eviction candidate budget");
         List<String> result = new ArrayList<>(limit);
-        int examined = evictionCandidates.size();
         long now = System.nanoTime();
-        while (examined-- > 0 && result.size() < limit) {
-            EvictionCandidate candidate = evictionCandidates.pollFirst();
-            if (candidate == null) break;
-            if (evictionCandidateById.get(candidate.localId) != candidate) continue;
-            if (activeAccessLeases.containsKey(candidate.localId)) {
-                evictionCandidateById.remove(candidate.localId, candidate);
-                continue;
-            }
-            if (now - candidate.eligibleAfterNanos < minIdleNanos) {
-                evictionCandidates.addFirst(candidate);
+        while (evictionCandidateHead != null && result.size() < limit) {
+            EvictionCandidate candidate = evictionCandidateHead;
+            if (now - candidate.eligibleAfterNanos < minIdleNanos)
                 break; // FIFO timestamps: later candidates cannot be older.
-            }
+            unlinkEvictionCandidate(candidate);
             evictionCandidateById.remove(candidate.localId, candidate);
+            if (activeAccessLeases.containsKey(candidate.localId)) continue;
             result.add(candidate.localId);
         }
         return List.copyOf(result);
