@@ -616,6 +616,10 @@ public class PeopleMod {
             catch (Exception failure) { LOGGER.error("wf_people: failed to drain Character WAL writer", failure); }
         }
         CHARACTER_WAL_WRITERS.clear();
+        // WORLD_REGISTRY and PLAYER_REGISTRY are static reusable instances. Detach their
+        // old coordinators so the next integrated server can attach fresh WAL resources.
+        for (CharacterRegistry registry : new ArrayList<>(CHARACTER_WALS.keySet()))
+            registry.access().detachPersistenceCoordinator();
         for (CharacterWal wal : CHARACTER_WALS.values()) {
             try { wal.close(); }
             catch (Exception failure) { LOGGER.error("wf_people: failed to close Character WAL cleanly", failure); }
