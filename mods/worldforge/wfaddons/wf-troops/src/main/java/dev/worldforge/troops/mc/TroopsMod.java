@@ -845,22 +845,26 @@ public class TroopsMod {
             characterId = binding.character().globalId;
         }
 
-        Character fallen = PeopleMod.authority().getGlobal(characterId);
         long worldMinute = Math.max(0,troop.level().getDayTime()/20L);
-        if (fallen != null && fallen.alive) {
-            Entity attackerEntity = source == null ? null : source.getEntity();
-            if (attackerEntity != null)
-                MilitaryPsychology.recordBattleOutcome(fallen, false,
-                        "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
-            recordComradeLosses(troop, fallen, worldMinute);
-            if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
-                PersonBinding killer = bindPerson(attacker, false);
-                if (killer != null && killer.character() != null && killer.character().alive)
-                    MilitaryPsychology.recordBattleOutcome(killer.character(), true,
-                            "battle:kill:" + fallen.globalId + ":" + killer.character().globalId,
-                            worldMinute, 2);
+        try (PersonBinding fallenBinding = acquirePersonGlobal(characterId)) {
+            Character fallen = fallenBinding == null ? null : fallenBinding.character();
+            if (fallen != null) {
+                Entity attackerEntity = source == null ? null : source.getEntity();
+                if (attackerEntity != null)
+                    MilitaryPsychology.recordBattleOutcome(fallen, false,
+                            "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
+                recordComradeLosses(troop, fallen, worldMinute);
+                if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
+                    try (PersonBinding killer = bindPerson(attacker, false)) {
+                        if (killer != null && killer.character().alive)
+                            MilitaryPsychology.recordBattleOutcome(killer.character(), true,
+                                    "battle:kill:" + fallen.globalId + ":" + killer.character().globalId,
+                                    worldMinute, 2);
+                    }
+                }
             }
         }
+
         String cause = source == null ? "combat" : source.getMsgId();
         if (cause == null || cause.isBlank()) cause = "combat";
         MilitaryDeathLedger.Pending pending;
@@ -893,11 +897,13 @@ public class TroopsMod {
             if(memberId.equals(fallenBody.getUUID().toString())) continue;
             TroopEntity body=LIVE.get(memberId);
             if(body==null||!body.isAlive()) continue;
-            PersonBinding witness=bindPerson(body,false);
-            if(witness==null||witness.character()==null||!witness.character().alive) continue;
-            MilitaryPsychology.recordComradeLoss(witness.character(),fallen,
-                    "battle:comrade-fallen:"+fallen.globalId+":"+witness.character().globalId,worldMinute);
-            body.setMorale(CharacterDevelopment.militaryMorale(witness.character()));
+            try (PersonBinding witness=bindPerson(body,false)) {
+                if(witness==null||!witness.character().alive) continue;
+                MilitaryPsychology.recordComradeLoss(witness.character(),fallen,
+                        "battle:comrade-fallen:"+fallen.globalId+":"+witness.character().globalId,worldMinute);
+                body.setMorale(CharacterDevelopment.militaryMorale(witness.character()));
+                witness.registry().access().mutateGlobal(witness.character().globalId, ignored -> { });
+            }
         }
     }
 
