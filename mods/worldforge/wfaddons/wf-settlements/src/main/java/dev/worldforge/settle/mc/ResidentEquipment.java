@@ -79,22 +79,9 @@ public final class ResidentEquipment {
         };
     }
 
+    /** The colony dimension is the stable local scope; never scan every registry for a resident. */
     private static String populationScope(Character person, Colony colony) {
-        try {
-            Class<?> people = Class.forName("dev.worldforge.people.mc.PeopleMod");
-            Object raw = people.getMethod("registries").invoke(null);
-            if (raw instanceof java.util.Map<?, ?> registries) {
-                for (java.util.Map.Entry<?, ?> entry : registries.entrySet()) {
-                    Object map = entry.getKey(), registry = entry.getValue();
-                    if (registry == null) continue;
-                    Object found = registry.getClass().getMethod("get", String.class).invoke(registry, person.id);
-                    if (found != person) continue;
-                    Object name = map.getClass().getField("name").get(map);
-                    if (name != null && !String.valueOf(name).isBlank()) return String.valueOf(name);
-                }
-            }
-        } catch (ReflectiveOperationException | LinkageError ignored) { }
-        return colony.dim;
+        return colony == null || colony.dim == null || colony.dim.isBlank() ? "world" : colony.dim;
     }
 
     private static int level(Character person, Colony colony) {
