@@ -570,9 +570,13 @@ public final class PopulationSimulation {
                     && registry.size() > cursor.snapshotSize) {
                 // Membership is append-only within a generation. Extend the ID snapshot and
                 // resume strictly after the last acknowledged ID, including completed passes.
+                // Registry membership is append-only within this generation. nextIndex is
+                // already the acknowledged prefix length, so never search the expanded snapshot
+                // for lastProcessedId (that made repeated appends O(population) each).
+                // This also handles a completed cursor whose ID list was deliberately released:
+                // resume exactly at the old snapshot size instead of replaying the whole world.
                 List<String> extendedIds = registry.idSnapshot();
-                int anchor = cursor.lastProcessedId.isEmpty() ? -1 : extendedIds.indexOf(cursor.lastProcessedId);
-                int resumeAt = anchor < 0 ? 0 : anchor + 1;
+                int resumeAt = Math.min(cursor.nextIndex, extendedIds.size());
                 cursor = new WorldDayCursor(cursor.targetDay, fallbackStartDay, year, generation,
                         extendedIds, resumeAt, cursor.catchUpPass, cursor.lastProcessedId);
             }
