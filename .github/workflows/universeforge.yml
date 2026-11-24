@@ -211,7 +211,7 @@ jobs:
         run: |
           "CONTOUR_02_POPULATION_OUTCOME=$env:POPULATION_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:POPULATION_OUTCOME -ne "success") {
-            "Contour 02 failed; continuing to Families / Social and dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "Contour 02 failed; continuing to Families / Social and Settlements / Labor." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Contour 03 — Families / Social lifecycle (same acceptance job, independent server runs)
@@ -240,7 +240,7 @@ jobs:
         run: |
           "CONTOUR_03_SOCIAL_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:SOCIAL_OUTCOME -ne "success") {
-            "Contour 03 failed; continuing to dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "Contour 03 failed; continuing to Settlements / Labor." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
       - name: Contour 04 — real Minecraft Settlements / Labor / physical LOD stress
@@ -263,7 +263,7 @@ jobs:
         run: |
           "CONTOUR_04_SETTLEMENTS_OUTCOME=$env:SETTLEMENT_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:SETTLEMENT_OUTCOME -ne "success") {
-            "Contour 04 failed; continuing to same-server dual-world checks." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "Contour 04 failed; all four requested runtime contours have been attempted." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
       # Dual-world Genesis is intentionally deferred while the four independent
       # runtime contours are stabilized. Do not spend another multi-hour runner here.
