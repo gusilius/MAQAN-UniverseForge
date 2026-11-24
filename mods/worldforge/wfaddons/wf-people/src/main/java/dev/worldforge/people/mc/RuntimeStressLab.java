@@ -69,6 +69,13 @@ public final class RuntimeStressLab {
         int simulationPending;
         long maxTickNanos;
         long lastProgressLogNanos;
+        long lastMemorySampleNanos = startedNanos;
+        long peakHeapUsedBytes = usedHeapBytes();
+        long peakHeapCommittedBytes = Runtime.getRuntime().totalMemory();
+        final long gcCollectionsAtStart = gcMetric(true);
+        final long gcCollectionMillisAtStart = gcMetric(false);
+        long gcCollectionsAtEnd = gcCollectionsAtStart;
+        long gcCollectionMillisAtEnd = gcCollectionMillisAtStart;
         String status = "RUNNING";
         String failure = "";
 
@@ -227,6 +234,14 @@ public final class RuntimeStressLab {
                     cursor != null && cursor.catchUpPass(), run.verificationIndex, run.target,
                     run.simulationProcessed, run.simulationPending, run.registry.size());
         }
+        if (now - run.lastMemorySampleNanos >= 1_000_000_000L) {
+            Runtime runtime = Runtime.getRuntime();
+            run.peakHeapUsedBytes = Math.max(run.peakHeapUsedBytes, usedHeapBytes());
+            run.peakHeapCommittedBytes = Math.max(run.peakHeapCommittedBytes, runtime.totalMemory());
+            run.gcCollectionsAtEnd = gcMetric(true);
+            run.gcCollectionMillisAtEnd = gcMetric(false);
+            run.lastMemorySampleNanos = now;
+        }
         long elapsed = Math.max(0L, now - tickStartNanos);
         run.tickNanos[run.sampleCursor] = elapsed;
         run.sampleCursor = (run.sampleCursor + 1) % MAX_SAMPLES;
@@ -308,7 +323,13 @@ public final class RuntimeStressLab {
             }
             Arrays.sort(samples);
             Runtime runtime = Runtime.getRuntime();
-            long usedHeap = runtime.totalMemory() - runtime.freeMemory();
+            long usedHeap = usedHeapBytes();
+            run.peakHeapUsedBytes = Math.max(run.peakHeapUsedBytes, usedHeap);
+            run.peakHeapCommittedBytes = Math.max(run.peakHeapCommittedBytes, runtime.totalMemory());
+            run.gcCollectionsAtEnd = gcMetric(true);
+            run.gcCollectionMillisAtEnd = gcMetric(false);
+            long gcCollections = deltaMetric(run.gcCollectionsAtStart, run.gcCollectionsAtEnd);
+            long gcCollectionMillis = deltaMetric(run.gcCollectionMillisAtStart, run.gcCollectionMillisAtEnd);
             long cpuNanos = processCpuNanos();
             long elapsedNanos = Math.max(1L, System.nanoTime() - run.startedNanos);
             String json = String.format(Locale.ROOT,
@@ -316,13 +337,16 @@ public final class RuntimeStressLab {
                     + "\"target\":%d,\"created\":%d,\"initial_registry_size\":%d,\"final_registry_size\":%d,"
                     + "\"durable_character_writes\":%d,\"batch_per_tick\":%d,\"elapsed_seconds\":%.3f,"
                     + "\"tick_ms_p50\":%.3f,\"tick_ms_p95\":%.3f,\"tick_ms_p99\":%.3f,\"tick_ms_max\":%.3f,"
-                    + "\"heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"process_cpu_nanos\":%d,"
+                    + "\"heap_used_bytes\":%d,\"heap_committed_bytes\":%d,\"heap_peak_used_bytes\":%d,"
+                    + "\"heap_peak_committed_bytes\":%d,\"gc_collections\":%d,\"gc_collection_ms\":%d,"
+                    + "\"process_cpu_nanos\":%d,"
                     + "\"wal_queue_high_water\":%d,\"population_processed_world_day\":%d,\"creation_finished_day\":%d,\"simulation_target_day\":%d,\"simulation_processed\":%d,\"simulation_pending\":%d,\"sample_count\":%d}\n",
                     finalStatus, run.failure, run.target, run.created, run.initialPopulation, run.registry.size(),
                     run.durableWrites.get(), run.batchPerTick, elapsedNanos / 1_000_000_000.0,
                     percentile(samples, 0.50) / 1_000_000.0, percentile(samples, 0.95) / 1_000_000.0,
                     percentile(samples, 0.99) / 1_000_000.0, run.maxTickNanos / 1_000_000.0,
-                    usedHeap, runtime.totalMemory(), cpuNanos, run.walQueueHighWater, PeopleMod.populationProcessedDay(), run.creationFinishedDay,
+                    usedHeap, runtime.totalMemory(), run.peakHeapUsedBytes, run.peakHeapCommittedBytes,
+                    gcCollections, gcCollectionMillis, cpuNanos, run.walQueueHighWater, PeopleMod.populationProcessedDay(), run.creationFinishedDay,
                     run.verificationTargetDay, run.simulationProcessed, run.simulationPending, run.sampleCount);
             Files.writeString(report, json, StandardCharsets.UTF_8);
             run.status = "REPORT_WRITTEN";
@@ -339,6 +363,29 @@ public final class RuntimeStressLab {
         if (sorted.length == 0) return 0L;
         int index = (int) Math.ceil(quantile * sorted.length) - 1;
         return sorted[Math.max(0, Math.min(sorted.length - 1, index))];
+    }
+
+    private static long usedHeapBytes() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.totalMemory() - runtime.freeMemory();
+    }
+
+    /** Sum JVM collector counters; -1 means the JVM does not expose that metric. */
+    private static long gcMetric(boolean collectionCount) {
+        long total = 0L;
+        boolean available = false;
+        for (java.lang.management.GarbageCollectorMXBean bean : ManagementFactory.getGarbageCollectorMXBeans()) {
+            long value = collectionCount ? bean.getCollectionCount() : bean.getCollectionTime();
+            if (value >= 0L) {
+                total += value;
+                available = true;
+            }
+        }
+        return available ? total : -1L;
+    }
+
+    private static long deltaMetric(long before, long after) {
+        return before < 0L || after < 0L ? -1L : Math.max(0L, after - before);
     }
 
     private static long processCpuNanos() {
