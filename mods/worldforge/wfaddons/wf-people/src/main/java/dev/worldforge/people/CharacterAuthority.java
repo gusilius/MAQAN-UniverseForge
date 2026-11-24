@@ -294,6 +294,26 @@ public final class CharacterAuthority {
     }
 
     /**
+     * Resolves the canonical Character UUID bound to a physical entity without scanning
+     * materialized Characters or building the sorted world identity snapshot.
+     *
+     * Cost is proportional to the number of registered partitions, not population size.
+     * A null result means no partition currently owns this entity binding.
+     */
+    public synchronized String globalIdForEntityBinding(String entityUuid) {
+        if (entityUuid == null || entityUuid.isBlank()) return null;
+        String match = null;
+        for (CharacterRegistry registry : registries.values()) {
+            String owner = registry.entityBindingOwner(entityUuid);
+            if (owner == null) continue;
+            if (match != null && !match.equals(owner))
+                throw new IllegalStateException("Physical entity UUID is bound to multiple Characters: " + entityUuid);
+            match = owner;
+        }
+        return match;
+    }
+
+    /**
      * Binds a physical Minecraft body to its canonical person while enforcing entity UUID
      * uniqueness across every map partition in this world, not just the owning map.
      */
