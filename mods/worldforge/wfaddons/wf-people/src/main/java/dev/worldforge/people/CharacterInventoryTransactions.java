@@ -325,8 +325,10 @@ public final class CharacterInventoryTransactions {
     }
 
     private static Map<String, Object> markerRecord(Character person, String key) {
+        if (!person.props.containsKey(key)) return null;
         Object raw = CharacterInventory.transferMarker(person, key);
-        if (!(raw instanceof Map<?, ?> map)) return null;
+        if (!(raw instanceof Map<?, ?> map))
+            throw new IllegalStateException("Malformed inventory transfer marker " + key);
         Map<String, Object> result = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String name) result.put(name, entry.getValue());
