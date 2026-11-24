@@ -780,8 +780,8 @@ public class PeopleMod {
                 // One authoritative route: the coordinator captures the dirty generation,
                 // queues through the bounded writer, and acknowledges it only after the
                 // matching forced WAL receipt. Waiting preserves this method's durable-true contract.
-                byte[] payload = owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
-                persistence.persist(character.globalId, payload).get();
+                persistence.persistMutation(character.globalId,
+                        () -> owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8)).get();
                 return true;
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();

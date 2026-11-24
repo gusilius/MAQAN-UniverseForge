@@ -45,6 +45,24 @@ public final class CharacterPersistenceCoordinatorTest {
             check(coordinator.canEvict(id), "new dirty generation becomes clean only after its WAL force");
 
 
+            boolean staleSnapshotRejected = false;
+            try {
+                coordinator.persistMutation(id, () -> {
+                    coordinator.markDirty(id); // Simulate a concurrent domain mutation after ticket capture.
+                    return "{\\"v\\":stale}".getBytes(StandardCharsets.UTF_8);
+                }).get(10, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException expected) {
+                staleSnapshotRejected = expected.getCause() instanceof CharacterPersistenceCoordinator.StalePersistenceException;
+            }
+            check(staleSnapshotRejected
+                            && gate.decision(id) == CharacterEvictionGate.Decision.DIRTY,
+                    "a generation changed during snapshot serialization cannot be acknowledged clean");
+
+            coordinator.persistMutation(id, () -> "{\\"v\\":2-final}".getBytes(StandardCharsets.UTF_8))
+                    .get(10, TimeUnit.SECONDS);
+            check(coordinator.canEvict(id),
+                    "a fresh snapshot receipt acknowledges the current generation");
+
             coordinator.markDirty(id);
             CharacterWalWriter failedWriter = new CharacterWalWriter(wal, 1, "wf-character-persistence-failure-test");
             failedWriter.close();
@@ -63,7 +81,7 @@ public final class CharacterPersistenceCoordinatorTest {
 
             coordinator.checkpointLatest();
             CharacterRecordStore.Record stored = coordinator.load(id);
-            check(stored != null && stored.payloadUtf8().equals("{\"v\":2}"),
+            check(stored != null && stored.payloadUtf8().equals("{\"v\":2-final}"),
                     "streaming checkpoint stores only the latest durable record");
 
             CharacterWal replayWal = new CharacterWal(walPath, 4);

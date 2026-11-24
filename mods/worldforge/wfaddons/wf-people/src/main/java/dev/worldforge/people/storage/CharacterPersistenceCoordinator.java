@@ -3,6 +3,7 @@ package dev.worldforge.people.storage;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * Single coordination point for the existing Character WAL, checkpoint store and
@@ -38,12 +39,19 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public CharacterEvictionGate.Pin beginTransaction(String globalId) { return evictionGate.beginTransaction(globalId); }
 
     /**
-     * Only a forced WAL receipt may acknowledge the captured generation as clean.
-     * A transaction pin spans queueing, disk force and receipt validation so a future
-     * eviction implementation cannot retire an identity while its write is in flight.
+     * Persist a mutation result. The dirty generation is advanced before the snapshot
+     * is captured, so callers that still mutate legacy public fields cannot accidentally
+     * acknowledge an old generation as clean merely by requesting a write.
      */
-    public CompletableFuture<CharacterWal.Record> persist(String globalId, byte[] payload) {
-        Objects.requireNonNull(payload, "payload");
+    public CompletableFuture<CharacterWal.Record> persistMutation(String globalId, Supplier<byte[]> snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        markDirty(globalId);
+        return persistSnapshot(globalId, snapshot);
+    }
+
+    /** Capture the generation before serialization; later mutations make this receipt stale. */
+    public CompletableFuture<CharacterWal.Record> persistSnapshot(String globalId, Supplier<byte[]> snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
         CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
         final CharacterEvictionGate.PersistenceTicket ticket;
         try {
@@ -52,6 +60,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
             transaction.close();
             throw failure;
         }
+
         CompletableFuture<CharacterWal.Record> durable = new CompletableFuture<>();
         CompletableFuture<CharacterWal.Record> result = new CompletableFuture<>();
         durable.whenComplete((record, failure) -> {
@@ -74,12 +83,20 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                 transaction.close();
             }
         });
+
         try {
+            byte[] payload = Objects.requireNonNull(snapshot.get(), "snapshot payload");
             writer.submit(globalId, payload, durable);
         } catch (RuntimeException failure) {
-            durable.completeExceptionally(new IOException("Could not enqueue Character WAL write", failure));
+            durable.completeExceptionally(new IOException("Could not prepare or enqueue Character WAL write", failure));
         }
         return result;
+    }
+
+    /** Compatibility overload; production code should use persistMutation/persistSnapshot. */
+    public CompletableFuture<CharacterWal.Record> persist(String globalId, byte[] payload) {
+        Objects.requireNonNull(payload, "payload");
+        return persistSnapshot(globalId, () -> payload);
     }
 
     /**
