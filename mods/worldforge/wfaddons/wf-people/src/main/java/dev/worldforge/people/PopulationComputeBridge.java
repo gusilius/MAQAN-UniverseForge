@@ -93,7 +93,7 @@ public final class PopulationComputeBridge {
          * If a registry append invalidates LinkedHashMap's fail-fast iterator, rebuild it once
          * at the requested cursor; a failed/stale slice can use the same recovery path.
          */
-        private Character nextCharacter(int registryIndex, int memberIndex) {
+        public Character nextCharacter(int registryIndex, int memberIndex) {
             CharacterRegistry registry = registries.get(registryIndex);
             Iterator<Character> iterator = memberIterators[registryIndex];
             if (iterator == null || iteratorPositions[registryIndex] != memberIndex) {
