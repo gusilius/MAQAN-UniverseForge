@@ -293,7 +293,7 @@ public final class CharacterRegistry {
     /** Internal non-hydrating lookup used by the storage/access boundary. */
     synchronized Character peekMaterialized(String localId) { return byId.get(localId); }
 
-    synchronized String globalIdForLocalId(String localId) { return globalIdByLocalId.get(localId); }
+    public synchronized String globalIdForLocalId(String localId) { return globalIdByLocalId.get(localId); }
 
     private Character resolveMaterialized(String localId) {
         Character current = byId.get(localId);
