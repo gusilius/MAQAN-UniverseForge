@@ -833,19 +833,24 @@ public class SettleMod {
         return SettlementSpacing.findAvailablePosition(x, z, occupied, searchRadius);
     }
 
-    private record PersonBinding(CharacterRegistry registry, Character character) {}
+    private record PersonBinding(CharacterRegistry registry, dev.worldforge.people.CharacterAccessService.Lease lease)
+            implements AutoCloseable {
+        Character character() { return lease.get(); }
+        @Override public void close() { lease.close(); }
+    }
 
-    /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */
+    /** Resolve and pin the canonical resident for the entire domain operation. Never return a bare registry pointer. */
     private static PersonBinding resolvePersonBinding(CharacterRegistry fallbackRegistry, String id) {
         if (id == null || id.isBlank()) return null;
-        Character global = PeopleMod.authority().getGlobal(id);
-        if (global != null) {
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
-            return owner == null ? null : new PersonBinding(owner, global);
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
+        if (owner != null) {
+            dev.worldforge.people.CharacterAccessService.Lease lease = owner.acquireGlobal(id);
+            return lease == null ? null : new PersonBinding(owner, lease);
         }
-        // Pre-global UUID worker saves can only be resolved in their original local map partition.
-        Character legacy = fallbackRegistry == null ? null : fallbackRegistry.get(id);
-        return legacy == null ? null : new PersonBinding(fallbackRegistry, legacy);
+        // Pre-global worker saves can only be resolved in their original local map partition.
+        if (fallbackRegistry == null) return null;
+        dev.worldforge.people.CharacterAccessService.Lease lease = fallbackRegistry.acquire(id);
+        return lease == null ? null : new PersonBinding(fallbackRegistry, lease);
     }
 
     private static Character resolvePerson(CharacterRegistry fallbackRegistry, String id) {
@@ -1763,7 +1768,7 @@ public class SettleMod {
                 colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
                 continue;
             }
-            PersonBinding departedBinding = resolvePersonBinding(registry, departure.personId());
+            try (PersonBinding departedBinding = resolvePersonBinding(registry, departure.personId())) {
             Character departed = departedBinding == null ? null : departedBinding.character();
             if (departedBinding == null) {
                 LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
@@ -1783,11 +1788,12 @@ public class SettleMod {
                 }
             }
             colony.s.acknowledgeDeparture(departure);
+            }
         }
 
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
             boolean hasPersonId = worker.person != null && !worker.person.isBlank();
-            PersonBinding personBinding = hasPersonId ? resolvePersonBinding(registry, worker.person) : null;
+            try (PersonBinding personBinding = hasPersonId ? resolvePersonBinding(registry, worker.person) : null) {
             Character person = personBinding == null ? null : personBinding.character();
             CharacterRegistry personRegistry = personBinding == null ? registry : personBinding.registry();
             if (hasPersonId && person == null) {
@@ -1850,6 +1856,7 @@ public class SettleMod {
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
+            }
         }
         if (!pendingProfessionTransitions.isEmpty() && saveDurably(server)) {
             for (Character person : pendingProfessionTransitions) {
@@ -1936,7 +1943,8 @@ public class SettleMod {
         for (int offset = 0; offset < window.count(); offset++) {
             dev.worldforge.settle.Worker worker = workers.get((window.start() + offset) % workerCount);
             if (worker.person == null || worker.person.isBlank()) continue;
-            Character person = resolvePerson(registry, worker.person);
+            try (PersonBinding personBinding = resolvePersonBinding(registry, worker.person)) {
+            Character person = personBinding == null ? null : personBinding.character();
             if (person == null || !person.alive) continue;
             if (!settlement.raidIncoming && !(person.props.get("population.ai.pending_action") instanceof String)) {
                 Object nextThinkRaw = person.props.get("population.ai.next_think_minute");
@@ -2100,6 +2108,7 @@ public class SettleMod {
                 }
                 return LifeSimulation.Outcome.BLOCKED;
             });
+            }
         }
         dev.worldforge.settle.ResidentLifeEvents.advanceYearly(registry, settlement.year(), PeopleMod.NAMES,
                     dev.worldforge.mod.MaqanPerformanceConfig.familyEventsResidentsPerTick(), ticks);
