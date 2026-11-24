@@ -118,6 +118,11 @@ public final class CharacterRegistry {
         return result;
     }
 
+    /** One insertion-order snapshot of IDs only; safe to retain across bounded processing slices. */
+    public List<String> idSnapshot() {
+        return new ArrayList<>(byId.keySet());
+    }
+
     /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
