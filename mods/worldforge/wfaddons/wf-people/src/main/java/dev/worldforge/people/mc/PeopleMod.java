@@ -573,7 +573,7 @@ public class PeopleMod {
                 } else {
                     // Existing records are already durable. Only journaled changes need
                     // compaction; do not serialize or scan unchanged Characters.
-                    wal.replayLatestEach(record -> records.put(record.globalId(), record.payload()));
+                    wal.replayLatestEach(records::put);
                 }
             });
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
