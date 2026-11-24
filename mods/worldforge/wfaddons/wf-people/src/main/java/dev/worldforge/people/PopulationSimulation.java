@@ -624,8 +624,8 @@ public final class PopulationSimulation {
                                 cursor.snapshotSize, 0, false));
                 return false;
             }
-            if (complete) WORLD_DAY_CURSORS.remove(registry);
-            else WORLD_DAY_CURSORS.put(registry, cursor);
+            cursor.complete = complete;
+            WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
     }
