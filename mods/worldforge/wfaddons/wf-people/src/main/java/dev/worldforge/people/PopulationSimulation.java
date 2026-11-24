@@ -16,23 +16,19 @@ public final class PopulationSimulation {
         final long fallbackDay;
         final int year;
         final long membershipGeneration;
-        List<String> ids;
-        final int snapshotSize;
+        int snapshotSize;
         int nextIndex;
         boolean complete;
         boolean catchUpPass;
-        String lastProcessedId = "";
         WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
-                       List<String> ids, int nextIndex, boolean catchUpPass, String lastProcessedId) {
+                       int snapshotSize, int nextIndex, boolean catchUpPass) {
             this.targetDay = targetDay;
             this.fallbackDay = fallbackDay;
             this.year = year;
             this.membershipGeneration = membershipGeneration;
-            this.ids = ids;
-            this.snapshotSize = ids.size();
+            this.snapshotSize = snapshotSize;
             this.nextIndex = nextIndex;
             this.catchUpPass = catchUpPass;
-            this.lastProcessedId = lastProcessedId == null ? "" : lastProcessedId;
         }
     }
     /** Read-only scheduler progress for diagnostics; does not advance or mutate the cursor. */
@@ -565,20 +561,12 @@ public final class PopulationSimulation {
         if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
+            int currentSize = registry.size();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
-            if (cursor != null && cursor.membershipGeneration == generation
-                    && registry.size() > cursor.snapshotSize) {
-                // Membership is append-only within a generation. Extend the ID snapshot and
-                // resume strictly after the last acknowledged ID, including completed passes.
-                // Registry membership is append-only within this generation. nextIndex is
-                // already the acknowledged prefix length, so never search the expanded snapshot
-                // for lastProcessedId (that made repeated appends O(population) each).
-                // This also handles a completed cursor whose ID list was deliberately released:
-                // resume exactly at the old snapshot size instead of replaying the whole world.
-                List<String> extendedIds = registry.idSnapshot();
-                int resumeAt = Math.min(cursor.nextIndex, extendedIds.size());
-                cursor = new WorldDayCursor(cursor.targetDay, fallbackStartDay, year, generation,
-                        extendedIds, resumeAt, cursor.catchUpPass, cursor.lastProcessedId);
+            if (cursor != null && cursor.membershipGeneration == generation && currentSize > cursor.snapshotSize) {
+                // Append-only membership: extend the logical boundary, not an O(population) ID snapshot.
+                cursor.snapshotSize = currentSize;
+                cursor.complete = false;
             }
             if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
                     && cursor.year == year && cursor.membershipGeneration == generation
@@ -586,31 +574,29 @@ public final class PopulationSimulation {
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
                     || cursor.membershipGeneration != generation) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        registry.idSnapshot(), 0, false, "");
+                        currentSize, 0, false);
             } else if (cursor.targetDay != targetWorldDay) {
-                // Keep the unfinished suffix. Once drained, a second pass catches up the prefix.
                 if (cursor.nextIndex >= cursor.snapshotSize) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            registry.idSnapshot(), 0, false, "");
+                            currentSize, 0, false);
                 } else {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.ids, cursor.nextIndex, true, cursor.lastProcessedId);
+                            cursor.snapshotSize, cursor.nextIndex, true);
                 }
             }
-            if (cursor.nextIndex >= cursor.ids.size()) {
+            if (cursor.nextIndex >= cursor.snapshotSize) {
                 if (cursor.catchUpPass) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.ids, 0, false, "");
+                            cursor.snapshotSize, 0, false);
                 } else {
                     WORLD_DAY_CURSORS.remove(registry);
                     return true;
                 }
             }
-            int pageEnd = Math.min(cursor.ids.size(), cursor.nextIndex + maxCharacters);
-            List<String> page = cursor.ids.subList(cursor.nextIndex, pageEnd);
+            int pageEnd = Math.min(cursor.snapshotSize, cursor.nextIndex + maxCharacters);
+            List<String> page = registry.idPage(cursor.nextIndex, pageEnd - cursor.nextIndex);
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 for (String characterId : page) {
-                    cursor.lastProcessedId = characterId;
                     cursor.nextIndex++;
                     CharacterAccessService.Lease lease = registry.access().acquire(characterId);
                     if (lease == null) continue;
@@ -627,28 +613,22 @@ public final class PopulationSimulation {
                     }
                 }
             }
-            // If membership changed during processing, restart from a fresh key-only page.
             if (registry.membershipGeneration() != generation) {
                 WORLD_DAY_CURSORS.remove(registry);
                 return false;
             }
-            boolean complete = cursor.nextIndex >= cursor.ids.size();
+            boolean complete = cursor.nextIndex >= cursor.snapshotSize;
             if (complete && cursor.catchUpPass) {
                 WORLD_DAY_CURSORS.put(registry,
                         new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                                cursor.ids, 0, false, ""));
+                                cursor.snapshotSize, 0, false));
                 return false;
             }
-            if (complete) {
-                // Keep only a tiny acknowledgement marker; drop the population-sized ID snapshot.
-                cursor.ids = List.of();
-                cursor.complete = true;
-            }
-            WORLD_DAY_CURSORS.put(registry, cursor);
+            if (complete) WORLD_DAY_CURSORS.remove(registry);
+            else WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
     }
-
 
     /** Exclusive Java fallback with per-Character durable world-day receipts. */
     public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
