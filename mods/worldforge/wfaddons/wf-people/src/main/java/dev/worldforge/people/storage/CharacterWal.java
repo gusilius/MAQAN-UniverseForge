@@ -25,6 +25,8 @@ public final class CharacterWal implements AutoCloseable {
         @Override public byte[] payload() { return payload.clone(); }
         /** Decodes the private immutable frame payload without allocating defensive byte-array copies. */
         public String payloadUtf8() { return new String(payload, StandardCharsets.UTF_8); }
+        // Package-private zero-copy handoff to CharacterRecordStore, which consumes bytes synchronously.
+        byte[] payloadView() { return payload; }
     }
     @FunctionalInterface
     public interface ReplayConsumer {
@@ -87,7 +89,8 @@ public final class CharacterWal implements AutoCloseable {
         for (int i = 0; i < writes.size(); i++) {
             Write write = Objects.requireNonNull(writes.get(i), "write");
             byte[] id = write.globalId().getBytes(StandardCharsets.UTF_8);
-            byte[] payload = write.payload();
+            // Write already owns a defensive immutable copy; avoid cloning it again here.
+            byte[] payload = write.payload;
             if (id.length == 0 || id.length > MAX_ID) throw new IllegalArgumentException("invalid globalId length");
             if (payload.length > MAX_PAYLOAD) throw new IllegalArgumentException("invalid payload length");
             ids.add(id); payloads.add(payload);
