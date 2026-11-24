@@ -859,30 +859,32 @@ public class TroopsMod {
                 if (killer != null && killer.character().alive) killerGlobalId = killer.character().globalId;
             }
         }
+        final String fallenGlobalId = characterId;
+        final String killerId = killerGlobalId;
         List<String> battleParticipants = new ArrayList<>();
-        battleParticipants.add(characterId);
-        if (!killerGlobalId.isBlank()) battleParticipants.add(killerGlobalId);
+        battleParticipants.add(fallenGlobalId);
+        if (!killerId.isBlank()) battleParticipants.add(killerId);
         try {
             dev.worldforge.people.CharacterAccessService.mutateGlobalsIfChanged(
                     PeopleMod.authority(), battleParticipants, participants -> {
-                        Character fallen = participants.get(characterId);
+                        Character fallen = participants.get(fallenGlobalId);
                         if (fallen != null && fallen.alive && attackerEntity != null)
                             MilitaryPsychology.recordBattleOutcome(fallen, false,
                                     "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
-                        Character killer = killerGlobalId.isBlank() ? null : participants.get(killerGlobalId);
+                        Character killer = killerId.isBlank() ? null : participants.get(killerId);
                         if (killer != null && killer.alive)
                             MilitaryPsychology.recordBattleOutcome(killer, true,
-                                    "battle:kill:" + characterId + ":" + killer.globalId,
+                                    "battle:kill:" + fallenGlobalId + ":" + killer.globalId,
                                     worldMinute, 2);
                         return true;
                     });
         } catch (RuntimeException transactionFailure) {
             actionPersistenceBlocked = true;
             LOGGER.error("wf-troops: battle participants for fallen Character {} could not be leased atomically",
-                    characterId, transactionFailure);
+                    fallenGlobalId, transactionFailure);
             return false;
         }
-        recordComradeLosses(troop, characterId, worldMinute);
+        recordComradeLosses(troop, fallenGlobalId, worldMinute);
 
         String cause = source == null ? "combat" : source.getMsgId();
         if (cause == null || cause.isBlank()) cause = "combat";
