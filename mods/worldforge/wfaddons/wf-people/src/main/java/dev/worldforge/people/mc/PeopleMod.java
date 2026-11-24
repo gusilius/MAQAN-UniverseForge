@@ -1012,24 +1012,15 @@ public class PeopleMod {
             outgoing.put(registry, new HashSet<>());
             indegree.put(registry, 0);
         }
-        for (CharacterRegistry recipientRegistry : registries) {
-            for (Character heir : recipientRegistry.all()) {
-                for (Map.Entry<String, Object> property : heir.props.entrySet()) {
-                    if (!property.getKey().startsWith("estate.incoming.")
-                            || !(property.getValue() instanceof String sourceGlobalId)) continue;
-                    String transferId = property.getKey().substring("estate.incoming.".length());
-                    Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
-                    // Incoming markers are permanent replay receipts. Only an active source
-                    // transfer creates a write-order dependency between registry files.
-                    if (deceased == null
-                            || !transferId.equals(deceased.props.get("estate.transfer_pending"))
-                            || !heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))) continue;
-                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
-                    if (sourceRegistry != null && sourceRegistry != recipientRegistry
-                            && outgoing.get(recipientRegistry).add(sourceRegistry))
-                        indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
-                }
-            }
+        // The authority keeps a sparse UUID index of incoming estate markers. Do not
+        // materialize every heir just to discover cross-partition save dependencies.
+        for (CharacterAuthority.EstateIncoming incoming : AUTHORITY.pendingEstateIncoming()) {
+            CharacterRegistry recipientRegistry = AUTHORITY.registryForGlobal(incoming.heirGlobalId());
+            CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(incoming.deceasedGlobalId());
+            if (recipientRegistry == null || sourceRegistry == null) return false;
+            if (sourceRegistry != recipientRegistry
+                    && outgoing.get(recipientRegistry).add(sourceRegistry))
+                indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
         }
 
         // Inventory transactions require destination-first writes just like estate succession.
@@ -1127,28 +1118,37 @@ public class PeopleMod {
             List<CharacterRegistry> registries,
             java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners,
             java.util.IdentityHashMap<CharacterRegistry, String> dimensionOwners) {
-        java.util.IdentityHashMap<CharacterRegistry, List<Character>> changed = new java.util.IdentityHashMap<>();
-        for (CharacterRegistry recipientRegistry : registries) {
-            for (Character heir : recipientRegistry.all()) {
+        Set<CharacterRegistry> changed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (CharacterAuthority.EstateIncoming incoming : AUTHORITY.pendingEstateIncoming()) {
+            String heirGlobalId = incoming.heirGlobalId();
+            String sourceGlobalId = incoming.deceasedGlobalId();
+            CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
+            if (sourceRegistry == null || AUTHORITY.registryForGlobal(heirGlobalId) == null) return false;
+            boolean committed = CharacterAccessService.mutateGlobalsIfChanged(AUTHORITY,
+                    List.of(heirGlobalId, sourceGlobalId), people -> {
+                Character heir = people.get(heirGlobalId);
+                Character deceased = people.get(sourceGlobalId);
+                String transferId = null;
                 for (Map.Entry<String, Object> property : heir.props.entrySet()) {
-                    if (!property.getKey().startsWith("estate.incoming.")
-                            || !(property.getValue() instanceof String sourceGlobalId)) continue;
-                    String transferId = property.getKey().substring("estate.incoming.".length());
-                    Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
-                    if (deceased == null
-                            || !transferId.equals(deceased.props.get("estate.transfer_pending"))
-                            || !heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))) continue;
-                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
-                    if (sourceRegistry == null) return false;
-                    deceased.props.put("estate.transfer_receipt", transferId);
-                    deceased.props.remove("estate.transfer_pending");
-                    AUTHORITY.clearEstateIncoming(heir.globalId, sourceGlobalId);
-                    changed.computeIfAbsent(sourceRegistry, ignored -> new ArrayList<>()).add(deceased);
+                    if (property.getKey().startsWith("estate.incoming.")
+                            && sourceGlobalId.equals(property.getValue())) {
+                        transferId = property.getKey().substring("estate.incoming.".length());
+                        break;
+                    }
                 }
+                if (transferId == null
+                        || !transferId.equals(deceased.props.get("estate.transfer_pending"))
+                        || !heirGlobalId.equals(deceased.props.get("estate.recipient_global_id"))) return false;
+                deceased.props.put("estate.transfer_receipt", transferId);
+                deceased.props.remove("estate.transfer_pending");
+                return true;
+            });
+            if (committed) {
+                AUTHORITY.clearEstateIncoming(heirGlobalId, sourceGlobalId);
+                changed.add(sourceRegistry);
             }
         }
-        for (Map.Entry<CharacterRegistry, List<Character>> entry : changed.entrySet()) {
-            CharacterRegistry registry = entry.getKey();
+        for (CharacterRegistry registry : changed) {
             try {
                 if (registry == PLAYER_REGISTRY) {
                     Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
