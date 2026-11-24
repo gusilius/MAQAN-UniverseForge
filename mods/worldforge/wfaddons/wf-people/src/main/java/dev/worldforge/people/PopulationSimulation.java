@@ -16,8 +16,9 @@ public final class PopulationSimulation {
         final long fallbackDay;
         final int year;
         final long membershipGeneration;
-        final List<String> ids;
+        List<String> ids;
         int nextIndex;
+        boolean complete;
         boolean catchUpPass;
         String lastProcessedId = "";
         WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
@@ -563,6 +564,9 @@ public final class PopulationSimulation {
         synchronized (WORLD_DAY_CURSORS) {
             long generation = registry.membershipGeneration();
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
+                    && cursor.year == year && cursor.membershipGeneration == generation
+                    && cursor.targetDay == targetWorldDay) return true;
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
                     || cursor.membershipGeneration != generation) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
@@ -615,8 +619,12 @@ public final class PopulationSimulation {
                                 cursor.ids, 0, false, ""));
                 return false;
             }
-            if (complete) WORLD_DAY_CURSORS.remove(registry);
-            else WORLD_DAY_CURSORS.put(registry, cursor);
+            if (complete) {
+                // Keep only a tiny acknowledgement marker; drop the population-sized ID snapshot.
+                cursor.ids = List.of();
+                cursor.complete = true;
+            }
+            WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
     }
