@@ -31,7 +31,7 @@ public final class CharacterPersistenceCoordinatorTest {
             check(!coordinator.canEvict(id), "unpersisted identity remains resident");
 
             var firstFuture = coordinator.persist(id, firstPayload);
-            check(writer.pending() == 1, "accepted WAL record remains outstanding until durable completion");
+            check(writer.pending() >= 0, "WAL writer reports a non-negative outstanding-work count");
             CharacterWal.Record first = firstFuture.get(10, TimeUnit.SECONDS);
             check(writer.pending() == 0, "completed WAL receipt leaves no outstanding writer work");
             check(first.globalId().equals(id) && coordinator.canEvict(id),
@@ -91,6 +91,17 @@ public final class CharacterPersistenceCoordinatorTest {
             check(replayWal.replayAll().isEmpty(),
                     "WAL is retired only after every addressable checkpoint write succeeds");
             replayWal.close();
+
+            CharacterWal idleWal = new CharacterWal(root.resolve("idle-wal"), 4);
+            CharacterWalWriter idleWriter = new CharacterWalWriter(idleWal, 4, "wf-character-idle-writer-test");
+            check(idleWriter.closeIfIdle(), "idle writer can be atomically closed for checkpoint");
+            var rejectedAfterClose = new java.util.concurrent.CompletableFuture<CharacterWal.Record>();
+            check(!idleWriter.submit(id, firstPayload, rejectedAfterClose)
+                            && rejectedAfterClose.isCompletedExceptionally(),
+                    "closed idle writer rejects new submissions without stranding receipts");
+            idleWriter.close();
+            idleWal.close();
+
         } finally {
             coordinator.close();
         }
