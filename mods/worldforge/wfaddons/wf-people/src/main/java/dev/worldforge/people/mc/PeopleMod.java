@@ -93,6 +93,9 @@ public class PeopleMod {
     private static final Map<CharacterRegistry, CharacterWal> CHARACTER_WALS = new java.util.IdentityHashMap<>();
     /** Addressable per-Character checkpoint store; the WAL remains the write-ahead authority. */
     private static final Map<CharacterRegistry, CharacterRecordStore> CHARACTER_RECORD_STORES = new java.util.IdentityHashMap<>();
+    /** Record-store completeness is conservative: bootstrap again after any membership change. */
+    private static final Map<CharacterRegistry, Boolean> CHARACTER_RECORD_STORE_COMPLETE = new java.util.IdentityHashMap<>();
+    private static final Map<CharacterRegistry, Long> CHARACTER_RECORD_STORE_MEMBERSHIP = new java.util.IdentityHashMap<>();
     /** Bounded asynchronous writers for explicit bulk workloads; transactional writes remain synchronous. */
     private static final Map<CharacterRegistry, CharacterWalWriter> CHARACTER_WAL_WRITERS = new java.util.IdentityHashMap<>();
     /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
@@ -522,6 +525,8 @@ public class PeopleMod {
                 replayed[0]++;
             });
             CHARACTER_RECORD_STORES.put(registry, records);
+            CHARACTER_RECORD_STORE_COMPLETE.put(registry, checkpointRecords[0] >= registry.size());
+            CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
             CHARACTER_WALS.put(registry, wal);
             String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
             CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken));
@@ -541,20 +546,38 @@ public class PeopleMod {
         // A forced append batch is already durable. Defer checkpointing while the
         // asynchronous writer has queued or in-flight records; never stall the tick.
         if (writer != null && writer.pending() > 0) return;
-        writer = CHARACTER_WAL_WRITERS.remove(registry);
-        if (writer != null) writer.close();
+        // Keep the writer registered until close/drain succeeds. A failed writer must
+        // remain visible so a later save cannot silently checkpoint around its error.
+        if (writer != null) {
+            writer.close();
+            CHARACTER_WAL_WRITERS.remove(registry, writer);
+        }
+        boolean restartWriter = writer != null;
         try {
             CharacterRecordStore records = CHARACTER_RECORD_STORES.get(registry);
             if (records == null) throw new java.io.IOException("Character record store is not open");
-            // Publish every current Character record before retiring any WAL frame.
-            // Membership is append-only; per-record replacements are atomic and replayable.
-            for (Character character : registry.all()) {
-                records.put(character.globalId,
-                        registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+            long membership = registry.membershipGeneration();
+            boolean fullBootstrap = !Boolean.TRUE.equals(CHARACTER_RECORD_STORE_COMPLETE.get(registry))
+                    || !Objects.equals(CHARACTER_RECORD_STORE_MEMBERSHIP.get(registry), membership);
+            if (fullBootstrap) {
+                // First checkpoint, legacy migration, or new/deleted membership: establish
+                // a complete durable baseline before allowing WAL-only incremental passes.
+                for (Character character : registry.all()) {
+                    records.put(character.globalId,
+                            registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+                }
+            } else {
+                // Existing records are already durable. Only journaled changes need to be
+                // compacted; do not serialize or scan every unchanged Character.
+                wal.replayEach(record -> records.put(record.globalId(), record.payload()));
             }
+            // Never retire the WAL until every corresponding record-store replacement
+            // has completed its forced write and atomic rename.
             wal.checkpoint();
+            CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
+            CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
         } finally {
-            CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192,
+            if (restartWriter) CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192,
                     "wf-character-wal-checkpoint-" + Integer.toHexString(System.identityHashCode(registry))));
         }
     }
@@ -575,6 +598,8 @@ public class PeopleMod {
             catch (Exception failure) { LOGGER.error("wf_people: failed to close Character record store", failure); }
         }
         CHARACTER_RECORD_STORES.clear();
+        CHARACTER_RECORD_STORE_COMPLETE.clear();
+        CHARACTER_RECORD_STORE_MEMBERSHIP.clear();
     }
 
     @FunctionalInterface
