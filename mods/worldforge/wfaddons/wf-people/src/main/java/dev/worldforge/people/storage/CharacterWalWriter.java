@@ -136,8 +136,13 @@ public final class CharacterWalWriter implements AutoCloseable {
         return true;
     }
 
-    @Override public synchronized void close() throws IOException {
-        accepting.set(false);
+    @Override public void close() throws IOException {
+        // Stop producers while holding the same monitor used by submit(), then release
+        // it before joining. Completion callbacks are allowed to call submit() and must
+        // not deadlock the worker against a shutdown thread waiting in join().
+        synchronized (this) {
+            accepting.set(false);
+        }
         try { worker.join(); }
         catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
