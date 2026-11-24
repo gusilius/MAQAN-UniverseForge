@@ -203,11 +203,11 @@ public final class CharacterRecordStore implements AutoCloseable {
         byte[] payload = new byte[payloadLength];
         frame.get(id).get(payload);
         int storedCrc = frame.getInt();
-        ByteBuffer crcBytes = ByteBuffer.allocate(HEADER_BYTES - Integer.BYTES + idLength + payloadLength)
-                .order(ByteOrder.BIG_ENDIAN);
-        crcBytes.putShort(version).putShort(reserved).putInt(idLength).putInt(payloadLength).put(id).put(payload);
+        // The decoded frame is heap-backed. Verify the exact encoded CRC range in place
+        // instead of allocating and filling a second payload-sized buffer.
         CRC32C crc = new CRC32C();
-        crc.update(crcBytes.array(), 0, crcBytes.position());
+        crc.update(frame.array(), Integer.BYTES,
+                HEADER_BYTES - Integer.BYTES + idLength + payloadLength);
         if ((int) crc.getValue() != storedCrc)
             throw new IOException("Character record checksum mismatch: " + file);
         String globalId = new String(id, StandardCharsets.UTF_8);
