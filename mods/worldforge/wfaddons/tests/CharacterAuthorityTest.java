@@ -43,6 +43,29 @@ public final class CharacterAuthorityTest {
         Character b = south.create("Beatrice", "", "", "f", 0);
         check(a.id.equals("c1") && b.id.equals("c1"), "legacy per-map IDs remain unchanged during migration");
         check(!a.globalId.equals(b.globalId), "each new Character receives a unique immutable global UUID");
+        CharacterRegistry officeRegistry = new CharacterRegistry();
+        Character ruler = officeRegistry.create("Ruler", "House A", "", "m", 0);
+        Character marshal = officeRegistry.create("Marshal", "House B", "", "m", 0);
+        Character clerk = officeRegistry.create("Clerk", "", "", "f", 0);
+        officeRegistry.appoint(ruler.id, "ruler", "realm:test");
+        officeRegistry.appoint(marshal.id, "marshal", "realm:test");
+        officeRegistry.appoint(clerk.id, "marshal", "realm:other");
+        check(officeRegistry.holders("ruler", "realm:test").size() == 1
+                        && officeRegistry.holders("marshal", "realm:test").size() == 1
+                        && officeRegistry.holdersAtPlace("realm:test").size() == 2,
+                "role/place and place-only reverse indexes return exact living office holders");
+        officeRegistry.dismiss(marshal.id, "marshal", "realm:test");
+        check(officeRegistry.holders("marshal", "realm:test").isEmpty()
+                        && officeRegistry.holdersAtPlace("realm:test").size() == 1,
+                "dismissal removes the character from both reverse office indexes");
+        String officeSave = officeRegistry.toJson();
+        CharacterRegistry restoredOffices = new CharacterRegistry();
+        restoredOffices.fromJson(officeSave, world + "|office-index");
+        check(restoredOffices.holders("ruler", "realm:test").size() == 1
+                        && restoredOffices.holders("marshal", "realm:other").size() == 1
+                        && restoredOffices.holdersAtPlace("realm:test").size() == 1,
+                "office reverse indexes are reconstructed from persisted posts");
+
         authority.registerMap("north", north);
         authority.registerMap("south", south);
         check(authority.size() == 2 && authority.mapCount() == 2, "global authority indexes both map partitions");

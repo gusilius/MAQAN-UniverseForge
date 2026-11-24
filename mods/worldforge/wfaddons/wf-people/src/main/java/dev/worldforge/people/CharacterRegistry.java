@@ -200,8 +200,7 @@ public final class CharacterRegistry {
         List<Character> result = new ArrayList<>(ids.size());
         for (String id : ids) {
             Character character = byId.get(id);
-            if (character != null && character.alive
-                    && character.posts.stream().anyMatch(post -> post.place.equals(place))) result.add(character);
+            if (character != null && character.alive) result.add(character);
         }
         return Collections.unmodifiableList(result);
     }
