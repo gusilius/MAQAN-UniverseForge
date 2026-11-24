@@ -70,19 +70,19 @@ public final class CharacterAccessServiceTest {
                     "UUID mutation API marks the canonical identity dirty after releasing pins");
 
 
-            Character second = registry.create("Multi Subject", "", "test", "f", 2);
-            secondId = second.id;
+            Character secondPerson = registry.create("Multi Subject", "", "test", "f", 2);
+            secondId = secondPerson.id;
             dev.worldforge.people.CharacterAuthority authority = new dev.worldforge.people.CharacterAuthority();
             authority.beginWorld(WorldId.parse("00000000-0000-0000-0000-000000000001"));
             authority.registerMap("overworld", registry);
             access.mutateGlobals(authority, java.util.List.of(second.globalId, original.globalId, second.globalId),
                     participants -> {
                         participants.get(original.globalId).name = "Batch First";
-                        participants.get(second.globalId).name = "Batch Second";
+                        participants.get(secondPerson.globalId).name = "Batch Second";
                     });
-            check("Batch First".equals(original.name) && "Batch Second".equals(second.name)
+            check("Batch First".equals(original.name) && "Batch Second".equals(secondPerson.name)
                             && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
-                            && gate.decision(second.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && gate.decision(secondPerson.globalId) == CharacterEvictionGate.Decision.DIRTY
                             && registry.activeAccessLeaseCount() == 0,
                     "multi-character mutation deduplicates UUIDs and dirties every canonical participant");
 
@@ -94,7 +94,7 @@ public final class CharacterAccessServiceTest {
             boolean failedScopedMutation = false;
             try {
                 CharacterAccessService.mutateGlobalsIfChanged(authority,
-                        java.util.List.of(original.globalId, second.globalId), participants -> {
+                        java.util.List.of(original.globalId, secondPerson.globalId), participants -> {
                             participants.get(original.globalId).name = "Failed Batch";
                             throw new IllegalStateException("simulated batch failure");
                         });
