@@ -42,6 +42,15 @@ public final class CharacterMilitaryIdentityTest {
                         && PopulationSimulation.hasDuty(restoredPerson, Duty.SOLDIER),
                 "soldier identity and physical entity binding survive Character registry save/load");
 
+        int leasesBefore = restored.activeAccessLeaseCount();
+        try (var lease = restored.access().acquireGlobal(globalId)) {
+            check(lease != null && lease.get() == restoredPerson
+                            && restored.activeAccessLeaseCount() == leasesBefore + 1,
+                    "physical troop UUID resolves to the canonical Character through a scoped lease");
+        }
+        check(restored.activeAccessLeaseCount() == leasesBefore,
+                "closing the military Character lease releases the eviction pin exactly once");
+
         restored.unbindEntity(legacyId, "troop", troopEntity);
         String formerProfession = String.valueOf(restoredPerson.props.remove("population.pre_military_profession"));
         restored.changeProfession(legacyId, formerProfession, 302);
