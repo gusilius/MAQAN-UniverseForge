@@ -21,6 +21,15 @@ public final class ResidentLifeEventsTest {
         else System.out.println("ok   " + message);
     }
 
+    private static boolean retainsCharacterReference(Object value) {
+        if (value instanceof Character) return true;
+        if (value instanceof Iterable<?> values)
+            for (Object item : values) if (retainsCharacterReference(item)) return true;
+        if (value instanceof Map<?, ?> map)
+            for (Object item : map.values()) if (retainsCharacterReference(item)) return true;
+        return false;
+    }
+
     private static int registryPassField(CharacterRegistry registry, String fieldName) {
         try {
             java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
@@ -38,6 +47,23 @@ public final class ResidentLifeEventsTest {
 
     public static void main(String[] args) {
         System.setProperty("wf.test.traceResidentLife", "true");
+        CharacterRegistry retentionRegistry = new CharacterRegistry();
+        for (int i = 0; i < 64; i++)
+            retentionRegistry.create("Resident " + i, "", "north", i % 2 == 0 ? "m" : "f", 1980);
+        ResidentLifeEvents.advanceYearly(retentionRegistry, 2020, null, 1, 9001L);
+        try {
+            java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
+            passesField.setAccessible(true);
+            Object passState = ((java.util.Map<?, ?>) passesField.get(null)).get(retentionRegistry);
+            java.lang.reflect.Field sessionField = passState.getClass().getDeclaredField("session");
+            sessionField.setAccessible(true);
+            Object session = sessionField.get(passState);
+            check(session != null && !retainsCharacterReference(session),
+                    "resumable family sessions retain UUIDs rather than population-sized Character references");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("could not inspect UUID-based family session", error);
+        }
+
         CharacterRegistry registry = new CharacterRegistry();
         Character father = registry.create("Арен", "Дом Арен", "north", "m", 1980);
         Character mother = registry.create("Мира", "Дом Мира", "north", "f", 1980);
