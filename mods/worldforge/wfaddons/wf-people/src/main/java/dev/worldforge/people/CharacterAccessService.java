@@ -92,6 +92,44 @@ public final class CharacterAccessService {
     public Lease acquireGlobal(String globalId) { return registry.acquireGlobal(globalId); }
 
     /**
+     * Synchronous lazy hydration under the registry monitor. The checkpoint store is
+     * authoritative here: a merely WAL-durable record is not evictable until compaction
+     * has produced its addressable checkpoint. The record codec validates the UUID again.
+     */
+    Character hydrate(String localId) {
+        synchronized (registry) {
+            Character existing = registry.peekMaterialized(localId);
+            if (existing != null) return existing;
+            String globalId = registry.globalIdForLocalId(localId);
+            if (globalId == null) return null;
+            CharacterPersistenceCoordinator persistence = coordinator();
+            if (persistence == null || !persistence.canEvict(globalId)) return null;
+            try {
+                dev.worldforge.people.storage.CharacterRecordStore.Record record = persistence.load(globalId);
+                if (record == null || !globalId.equals(record.globalId())) return null;
+                registry.applyJsonRecord(record.payloadUtf8(), "wf-lazy-hydration", globalId);
+                Character restored = registry.peekMaterialized(localId);
+                if (restored == null || !globalId.equals(restored.globalId))
+                    throw new IllegalStateException("Hydrated Character identity does not match its directory entry");
+                return restored;
+            } catch (java.io.IOException failure) {
+                throw new IllegalStateException("Could not hydrate Character " + globalId, failure);
+            }
+        }
+    }
+
+    boolean canEvict(String globalId) {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        return persistence != null && persistence.canEvict(globalId);
+    }
+
+    dev.worldforge.people.storage.CharacterRecordStore.Record loadCheckpoint(String globalId)
+            throws java.io.IOException {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        return persistence == null ? null : persistence.load(globalId);
+    }
+
+    /**
      * Runs one canonical mutation under a strong lease and transaction pin.
      * The Character is conservatively marked dirty in finally, including when the
      * callback throws after partially changing state. The caller remains responsible
