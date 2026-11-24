@@ -12,7 +12,7 @@ public final class PopulationComputeBridge {
     public static final int SCHEMA_VERSION = 1;
     public static final class Scan {
         private final List<CharacterRegistry> registries;
-        private final long[] membershipGenerations;
+        private final long[] membershipResetGenerations;
         private final int[] starts, limits;
         // Store only integer range boundaries. IDs are resolved by index on demand.
 
@@ -24,14 +24,14 @@ public final class PopulationComputeBridge {
                 if (seen.add(registry)) ordered.add(registry);
             }
             this.registries = List.copyOf(ordered);
-            this.membershipGenerations = new long[ordered.size()];
+            this.membershipResetGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
             if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
                 throw new IllegalArgumentException("Population scan partition shape changed");
             for (int i = 0; i < ordered.size(); i++) {
                 CharacterRegistry registry = ordered.get(i);
-                membershipGenerations[i] = registry.membershipGeneration();
+                membershipResetGenerations[i] = registry.membershipResetGeneration();
                 if (starts == null) this.starts[i] = 0;
                 if (limits == null) this.limits[i] = registry.size();
                 if (this.starts[i] < 0 || this.limits[i] < this.starts[i]
@@ -53,7 +53,7 @@ public final class PopulationComputeBridge {
             if (current.size() != registries.size()) return false;
             for (int i = 0; i < current.size(); i++) {
                 if (current.get(i) != registries.get(i)
-                        || current.get(i).membershipGeneration() != membershipGenerations[i]) return false;
+                        || current.get(i).membershipResetGeneration() != membershipResetGenerations[i]) return false;
             }
             return true;
         }
@@ -65,7 +65,7 @@ public final class PopulationComputeBridge {
             boolean appended = false;
             for (int i = 0; i < registries.size(); i++) {
                 CharacterRegistry registry = registries.get(i);
-                if (registry.membershipGeneration() != membershipGenerations[i])
+                if (registry.membershipResetGeneration() != membershipResetGenerations[i])
                     throw new IllegalStateException("Character registry was restored during population scan");
                 int currentSize = registry.size();
                 if (currentSize < limits[i])
@@ -110,7 +110,7 @@ public final class PopulationComputeBridge {
         public int firstMemberCursor() { return starts.length == 0 ? 0 : starts[0]; }
         private boolean current() {
             for (int i = 0; i < registries.size(); i++)
-                if (registries.get(i).membershipGeneration() != membershipGenerations[i]) return false;
+                if (registries.get(i).membershipResetGeneration() != membershipResetGenerations[i]) return false;
             return true;
         }
     }
