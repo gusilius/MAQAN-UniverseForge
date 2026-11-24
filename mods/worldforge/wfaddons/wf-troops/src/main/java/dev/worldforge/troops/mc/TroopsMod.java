@@ -768,6 +768,7 @@ public class TroopsMod {
             String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
             if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute)) {
                 troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
+                troop.setCanonicalCharacterMorale(troop.moralePct());
                 troop.setCanonicalInjuryCombatMultiplier(
                         CharacterDevelopment.injuryCombatMultiplier(binding.character()));
                 binding.registry().access().mutateGlobal(binding.character().globalId, ignored -> { });
@@ -782,13 +783,18 @@ public class TroopsMod {
 
     /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
     static void syncMilitaryMorale(TroopEntity troop) {
+        int next = troop == null ? 100 : Math.max(0, Math.min(100, troop.moralePct()));
+        if (troop == null || troop.canonicalCharacterMorale() == next) return;
         try (PersonBinding binding = bindPerson(troop, false)) {
             if (binding == null) return;
             Character person = binding.character();
-            int next = Math.max(0, Math.min(100, troop.moralePct()));
-            if (CharacterDevelopment.militaryMorale(person) == next) return;
+            if (CharacterDevelopment.militaryMorale(person) == next) {
+                troop.setCanonicalCharacterMorale(next);
+                return;
+            }
             CharacterDevelopment.setMilitaryMorale(person, next);
             binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+            troop.setCanonicalCharacterMorale(next);
         }
     }
 
@@ -848,6 +854,7 @@ public class TroopsMod {
                 CharacterDevelopment.setMilitaryMorale(person, morale);
                 changed = true;
             }
+            troop.setCanonicalCharacterMorale(morale);
             troop.setCanonicalInjuryCombatMultiplier(CharacterDevelopment.injuryCombatMultiplier(person));
             Object previousIntent = person.props.get("population.intent");
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
