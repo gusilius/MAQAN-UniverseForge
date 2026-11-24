@@ -152,16 +152,19 @@ public final class CharacterWal implements AutoCloseable {
     }
 
     /**
-     * Emits only the last durable frame per global Character ID. The temporary index stores
-     * one payload per changed Character, not one entry per mutation; this avoids repeatedly
-     * rewriting the same record during checkpoint compaction.
+     * Emits only the last durable frame per global Character ID. Two streaming passes keep
+     * only ID-to-sequence metadata in memory; payload byte arrays are never retained for the
+     * whole dirty population. Every ID is deterministically assigned to one shard.
      */
     public synchronized void replayLatestEach(ReplayConsumer consumer) throws IOException {
         ensureOpen();
         Objects.requireNonNull(consumer, "consumer");
-        Map<String, Record> latest = new HashMap<>();
-        replayEach(record -> latest.put(record.globalId(), record));
-        for (Record record : latest.values()) consumer.accept(record);
+        Map<String, Long> latestSequence = new HashMap<>();
+        replayEach(record -> latestSequence.put(record.globalId(), record.sequence()));
+        replayEach(record -> {
+            Long latest = latestSequence.get(record.globalId());
+            if (latest != null && latest.longValue() == record.sequence()) consumer.accept(record);
+        });
     }
 
     /** Compatibility helper for small tests/tools; production recovery should use replayEach. */
