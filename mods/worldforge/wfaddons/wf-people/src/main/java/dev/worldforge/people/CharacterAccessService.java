@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Scoped access to canonical Characters. A lease pins the exact materialized object
@@ -20,10 +21,6 @@ public final class CharacterAccessService {
         this.registry = Objects.requireNonNull(registry, "registry");
     }
 
-    /**
-     * Attaches the registry to its existing WAL/record-store coordinator. Existing IDs
-     * are registered as not-yet-persisted; this deliberately does not claim they are clean.
-     */
     public synchronized void attachPersistenceCoordinator(CharacterPersistenceCoordinator coordinator) {
         Objects.requireNonNull(coordinator, "coordinator");
         synchronized (PERSISTENCE) {
@@ -35,17 +32,62 @@ public final class CharacterAccessService {
         for (Character character : registry.all()) coordinator.register(character.globalId);
     }
 
+    private CharacterPersistenceCoordinator coordinator() {
+        synchronized (PERSISTENCE) { return PERSISTENCE.get(registry); }
+    }
+
     private CharacterEvictionGate.Pin pin(Character character) {
-        CharacterPersistenceCoordinator coordinator;
-        synchronized (PERSISTENCE) { coordinator = PERSISTENCE.get(registry); }
+        CharacterPersistenceCoordinator coordinator = coordinator();
         if (coordinator == null) return null;
-        // Register lazily as a safe fallback for characters created after attachment.
         coordinator.register(character.globalId);
         return coordinator.acquireLease(character.globalId);
     }
 
     public Lease acquire(String localId) { return registry.acquire(localId); }
     public Lease acquireGlobal(String globalId) { return registry.acquireGlobal(globalId); }
+
+    /**
+     * Runs one canonical mutation under a strong lease and transaction pin.
+     * The Character is conservatively marked dirty in finally, including when the
+     * callback throws after partially changing state. The caller remains responsible
+     * for domain rollback/atomicity; this method guarantees it cannot be evicted.
+     */
+    public void mutate(String localId, Consumer<Character> mutation) {
+        Objects.requireNonNull(mutation, "mutation");
+        CharacterPersistenceCoordinator persistence = coordinator();
+        if (persistence == null)
+            throw new IllegalStateException("Character persistence coordinator is not attached");
+        try (Lease lease = acquire(localId)) {
+            if (lease == null) throw new IllegalArgumentException("Unknown Character: " + localId);
+            Character character = lease.get();
+            try (CharacterEvictionGate.Pin transaction = persistence.beginTransaction(character.globalId)) {
+                try {
+                    mutation.accept(character);
+                } finally {
+                    persistence.markDirty(character.globalId);
+                }
+            }
+        }
+    }
+
+    /** UUID-addressed variant for cross-map family, estate and inventory operations. */
+    public void mutateGlobal(String globalId, Consumer<Character> mutation) {
+        Objects.requireNonNull(mutation, "mutation");
+        CharacterPersistenceCoordinator persistence = coordinator();
+        if (persistence == null)
+            throw new IllegalStateException("Character persistence coordinator is not attached");
+        try (Lease lease = acquireGlobal(globalId)) {
+            if (lease == null) throw new IllegalArgumentException("Unknown Character UUID: " + globalId);
+            Character character = lease.get();
+            try (CharacterEvictionGate.Pin transaction = persistence.beginTransaction(character.globalId)) {
+                try {
+                    mutation.accept(character);
+                } finally {
+                    persistence.markDirty(character.globalId);
+                }
+            }
+        }
+    }
 
     public static final class Lease implements AutoCloseable {
         private final CharacterRegistry registry;
@@ -58,8 +100,7 @@ public final class CharacterAccessService {
             this.registry = Objects.requireNonNull(registry, "registry");
             this.localId = Objects.requireNonNull(localId, "localId");
             this.character = Objects.requireNonNull(character, "character");
-            CharacterAccessService service = registry.access();
-            this.persistencePin = service.pin(character);
+            this.persistencePin = registry.access().pin(character);
         }
 
         public Character get() {

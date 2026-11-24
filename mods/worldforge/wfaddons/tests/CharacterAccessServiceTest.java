@@ -61,6 +61,22 @@ public final class CharacterAccessServiceTest {
             }
             check(gate.decision(original.globalId) == CharacterEvictionGate.Decision.NEVER_PERSISTED,
                     "closing registry lease releases the persistence pin without falsely marking clean");
+
+            access.mutateGlobal(original.globalId, character -> character.name = "Mutated Through Scoped API");
+            check("Mutated Through Scoped API".equals(original.name)
+                            && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY,
+                    "UUID mutation API marks the canonical identity dirty after releasing pins");
+
+            boolean failedMutation = false;
+            try {
+                access.mutate(original.id, character -> {
+                    character.name = "Partially Mutated";
+                    throw new IllegalStateException("simulated domain failure");
+                });
+            } catch (IllegalStateException expected) { failedMutation = true; }
+            check(failedMutation && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && registry.activeAccessLeaseCount() == 0,
+                    "failed partial mutation remains dirty and releases lease/transaction pins");
         } finally {
             coordinator.close();
             try (var paths = Files.walk(root)) {
