@@ -83,8 +83,9 @@ public final class CharacterRegistry {
     }
 
     /**
-     * Key-only insertion-order cursor. Unlike a values/entry iterator, it retains only the
-     * last local ID between bounded slices, never the last Character object.
+     * Temporary key-only iterator for one synchronous traversal. Do not retain it across
+     * ticks: LinkedHashMap iterator state can still retain its last node and Character value.
+     * Long-lived population work must use idSnapshot() instead.
      */
     public Iterator<String> idIteratorAfter(String exclusiveId) {
         Iterator<String> iterator = byId.keySet().iterator();
@@ -93,29 +94,6 @@ public final class CharacterRegistry {
             if (exclusiveId.equals(iterator.next())) return iterator;
         }
         throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
-    }
-
-    /**
-     * Copies a bounded insertion-order page of IDs. The map iterator is strictly local to
-     * this call and is discarded before returning, so its internal LinkedHashMap.Node cannot
-     * keep a Character value reachable across ticks or asynchronous compute slices.
-     */
-    public List<String> idRange(int fromInclusive, int toExclusive) {
-        int size = byId.size();
-        if (fromInclusive < 0 || toExclusive < fromInclusive || toExclusive > size)
-            throw new IndexOutOfBoundsException("ID range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
-        if (fromInclusive == toExclusive) return List.of();
-        List<String> result = new ArrayList<>(toExclusive - fromInclusive);
-        Iterator<String> iterator = byId.keySet().iterator();
-        for (int skipped = 0; skipped < fromInclusive; skipped++) {
-            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during ID page capture");
-            iterator.next();
-        }
-        for (int index = fromInclusive; index < toExclusive; index++) {
-            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during ID page capture");
-            result.add(iterator.next());
-        }
-        return result;
     }
 
     /** One insertion-order snapshot of IDs only; safe to retain across bounded processing slices. */
