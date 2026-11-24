@@ -1227,18 +1227,20 @@ public class PeopleMod {
             java.util.concurrent.atomic.AtomicLong partitionBytes = new java.util.concurrent.atomic.AtomicLong();
             java.util.concurrent.atomic.AtomicLong passBytes = new java.util.concurrent.atomic.AtomicLong(bytesUsed);
             int accepted = persistence.persistDirtyBatch(globalId -> {
-                Character character = registry.getByGlobalId(globalId);
-                if (character == null)
-                    throw new IllegalStateException("Dirty Character identity is absent from its canonical registry: " + globalId);
-                byte[] payload = registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
-                long local = partitionBytes.get();
-                long global = passBytes.get();
-                if (payload.length > byteBudget - local || payload.length > DIRTY_SAVE_MAX_BYTES_PER_PASS - global)
-                    throw new CharacterPersistenceCoordinator.DirtyBatchBudgetExceededException(
-                            "Server dirty-save byte budget reached");
-                partitionBytes.addAndGet(payload.length);
-                passBytes.addAndGet(payload.length);
-                return payload;
+                try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                             registry.access().acquireGlobal(globalId)) {
+                    if (lease == null)
+                        throw new IllegalStateException("Dirty Character identity is absent from its canonical registry: " + globalId);
+                    byte[] payload = registry.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8);
+                    long local = partitionBytes.get();
+                    long global = passBytes.get();
+                    if (payload.length > byteBudget - local || payload.length > DIRTY_SAVE_MAX_BYTES_PER_PASS - global)
+                        throw new CharacterPersistenceCoordinator.DirtyBatchBudgetExceededException(
+                                "Server dirty-save byte budget reached");
+                    partitionBytes.addAndGet(payload.length);
+                    passBytes.addAndGet(payload.length);
+                    return payload;
+                }
             }, countBudget, byteBudget);
 
             long writtenBytes = partitionBytes.get();
