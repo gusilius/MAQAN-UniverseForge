@@ -985,9 +985,11 @@ public final class CharacterRegistry {
                         || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
                 if (!(entry.getKey() instanceof String globalId)
                         || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
-                String localId = localIdForGlobalId(globalId);
+                CharacterRegistry friendRegistry = authority == null ? this : authority.registryForGlobal(globalId);
+                if (friendRegistry == null) continue;
+                String localId = friendRegistry.localIdForGlobalId(globalId);
                 if (localId == null) continue;
-                try (CharacterAccessService.Lease lease = access().acquire(localId)) {
+                try (CharacterAccessService.Lease lease = friendRegistry.access().acquire(localId)) {
                     if (lease != null && lease.get().alive
                             && relationshipScore(lease.get(), deceased.globalId) >= 35)
                         recipients.add(globalId);
@@ -1101,7 +1103,9 @@ public final class CharacterRegistry {
                     cursor++;
                     processed++;
                     final int committedCursor = cursor;
-                    String survivorLocalId = localIdForGlobalId(survivorGlobalId);
+                    CharacterRegistry survivorRegistry = authority == null ? this : authority.registryForGlobal(survivorGlobalId);
+                    String survivorLocalId = survivorRegistry == null ? null
+                            : survivorRegistry.localIdForGlobalId(survivorGlobalId);
                     if (survivorLocalId == null || survivorGlobalId.equals(deceasedGlobalId)) {
                         CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
                             people.get(deceasedGlobalId).props.put("death.bereavement.cursor", committedCursor);
