@@ -593,7 +593,7 @@ public final class PopulationSimulation {
                     return true;
                 }
             }
-            int pageEnd = Math.min(cursor.snapshotSize, cursor.nextIndex + maxCharacters);
+            int pageEnd = (int) Math.min((long) cursor.snapshotSize, (long) cursor.nextIndex + maxCharacters);
             List<String> page = registry.idPage(cursor.nextIndex, pageEnd - cursor.nextIndex);
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 for (String characterId : page) {
