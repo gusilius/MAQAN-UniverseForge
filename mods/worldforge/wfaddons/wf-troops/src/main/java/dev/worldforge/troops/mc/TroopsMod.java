@@ -317,20 +317,16 @@ public class TroopsMod {
         return matches.size() == 1 ? matches.get(0).name : null;
     }
 
-    /** Finds a Character already bound to this exact physical troop UUID after an entity/registry split crash. */
+    /** Finds the canonical Character bound to this physical troop UUID using the partition reverse indexes. */
     private static PersonBinding findCharacterForTroopEntity(String entityId) {
         if (entityId == null || entityId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
-        for (var identity : PeopleMod.authority().identities()) {
-            Character person = PeopleMod.authority().get(identity);
-            if (person == null || !person.alive) continue;
-            boolean matches = entityId.equals(person.props.get("wf_troop_uuid"));
-            Object raw = person.props.get("population.entity_bindings");
-            if (!matches && raw instanceof Map<?, ?> bindings) matches = bindings.containsValue(entityId);
-            if (!matches) continue;
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(person.globalId);
-            return owner == null ? null : new PersonBinding(owner, person);
-        }
-        return null;
+        String globalId = PeopleMod.authority().globalIdForEntityBinding(entityId);
+        if (globalId == null) return null;
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+        if (owner == null) return null;
+        Character person = PeopleMod.authority().getGlobal(globalId);
+        if (person == null || !person.alive || !globalId.equals(person.globalId)) return null;
+        return new PersonBinding(owner, person);
     }
 
     private static ArmyRef armyRef(MapData map, int armyId) {
