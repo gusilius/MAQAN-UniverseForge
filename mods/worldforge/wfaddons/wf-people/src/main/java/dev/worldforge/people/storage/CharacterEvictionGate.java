@@ -106,8 +106,14 @@ public final class CharacterEvictionGate {
         synchronized (state) {
             if (state.leases != 0) return Decision.ACTIVE_LEASE;
             if (state.transactions != 0) return Decision.ACTIVE_TRANSACTION;
-            if (state.persistedGeneration == 0) return Decision.NEVER_PERSISTED;
-            if (state.persistedGeneration != state.generation) return Decision.DIRTY;
+            // A newly registered identity (generation 1) has never had a write.
+            // Once any mutation advances it, it is explicitly DIRTY even before its
+            // first durable receipt; callers must not confuse changed data with untouched data.
+            if (state.persistedGeneration != state.generation) {
+                if (state.persistedGeneration == 0 && state.generation == 1)
+                    return Decision.NEVER_PERSISTED;
+                return Decision.DIRTY;
+            }
             return Decision.ELIGIBLE;
         }
     }
