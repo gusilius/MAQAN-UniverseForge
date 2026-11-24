@@ -740,21 +740,16 @@ public final class CharacterInventory {
         }
         if (pending[0] != null && priorRecipient[0] != null && authority != null) {
             CharacterRegistry heirRegistry = authority.registryForGlobal(priorRecipient[0]);
-            if (heirRegistry != null) {
-                String heirLocal = heirRegistry.localIdForGlobalId(priorRecipient[0]);
-                if (heirLocal != null) {
-                    try (CharacterAccessService.Lease heirLease = heirRegistry.access().acquire(heirLocal)) {
-                        if (heirLease != null && deceasedGlobalId.equals(
-                                heirLease.get().props.get("estate.incoming." + pending[0]))) {
-                            CharacterAccessService.mutateScoped(authority, registry,
-                                    List.of(deceasedGlobalId, priorRecipient[0]), people -> {
-                                clearTransferredEstate(people.get(deceasedGlobalId), people.get(priorRecipient[0]));
-                                return true;
-                            });
-                            return heirLocal;
-                        }
-                    }
-                }
+            String heirLocal = heirRegistry == null ? null : heirRegistry.localIdForGlobalId(priorRecipient[0]);
+            if (heirLocal != null) {
+                boolean reconciled = CharacterAccessService.mutateScoped(authority, registry,
+                        List.of(deceasedGlobalId, priorRecipient[0]), people -> {
+                    Character heir = people.get(priorRecipient[0]);
+                    if (!deceasedGlobalId.equals(heir.props.get("estate.incoming." + pending[0]))) return false;
+                    clearTransferredEstate(people.get(deceasedGlobalId), heir);
+                    return true;
+                });
+                if (reconciled) return heirLocal;
             }
         }
 
