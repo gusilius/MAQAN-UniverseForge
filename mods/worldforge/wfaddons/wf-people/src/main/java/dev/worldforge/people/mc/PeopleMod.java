@@ -15,6 +15,8 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.storage.CharacterWal;
 import dev.worldforge.people.storage.CharacterWalWriter;
 import dev.worldforge.people.storage.CharacterRecordStore;
+import dev.worldforge.people.storage.CharacterEvictionGate;
+import dev.worldforge.people.storage.CharacterPersistenceCoordinator;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
@@ -529,7 +531,13 @@ public class PeopleMod {
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
             CHARACTER_WALS.put(registry, wal);
             String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
-            CHARACTER_WAL_WRITERS.put(registry, new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken));
+            CharacterWalWriter writer = new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken);
+            CHARACTER_WAL_WRITERS.put(registry, writer);
+            // Attach the existing WAL/record-store pipeline to the registry access service.
+            // This activates lease/transaction dirty tracking for real server partitions;
+            // physical eviction remains deliberately disabled.
+            registry.access().attachPersistenceCoordinator(new CharacterPersistenceCoordinator(
+                    new CharacterEvictionGate(), wal, writer, records));
             LOGGER.info("wf_people: recovered Character partition={} checkpointRecords={} walRecords={} characters={}",
                     partition, checkpointRecords[0], replayed[0], registry.size());
         } catch (Exception failure) {
