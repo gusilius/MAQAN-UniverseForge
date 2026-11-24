@@ -192,6 +192,10 @@ public class PeopleMod {
         else AUTHORITY.clear();
         FLAGS.clear();
         ticks = 0;
+        dirtySavePartitionCursor = 0;
+        dirtySaveRegistryGeneration = Long.MIN_VALUE;
+        dirtySavePasses = 0L;
+        dirtySaveLastLogTick = 0L;
         populationProcessedDay = Long.MIN_VALUE;
         populationBaselineDay = Long.MIN_VALUE;
         populationRegistryGeneration = 0L;
