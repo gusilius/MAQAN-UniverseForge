@@ -695,7 +695,13 @@ public class PeopleMod {
     }
 
     static void saveAll(MinecraftServer server) {
-        persistAllNow(server);
+        if (server == null) return;
+        PlayerInventoryBridge.syncOnline(server);
+        // Every accepted WAL append batch is already forced to stable storage. Commit the
+        // compatibility snapshot but retain the journal instead of replaying every dirty
+        // Character into one-file-per-record checkpoints on the server thread. Startup
+        // replays the retained WAL after loading the snapshot.
+        persistAllRegistries(server, false);
     }
 
     /**
@@ -988,6 +994,10 @@ public class PeopleMod {
     }
 
     static boolean persistAllRegistries(MinecraftServer server) {
+        return persistAllRegistries(server, true);
+    }
+
+    private static boolean persistAllRegistries(MinecraftServer server, boolean checkpointWal) {
         if (server == null || !playerRegistryAvailable) return false;
 
         List<CharacterRegistry> registries = new ArrayList<>();
@@ -1052,10 +1062,14 @@ public class PeopleMod {
             LOGGER.warn("wf_people: active estate dependency cycle detected; committing one write-ahead registry snapshot");
             if (!persistRegistriesWithJournal(server, registries, mapOwners, dimensionOwners)) return false;
             if (!finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners)) return false;
-            try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
-            catch (Exception checkpointFailure) {
-                LOGGER.error("wf_people: journaled snapshot committed but Character WAL checkpoint failed", checkpointFailure);
-                return false;
+            if (checkpointWal) {
+                try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
+                catch (Exception checkpointFailure) {
+                    LOGGER.error("wf_people: journaled snapshot committed but Character WAL checkpoint failed", checkpointFailure);
+                    return false;
+                }
+            } else {
+                LOGGER.info("wf_people: shutdown snapshot committed; durable Character WAL retained for startup replay");
             }
             return true;
         }
@@ -1096,10 +1110,16 @@ public class PeopleMod {
         }
         if (!finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners)) return false;
         // Retire WAL records only after every owner snapshot and estate receipt is durable.
-        try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
-        catch (Exception checkpointFailure) {
-            LOGGER.error("wf_people: snapshots committed but Character WAL checkpoint failed; replay remains safe", checkpointFailure);
-            return false;
+        // During shutdown keep the already-forced journal frames; startup applies them
+        // after the snapshot, avoiding a population-sized fsync loop on the server thread.
+        if (checkpointWal) {
+            try { for (CharacterRegistry registry : registries) checkpointCharacterWal(registry); }
+            catch (Exception checkpointFailure) {
+                LOGGER.error("wf_people: snapshots committed but Character WAL checkpoint failed; replay remains safe", checkpointFailure);
+                return false;
+            }
+        } else {
+            LOGGER.info("wf_people: shutdown snapshot committed; durable Character WAL retained for startup replay");
         }
         return true;
     }
