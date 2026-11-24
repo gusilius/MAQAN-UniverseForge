@@ -27,12 +27,12 @@ public final class PopulationComputeBridge {
             this.membershipGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
-                        if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
+            if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
                 throw new IllegalArgumentException("Population scan partition shape changed");
             for (int i = 0; i < ordered.size(); i++) {
                 CharacterRegistry registry = ordered.get(i);
                 membershipGenerations[i] = registry.membershipGeneration();
-                                if (starts == null) this.starts[i] = 0;
+                if (starts == null) this.starts[i] = 0;
                 if (limits == null) this.limits[i] = registry.size();
                 if (this.starts[i] < 0 || this.limits[i] < this.starts[i]
                         || this.limits[i] > registry.size())
