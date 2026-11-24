@@ -1437,37 +1437,41 @@ public class PeopleMod {
                 List<WFNpc> nearby = level.getEntitiesOfClass(WFNpc.class, player.getBoundingBox().inflate(3.0));
                 for (WFNpc body : nearby) {
                     if (player.distanceToSqr(body) > 9.0) continue;
-                    Character person = registry.get(body.characterId());
-                    if (person == null || !person.alive) continue;
-                    Object configured = person.props.get("social.initiative_dialogue");
-                    if (!(configured instanceof String dialogueId) || dialogueId.isBlank()) continue;
-                    String intent = pendingSocialIntent(person);
-                    if (!Boolean.TRUE.equals(person.props.get("social.initiative_enabled")) && intent.isEmpty()) continue;
-                    Map<String,Object> cooldowns = new HashMap<>();
-                    Object raw = person.props.get("social.initiative_cooldowns");
-                    if (raw instanceof Map<?,?> values) for (Map.Entry<?,?> entry : values.entrySet())
-                        if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n) cooldowns.put(key,n.longValue());
-                    String playerId = player.getUUID().toString();
-                    Object last = cooldowns.get(playerId);
-                    if (last instanceof Number n && ticks - n.longValue() < 2400) continue;
-                    person.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
-                    if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
-                            FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
-                    cooldowns.put(playerId, ticks);
-                    while (cooldowns.size() > 64) {
-                        String oldest = null;
-                        long oldestTick = Long.MAX_VALUE;
-                        for (Map.Entry<String,Object> entry : cooldowns.entrySet()) {
-                            if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
-                                oldest = entry.getKey();
-                                oldestTick = value.longValue();
+                    try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                                 registry.access().acquire(body.characterId())) {
+                        if (lease == null) continue;
+                        Character person = lease.get();
+                        if (!person.alive) continue;
+                        Object configured = person.props.get("social.initiative_dialogue");
+                        if (!(configured instanceof String dialogueId) || dialogueId.isBlank()) continue;
+                        String intent = pendingSocialIntent(person);
+                        if (!Boolean.TRUE.equals(person.props.get("social.initiative_enabled")) && intent.isEmpty()) continue;
+                        Map<String,Object> cooldowns = new HashMap<>();
+                        Object raw = person.props.get("social.initiative_cooldowns");
+                        if (raw instanceof Map<?,?> values) for (Map.Entry<?,?> entry : values.entrySet())
+                            if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n) cooldowns.put(key,n.longValue());
+                        String playerId = player.getUUID().toString();
+                        Object last = cooldowns.get(playerId);
+                        if (last instanceof Number n && ticks - n.longValue() < 2400) continue;
+                        person.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
+                        if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
+                                FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
+                        cooldowns.put(playerId, ticks);
+                        while (cooldowns.size() > 64) {
+                            String oldest = null;
+                            long oldestTick = Long.MAX_VALUE;
+                            for (Map.Entry<String,Object> entry : cooldowns.entrySet()) {
+                                if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
+                                    oldest = entry.getKey();
+                                    oldestTick = value.longValue();
+                                }
                             }
+                            if (oldest == null) break;
+                            cooldowns.remove(oldest);
                         }
-                        if (oldest == null) break;
-                        cooldowns.remove(oldest);
+                        person.props.put("social.initiative_cooldowns", cooldowns);
+                        break;
                     }
-                    person.props.put("social.initiative_cooldowns", cooldowns);
-                    break;
                 }
             }
         }
@@ -1537,23 +1541,30 @@ public class PeopleMod {
     static void interact(ServerPlayer sp, WFNpc npc) {
         ServerLevel level = sp.serverLevel();
         CharacterRegistry reg = registryFor(level);
-        Character c = reg == null ? null : reg.get(npc.characterId());
-        if (c == null || !c.alive) {
+        if (reg == null) {
             sp.sendSystemMessage(Component.literal("Незнакомец молчит."));
             return;
         }
-        String did = dialogueId(c);
-        NpcInteractEvent ev = new NpcInteractEvent(sp, npc, c, did);
-        MinecraftForge.EVENT_BUS.post(ev);
-        if (!ev.isHandled() && dialogueLoaded()) {
-            MapData m = EditorManager.dataFor(level);
-            Set<String> flags = FLAGS.computeIfAbsent(sp.getUUID(), k -> new HashSet<>());
-            if (m != null && m.titles != null) {
-                if (DialogueHook.open(sp, npc, c, did, ROLES, m.titles, flags)) return;
-                if (!did.equals("default") && DialogueHook.open(sp, npc, c, "default", ROLES, m.titles, flags)) return;   // у роли нет файла диалога
+        try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                     reg.access().acquire(npc.characterId())) {
+            if (lease == null || !lease.get().alive) {
+                sp.sendSystemMessage(Component.literal("Незнакомец молчит."));
+                return;
             }
+            Character c = lease.get();
+            String did = dialogueId(c);
+            NpcInteractEvent ev = new NpcInteractEvent(sp, npc, c, did);
+            MinecraftForge.EVENT_BUS.post(ev);
+            if (!ev.isHandled() && dialogueLoaded()) {
+                MapData m = EditorManager.dataFor(level);
+                Set<String> flags = FLAGS.computeIfAbsent(sp.getUUID(), k -> new HashSet<>());
+                if (m != null && m.titles != null) {
+                    if (DialogueHook.open(sp, npc, c, did, ROLES, m.titles, flags)) return;
+                    if (!did.equals("default") && DialogueHook.open(sp, npc, c, "default", ROLES, m.titles, flags)) return;
+                }
+            }
+            if (!ev.isHandled()) sp.sendSystemMessage(Component.literal(label(c)));
         }
-        if (!ev.isHandled()) sp.sendSystemMessage(Component.literal(label(c)));
     }
 
     static Map<String, Integer> tierIndex(TitleData d) {
