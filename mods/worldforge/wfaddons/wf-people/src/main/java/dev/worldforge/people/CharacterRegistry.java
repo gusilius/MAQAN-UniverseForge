@@ -402,7 +402,7 @@ public final class CharacterRegistry {
         if (ids == null || ids.isEmpty()) return List.of();
         List<Character> result = new ArrayList<>(ids.size());
         for (String id : ids) {
-            Character character = byId.get(id);
+            Character character = resolveMaterialized(id);
             if (character != null && character.alive) result.add(character);
         }
         return Collections.unmodifiableList(result);
@@ -440,7 +440,7 @@ public final class CharacterRegistry {
         if (ids == null || ids.isEmpty()) return List.of();
         List<Character> result = new ArrayList<>(ids.size());
         for (String id : ids) {
-            Character character = byId.get(id);
+            Character character = resolveMaterialized(id);
             if (character != null && character.alive && character.has(role, place)) result.add(character);
         }
         return Collections.unmodifiableList(result);
@@ -711,7 +711,7 @@ public final class CharacterRegistry {
     /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
     public String entityBindingOwner(String entityUuid) {
         String characterId = entityOwnerByUuid.get(entityUuid);
-        Character character = characterId == null ? null : byId.get(characterId);
+        Character character = characterId == null ? null : resolveMaterialized(characterId);
         return character == null ? null : character.globalId;
     }
 
@@ -882,8 +882,8 @@ public final class CharacterRegistry {
             if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
             addLivingCandidate(recipients, childId);
         }
-        Character father = deceased.father.isBlank() ? null : byId.get(deceased.father);
-        Character mother = deceased.mother.isBlank() ? null : byId.get(deceased.mother);
+        Character father = deceased.father.isBlank() ? null : resolveMaterialized(deceased.father);
+        Character mother = deceased.mother.isBlank() ? null : resolveMaterialized(deceased.mother);
         if (father != null) for (String siblingId : father.children) {
             if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
             addLivingCandidate(recipients, siblingId);
@@ -919,7 +919,7 @@ public final class CharacterRegistry {
 
     private void addLivingCandidate(Set<String> candidates, String localId) {
         if (localId == null || localId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
-        Character candidate = byId.get(localId);
+        Character candidate = resolveMaterialized(localId);
         if (candidate != null && candidate.alive) candidates.add(candidate.globalId);
     }
 
@@ -1054,7 +1054,7 @@ public final class CharacterRegistry {
     /** A deceased or missing spouse does not permanently prevent remarriage. */
     private void clearDeceasedSpouse(Character character) {
         if (character.spouse.isEmpty()) return;
-        Character spouse = byId.get(character.spouse);
+        Character spouse = resolveMaterialized(character.spouse);
         if (spouse != null && spouse.alive) return;
         String previousSpouse = character.spouse;
         String previousSpouseGlobal = optionalFamilyId(character, "family.spouse_global_id");
@@ -1138,7 +1138,7 @@ public final class CharacterRegistry {
     }
 
     private Character require(String id) {
-        Character c = byId.get(id);
+        Character c = resolveMaterialized(id);
         if (c == null) throw new IllegalArgumentException("Нет персонажа " + id);
         return c;
     }
