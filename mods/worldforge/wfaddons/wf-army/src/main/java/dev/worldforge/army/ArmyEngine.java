@@ -519,6 +519,8 @@ public final class ArmyEngine {
         target.morale = Math.max(0, Math.min(1, target.morale * targetWeight + source.morale * sourceWeight));
         target.supply = Math.max(0, Math.min(1, target.supply * targetWeight + source.supply * sourceWeight));
         if (target.commander == null || target.commander.isBlank()) target.commander = source.commander == null ? "" : source.commander;
+        if (target.commanderGlobalId == null || target.commanderGlobalId.isBlank())
+            target.commanderGlobalId = source.commanderGlobalId == null ? "" : source.commanderGlobalId;
         target.martial = Math.max(target.martial, source.martial);
         for (Map.Entry<String, Integer> entry : source.units.entrySet()) target.add(entry.getKey(), entry.getValue());
         armies.remove(from);
@@ -550,6 +552,9 @@ public final class ArmyEngine {
         Army split = new Army(nextArmy++, source.realm, (armiesOf(source.realm).size() + 1) + "-я армия", source.location);
         split.mercenary = source.mercenary;
         split.martial = source.martial;
+        // A split preserves command authority by UUID without pinning the commander object.
+        split.commander = source.commander == null ? "" : source.commander;
+        split.commanderGlobalId = source.commanderGlobalId == null ? "" : source.commanderGlobalId;
         split.morale = source.morale;
         split.supply = source.supply;
         split.add(type, n);
@@ -1273,7 +1278,7 @@ public final class ArmyEngine {
     public String toJson() {
         for (String realm : new ArrayList<>(gold.keySet())) gold(realm); // migrate every wf-army/1 balance before dropping the legacy field
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-army/3");
+        root.put("format", "wf-army/4");
         root.put("next", nextArmy);
         root.put("dayAccumulator", dayAccumulator);
         root.put("pool", new LinkedHashMap<String, Object>(pool));
@@ -1281,7 +1286,9 @@ public final class ArmyEngine {
         List<Object> al = new ArrayList<>();
         for (Army a : armies.values()) {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", a.id); m.put("realm", a.realm); m.put("name", a.name); m.put("commander", a.commander); m.put("martial", a.martial);
+            m.put("id", a.id); m.put("realm", a.realm); m.put("name", a.name);
+            m.put("commander", a.commander); m.put("commanderGlobalId", a.commanderGlobalId == null ? "" : a.commanderGlobalId);
+            m.put("martial", a.martial);
             m.put("loc", a.location); m.put("morale", a.morale); m.put("supply", a.supply); m.put("merc", a.mercenary); m.put("siege", a.siegeTitle);
             m.put("units", new LinkedHashMap<String, Object>(a.units));
             m.put("path", new ArrayList<Object>(a.path));
@@ -1307,7 +1314,7 @@ public final class ArmyEngine {
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         String format = String.valueOf(root.get("format"));
-        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format) && !"wf-army/3".equals(format))
+        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format) && !"wf-army/3".equals(format) && !"wf-army/4".equals(format))
             throw new IllegalArgumentException("Неверный формат армий");
         armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear(); rosterOperations.clear(); pendingRecruitments.clear();
         nextArmy = ((Number) root.get("next")).intValue();
@@ -1325,7 +1332,16 @@ public final class ArmyEngine {
         for (Object o : (List<Object>) root.get("armies")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Army a = new Army(((Number) m.get("id")).intValue(), (String) m.get("realm"), (String) m.get("name"), ((Number) m.get("loc")).intValue());
-            a.commander = (String) m.get("commander"); a.martial = ((Number) m.get("martial")).intValue();
+            a.commander = (String) m.get("commander");
+            Object commanderId = m.get("commanderGlobalId");
+            a.commanderGlobalId = commanderId instanceof String id ? id : "";
+            if (!a.commanderGlobalId.isBlank()) {
+                try { java.util.UUID.fromString(a.commanderGlobalId); }
+                catch (IllegalArgumentException malformed) {
+                    throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id, malformed);
+                }
+            }
+            a.martial = ((Number) m.get("martial")).intValue();
             a.morale = ((Number) m.get("morale")).doubleValue(); if (m.get("supply") instanceof Number sp) a.supply = sp.doubleValue(); a.mercenary = Boolean.TRUE.equals(m.get("merc")); a.siegeTitle = ((Number) m.get("siege")).intValue();
             for (Map.Entry<String, Object> e : ((Map<String, Object>) m.get("units")).entrySet()) a.units.put(e.getKey(), ((Number) e.getValue()).intValue());
             for (Object p : (List<Object>) m.get("path")) a.path.add(((Number) p).intValue());
