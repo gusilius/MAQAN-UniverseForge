@@ -852,28 +852,37 @@ public class TroopsMod {
         }
 
         long worldMinute = Math.max(0,troop.level().getDayTime()/20L);
-        try (PersonBinding fallenBinding = acquirePersonGlobal(characterId)) {
-            Character fallen = fallenBinding == null ? null : fallenBinding.character();
-            if (fallen != null && fallen.alive) {
-                Entity attackerEntity = source == null ? null : source.getEntity();
-                if (attackerEntity != null) {
-                    MilitaryPsychology.recordBattleOutcome(fallen, false,
-                            "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
-                    fallenBinding.registry().access().mutateGlobal(fallen.globalId, ignored -> { });
-                }
-                recordComradeLosses(troop, fallen, worldMinute);
-                if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
-                    try (PersonBinding killer = bindPerson(attacker, false)) {
-                        if (killer != null && killer.character().alive) {
-                            MilitaryPsychology.recordBattleOutcome(killer.character(), true,
-                                    "battle:kill:" + fallen.globalId + ":" + killer.character().globalId,
-                                    worldMinute, 2);
-                            killer.registry().access().mutateGlobal(killer.character().globalId, ignored -> { });
-                        }
-                    }
-                }
+        Entity attackerEntity = source == null ? null : source.getEntity();
+        String killerGlobalId = "";
+        if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
+            try (PersonBinding killer = bindPerson(attacker, false)) {
+                if (killer != null && killer.character().alive) killerGlobalId = killer.character().globalId;
             }
         }
+        List<String> battleParticipants = new ArrayList<>();
+        battleParticipants.add(characterId);
+        if (!killerGlobalId.isBlank()) battleParticipants.add(killerGlobalId);
+        try {
+            dev.worldforge.people.CharacterAccessService.mutateGlobalsIfChanged(
+                    PeopleMod.authority(), battleParticipants, participants -> {
+                        Character fallen = participants.get(characterId);
+                        if (fallen != null && fallen.alive && attackerEntity != null)
+                            MilitaryPsychology.recordBattleOutcome(fallen, false,
+                                    "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
+                        Character killer = killerGlobalId.isBlank() ? null : participants.get(killerGlobalId);
+                        if (killer != null && killer.alive)
+                            MilitaryPsychology.recordBattleOutcome(killer, true,
+                                    "battle:kill:" + characterId + ":" + killer.globalId,
+                                    worldMinute, 2);
+                        return true;
+                    });
+        } catch (RuntimeException transactionFailure) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf-troops: battle participants for fallen Character {} could not be leased atomically",
+                    characterId, transactionFailure);
+            return false;
+        }
+        recordComradeLosses(troop, characterId, worldMinute);
 
         String cause = source == null ? "combat" : source.getMsgId();
         if (cause == null || cause.isBlank()) cause = "combat";
@@ -899,21 +908,48 @@ public class TroopsMod {
         return completed;
     }
 
-    private static void recordComradeLosses(TroopEntity fallenBody, Character fallen, long worldMinute) {
-        String squadId=fallenBody.squadId();
-        Squads.Squad squad=squadId==null||squadId.isBlank()?null:SQUADS.get(squadId);
-        if(squad==null) return;
-        for(String memberId:new ArrayList<>(squad.members)) {
-            if(memberId.equals(fallenBody.getUUID().toString())) continue;
-            TroopEntity body=LIVE.get(memberId);
-            if(body==null||!body.isAlive()) continue;
-            try (PersonBinding witness=bindPerson(body,false)) {
-                if(witness==null||!witness.character().alive) continue;
-                MilitaryPsychology.recordComradeLoss(witness.character(),fallen,
-                        "battle:comrade-fallen:"+fallen.globalId+":"+witness.character().globalId,worldMinute);
-                body.setMorale(CharacterDevelopment.militaryMorale(witness.character()));
-                witness.registry().access().mutateGlobal(witness.character().globalId, ignored -> { });
+    private static void recordComradeLosses(TroopEntity fallenBody, String fallenGlobalId, long worldMinute) {
+        String squadId = fallenBody.squadId();
+        Squads.Squad squad = squadId == null || squadId.isBlank() ? null : SQUADS.get(squadId);
+        if (squad == null) return;
+        Map<String, TroopEntity> witnesses = new LinkedHashMap<>();
+        for (String memberId : new ArrayList<>(squad.members)) {
+            if (memberId.equals(fallenBody.getUUID().toString())) continue;
+            TroopEntity body = LIVE.get(memberId);
+            if (body == null || !body.isAlive()) continue;
+            String globalId = body.characterId == null ? "" : body.characterId;
+            if (globalId.isBlank()) {
+                try (PersonBinding binding = findCharacterForTroopEntity(memberId)) {
+                    if (binding != null) globalId = binding.character().globalId;
+                }
             }
+            if (!globalId.isBlank()) witnesses.put(globalId, body);
+        }
+        if (witnesses.isEmpty()) return;
+        List<String> participants = new ArrayList<>(witnesses.size() + 1);
+        participants.add(fallenGlobalId);
+        participants.addAll(witnesses.keySet());
+        try {
+            dev.worldforge.people.CharacterAccessService.mutateGlobalsIfChanged(
+                    PeopleMod.authority(), participants, characters -> {
+                        Character fallen = characters.get(fallenGlobalId);
+                        if (fallen == null) return false;
+                        boolean changed = false;
+                        for (Map.Entry<String, TroopEntity> entry : witnesses.entrySet()) {
+                            Character witness = characters.get(entry.getKey());
+                            if (witness == null || !witness.alive) continue;
+                            MilitaryPsychology.recordComradeLoss(witness, fallen,
+                                    "battle:comrade-fallen:" + fallen.globalId + ":" + witness.globalId,
+                                    worldMinute);
+                            entry.getValue().setMorale(CharacterDevelopment.militaryMorale(witness));
+                            changed = true;
+                        }
+                        return changed;
+                    });
+        } catch (RuntimeException failure) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf-troops: squad witness transaction for fallen Character {} failed",
+                    fallenGlobalId, failure);
         }
     }
 
