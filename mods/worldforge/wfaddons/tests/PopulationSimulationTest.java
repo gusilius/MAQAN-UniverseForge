@@ -823,7 +823,7 @@ public final class PopulationSimulationTest {
                 "registry scheduler iterator advances in canonical insertion order");
         Character iteratorD = iteratorRegistry.create("Iterator D", "", "", "n", 270);
         boolean appendInvalidates = false;
-        try { stableCursor.hasNext(); }
+        try { stableCursor.next(); }
         catch (java.util.ConcurrentModificationException expected) { appendInvalidates = true; }
         java.util.Iterator<Character> resumedCursor = iteratorRegistry.iteratorAfter(iteratorB.id);
         ok(appendInvalidates && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,

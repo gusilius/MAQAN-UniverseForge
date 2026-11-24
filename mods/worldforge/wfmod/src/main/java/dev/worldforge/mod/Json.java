@@ -102,7 +102,7 @@ public final class Json {
                 if (ch < 0) throw new IllegalArgumentException("Unterminated JSON string");
                 raw.append((char) ch);
                 if (escaped) escaped = false;
-                else if (ch == '\\\\') escaped = true;
+                else if (ch == '\\') escaped = true;
                 else if (ch == '"') break;
             }
         } else if (first == '{' || first == '[') {
@@ -115,7 +115,7 @@ public final class Json {
                 raw.append((char) ch);
                 if (inString) {
                     if (escaped) escaped = false;
-                    else if (ch == '\\\\') escaped = true;
+                    else if (ch == '\\') escaped = true;
                     else if (ch == '"') inString = false;
                     continue;
                 }
