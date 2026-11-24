@@ -41,7 +41,7 @@ public final class CharacterWal implements AutoCloseable {
         public int shard() { return shard; }
         public long sequence() { return sequence; }
         public String globalId() { return globalId; }
-        @Override public byte[] payload() { return payload.clone(); }
+        public byte[] payload() { return payload.clone(); }
         public String payloadUtf8() { return new String(payload, StandardCharsets.UTF_8); }
         byte[] payloadView() { return payload; }
     }
