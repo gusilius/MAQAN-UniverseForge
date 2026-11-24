@@ -86,14 +86,23 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         int accepted = 0;
         for (int index = 0; index < batch.size(); index++) {
             CharacterDirtyQueue.Entry entry = batch.get(index);
-            CompletableFuture<CharacterWal.Record> future = persistSnapshot(entry.globalId(), () -> {
-                byte[] payload = Objects.requireNonNull(snapshot.apply(entry.globalId()), "snapshot payload");
-                if (payload.length > maxBytes - used[0])
-                    throw new DirtyBatchBudgetExceededException("Character dirty batch byte budget exceeded");
-                used[0] += payload.length;
-                dirtyBytes.add(payload.length);
-                return payload;
-            });
+            final CompletableFuture<CharacterWal.Record> future;
+            try {
+                future = persistSnapshot(entry.globalId(), () -> {
+                    byte[] payload = Objects.requireNonNull(snapshot.apply(entry.globalId()), "snapshot payload");
+                    if (payload.length > maxBytes - used[0])
+                        throw new DirtyBatchBudgetExceededException("Character dirty batch byte budget exceeded");
+                    used[0] += payload.length;
+                    dirtyBytes.add(payload.length);
+                    return payload;
+                });
+            } catch (RuntimeException | Error submissionFailure) {
+                dirtyFailed.increment();
+                dirtyQueue.retry(entry);
+                for (int remaining = index + 1; remaining < batch.size(); remaining++)
+                    dirtyQueue.retry(batch.get(remaining));
+                break;
+            }
             future.whenComplete((record, failure) -> {
                 if (failure != null) {
                     dirtyFailed.increment();
