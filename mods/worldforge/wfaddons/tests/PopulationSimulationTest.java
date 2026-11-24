@@ -495,6 +495,7 @@ public final class PopulationSimulationTest {
         registry.marry(deceased.id, widow.id, 260);
         ResidentSocial.socialize(deceased, trustedFriend, 75);
         PopulationSimulation.die(registry, deceased.id, 304, "battle");
+        registry.processPendingBereavementBatch(32);
         int widowGrief = CharacterDevelopment.stress(widow);
         int childGrief = CharacterDevelopment.stress(orphanedChild);
         int friendGrief = CharacterDevelopment.stress(trustedFriend);
