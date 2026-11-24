@@ -80,6 +80,19 @@ public final class CharacterWalTest {
                         "batch append and streaming replay preserve every durable record in shard sequence");
             }
 
+            Path largeWalDir = root.resolve("large-wal");
+            byte[] largeWalPayload = new byte[1024 * 1024];
+            for (int i = 0; i < largeWalPayload.length; i++) largeWalPayload[i] = (byte) (i * 17 + 3);
+            try (CharacterWal wal = new CharacterWal(largeWalDir, 4)) {
+                wal.append(id, largeWalPayload);
+                boolean[] largeReplayMatches = {false};
+                wal.replayEach(record -> largeReplayMatches[0] =
+                        record.payload().length == largeWalPayload.length
+                                && java.util.Arrays.equals(record.payload(), largeWalPayload));
+                ok(largeReplayMatches[0],
+                        "large WAL payload replays and validates CRC without a duplicate combined body buffer");
+            }
+
             Path compactDir = root.resolve("compact");
             Path compactStoreDir = root.resolve("compact-store");
             try (CharacterWal wal = new CharacterWal(compactDir, 8);
