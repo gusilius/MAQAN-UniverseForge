@@ -765,8 +765,10 @@ public class TroopsMod {
             long minute=Math.max(0,troop.level().getDayTime()/20L);
             int nextInjury=CharacterDevelopment.injuryCount(binding.character())+1;
             String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
-            if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute))
+            if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute)) {
                 troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
+                binding.registry().access().mutateGlobal(binding.character().globalId, ignored -> { });
+            }
         }
     }
 
@@ -781,6 +783,7 @@ public class TroopsMod {
         try (PersonBinding binding = bindPerson(troop, false)) {
             if (binding == null) return;
             CharacterDevelopment.setMilitaryMorale(binding.character(), troop.moralePct());
+            binding.registry().access().mutateGlobal(binding.character().globalId, ignored -> { });
         }
     }
 
@@ -2676,19 +2679,18 @@ public class TroopsMod {
     private static boolean releaseBodyDurably(TroopEntity troop) {
         if (troop == null) return false;
         if (ModList.get().isLoaded("wf_people")) {
-            String entityUuid = troop.getUUID().toString();
-            PersonBinding binding = bindPerson(troop, false);
-            if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
-                binding = findCharacterForTroopEntity(entityUuid);
-            if (binding == null) return false;
-            Character person = binding.character();
-            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-            person.props.remove("wf_troop_uuid");
-            person.props.remove("wf_troop_unit");
-            person.props.remove("wf_army_id");
-            person.props.remove("wf_combat_xp");
-            person.props.remove("wf_veteran_rank");
-            if (server == null || !PeopleMod.persistCharacter(person, server)) return false;
+            try (PersonBinding binding = bindPerson(troop, false)) {
+                if (binding == null) return false;
+                Character person = binding.character();
+                binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+                person.props.remove("wf_troop_uuid");
+                person.props.remove("wf_troop_unit");
+                person.props.remove("wf_army_id");
+                person.props.remove("wf_combat_xp");
+                person.props.remove("wf_veteran_rank");
+                binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+                if (server == null || !PeopleMod.persistCharacter(person, server)) return false;
+            }
         }
         String id = troop.getUUID().toString();
         removeLive(id);
