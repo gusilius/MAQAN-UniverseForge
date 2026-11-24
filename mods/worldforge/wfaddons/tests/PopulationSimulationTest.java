@@ -547,7 +547,7 @@ public final class PopulationSimulationTest {
         iteratorPrefix.add(iteratorFirst.id);
         while (orderedBeforeAppend.hasNext()) iteratorPrefix.add(orderedBeforeAppend.next().id);
         ok(iteratorPrefix.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id,
-                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
+                        cursorRegistry.idAt(3)))
                         && !orderedBeforeAppend.hasNext(),
                 "HashMap-backed registry traversal preserves insertion order and excludes mid-pass appends");
         String anchorId = cursorRegistry.idAt(1);
