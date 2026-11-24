@@ -88,22 +88,25 @@ public final class CharacterWalWriter implements AutoCloseable {
                     List<CharacterWal.Write> writes = batch.stream()
                             .map(item -> new CharacterWal.Write(item.globalId, item.payload)).toList();
                     List<CharacterWal.Record> receipts = wal.appendBatch(writes);
+                    // The durable append has completed. Retire the accepted-work count
+                    // before publishing receipts so future.get() observes pending()==0.
+                    outstanding.addAndGet(-batch.size());
+                    inFlight = 0;
                     for (int i = 0; i < batch.size(); i++) batch.get(i).durable.complete(receipts.get(i));
                 } catch (IOException | RuntimeException ex) {
                     IOException io = ex instanceof IOException value
                             ? value : new IOException("Character WAL append failed", ex);
                     failure = io;
-                    for (Pending item : batch) item.durable.completeExceptionally(io);
                     accepting.set(false);
                     Pending queued;
                     while ((queued = queue.poll()) != null) {
-                        queued.durable.completeExceptionally(io);
                         outstanding.decrementAndGet();
+                        queued.durable.completeExceptionally(io);
                     }
-                    break;
-                } finally {
                     outstanding.addAndGet(-batch.size());
                     inFlight = 0;
+                    for (Pending item : batch) item.durable.completeExceptionally(io);
+                    break;
                 }
             }
         } catch (InterruptedException ex) {
