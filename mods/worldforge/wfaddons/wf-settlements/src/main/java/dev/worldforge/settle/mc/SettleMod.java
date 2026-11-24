@@ -859,6 +859,22 @@ public class SettleMod {
      * Executes a caller action while the resident Character is pinned. A raw Character
      * must never escape this callback: the lease is closed on every exit path.
      */
+    /** Executes a value-returning operation while the canonical resident is pinned. */
+    public static <T> T withResidentCharacter(WFWorker body,
+                                               java.util.function.Function<Character, T> action,
+                                               T unavailable) {
+        if (body == null || action == null) return unavailable;
+        Colony colony = COLONIES.get(body.colonyId);
+        Worker worker = body.worker();
+        CharacterRegistry registry = registryForColony(colony);
+        if (registry == null || worker == null || worker.person == null || worker.person.isBlank())
+            return unavailable;
+        try (PersonBinding binding = resolvePersonBinding(registry, worker.person)) {
+            if (binding == null || !binding.character().alive) return unavailable;
+            return action.apply(binding.character());
+        }
+    }
+
     public static boolean withResidentCharacter(WFWorker body,
                                                 java.util.function.Consumer<Character> action) {
         if (body == null || action == null) return false;
