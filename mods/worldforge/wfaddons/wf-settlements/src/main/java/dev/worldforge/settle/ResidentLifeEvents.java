@@ -682,8 +682,14 @@ public final class ResidentLifeEvents {
                     }
                     if (guardian != null) {
                         String guardianGlobalId = guardian.globalId;
-                        ResidentSocial.adjust(child, guardianGlobalId, 1);
-                        mutateSingle(registry, guardian.id, current -> ResidentSocial.adjust(current, child.globalId, 1));
+                        String childGlobalId = child.globalId;
+                        mutatePair(registry, List.of(childGlobalId, guardianGlobalId), participants -> {
+                            Character currentChild = participants.get(childGlobalId);
+                            Character currentGuardian = participants.get(guardianGlobalId);
+                            ResidentSocial.adjust(currentChild, guardianGlobalId, 1);
+                            ResidentSocial.adjust(currentGuardian, childGlobalId, 1);
+                            return true;
+                        });
                         if (age >= 10) {
                             int annualXp = age >= 13 ? 10 : 5;
                             PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
