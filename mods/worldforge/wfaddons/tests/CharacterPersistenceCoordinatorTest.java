@@ -85,7 +85,7 @@ public final class CharacterPersistenceCoordinatorTest {
             String batchId = "00000000-0000-0000-0000-000000000088";
             coordinator.register(batchId);
             int batchAccepted = coordinator.persistDirtyBatch(
-                    key -> ("{\\"id\\":\\""+key+"\\"}").getBytes(StandardCharsets.UTF_8), 2, 1024);
+                    key -> dev.worldforge.mod.Json.write(java.util.Map.of("id", key)).getBytes(StandardCharsets.UTF_8), 2, 1024);
             long batchDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (coordinator.dirtyQueue().pendingCount() != 0 && System.nanoTime() < batchDeadline)
                 Thread.sleep(5);
