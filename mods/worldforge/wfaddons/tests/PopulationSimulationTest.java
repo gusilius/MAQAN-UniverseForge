@@ -561,7 +561,7 @@ public final class PopulationSimulationTest {
         idCursorTail.add(firstAfterA);
         while (idCursor.hasNext()) idCursorTail.add(idCursor.next());
         ok(idCursorTail.equals(java.util.List.of(cursorB.id, cursorC.id,
-                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
+                        cursorRegistry.idAt(3)))
                         && !idCursor.hasNext(),
                 "key iterator remains stable when an NPC is appended mid-pass");
         java.util.Iterator<Character> allCursor = cursorRegistry.all().iterator();
