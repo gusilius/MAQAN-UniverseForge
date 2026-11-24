@@ -10,12 +10,12 @@ public final class CharacterAuthority {
     private final Map<String, CharacterIdentity> byGlobalId = new ConcurrentHashMap<>();
     private final Map<String, Set<CharacterIdentity>> byLegacyId = new ConcurrentHashMap<>();
     /** Family reverse indexes: estate succession must never scan every living Character per death. */
-    private Map<String, Set<CharacterIdentity>> familyByParentGlobal = new HashMap<>();
-    private Map<String, Set<CharacterIdentity>> familyByParentLegacy = new HashMap<>();
-    private Map<String, Set<CharacterIdentity>> familyByChildGlobal = new HashMap<>();
-    private Map<String, Set<CharacterIdentity>> familyByChildLegacy = new HashMap<>();
-    private Map<String, Set<CharacterIdentity>> familyBySpouseGlobal = new HashMap<>();
-    private Map<String, Set<CharacterIdentity>> familyBySpouseLegacy = new HashMap<>();
+    private Map<String, Set<String>> familyByParentGlobal = new HashMap<>();
+    private Map<String, Set<String>> familyByParentLegacy = new HashMap<>();
+    private Map<String, Set<String>> familyByChildGlobal = new HashMap<>();
+    private Map<String, Set<String>> familyByChildLegacy = new HashMap<>();
+    private Map<String, Set<String>> familyBySpouseGlobal = new HashMap<>();
+    private Map<String, Set<String>> familyBySpouseLegacy = new HashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
     private final Map<CharacterRegistry, String> registryMapIds = new IdentityHashMap<>();
@@ -331,12 +331,12 @@ public final class CharacterAuthority {
     public synchronized void rebuildFamilyIndex(long day) {
         refreshIndex();
         if (familyIndexDay == day) return;
-        Map<String, Set<CharacterIdentity>> parentGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> parentLegacy = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> childGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> childLegacy = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> spouseGlobal = new HashMap<>();
-        Map<String, Set<CharacterIdentity>> spouseLegacy = new HashMap<>();
+        Map<String, Set<String>> parentGlobal = new HashMap<>();
+        Map<String, Set<String>> parentLegacy = new HashMap<>();
+        Map<String, Set<String>> childGlobal = new HashMap<>();
+        Map<String, Set<String>> childLegacy = new HashMap<>();
+        Map<String, Set<String>> spouseGlobal = new HashMap<>();
+        Map<String, Set<String>> spouseLegacy = new HashMap<>();
 
         for (CharacterIdentity identity : byGlobalId.values()) {
             CharacterRegistry owner = registries.get(identity.mapId());
@@ -353,9 +353,9 @@ public final class CharacterAuthority {
 
             // Parent-side pointers are authoritative even in older saves that lack child lists.
             Set<CharacterIdentity> fathers = byLegacyId.get(person.father);
-            if (fathers != null) childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()).addAll(fathers);
+            if (fathers != null) addIdentityIds(childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()), fathers);
             Set<CharacterIdentity> mothers = byLegacyId.get(person.mother);
-            if (mothers != null) childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()).addAll(mothers);
+            if (mothers != null) addIdentityIds(childLegacy.computeIfAbsent(person.id, ignored -> new LinkedHashSet<>()), mothers);
             CharacterIdentity fatherIdentity = byGlobalId.get(fatherGlobal);
             if (fatherIdentity != null) addFamilyIndex(childGlobal, person.globalId, fatherIdentity);
             CharacterIdentity motherIdentity = byGlobalId.get(motherGlobal);
@@ -472,17 +472,24 @@ public final class CharacterAuthority {
         return value instanceof String id && !id.isBlank() ? id : "";
     }
 
-    private static void addFamilyIndex(Map<String, Set<CharacterIdentity>> index,
-                                       String key, CharacterIdentity identity) {
-        if (key != null && !key.isBlank())
-            index.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).add(identity);
+    /** Family projections store canonical global IDs instead of repeated identity objects. */
+    private static void addFamilyIndex(Map<String, Set<String>> index, String key, CharacterIdentity identity) {
+        if (key != null && !key.isBlank() && identity != null)
+            index.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).add(identity.globalCharacterId());
     }
 
-    private static void addFamilyMatches(Set<CharacterIdentity> target,
-                                         Map<String, Set<CharacterIdentity>> index, String key) {
+    private static void addIdentityIds(Set<String> target, Set<CharacterIdentity> identities) {
+        for (CharacterIdentity identity : identities) target.add(identity.globalCharacterId());
+    }
+
+    private void addFamilyMatches(Set<CharacterIdentity> target, Map<String, Set<String>> index, String key) {
         if (key == null || key.isBlank()) return;
-        Set<CharacterIdentity> found = index.get(key);
-        if (found != null) target.addAll(found);
+        Set<String> found = index.get(key);
+        if (found == null) return;
+        for (String globalId : found) {
+            CharacterIdentity identity = byGlobalId.get(globalId);
+            if (identity != null) target.add(identity);
+        }
     }
 
     public synchronized int size() { refreshIndex(); return byGlobalId.size(); }
