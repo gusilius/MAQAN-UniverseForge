@@ -1119,6 +1119,7 @@ public class PeopleMod {
             java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners,
             java.util.IdentityHashMap<CharacterRegistry, String> dimensionOwners) {
         Set<CharacterRegistry> changed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        List<CharacterAuthority.EstateIncoming> finalized = new ArrayList<>();
         for (CharacterAuthority.EstateIncoming incoming : AUTHORITY.pendingEstateIncoming()) {
             String heirGlobalId = incoming.heirGlobalId();
             String sourceGlobalId = incoming.deceasedGlobalId();
@@ -1144,7 +1145,7 @@ public class PeopleMod {
                 return true;
             });
             if (committed) {
-                AUTHORITY.clearEstateIncoming(heirGlobalId, sourceGlobalId);
+                finalized.add(incoming);
                 changed.add(sourceRegistry);
             }
         }
@@ -1170,6 +1171,8 @@ public class PeopleMod {
                 return false;
             }
         }
+        for (CharacterAuthority.EstateIncoming incoming : finalized)
+            AUTHORITY.clearEstateIncoming(incoming.heirGlobalId(), incoming.deceasedGlobalId());
         return true;
     }
 
