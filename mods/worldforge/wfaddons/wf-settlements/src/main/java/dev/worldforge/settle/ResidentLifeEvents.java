@@ -445,38 +445,54 @@ public final class ResidentLifeEvents {
         return childGlobalId[0];
     }
 
-    private static void processMaritalConflict(CharacterRegistry registry, Character person, int year) {
-        if (!person.alive || person.spouse == null || person.spouse.isBlank()
-                || person.id.compareTo(person.spouse) >= 0) return;
-        Character spouse = registry.get(person.spouse);
-        if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)
-                || year <= number(person.props.get("family.marital_review_year"), 0)) return;
-        
-        int affinity = Math.min(ResidentSocial.score(person, spouse.globalId), ResidentSocial.score(spouse, person.globalId));
-        
-        person.props.put("family.marital_review_year", year);
-        spouse.props.put("family.marital_review_year", year);
-        int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
-        conflictYears = affinity <= -55 ? conflictYears + 1 : Math.max(0, conflictYears - 1);
-        person.props.put("family.marital_conflict_years", conflictYears);
-        spouse.props.put("family.marital_conflict_years", conflictYears);
-        person.props.put("family.marital_affinity", affinity);
-        spouse.props.put("family.marital_affinity", affinity);
-        if (conflictYears >= 3 && registry.divorce(person.id, spouse.id, year)) {
-            person.props.put("family.last_event", "divorced:" + spouse.id);
-            spouse.props.put("family.last_event", "divorced:" + person.id);
-            person.props.put("family.separation_year", year);
-            spouse.props.put("family.separation_year", year);
-            long minute = Math.max(0L, year * 525600L);
-            CharacterDevelopment.recordExperience(person, CharacterDevelopment.Experience.DIVORCE,
-                    "family:divorce:" + person.globalId + ":" + spouse.globalId, "marriage ended with " + spouse.name, minute, 2);
-            CharacterDevelopment.recordExperience(spouse, CharacterDevelopment.Experience.DIVORCE,
-                    "family:divorce:" + spouse.globalId + ":" + person.globalId, "marriage ended with " + person.name, minute, 2);
-            CharacterDevelopment.remember(person, "family:divorce-memory:" + person.globalId + ":" + spouse.globalId,
-                    "divorce", spouse.globalId, "marriage ended after prolonged conflict", -65, minute);
-            CharacterDevelopment.remember(spouse, "family:divorce-memory:" + spouse.globalId + ":" + person.globalId,
-                    "divorce", person.globalId, "marriage ended after prolonged conflict", -65, minute);
+    private static void processMaritalConflictById(CharacterRegistry registry, String personGlobalId, int year) {
+        if (personGlobalId == null || personGlobalId.isBlank()) return;
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(personGlobalId);
+        if (owner == null) return;
+        String spouseGlobalId;
+        try (CharacterAccessService.Lease lease = owner.access().acquireGlobal(personGlobalId)) {
+            if (lease == null) return;
+            Character person = lease.get();
+            if (!person.alive || person.spouse == null || person.spouse.isBlank()
+                    || person.id.compareTo(person.spouse) >= 0
+                    || year <= number(person.props.get("family.marital_review_year"), 0)) return;
+            spouseGlobalId = owner.globalIdForLocalId(person.spouse);
         }
+        if (spouseGlobalId == null || spouseGlobalId.isBlank()) return;
+        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
+                List.of(personGlobalId, spouseGlobalId), people -> {
+                    Character person = people.get(personGlobalId), spouse = people.get(spouseGlobalId);
+                    if (!person.alive || !spouse.alive || !person.id.equals(spouse.spouse)
+                            || year <= number(person.props.get("family.marital_review_year"), 0)) return false;
+                    int affinity = Math.min(ResidentSocial.score(person, spouse.globalId),
+                            ResidentSocial.score(spouse, person.globalId));
+                    person.props.put("family.marital_review_year", year);
+                    spouse.props.put("family.marital_review_year", year);
+                    int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
+                    conflictYears = affinity <= -55 ? conflictYears + 1 : Math.max(0, conflictYears - 1);
+                    person.props.put("family.marital_conflict_years", conflictYears);
+                    spouse.props.put("family.marital_conflict_years", conflictYears);
+                    person.props.put("family.marital_affinity", affinity);
+                    spouse.props.put("family.marital_affinity", affinity);
+                    if (conflictYears >= 3 && owner.divorce(person.id, spouse.id, year)) {
+                        person.props.put("family.last_event", "divorced:" + spouse.id);
+                        spouse.props.put("family.last_event", "divorced:" + person.id);
+                        person.props.put("family.separation_year", year);
+                        spouse.props.put("family.separation_year", year);
+                        long minute = Math.max(0L, year * 525600L);
+                        CharacterDevelopment.recordExperience(person, CharacterDevelopment.Experience.DIVORCE,
+                                "family:divorce:" + person.globalId + ":" + spouse.globalId,
+                                "marriage ended with " + spouse.name, minute, 2);
+                        CharacterDevelopment.recordExperience(spouse, CharacterDevelopment.Experience.DIVORCE,
+                                "family:divorce:" + spouse.globalId + ":" + person.globalId,
+                                "marriage ended with " + person.name, minute, 2);
+                        CharacterDevelopment.remember(person, "family:divorce-memory:" + person.globalId + ":" + spouse.globalId,
+                                "divorce", spouse.globalId, "marriage ended after prolonged conflict", -65, minute);
+                        CharacterDevelopment.remember(spouse, "family:divorce-memory:" + spouse.globalId + ":" + person.globalId,
+                                "divorce", person.globalId, "marriage ended after prolonged conflict", -65, minute);
+                    }
+                    return true;
+                });
     }
 
     private static void processRelationshipReviewById(CharacterRegistry registry, List<String> eligibleIds,
