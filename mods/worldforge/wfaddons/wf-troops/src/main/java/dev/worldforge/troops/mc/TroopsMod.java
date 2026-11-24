@@ -768,23 +768,27 @@ public class TroopsMod {
             String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
             if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute)) {
                 troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
+                troop.setCanonicalInjuryCombatMultiplier(
+                        CharacterDevelopment.injuryCombatMultiplier(binding.character()));
                 binding.registry().access().mutateGlobal(binding.character().globalId, ignored -> { });
             }
         }
     }
 
+    /** Combat hot path reads the value synchronized at join/injury, never hydrates or leases an NPC. */
     static double injuryCombatMultiplier(TroopEntity troop) {
-        try (PersonBinding binding=bindPerson(troop,false)) {
-            return binding==null?1.0:CharacterDevelopment.injuryCombatMultiplier(binding.character());
-        }
+        return troop == null ? 1.0 : troop.canonicalInjuryCombatMultiplier();
     }
 
     /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
     static void syncMilitaryMorale(TroopEntity troop) {
         try (PersonBinding binding = bindPerson(troop, false)) {
             if (binding == null) return;
-            CharacterDevelopment.setMilitaryMorale(binding.character(), troop.moralePct());
-            binding.registry().access().mutateGlobal(binding.character().globalId, ignored -> { });
+            Character person = binding.character();
+            int next = Math.max(0, Math.min(100, troop.moralePct()));
+            if (CharacterDevelopment.militaryMorale(person) == next) return;
+            CharacterDevelopment.setMilitaryMorale(person, next);
+            binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
         }
     }
 
@@ -793,23 +797,62 @@ public class TroopsMod {
         try (PersonBinding binding = bindPerson(troop, true)) {
             if (binding == null) return;
             Character person = binding.character();
+            CharacterRegistry registry = binding.registry();
+            boolean changed = false;
             String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
-            if (!profession.equals(PopulationSimulation.profession(person)))
-                binding.registry().changeProfession(person.id, profession, PeopleMod.YEAR);
-            binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+            if (!profession.equals(PopulationSimulation.profession(person))) {
+                registry.changeProfession(person.id, profession, PeopleMod.YEAR);
+                changed = true;
+            }
+            if (!PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
+                registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+                changed = true;
+            }
             long characterXp = PopulationSimulation.trainingXp(person, "combat");
-            if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
-            else PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
-            PopulationSimulation.setSkillRank(person, "combat", troop.veteranRank());
-            person.props.put("wf_unit_kind", "soldier");
-            person.props.put("wf_troop_uuid", troop.getUUID().toString());
-            person.props.put("wf_troop_unit", troop.unitId());
-            person.props.put("wf_army_id", troop.armyId);
-            person.props.put("wf_combat_xp", troop.combatXp());
-            person.props.put("wf_veteran_rank", troop.veteranRank());
-            CharacterDevelopment.setMilitaryMorale(person, troop.moralePct());
+            if (characterXp > troop.combatXp()) {
+                troop.setCombatXpFromCharacter(characterXp);
+            } else if (characterXp != troop.combatXp()) {
+                PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
+                changed = true;
+            }
+            if (PopulationSimulation.skillRank(person, "combat") != troop.veteranRank()) {
+                PopulationSimulation.setSkillRank(person, "combat", troop.veteranRank());
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_unit_kind"), "soldier")) {
+                person.props.put("wf_unit_kind", "soldier");
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_troop_uuid"), troop.getUUID().toString())) {
+                person.props.put("wf_troop_uuid", troop.getUUID().toString());
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_troop_unit"), troop.unitId())) {
+                person.props.put("wf_troop_unit", troop.unitId());
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_army_id"), troop.armyId)) {
+                person.props.put("wf_army_id", troop.armyId);
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_combat_xp"), troop.combatXp())) {
+                person.props.put("wf_combat_xp", troop.combatXp());
+                changed = true;
+            }
+            if (!Objects.equals(person.props.get("wf_veteran_rank"), troop.veteranRank())) {
+                person.props.put("wf_veteran_rank", troop.veteranRank());
+                changed = true;
+            }
+            int morale = Math.max(0, Math.min(100, troop.moralePct()));
+            if (CharacterDevelopment.militaryMorale(person) != morale) {
+                CharacterDevelopment.setMilitaryMorale(person, morale);
+                changed = true;
+            }
+            troop.setCanonicalInjuryCombatMultiplier(CharacterDevelopment.injuryCombatMultiplier(person));
+            Object previousIntent = person.props.get("population.intent");
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
-            binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+            changed |= !Objects.equals(previousIntent, person.props.get("population.intent"));
+            if (changed) registry.access().mutateGlobal(person.globalId, ignored -> { });
         }
     }
 
