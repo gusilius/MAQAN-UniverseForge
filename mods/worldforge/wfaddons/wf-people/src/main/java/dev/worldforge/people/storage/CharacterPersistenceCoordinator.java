@@ -3,6 +3,7 @@ package dev.worldforge.people.storage;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -17,6 +18,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private final CharacterWal wal;
     private volatile CharacterWalWriter writer;
     private final CharacterRecordStore records;
+    private final CharacterDirtyQueue dirtyQueue = new CharacterDirtyQueue();
 
     public CharacterPersistenceCoordinator(CharacterEvictionGate evictionGate,
                                             CharacterWal wal,
@@ -33,8 +35,57 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         this.writer = Objects.requireNonNull(replacement, "replacement");
     }
 
-    public void register(String globalId) { evictionGate.register(globalId); }
-    public long markDirty(String globalId) { return evictionGate.markDirty(globalId); }
+    public void register(String globalId) {
+        evictionGate.register(globalId);
+        CharacterEvictionGate.PersistenceTicket dirty = evictionGate.dirtyTicket(globalId);
+        if (dirty != null) dirtyQueue.enqueue(globalId, dirty.generation());
+    }
+    public long markDirty(String globalId) {
+        long generation = evictionGate.markDirty(globalId);
+        dirtyQueue.enqueue(globalId, generation);
+        return generation;
+    }
+    public CharacterDirtyQueue dirtyQueue() { return dirtyQueue; }
+
+    /**
+     * Services a bounded dirty batch through the same WAL coordinator. Snapshot creation
+     * occurs after the generation ticket is captured. Failed, rejected and over-budget
+     * entries are returned to the queue; only a durable matching receipt removes work.
+     *
+     * @return number of snapshots accepted by the WAL writer during this pass
+     */
+    public int persistDirtyBatch(Function<String, byte[]> snapshot, int maxCharacters, long maxBytes) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        if (maxCharacters < 1 || maxBytes < 1)
+            throw new IllegalArgumentException("Dirty batch limits must be positive");
+        java.util.List<CharacterDirtyQueue.Entry> batch = dirtyQueue.takeBatch(maxCharacters);
+        long[] used = {0L};
+        int accepted = 0;
+        for (int index = 0; index < batch.size(); index++) {
+            CharacterDirtyQueue.Entry entry = batch.get(index);
+            CompletableFuture<CharacterWal.Record> future = persistSnapshot(entry.globalId(), () -> {
+                byte[] payload = Objects.requireNonNull(snapshot.apply(entry.globalId()), "snapshot payload");
+                if (payload.length > maxBytes - used[0])
+                    throw new DirtyBatchBudgetExceededException("Character dirty batch byte budget exceeded");
+                used[0] += payload.length;
+                return payload;
+            });
+            future.whenComplete((record, failure) -> {
+                if (failure != null) dirtyQueue.retry(entry);
+            });
+            if (future.isCompletedExceptionally()) {
+                for (int remaining = index + 1; remaining < batch.size(); remaining++)
+                    dirtyQueue.retry(batch.get(remaining));
+                break;
+            }
+            accepted++;
+        }
+        return accepted;
+    }
+
+    public static final class DirtyBatchBudgetExceededException extends RuntimeException {
+        public DirtyBatchBudgetExceededException(String message) { super(message); }
+    }
     public CharacterEvictionGate.Pin acquireLease(String globalId) { return evictionGate.acquireLease(globalId); }
     public CharacterEvictionGate.Pin beginTransaction(String globalId) { return evictionGate.beginTransaction(globalId); }
 
@@ -54,7 +105,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
         final CharacterEvictionGate.PersistenceTicket ticket;
         try {
-            if (markDirtyFirst) evictionGate.markDirty(globalId);
+            if (markDirtyFirst) markDirty(globalId);
             ticket = evictionGate.capture(globalId);
         } catch (RuntimeException | Error failure) {
             transaction.close();
@@ -78,6 +129,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                             "Character changed while its WAL frame was being written: " + globalId));
                     return;
                 }
+                dirtyQueue.acknowledge(globalId, ticket.generation());
                 result.complete(record);
             } finally {
                 transaction.close();
