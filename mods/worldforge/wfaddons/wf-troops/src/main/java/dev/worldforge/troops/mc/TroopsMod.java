@@ -1030,6 +1030,7 @@ public class TroopsMod {
                 owner.kill(person.id);
             }
 
+            owner.access().mutateGlobal(person.globalId, ignored -> { });
             if (!PeopleMod.persistCharacter(person, server)) {
                 LOGGER.error("wf_troops: Character death/estate {} is not durable; outbox remains pending",
                         pending.characterGlobalId());
