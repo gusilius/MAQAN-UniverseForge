@@ -15,7 +15,7 @@ public final class CharacterAccessServiceTest {
     public static void main(String[] args) {
         CharacterRegistry registry = new CharacterRegistry();
         Character original = registry.create("Lease Subject", "", "test", "m", 0);
-        CharacterAccessService access = new CharacterAccessService(registry);
+        CharacterAccessService access = registry.access();
 
         CharacterAccessService.Lease first = access.acquire(original.id);
         check(first != null && first.get() == original, "lease resolves the canonical Character instance");
