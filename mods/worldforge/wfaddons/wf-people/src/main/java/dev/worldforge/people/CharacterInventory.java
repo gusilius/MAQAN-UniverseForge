@@ -994,8 +994,10 @@ public final class CharacterInventory {
         write(deceased, List.of());
         writeEquipment(deceased, Map.of());
         deceased.props.remove(CONTAINERS_KEY);
-        if (transferId != null && !transferId.isBlank())
+        if (transferId != null && !transferId.isBlank()) {
             deceased.props.put("estate.transfer_receipt", transferId);
+            heir.props.remove("estate.incoming." + transferId);
+        }
         deceased.props.remove("estate.transfer_pending");
         deceased.props.put("estate.recipient", heir.id);
         deceased.props.put("estate.recipient_global_id", heir.globalId);
@@ -1008,8 +1010,10 @@ public final class CharacterInventory {
         writeEquipment(deceased, Map.of());
         deceased.props.remove(CONTAINERS_KEY);
         Object pending = deceased.props.get("estate.transfer_pending");
-        if (pending instanceof String transferId && !transferId.isBlank())
+        if (pending instanceof String transferId && !transferId.isBlank()) {
             deceased.props.put("estate.transfer_receipt", transferId);
+            heir.props.remove("estate.incoming." + transferId);
+        }
         deceased.props.remove("estate.transfer_pending");
         deceased.props.put("estate.recipient", heir.id);
         deceased.props.put("estate.recipient_global_id", heir.globalId);
@@ -1037,8 +1041,11 @@ public final class CharacterInventory {
                         break;
                     }
                 }
-                if (markerKey == null || transferId == null
-                        || transferId.equals(deceased.props.get("estate.transfer_receipt"))) return false;
+                if (markerKey == null || transferId == null) return false;
+                if (transferId.equals(deceased.props.get("estate.transfer_receipt"))) {
+                    heir.props.remove(markerKey);
+                    return true;
+                }
                 deceased.alive = false;
                 clearTransferredEstate(deceased, heir, transferId);
                 heir.props.remove(markerKey);
