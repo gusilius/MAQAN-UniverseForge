@@ -44,6 +44,23 @@ public final class CharacterPersistenceCoordinatorTest {
             coordinator.persist(id, secondPayload).get(10, TimeUnit.SECONDS);
             check(coordinator.canEvict(id), "new dirty generation becomes clean only after its WAL force");
 
+
+            coordinator.markDirty(id);
+            CharacterWalWriter failedWriter = new CharacterWalWriter(wal, 1, "wf-character-persistence-failure-test");
+            failedWriter.close();
+            CharacterPersistenceCoordinator failedCoordinator =
+                    new CharacterPersistenceCoordinator(gate, wal, failedWriter, records);
+            boolean failedWriteRejected = false;
+            try {
+                failedCoordinator.persist(id, "{\\"v\\":3}".getBytes(StandardCharsets.UTF_8))
+                        .get(10, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException expected) {
+                failedWriteRejected = true;
+            }
+            check(failedWriteRejected
+                            && gate.decision(id) == CharacterEvictionGate.Decision.DIRTY,
+                    "failed WAL submission keeps identity dirty and releases persistence transaction pin");
+
             coordinator.checkpointLatest();
             CharacterRecordStore.Record stored = coordinator.load(id);
             check(stored != null && stored.payloadUtf8().equals("{\"v\":2}"),

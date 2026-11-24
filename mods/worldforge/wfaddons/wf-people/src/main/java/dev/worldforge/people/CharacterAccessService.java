@@ -2,6 +2,7 @@ package dev.worldforge.people;
 
 import dev.worldforge.people.storage.CharacterEvictionGate;
 import dev.worldforge.people.storage.CharacterPersistenceCoordinator;
+import dev.worldforge.people.storage.CharacterWalWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -42,6 +43,10 @@ public final class CharacterAccessService {
     public void replacePersistenceWriter(CharacterWalWriter writer) {
         CharacterPersistenceCoordinator persistence = coordinator();
         if (persistence != null) persistence.replaceWriter(writer);
+    }
+
+    public CharacterPersistenceCoordinator persistenceCoordinator() {
+        return coordinator();
     }
 
     private CharacterPersistenceCoordinator coordinator() {

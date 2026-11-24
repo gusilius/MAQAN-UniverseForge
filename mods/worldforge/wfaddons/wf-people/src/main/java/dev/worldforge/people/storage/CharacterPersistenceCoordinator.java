@@ -37,29 +37,48 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public CharacterEvictionGate.Pin acquireLease(String globalId) { return evictionGate.acquireLease(globalId); }
     public CharacterEvictionGate.Pin beginTransaction(String globalId) { return evictionGate.beginTransaction(globalId); }
 
-    /** Only a forced WAL receipt may acknowledge the captured generation as clean. */
+    /**
+     * Only a forced WAL receipt may acknowledge the captured generation as clean.
+     * A transaction pin spans queueing, disk force and receipt validation so a future
+     * eviction implementation cannot retire an identity while its write is in flight.
+     */
     public CompletableFuture<CharacterWal.Record> persist(String globalId, byte[] payload) {
         Objects.requireNonNull(payload, "payload");
-        CharacterEvictionGate.PersistenceTicket ticket = evictionGate.capture(globalId);
+        CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
+        final CharacterEvictionGate.PersistenceTicket ticket;
+        try {
+            ticket = evictionGate.capture(globalId);
+        } catch (RuntimeException failure) {
+            transaction.close();
+            throw failure;
+        }
         CompletableFuture<CharacterWal.Record> durable = new CompletableFuture<>();
         CompletableFuture<CharacterWal.Record> result = new CompletableFuture<>();
         durable.whenComplete((record, failure) -> {
-            if (failure != null) {
-                result.completeExceptionally(failure);
-                return;
+            try {
+                if (failure != null) {
+                    result.completeExceptionally(failure);
+                    return;
+                }
+                if (record == null || !ticket.globalId().equals(record.globalId())) {
+                    result.completeExceptionally(new IOException("WAL receipt identity mismatch"));
+                    return;
+                }
+                if (!evictionGate.markPersisted(ticket)) {
+                    result.completeExceptionally(new StalePersistenceException(
+                            "Character changed while its WAL frame was being written: " + globalId));
+                    return;
+                }
+                result.complete(record);
+            } finally {
+                transaction.close();
             }
-            if (!ticket.globalId().equals(record.globalId())) {
-                result.completeExceptionally(new IOException("WAL receipt identity mismatch"));
-                return;
-            }
-            if (!evictionGate.markPersisted(ticket)) {
-                result.completeExceptionally(new StalePersistenceException(
-                        "Character changed while its WAL frame was being written: " + globalId));
-                return;
-            }
-            result.complete(record);
         });
-        writer.submit(globalId, payload, durable);
+        try {
+            writer.submit(globalId, payload, durable);
+        } catch (RuntimeException failure) {
+            durable.completeExceptionally(new IOException("Could not enqueue Character WAL write", failure));
+        }
         return result;
     }
 

@@ -774,18 +774,26 @@ public class PeopleMod {
         CharacterWal wal = CHARACTER_WALS.get(owner);
         if (wal != null) {
             try {
-                // Transactional identity mutations remain synchronous: returning true means
-                // this exact Character frame has been forced to stable storage. Do not replace
-                // this with fire-and-forget writer.submit(); bounded async writes are reserved
-                // for explicit bulk workloads that expose a durable completion future.
+                CharacterPersistenceCoordinator persistence = owner.access().persistenceCoordinator();
+                if (persistence == null)
+                    throw new IllegalStateException("Character persistence coordinator is not attached");
+                // One authoritative route: the coordinator captures the dirty generation,
+                // queues through the bounded writer, and acknowledges it only after the
+                // matching forced WAL receipt. Waiting preserves this method's durable-true contract.
                 byte[] payload = owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
-                // Routine mutations pay for one durable append only. The addressable record
-                // store is refreshed during coordinated checkpoints, then the WAL is retired.
-                // This avoids a second fsync and one file replacement per Character mutation.
-                wal.append(character.globalId, payload);
+                persistence.persist(character.globalId, payload).get();
                 return true;
-            } catch (Exception walFailure) {
-                LOGGER.error("wf_people: Character WAL append failed for {}; identity writes are blocked", character.globalId, walFailure);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                LOGGER.error("wf_people: interrupted while waiting for Character WAL durability {}; identity writes are blocked",
+                        character.globalId, interrupted);
+                if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
+                return false;
+            } catch (java.util.concurrent.ExecutionException | RuntimeException walFailure) {
+                Throwable cause = walFailure instanceof java.util.concurrent.ExecutionException
+                        && walFailure.getCause() != null ? walFailure.getCause() : walFailure;
+                LOGGER.error("wf_people: coordinated Character WAL write failed for {}; identity writes are blocked",
+                        character.globalId, cause);
                 if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
                 return false;
             }
