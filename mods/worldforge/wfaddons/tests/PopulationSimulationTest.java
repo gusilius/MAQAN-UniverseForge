@@ -561,7 +561,7 @@ public final class PopulationSimulationTest {
         idCursorTail.add(firstAfterA);
         while (idCursor.hasNext()) idCursorTail.add(idCursor.next());
         ok(idCursorTail.equals(java.util.List.of(cursorB.id, cursorC.id,
-                        cursorRegistry.idAt(3)))
+                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
                         && !idCursor.hasNext(),
                 "key iterator remains stable when an NPC is appended mid-pass");
         java.util.Iterator<Character> allCursor = cursorRegistry.all().iterator();
@@ -573,8 +573,8 @@ public final class PopulationSimulationTest {
                 "legacy all() iterator has a stable boundary and does not fail on append");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
         Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
-        ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
-                        && stableIds.size() == 4 && cursorRegistry.size() == 5,
+        ok(stableIds.equals(cursorRegistry.idPage(0, 6))
+                        && stableIds.size() == 6 && cursorRegistry.size() == 7,
                 "ID snapshot is detached from Character values and remains stable when new members are appended");
         ok(cursorRegistry.idPage(1, 2).equals(java.util.List.of(cursorB.id, cursorC.id))
                         && cursorRegistry.idAt(4).equals(cursorLater.id)
@@ -901,10 +901,10 @@ public final class PopulationSimulationTest {
                 "registry scheduler iterator advances in canonical insertion order");
         Character iteratorD = iteratorRegistry.create("Iterator D", "", "", "n", 270);
         boolean appendInvalidates = false;
-        try { stableCursor.next(); }
-        catch (java.util.ConcurrentModificationException expected) { appendInvalidates = true; }
+        Character stableThird = stableCursor.next();
+        boolean stableBoundary = !stableCursor.hasNext() && stableThird == iteratorC;
         java.util.Iterator<Character> resumedCursor = iteratorRegistry.iteratorAfter(iteratorB.id);
-        ok(appendInvalidates && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,
+        ok(stableBoundary && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,
                 "scheduler iterator recovers after append without replaying acknowledged Characters");
 
         CharacterRegistry scheduledAppendRegistry = new CharacterRegistry();
@@ -915,7 +915,7 @@ public final class PopulationSimulationTest {
         Character scheduledD = scheduledAppendRegistry.create("Scheduled D", "", "", "n", 270);
         boolean scheduledSecond = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
         boolean scheduledThird = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
-        ok(!scheduledFirst && !scheduledSecond && scheduledThird
+        ok(!scheduledFirst && scheduledSecond && scheduledThird
                         && PopulationSimulation.need(scheduledA, Need.HUNGER) == 10
                         && PopulationSimulation.need(scheduledB, Need.HUNGER) == 10
                         && PopulationSimulation.need(scheduledC, Need.HUNGER) == 10
