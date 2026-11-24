@@ -41,10 +41,12 @@ public final class ResidentLifeSchedulerTest {
         Object session = registryPassField(registry, "session");
         check(session != null, "bounded annual pass creates a resumable session");
         try {
-            java.lang.reflect.Field peopleField = session.getClass().getDeclaredField("people");
-            peopleField.setAccessible(true);
-            check(peopleField.get(session) == registry.all(),
-                    "annual life session retains the canonical append-only registry view without copying it");
+            java.lang.reflect.Field registryField = session.getClass().getDeclaredField("registry");
+            registryField.setAccessible(true);
+            check(registryField.get(session) == registry
+                            && !java.util.Arrays.stream(session.getClass().getDeclaredFields())
+                            .anyMatch(field -> field.getName().equals("people")),
+                    "annual life session retains only the canonical registry reference, not a population-sized Character view");
         } catch (ReflectiveOperationException failure) {
             throw new AssertionError("cannot inspect annual session population view", failure);
         }
