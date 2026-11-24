@@ -129,6 +129,38 @@ public class PeopleTest {
         // один правитель задан вручную: он должен сохраниться
         String preset = d.realmList().get(0).id;
         ed.setRuler(preset, "Эйегон Завоеватель");
+        // A child WAL frame can be newer than the last durable parent frames.
+        // Replaying the independent records must rebuild the reciprocal parent->child
+        // indexes after the whole partition has been restored.
+        CharacterRegistry familyWalSource = new CharacterRegistry();
+        Character walFather = familyWalSource.create("WAL Father", "House Test", "human", "m", 250);
+        Character walMother = familyWalSource.create("WAL Mother", "House Test", "human", "f", 252);
+        familyWalSource.marry(walFather.id, walMother.id, 270);
+        String fatherBeforeBirth = familyWalSource.toJsonRecord(walFather);
+        String motherBeforeBirth = familyWalSource.toJsonRecord(walMother);
+        Character walChild = familyWalSource.addChild(walFather, walMother, "WAL Child", "f", 271);
+        String childAfterBirth = familyWalSource.toJsonRecord(walChild);
+        CharacterRegistry familyWalRestored = new CharacterRegistry();
+        familyWalRestored.applyJsonRecord(fatherBeforeBirth, "family-wal-roundtrip");
+        familyWalRestored.applyJsonRecord(motherBeforeBirth, "family-wal-roundtrip");
+        familyWalRestored.applyJsonRecord(childAfterBirth, "family-wal-roundtrip");
+        familyWalRestored.reconcileFamilyLinksAfterRecordRestore();
+        Character restoredFather = familyWalRestored.get(walFather.id);
+        Character restoredMother = familyWalRestored.get(walMother.id);
+        Character restoredChild = familyWalRestored.get(walChild.id);
+        ok(restoredFather != null && restoredMother != null && restoredChild != null
+                        && restoredFather.children.contains(restoredChild.id)
+                        && restoredMother.children.contains(restoredChild.id)
+                        && restoredChild.id.equals(restoredFather.spouse)
+                        == false,
+                "independent WAL record replay restores reciprocal family parent/child indexes");
+        ok(restoredFather != null && restoredMother != null
+                        && restoredFather.id.equals(restoredMother.spouse)
+                        && restoredMother.id.equals(restoredFather.spouse)
+                        && restoredFather.globalId.equals(restoredChild.props.get("family.father_global_id"))
+                        && restoredMother.globalId.equals(restoredChild.props.get("family.mother_global_id")),
+                "family record replay retains canonical parent and spouse UUID references");
+
         CharacterRegistry reg = new CharacterRegistry();
         int created = Courts.ensure(d, ed, reg, defs, names, 42L, 300);
         TerritorialIdentity.Result identity = TerritorialIdentity.ensure(nm, d, ed, reg, names, 42L);
