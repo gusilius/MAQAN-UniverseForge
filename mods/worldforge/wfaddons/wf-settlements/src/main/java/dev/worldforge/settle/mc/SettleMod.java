@@ -424,10 +424,12 @@ public class SettleMod {
                 double offsetX = worker.x - other.x, offsetZ = worker.z - other.z;
                 double distance = offsetX * offsetX + offsetZ * offsetZ;
                 if (distance >= nearest) continue;
-                Character candidate = resolvePerson(registry, other.person);
-                if (candidate != null && candidate.alive) {
-                    nearest = distance;
-                    best = other;
+                try (PersonBinding candidateBinding = resolvePersonBinding(registry, other.person)) {
+                    Character candidate = candidateBinding == null ? null : candidateBinding.character();
+                    if (candidate != null && candidate.alive) {
+                        nearest = distance;
+                        best = other;
+                    }
                 }
             }
         }
@@ -1856,6 +1858,12 @@ public class SettleMod {
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
+            // The lease prevents eviction, but does not itself advance the canonical dirty generation.
+            // Publish exactly one dirty mutation after the complete worker/Character reconciliation.
+            var persistence = personRegistry.access().persistenceCoordinator();
+            if (persistence == null)
+                throw new IllegalStateException("Character persistence coordinator is not attached for " + person.globalId);
+            persistence.markDirty(person.globalId);
             }
         }
         if (!pendingProfessionTransitions.isEmpty() && saveDurably(server)) {
@@ -2014,31 +2022,29 @@ public class SettleMod {
                     }
                     if (action == LifeSimulation.Action.SOCIALIZE) {
                         dev.worldforge.settle.Worker companion = residentIndex.byPerson.get(worker.lifeSocialTarget);
-                        Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
-                        if (companion == null || companionPerson == null || !companionPerson.alive) {
-                            settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
-                            return LifeSimulation.Outcome.BLOCKED;
-                        }
-                        if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
-                            double dx = worker.x - companion.x, dz = worker.z - companion.z;
-                            if (dx * dx + dz * dz > 16.0) {
+                        try (PersonBinding companionBinding = companion == null ? null
+                                : resolvePersonBinding(registry, companion.person)) {
+                            Character companionPerson = companionBinding == null ? null : companionBinding.character();
+                            if (companion == null || companionPerson == null || !companionPerson.alive) {
                                 settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
                                 return LifeSimulation.Outcome.BLOCKED;
                             }
+                            if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
+                                double dx = worker.x - companion.x, dz = worker.z - companion.z;
+                                if (dx * dx + dz * dz > 16.0) {
+                                    settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
+                                    return LifeSimulation.Outcome.BLOCKED;
+                                }
+                            }
+                            Object tokenRaw = character.props.get("population.ai.pending_token");
+                            if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
+                                settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
+                                return LifeSimulation.Outcome.BLOCKED;
+                            }
+                            int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
+                            dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
+                            settlement.updateWorkerKnownMember(companion, current -> current.status = "общался: " + character.name);
                         }
-                        Object tokenRaw = character.props.get("population.ai.pending_token");
-                        if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
-                            settlement.updateWorkerKnownMember(worker, SettleMod::clearLifeAction);
-                            return LifeSimulation.Outcome.BLOCKED;
-                        }
-                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
-                        dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
-                        // Both participants belong to this settlement's canonical registry.
-                        // The durable receipt is part of each Character snapshot and is committed
-                        // by PeopleMod's bounded registry checkpoint/shutdown save. Never serialize
-                        // every world registry synchronously for each ordinary conversation:
-                        // estate-transfer journals are reserved for actual ownership transactions.
-                        settlement.updateWorkerKnownMember(companion, current -> current.status = "общался: " + character.name);
                     }
                     settlement.updateWorkerKnownMember(worker, current -> {
                         clearLifeAction(current);
