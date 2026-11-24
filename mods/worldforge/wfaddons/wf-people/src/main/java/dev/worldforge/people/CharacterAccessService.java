@@ -63,6 +63,11 @@ public final class CharacterAccessService {
         }
     }
 
+    /** Detaches the closed world's coordinator before this reusable registry starts a new server. */
+    public void detachPersistenceCoordinator() {
+        synchronized (PERSISTENCE) { PERSISTENCE.remove(registry); }
+    }
+
     public void replacePersistenceWriter(CharacterWalWriter writer) {
         CharacterPersistenceCoordinator persistence = coordinator();
         if (persistence != null) persistence.replaceWriter(writer);
