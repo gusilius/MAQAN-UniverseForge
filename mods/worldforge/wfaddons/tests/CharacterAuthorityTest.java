@@ -137,20 +137,26 @@ public final class CharacterAuthorityTest {
         Character legacyFather = legacyFamilyRegistry.create("Legacy father", "", "", "m", 0);
         Character legacyMother = legacyFamilyRegistry.create("Legacy mother", "", "", "f", 0);
         Character legacyChild = legacyFamilyRegistry.create("Legacy child", "", "", "m", 1);
+        Character legacySibling = legacyFamilyRegistry.create("Legacy sibling", "", "", "f", 2);
         legacyChild.father = legacyFather.id;
         legacyChild.mother = legacyMother.id;
+        legacySibling.father = legacyFather.id;
+        legacySibling.mother = legacyMother.id;
         legacyFather.children.add(legacyChild.id);
+        legacyFather.children.add(legacySibling.id);
         legacyMother.children.add(legacyChild.id);
+        legacyMother.children.add(legacySibling.id);
         CharacterAuthority legacyFamilyAuthority = new CharacterAuthority();
         legacyFamilyAuthority.beginWorld(world);
         CharacterRegistry collidingLegacyRegistry = new CharacterRegistry();
         Character collidingLegacy = collidingLegacyRegistry.create("Other map c1", "", "", "m", 0);
         legacyFamilyAuthority.registerMap("legacy-family", legacyFamilyRegistry);
         legacyFamilyAuthority.registerMap("legacy-collision", collidingLegacyRegistry);
+        legacyFamilyAuthority.rebuildFamilyIndex(0);
         var legacyKin = legacyFamilyAuthority.kinCandidates(legacyChild);
         check(legacyKin.contains(legacyFather) && legacyKin.contains(legacyMother)
-                        && !legacyKin.contains(collidingLegacy),
-                "legacy-only parent and child links remain local to their map when cN IDs collide");
+                        && legacyKin.contains(legacySibling) && !legacyKin.contains(collidingLegacy),
+                "legacy-only parents, siblings and children remain map-local when cN IDs collide");
 
         CharacterRegistry legacyMarriageRegistry = new CharacterRegistry();
         Character legacyPartner = legacyMarriageRegistry.create("Legacy partner", "", "", "f", 0);
