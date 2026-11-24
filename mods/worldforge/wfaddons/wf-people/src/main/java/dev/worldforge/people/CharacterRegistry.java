@@ -1365,7 +1365,11 @@ public final class CharacterRegistry {
         if (identityNamespace == null || identityNamespace.isBlank())
             throw new IllegalArgumentException("identityNamespace is required");
 
-        Map<String, Character> loaded = new LinkedHashMap<>();
+        // Stage the replacement directly in its final map and order directory.
+        // Copying a LinkedHashMap into a HashMap plus a second key list doubled
+        // population-sized references during restore at exactly the worst moment.
+        Map<String, Character> loaded = new HashMap<>();
+        List<String> loadedIds = new ArrayList<>();
         Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
         int[] maxNumericId = {0};
@@ -1377,6 +1381,7 @@ public final class CharacterRegistry {
                 Character character = decodeCharacter(record, identityNamespace, globalOwners, entityOwners);
                 if (loaded.putIfAbsent(character.id, character) != null)
                     throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
+                loadedIds.add(character.id);
                 if (character.id.matches("c[0-9]+")) {
                     try {
                         maxNumericId[0] = Math.max(maxNumericId[0],
@@ -1422,8 +1427,8 @@ public final class CharacterRegistry {
         }
 
         // Publish only after every record, identity and entity binding has passed validation.
-        byId = new HashMap<>(loaded);
-        orderedIds = new ArrayList<>(loaded.keySet());
+        byId = loaded;
+        orderedIds = loadedIds;
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
