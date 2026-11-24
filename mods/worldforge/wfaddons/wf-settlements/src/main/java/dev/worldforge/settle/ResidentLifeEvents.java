@@ -5,6 +5,8 @@ import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.CharacterHealth;
 import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterAccessService;
+import dev.worldforge.people.PeopleMod;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
 
@@ -42,32 +44,33 @@ public final class ResidentLifeEvents {
     private static final class YearSession {
         final int year;
         final long worldDay;
-        final List<Character> people;
+        final CharacterRegistry registry;
+        final long membershipResetGeneration;
         final int initialSize;
-        final List<Character> newborns = new ArrayList<>();
-        final List<Character> eligibleSingles = new ArrayList<>();
+        final List<String> newbornIds = new ArrayList<>();
+        final List<String> eligibleSingleIds = new ArrayList<>();
         int phase;
         int cursor;
         long lastAdvanceToken = Long.MIN_VALUE;
         YearSession(CharacterRegistry registry, int year) {
             this.year = year;
             this.worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
-            // CharacterRegistry.all() is a stable append-only view; capture only the size,
-            // not a second O(population) reference array for every annual session.
-            this.people = registry.all();
+            this.registry = registry;
+            this.membershipResetGeneration = registry.membershipResetGeneration();
             this.initialSize = registry.size();
         }
     }
 
     private static final class StageRefresh {
         final int year, end;
-        final List<Character> people;
+        final CharacterRegistry registry;
+        final long membershipResetGeneration;
         int cursor;
         long lastAdvanceToken = Long.MIN_VALUE;
         StageRefresh(CharacterRegistry registry, int year, int start, int end) {
             this.year = year;
-            // Retain the registry's append-only view instead of copying every resident.
-            this.people = registry.all();
+            this.registry = registry;
+            this.membershipResetGeneration = registry.membershipResetGeneration();
             this.cursor = start;
             this.end = end;
         }
@@ -137,8 +140,8 @@ public final class ResidentLifeEvents {
                 session.cursor = 0;
                 continue;
             }
-            int workSize = session.phase == 3 ? session.eligibleSingles.size()
-                    : session.initialSize + (session.phase >= 1 ? session.newborns.size() : 0);
+            int workSize = session.phase == 3 ? session.eligibleSingleIds.size()
+                    : session.initialSize + (session.phase >= 1 ? session.newbornIds.size() : 0);
             if (session.cursor >= workSize) {
                 session.phase++;
                 session.cursor = 0;
@@ -147,30 +150,30 @@ public final class ResidentLifeEvents {
             int end = session.cursor + Math.min(remaining, workSize - session.cursor);
             
             if (session.phase == 0) {
-                List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
-                registry.refreshLifeStages(batch, session.year);
-                for (Character person : batch) {
-                    
-                    Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
-                    
-                    if (newborn != null) session.newborns.add(newborn);
-                    if (person.alive && (person.spouse == null || person.spouse.isBlank())
-                            && PopulationSimulation.age(person, session.year) >= 18)
-                        session.eligibleSingles.add(person);
+                for (int index = session.cursor; index < end; index++) {
+                    String localId = registry.idAt(index);
+                    String globalId = registry.globalIdForLocalId(localId);
+                    if (globalId == null) continue;
+                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                        if (lease == null) continue;
+                        Character person = lease.get();
+                        registry.refreshLifeStages(List.of(person), session.year);
+                        Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
+                        if (newborn != null) session.newbornIds.add(newborn.globalId);
+                        if (person.alive && (person.spouse == null || person.spouse.isBlank())
+                                && PopulationSimulation.age(person, session.year) >= 18)
+                            session.eligibleSingleIds.add(globalId);
+                    }
                 }
             } else if (session.phase == 1) {
                 for (int index = session.cursor; index < end; index++)
-                    advanceChildhoodPerson(registry, personAt(session, index), session.year);
+                    withSessionPerson(session, index, person -> advanceChildhoodPerson(registry, person, session.year));
             } else if (session.phase == 2) {
-                for (int index = session.cursor; index < end; index++) {
-                    Character reviewed = personAt(session, index);
-                    
-                    processMaritalConflict(registry, reviewed, session.year);
-                    
-                }
+                for (int index = session.cursor; index < end; index++)
+                    withSessionPerson(session, index, person -> processMaritalConflict(registry, person, session.year));
             } else {
                 for (int i = session.cursor; i < end; i++)
-                    processRelationshipReview(registry, session.eligibleSingles, i, session.year);
+                    processRelationshipReviewById(registry, session.eligibleSingleIds, i, session.year);
             }
             int processed = end - session.cursor;
             session.cursor = end;
@@ -207,9 +210,12 @@ public final class ResidentLifeEvents {
         int end = refresh.cursor + Math.min(residentBudget, refresh.end - refresh.cursor);
         if (end > refresh.cursor) {
             
-            List<Character> batch = new ArrayList<>(refresh.people.subList(refresh.cursor, end));
-            registry.refreshLifeStages(batch, year);
-            
+            for (int index = refresh.cursor; index < end; index++) {
+                String localId = registry.idAt(index);
+                try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                    if (lease != null) registry.refreshLifeStages(List.of(lease.get()), year);
+                }
+            }
             refresh.cursor = end;
         }
         if (refresh.cursor >= refresh.end) {
@@ -333,9 +339,20 @@ public final class ResidentLifeEvents {
         }
     }
 
-    private static Character personAt(YearSession session, int index) {
-        return index < session.initialSize ? session.people.get(index)
-                : session.newborns.get(index - session.initialSize);
+    private static String personIdAt(YearSession session, int index) {
+        if (index < session.initialSize) return session.registry.globalIdForLocalId(session.registry.idAt(index));
+        return session.newbornIds.get(index - session.initialSize);
+    }
+
+    private static void withSessionPerson(YearSession session, int index,
+                                          java.util.function.Consumer<Character> action) {
+        String globalId = personIdAt(session, index);
+        if (globalId == null || globalId.isBlank()) return;
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+        if (owner == null) return;
+        try (CharacterAccessService.Lease lease = owner.access().acquireGlobal(globalId)) {
+            if (lease != null) action.accept(lease.get());
+        }
     }
 
     private static Character processPregnancy(CharacterRegistry registry, Character person, int year,
@@ -424,17 +441,31 @@ public final class ResidentLifeEvents {
         }
     }
 
-    private static void processRelationshipReview(CharacterRegistry registry, List<Character> eligibleSingles,
+    private static void processRelationshipReviewById(CharacterRegistry registry, List<String> eligibleIds,
+                                                       int index, int year) {
+        String firstId = eligibleIds.get(index);
+        if (firstId == null || firstId.isBlank()) return;
+        try (CharacterAccessService.Lease lease = PeopleMod.authority().registryForGlobal(firstId)
+                .access().acquireGlobal(firstId)) {
+            if (lease == null) return;
+            processRelationshipReview(registry, eligibleIds, index, year, lease.get());
+        }
+    }
+
+    private static void processRelationshipReview(CharacterRegistry registry, List<String> eligibleIds,
+                                                    int index, int year, Character first) {
                                                    int index, int year) {
         Character first = eligibleSingles.get(index);
         if (year <= number(first.props.get("family.relationship_review_year"), 0)) return;
         first.props.put("family.relationship_review_year", year);
-        int available = eligibleSingles.size() - index - 1;
+        int available = eligibleIds.size() - index - 1;
         if (available <= 0) return;
         int checks = Math.min(available, MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR);
         int startOffset = Math.floorMod(Objects.hash(first.id, year, "relationship-review"), available);
         for (int probe = 0; probe < checks; probe++) {
-            Character second = eligibleSingles.get(index + 1 + ((startOffset + probe) % available));
+            String secondId = eligibleIds.get(index + 1 + ((startOffset + probe) % available));
+            Character second = registry.getByGlobalId(secondId);
+            if (second == null) continue;
             if (!second.alive || second.spouse != null && !second.spouse.isBlank()
                     || closeFamily(registry, first, second)) continue;
             int affinity = Math.min(ResidentSocial.score(first, second.globalId), ResidentSocial.score(second, first.globalId));
