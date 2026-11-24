@@ -1196,10 +1196,9 @@ public final class CharacterRegistry {
         indexPosts(restored);
         byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
-        if (restored.id.matches("c[0-9]+")) {
-            try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
-            catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
-        }
+        int restoredNumericId = numericCharacterId(restored.id);
+        if (restoredNumericId >= 0 && restoredNumericId < Integer.MAX_VALUE)
+            next = Math.max(next, restoredNumericId + 1);
         Object recipients = restored.props.get("death.bereavement.recipients");
         if (!Boolean.TRUE.equals(restored.props.get("death.bereavement.completed"))
                 && recipients instanceof List<?> && !pendingBereavement.contains(restored.globalId))
@@ -1269,6 +1268,17 @@ public final class CharacterRegistry {
             writer.write('}');
         }
         writer.write("]}");
+    }
+
+    /** Parses generated local IDs without compiling a regular expression per NPC. */
+    private static int numericCharacterId(String id) {
+        if (id == null || id.length() < 2 || id.charAt(0) != 'c') return -1;
+        for (int i = 1; i < id.length(); i++) {
+            char value = id.charAt(i);
+            if (value < '0' || value > '9') return -1;
+        }
+        try { return Integer.parseInt(id.substring(1)); }
+        catch (NumberFormatException ignored) { return -1; }
     }
 
     /**
@@ -1401,14 +1411,8 @@ public final class CharacterRegistry {
                 if (loaded.putIfAbsent(character.id, character) != null)
                     throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
                 loadedIds.add(character.id);
-                if (character.id.matches("c[0-9]+")) {
-                    try {
-                        maxNumericId[0] = Math.max(maxNumericId[0],
-                                Integer.parseInt(character.id.substring(1)));
-                    } catch (NumberFormatException ignoredNumber) {
-                        // Non-allocatable legacy identifier.
-                    }
-                }
+                int numericId = numericCharacterId(character.id);
+                if (numericId >= 0) maxNumericId[0] = Math.max(maxNumericId[0], numericId);
             });
         } catch (IOException ex) {
             throw new IllegalArgumentException("Не удалось потоково прочитать сохранение персонажей", ex);
