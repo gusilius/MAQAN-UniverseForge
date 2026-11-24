@@ -1327,11 +1327,11 @@ public final class CharacterRegistry {
         }
         Object rawTraits = m.get("traits");
         if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
-        Set<String> uniqueTraits = new HashSet<>();
+        // Character.traits is already a Set; use it for duplicate detection instead
+        // of allocating a second temporary HashSet for every decoded NPC.
         for (Object trait : traits) {
-            if (!(trait instanceof String value) || value.isBlank() || !uniqueTraits.add(value))
+            if (!(trait instanceof String value) || value.isBlank() || !character.traits.add(value))
                 throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
-            character.traits.add(value);
         }
         Object props = m.get("props");
         if (props != null) {
