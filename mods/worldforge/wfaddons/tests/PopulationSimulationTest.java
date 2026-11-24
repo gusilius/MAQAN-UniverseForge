@@ -772,20 +772,28 @@ public final class PopulationSimulationTest {
         // Regression: cached registry membership must not cache the mutable alive flag.
         CharacterRegistry cachedLifeStateRegistry = new CharacterRegistry();
         Character cachedLifeState = cachedLifeStateRegistry.create("Cached Life State", "", "north", "m", 270);
+        PopulationComputeBridge.Scan lifeStateScan =
+                PopulationComputeBridge.beginScan(java.util.List.of(cachedLifeStateRegistry));
         PopulationComputeBridge.captureForWorldDay("population-life-state-test", 300, 1, 0,
-                java.util.List.of(cachedLifeStateRegistry));
+                java.util.List.of(cachedLifeStateRegistry), lifeStateScan, 0,
+                lifeStateScan.firstMemberCursor(), Integer.MAX_VALUE);
         PopulationSimulation.die(cachedLifeStateRegistry, cachedLifeState.id, 300, "test");
         PopulationComputeBridge.Captured afterCachedDeath = PopulationComputeBridge.captureForWorldDay(
-                "population-life-state-test", 300, 2, 0, java.util.List.of(cachedLifeStateRegistry));
+                "population-life-state-test", 300, 2, 0, java.util.List.of(cachedLifeStateRegistry),
+                lifeStateScan, 0, lifeStateScan.firstMemberCursor(), Integer.MAX_VALUE);
         ok(afterCachedDeath.characterIds().isEmpty(),
                 "cached population membership re-filters mutable alive state after death");
 
+        PopulationComputeBridge.Scan resumeScan =
+                PopulationComputeBridge.beginScan(java.util.List.of(resumableRegistry));
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
-                "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry));
+                "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry),
+                resumeScan, 0, resumeScan.firstMemberCursor(), Integer.MAX_VALUE);
         ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 0,
                 "same-day Rust retry excludes Characters already acknowledged by durable receipts, even when the global cursor equals the target");
         PopulationComputeBridge.Captured nextDayCapture = PopulationComputeBridge.captureForWorldDay(
-                "population-resume-test", 300, 14, 10, java.util.List.of(resumableRegistry));
+                "population-resume-test", 300, 14, 10, java.util.List.of(resumableRegistry),
+                resumeScan, 0, resumeScan.firstMemberCursor(), Integer.MAX_VALUE);
         Map<?,?> nextDayRequest = (Map<?,?>) Json.parse(new String(nextDayCapture.request(), java.nio.charset.StandardCharsets.UTF_8));
         Map<?,?> nextDayPerson = (Map<?,?>) ((java.util.List<?>) nextDayRequest.get("characters")).get(0);
         ok(nextDayCapture.characterIds().equals(java.util.List.of(resumable.globalId))
