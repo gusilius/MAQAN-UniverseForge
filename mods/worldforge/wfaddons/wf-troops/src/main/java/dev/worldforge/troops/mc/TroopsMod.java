@@ -856,9 +856,13 @@ public class TroopsMod {
             }
             troop.setCanonicalCharacterMorale(morale);
             troop.setCanonicalInjuryCombatMultiplier(CharacterDevelopment.injuryCombatMultiplier(person));
-            Object previousIntent = person.props.get("population.intent");
+            Object previousIntent = person.props.get("population.last_intent");
+            Object previousAge = person.props.get("population.age_years");
+            Object previousStage = person.props.get("population.life_stage");
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
-            changed |= !Objects.equals(previousIntent, person.props.get("population.intent"));
+            changed |= !Objects.equals(previousIntent, person.props.get("population.last_intent"))
+                    || !Objects.equals(previousAge, person.props.get("population.age_years"))
+                    || !Objects.equals(previousStage, person.props.get("population.life_stage"));
             if (changed) registry.access().mutateGlobal(person.globalId, ignored -> { });
         }
     }
