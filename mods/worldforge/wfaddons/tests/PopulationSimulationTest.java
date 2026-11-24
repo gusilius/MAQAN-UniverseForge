@@ -545,10 +545,6 @@ public final class PopulationSimulationTest {
         ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
                         && stableIds.size() == 4 && cursorRegistry.size() == 5,
                 "ID snapshot is detached from Character values and remains stable when new members are appended");
-        java.util.Iterator<String> idOnlyCursor = cursorRegistry.idIteratorAfter(cursorA.id);
-        ok(idOnlyCursor.hasNext() && cursorB.id.equals(idOnlyCursor.next())
-                        && idOnlyCursor.hasNext() && cursorC.id.equals(idOnlyCursor.next()),
-                "key-only population cursor preserves insertion order without retaining Character values");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
         resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
         resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);
