@@ -111,8 +111,20 @@ public final class Succession {
             Character branchHeir = heirBranch(reg, child, law, visited);
             if (branchHeir != null) return branchHeir;
         }
+        // Siblings are the other children of the same father. Query the family
+        // projection instead of scanning every Character in the map/world. The index
+        // returns only this parent's relatives; the explicit father check preserves
+        // legacy-save semantics and guards against ambiguous old cN identifiers.
         List<Character> sibs = new ArrayList<>();
-        for (Character c : reg.all()) if (c.alive && c != dead && !dead.father.isEmpty() && dead.father.equals(c.father)) sibs.add(c);
+        if (!dead.father.isEmpty()) {
+            Character father = reg.get(dead.father);
+            if (father != null) {
+                for (Character candidate : reg.kinCandidates(father)) {
+                    if (candidate.alive && candidate != dead
+                            && dead.father.equals(candidate.father)) sibs.add(candidate);
+                }
+            }
+        }
         sort(sibs, law);
         if (!sibs.isEmpty()) return sibs.get(0);
         List<Character> nobles = new ArrayList<>();                    // придворная знать того же места
