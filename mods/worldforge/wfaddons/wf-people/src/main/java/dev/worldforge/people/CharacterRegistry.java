@@ -928,12 +928,8 @@ public final class CharacterRegistry {
     private List<Character.Post> killBatched(String id) {
         Character c = require(id);
         if (c.alive) c.alive = false;
-        // A pending cross-registry transfer marker must be reconciled even when the estate
-        // was previously marked settled: the recipient partition may have reached disk first.
-        if (!Boolean.TRUE.equals(c.props.get("estate.settled"))
-                || c.props.containsKey("estate.transfer_pending")) {
-            CharacterInventory.settleEstate(authority, this, c);
-        }
+        // Estate succession was committed under UUID-ordered leases before entering this
+        // lifecycle callback. Keep its transfer markers until coordinated snapshots finalize.
         if (Boolean.TRUE.equals(c.props.get("death.lifecycle.completed"))) return List.of();
 
         List<Character.Post> vacated = new ArrayList<>(c.posts);
