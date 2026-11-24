@@ -1172,9 +1172,14 @@ public final class CharacterRegistry {
         return raw instanceof List<?> values && values.contains(globalId);
     }
 
-    private static String familyGlobalId(Character character, String key) {
-        Object value = character.props.get(key);
-        return value instanceof String id ? id : "";
+    /** Resolve canonical family UUIDs while retaining compatibility with legacy local parent IDs. */
+    private String familyGlobalId(Character character, String key) {
+        String legacyId = switch (key) {
+            case "family.father_global_id" -> character.father;
+            case "family.mother_global_id" -> character.mother;
+            default -> "";
+        };
+        return familyGlobalOrLegacy(character, key, legacyId);
     }
 
     public int pendingBereavementEvents() { return pendingBereavement.size(); }
