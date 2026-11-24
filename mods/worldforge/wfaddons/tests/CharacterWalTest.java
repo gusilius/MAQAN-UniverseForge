@@ -95,6 +95,13 @@ public final class CharacterWalTest {
                                 && latestRecords.get(0).payloadUtf8().equals("{\"version\":2}"),
                         "latest-only WAL replay collapses repeated mutations to one durable record per Character");
                 wal.checkpoint(() -> wal.replayLatestEach(store::put));
+                CharacterRecordStore.Record publicRecord = new CharacterRecordStore.Record(id,
+                        "{\"external\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                byte[] callerBytes = "{\"external\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                CharacterRecordStore.Record defensiveRecord = new CharacterRecordStore.Record(id, callerBytes);
+                callerBytes[0] ^= 0x01;
+                ok(defensiveRecord.payloadUtf8().equals("{\"external\":true}"),
+                        "public Character record construction keeps defensive payload ownership");
                 CharacterRecordStore.Record stored = store.get(id);
                 boolean storedPayloadIsDefensive = false;
                 if (stored != null) {
