@@ -44,6 +44,11 @@ public final class CharacterWalTest {
                 ok(records.size() == 2 && streamed.size() == 2
                                 && streamed.get(0).startsWith("1:") && streamed.get(1).startsWith("2:"),
                         "streaming replay preserves deterministic shard/sequence order and crash-tail recovery");
+                byte[] callerOwnedPayload = "{\"caller\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                CharacterWal.Record defensiveRecord = new CharacterWal.Record(shardId, 99, id, callerOwnedPayload);
+                callerOwnedPayload[0] ^= 0x01;
+                ok(defensiveRecord.payloadUtf8().equals("{\"caller\":true}"),
+                        "public WAL record construction keeps defensive payload ownership");
                 CharacterWal.Record payloadRecord = records.get(0);
                 byte[] isolatedPayload = payloadRecord.payload();
                 isolatedPayload[0] ^= 0x01;
