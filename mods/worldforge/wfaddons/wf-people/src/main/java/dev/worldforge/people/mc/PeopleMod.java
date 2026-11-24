@@ -582,6 +582,8 @@ public class PeopleMod {
             CharacterRecordStore records = CHARACTER_RECORD_STORES.get(registry);
             if (records == null) throw new java.io.IOException("Character record store is not open");
             long membership = registry.membershipGeneration();
+            CharacterPersistenceCoordinator persistence = registry.access().persistenceCoordinator();
+            long checkpointDirtyEpoch = persistence == null ? -1L : persistence.dirtyEpoch();
             boolean fullBootstrap = !Boolean.TRUE.equals(CHARACTER_RECORD_STORE_COMPLETE.get(registry))
                     || !Objects.equals(CHARACTER_RECORD_STORE_MEMBERSHIP.get(registry), membership);
             // Hold the WAL monitor across both record-store writes and shard truncation.
@@ -618,6 +620,9 @@ public class PeopleMod {
             });
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
+            if (persistence != null && checkpointDirtyEpoch >= 0L
+                    && !persistence.markCheckpointCompleted(checkpointDirtyEpoch))
+                LOGGER.debug("wf_people: checkpoint committed but eviction remains fenced by concurrent/new dirty work");
         } finally {
             if (restartWriter) {
                 CharacterWalWriter replacement = new CharacterWalWriter(wal, 8192,
