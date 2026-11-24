@@ -49,6 +49,15 @@ public final class CharacterEvictionGate {
         states.putIfAbsent(id, new State());
     }
 
+    /** Registers an identity whose current snapshot was already recovered from durable storage. */
+    public void registerPersisted(String globalId) {
+        String id = requireId(globalId);
+        State state = states.computeIfAbsent(id, ignored -> new State());
+        synchronized (state) {
+            state.persistedGeneration = state.generation;
+        }
+    }
+
     /** Advances the identity generation. A prior write receipt can no longer clean it. */
     public long markDirty(String globalId) {
         State state = state(globalId);
