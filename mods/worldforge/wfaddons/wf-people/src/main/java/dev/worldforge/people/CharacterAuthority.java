@@ -15,6 +15,9 @@ public final class CharacterAuthority {
     private Map<String, Set<String>> familyBySpouseGlobal = new HashMap<>();
     /** Sparse recovery index: only recipients with durable incoming estate markers are retained. */
     private final Map<String, Set<String>> pendingEstateIncoming = new HashMap<>();
+    /** Sparse cross-partition inventory WAL index; keys and endpoints are UUIDs only. */
+    private final Map<String, InventoryTransfer> pendingInventoryTransfers = new HashMap<>();
+    public record InventoryTransfer(String transactionId, String sourceGlobalId, String destinationGlobalId) { }
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
     private final Map<CharacterRegistry, String> registryMapIds = new IdentityHashMap<>();
@@ -43,6 +46,7 @@ public final class CharacterAuthority {
         familyGlobal.clear();
         familyBySpouseGlobal.clear();
         pendingEstateIncoming.clear();
+        pendingInventoryTransfers.clear();
         indexedMembershipGenerations.clear();
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
@@ -101,6 +105,7 @@ public final class CharacterAuthority {
                     + " and " + mapId + "/" + character.id);
         byLegacyId.computeIfAbsent(character.id, ignored -> new LinkedHashSet<>()).add(identity);
         indexEstateIncoming(character);
+        indexInventoryTransferMarkers(character);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         sortedIdentityCache = null;
     }
@@ -116,6 +121,7 @@ public final class CharacterAuthority {
         if (mapId == null || currentWorld == null) return;
         if (previous != null) {
             removeEstateIncomingForHeir(previous.globalId);
+            removeInventoryTransfersForCharacter(previous.globalId);
             CharacterIdentity oldIdentity = new CharacterIdentity(
                     currentWorld, mapId, previous.id, previous.globalId);
             if (!previous.globalId.equals(replacement.globalId)) {
@@ -137,6 +143,7 @@ public final class CharacterAuthority {
 
         byLegacyId.computeIfAbsent(replacement.id, ignored -> new LinkedHashSet<>()).add(identity);
         indexEstateIncoming(replacement);
+        indexInventoryTransferMarkers(replacement);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         sortedIdentityCache = null;
         // The reverse family projection is day-scoped and may contain edges from the old record.
@@ -223,6 +230,7 @@ public final class CharacterAuthority {
                 if (!identity.mapId().equals(mapId)) continue;
                 existing.remove();
                 removeEstateIncomingForHeir(identity.globalCharacterId());
+                removeInventoryTransfersForCharacter(identity.globalCharacterId());
                 Set<CharacterIdentity> legacy = byLegacyId.get(identity.characterId());
                 if (legacy != null) {
                     legacy.remove(identity);
@@ -239,6 +247,7 @@ public final class CharacterAuthority {
                     throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
                 byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
                 indexEstateIncoming(character);
+                indexInventoryTransferMarkers(character);
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         }
@@ -388,6 +397,43 @@ public final class CharacterAuthority {
 
     private void removeEstateIncomingForHeir(String heirGlobalId) {
         if (heirGlobalId != null) pendingEstateIncoming.remove(heirGlobalId);
+    }
+
+    public synchronized void noteInventoryTransfer(String transactionId, String sourceGlobalId,
+                                                    String destinationGlobalId) {
+        if (transactionId == null || transactionId.isBlank()
+                || sourceGlobalId == null || sourceGlobalId.isBlank()
+                || destinationGlobalId == null || destinationGlobalId.isBlank()) return;
+        pendingInventoryTransfers.put(transactionId,
+                new InventoryTransfer(transactionId, sourceGlobalId, destinationGlobalId));
+    }
+
+    public synchronized void clearInventoryTransfer(String transactionId) {
+        if (transactionId != null) pendingInventoryTransfers.remove(transactionId);
+    }
+
+    public synchronized List<InventoryTransfer> pendingInventoryTransfers() {
+        return List.copyOf(pendingInventoryTransfers.values());
+    }
+
+    private void indexInventoryTransferMarkers(Character person) {
+        for (Map.Entry<String, Object> entry : person.props.entrySet()) {
+            if (!entry.getKey().startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)
+                    || !(entry.getValue() instanceof Map<?, ?> marker)) continue;
+            Object tx = marker.get("transaction_id");
+            Object source = marker.get("source_global_id");
+            Object destination = marker.get("destination_global_id");
+            if (tx instanceof String transactionId && source instanceof String sourceId
+                    && destination instanceof String destinationId)
+                noteInventoryTransfer(transactionId, sourceId, destinationId);
+        }
+    }
+
+    private void removeInventoryTransfersForCharacter(String globalId) {
+        if (globalId == null) return;
+        pendingInventoryTransfers.values().removeIf(transfer ->
+                globalId.equals(transfer.sourceGlobalId())
+                        || globalId.equals(transfer.destinationGlobalId()));
     }
 
     /** Resolves an unambiguous legacy partition-local ID to its canonical UUID without hydration. */
