@@ -109,6 +109,14 @@ public class TroopEntity extends PathfinderMob {
     public double dmgMult = 1;
     private double supplyCombatMultiplier = 1.0;
     private double supplyMovementMultiplier = 1.0;
+    /** Cached from the canonical Character; combat ticks must not resolve or lease NPCs repeatedly. */
+    private double canonicalInjuryCombatMultiplier = 1.0;
+
+    public double canonicalInjuryCombatMultiplier() { return canonicalInjuryCombatMultiplier; }
+    public void setCanonicalInjuryCombatMultiplier(double value) {
+        if (!Double.isFinite(value)) throw new IllegalArgumentException("injury multiplier must be finite");
+        canonicalInjuryCombatMultiplier = Math.max(0.70, Math.min(1.0, value));
+    }
 
     /** Applies operational ration readiness without overwriting morale or injury modifiers. */
     public void setSupplyReadiness(double combatMultiplier, double movementMultiplier) {
