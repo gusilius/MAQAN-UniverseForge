@@ -40,14 +40,16 @@ public final class CharacterAccessService {
             if (previous != null && previous != coordinator)
                 throw new IllegalStateException("CharacterRegistry already has a persistence coordinator");
             if (previous == coordinator) return;
+            // Publish and seed under the same lock used by registerCreated(): a concurrent
+            // create is either in the bootstrap snapshot or sees the attached coordinator.
             PERSISTENCE.put(registry, coordinator);
-        }
-        synchronized (pendingRegistrationIds) {
-            for (Character character : registry.all()) {
-                if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
-                else coordinator.registerPersisted(character.globalId);
+            synchronized (pendingRegistrationIds) {
+                for (Character character : registry.all()) {
+                    if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
+                    else coordinator.registerPersisted(character.globalId);
+                }
+                pendingRegistrationIds.clear();
             }
-            pendingRegistrationIds.clear();
         }
     }
 
