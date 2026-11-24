@@ -262,6 +262,77 @@ public final class CharacterAccessService {
         return changed;
     }
 
+    /**
+     * UUID-ordered scoped transaction for lifecycle work that must also run in isolated
+     * registries before a persistence coordinator is attached. Production coordinators
+     * are pinned and marked dirty; tests/bootstrap still receive canonical leases.
+     */
+    static boolean mutateScoped(CharacterAuthority authority, CharacterRegistry fallback,
+                                Collection<String> globalIds,
+                                Function<Map<String, Character>, Boolean> mutation) {
+        Objects.requireNonNull(globalIds, "globalIds");
+        Objects.requireNonNull(mutation, "mutation");
+        TreeSet<String> ordered = new TreeSet<>();
+        for (String id : globalIds) {
+            if (id == null || id.isBlank()) throw new IllegalArgumentException("Character UUID is required");
+            ordered.add(id);
+        }
+        if (ordered.isEmpty()) throw new IllegalArgumentException("At least one Character UUID is required");
+
+        List<Lease> leases = new ArrayList<>(ordered.size());
+        List<CharacterEvictionGate.Pin> pins = new ArrayList<>(ordered.size());
+        Map<String, Character> participants = new LinkedHashMap<>();
+        Map<String, CharacterPersistenceCoordinator> coordinators = new LinkedHashMap<>();
+        boolean callbackStarted = false;
+        boolean changed = false;
+        boolean callbackFailed = false;
+        RuntimeException dirtyFailure = null;
+        try {
+            for (String id : ordered) {
+                CharacterRegistry owner = authority == null ? fallback : authority.registryForGlobal(id);
+                if (owner == null) throw new IllegalArgumentException("Unknown Character UUID: " + id);
+                String localId = owner.localIdForGlobalId(id);
+                if (localId == null) throw new IllegalArgumentException("Unknown Character UUID: " + id);
+                Lease lease = owner.access().acquire(localId);
+                if (lease == null || !id.equals(lease.get().globalId)) {
+                    if (lease != null) lease.close();
+                    throw new IllegalStateException("Character identity changed while acquiring " + id);
+                }
+                leases.add(lease);
+                participants.put(id, lease.get());
+                CharacterPersistenceCoordinator persistence = owner.access().coordinator();
+                coordinators.put(id, persistence);
+            }
+            for (String id : ordered) {
+                CharacterPersistenceCoordinator persistence = coordinators.get(id);
+                if (persistence != null) pins.add(persistence.beginTransaction(id));
+            }
+            callbackStarted = true;
+            try {
+                changed = Boolean.TRUE.equals(mutation.apply(Collections.unmodifiableMap(participants)));
+            } catch (RuntimeException | Error failure) {
+                callbackFailed = true;
+                throw failure;
+            }
+        } finally {
+            if (callbackStarted && (changed || callbackFailed)) {
+                for (String id : ordered) {
+                    CharacterPersistenceCoordinator persistence = coordinators.get(id);
+                    if (persistence == null) continue;
+                    try { persistence.markDirty(id); }
+                    catch (RuntimeException failure) {
+                        if (dirtyFailure == null) dirtyFailure = failure;
+                        else dirtyFailure.addSuppressed(failure);
+                    }
+                }
+            }
+            closePins(pins);
+            closeLeases(leases);
+            if (dirtyFailure != null) throw dirtyFailure;
+        }
+        return changed;
+    }
+
     private static void closePins(List<CharacterEvictionGate.Pin> pins) {
         for (int i = pins.size() - 1; i >= 0; i--) pins.get(i).close();
     }
