@@ -128,6 +128,17 @@ public class PeopleMod {
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
     /** One shared per-tick budget across every canonical population partition. */
     private static final int POPULATION_FALLBACK_BUDGET_PER_TICK = 256;
+    /** Dirty persistence is serviced every five server ticks under one global CPU/byte budget. */
+    private static final int DIRTY_SAVE_INTERVAL_TICKS = 5;
+    private static final int DIRTY_SAVE_MAX_PARTITIONS_PER_PASS = 8;
+    private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION = 8;
+    private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PASS = 64;
+    private static final long DIRTY_SAVE_MAX_BYTES_PER_PASS = 1L << 20;
+    private static final long DIRTY_SAVE_MAX_BYTES_PER_PARTITION = 256L << 10;
+    private static int dirtySavePartitionCursor;
+    private static long dirtySaveRegistryGeneration = Long.MIN_VALUE;
+    private static long dirtySavePasses;
+    private static long dirtySaveLastLogTick;
     private static int populationFallbackRegistryCursor;
     private static long populationFallbackCursorGeneration = Long.MIN_VALUE;
     /** Stable partition snapshot; rebuilt only when the canonical registry set changes. */
@@ -1167,12 +1178,86 @@ public class PeopleMod {
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0 && !Boolean.getBoolean("wf.acceptance.contour02"))
                 socialInitiatives(e.getServer());
+            if (ticks % DIRTY_SAVE_INTERVAL_TICKS == 0)
+                serviceDirtyPersistence(e.getServer());
             // Routine Character mutations are already committed to the per-partition WAL
             // by persistCharacter(). A population-wide JSON checkpoint here serialized every
             // Character on the server thread and stalled the tick loop at scale. Keep full
             // coordinated snapshots for explicit cross-partition transactions and shutdown.
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
+        }
+    }
+
+    /**
+     * Production dirty-save scheduler. It visits a bounded round-robin window of the cached
+     * canonical partition snapshot; it never walks Characters or rebuilds the registry set
+     * on every tick. Serialization and queue admission are capped by both count and bytes.
+     */
+    private static void serviceDirtyPersistence(MinecraftServer server) {
+        if (server == null) return;
+        long registryGeneration = populationRegistryGeneration;
+        List<CharacterRegistry> registries = populationFallbackRegistries(registryGeneration);
+        if (registries.isEmpty()) return;
+        if (dirtySaveRegistryGeneration != registryGeneration) {
+            dirtySaveRegistryGeneration = registryGeneration;
+            dirtySavePartitionCursor = 0;
+        }
+
+        int partitionVisits = Math.min(DIRTY_SAVE_MAX_PARTITIONS_PER_PASS, registries.size());
+        int remainingCharacters = DIRTY_SAVE_MAX_CHARACTERS_PER_PASS;
+        long remainingBytes = DIRTY_SAVE_MAX_BYTES_PER_PASS;
+        long acceptedThisPass = 0L;
+        long failedThisPass = 0L;
+        long pendingObserved = 0L;
+        long bytesUsed = 0L;
+
+        for (int visit = 0; visit < partitionVisits && remainingCharacters > 0 && remainingBytes > 0; visit++) {
+            int index = (dirtySavePartitionCursor + visit) % registries.size();
+            CharacterRegistry registry = registries.get(index);
+            CharacterPersistenceCoordinator persistence = registry.access().persistenceCoordinator();
+            if (persistence == null) continue;
+
+            CharacterPersistenceCoordinator.DirtyMetrics before = persistence.dirtyMetrics();
+            pendingObserved += before.pending();
+            if (before.pending() == 0) continue;
+
+            int countBudget = Math.min(DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION, remainingCharacters);
+            long byteBudget = Math.min(DIRTY_SAVE_MAX_BYTES_PER_PARTITION, remainingBytes);
+            java.util.concurrent.atomic.AtomicLong partitionBytes = new java.util.concurrent.atomic.AtomicLong();
+            java.util.concurrent.atomic.AtomicLong passBytes = new java.util.concurrent.atomic.AtomicLong(bytesUsed);
+            int accepted = persistence.persistDirtyBatch(globalId -> {
+                Character character = registry.getByGlobalId(globalId);
+                if (character == null)
+                    throw new IllegalStateException("Dirty Character identity is absent from its canonical registry: " + globalId);
+                byte[] payload = registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8);
+                long local = partitionBytes.get();
+                long global = passBytes.get();
+                if (payload.length > byteBudget - local || payload.length > DIRTY_SAVE_MAX_BYTES_PER_PASS - global)
+                    throw new CharacterPersistenceCoordinator.DirtyBatchBudgetExceededException(
+                            "Server dirty-save byte budget reached");
+                partitionBytes.addAndGet(payload.length);
+                passBytes.addAndGet(payload.length);
+                return payload;
+            }, countBudget, byteBudget);
+
+            long writtenBytes = partitionBytes.get();
+            bytesUsed += writtenBytes;
+            remainingBytes -= writtenBytes;
+            remainingCharacters -= accepted;
+            acceptedThisPass += accepted;
+            CharacterPersistenceCoordinator.DirtyMetrics after = persistence.dirtyMetrics();
+            failedThisPass += Math.max(0L, after.failed() - before.failed());
+        }
+        dirtySavePartitionCursor = (dirtySavePartitionCursor + partitionVisits) % registries.size();
+        dirtySavePasses++;
+
+        if (ticks - dirtySaveLastLogTick >= 1200) {
+            dirtySaveLastLogTick = ticks;
+            LOGGER.info("wf_people: dirty-save scheduler passes={} partitions={} accepted={} failed={} pendingObserved={} bytes={} maxCharacters={} maxBytes={} cursor={}",
+                    dirtySavePasses, partitionVisits, acceptedThisPass, failedThisPass, pendingObserved,
+                    bytesUsed, DIRTY_SAVE_MAX_CHARACTERS_PER_PASS, DIRTY_SAVE_MAX_BYTES_PER_PASS,
+                    dirtySavePartitionCursor);
         }
     }
 
