@@ -3,6 +3,7 @@ package dev.worldforge.people;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.api.WorldForgeComputeRuntime;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -110,7 +111,7 @@ public final class PopulationComputeBridge {
                          Map<String,CharacterRegistry> owners,int nextRegistryCursor,int nextMemberCursor,
                          boolean scanComplete,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.targetWorldDay=targetWorldDay;this.revisions=revisions;
-            this.scan=scan;this.characterIds=List.copyOf(ids);
+            this.scan=scan;this.characterIds=Collections.unmodifiableList(ids);
             // These maps and the byte array are freshly allocated inside captureForWorldDay,
             // transferred only to this private constructor, and never mutated or exposed.
             // Taking ownership avoids a second full set of per-character hash-table entries
@@ -128,6 +129,14 @@ public final class PopulationComputeBridge {
         public int nextRegistryCursor(){return nextRegistryCursor;} public int nextMemberCursor(){return nextMemberCursor;}
         public boolean scanComplete(){return scanComplete;}
         public byte[] request(){return request.clone();}
+        /**
+         * Submits the owned immutable snapshot directly to the bounded runtime. The runtime
+         * takes its defensive copy synchronously, avoiding an intermediate full-size clone.
+         */
+        public boolean submit(WorldForgeComputeRuntime runtime, WorldForgeComputeRuntime.Ticket ticket,
+                              byte[] secondary, WorldForgeComputeRuntime.Operation operation) {
+            return Objects.requireNonNull(runtime, "runtime").submit(ticket, request, secondary, operation);
+        }
     }
     private record Update(String id,Map<String,Integer> needs,String intent,int age,String stage,long simulatedDays,int lastYear,long worldDay){}
     private static final Set<String> CANONICAL_NEEDS = Set.of("hunger", "rest", "safety", "social", "purpose", "leisure");

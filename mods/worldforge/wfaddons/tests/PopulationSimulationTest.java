@@ -521,6 +521,13 @@ public final class PopulationSimulationTest {
                         && requestText.contains(bridgeChild.globalId) && requestText.contains("custom_need")
                         && requestText.contains("\"simulated_days\":\"0\""),
                 "population snapshot uses canonical global UUIDs, preserves extension needs and excludes dead Characters");
+        boolean idsReadOnly = false;
+        try { captured.characterIds().add("not-a-character"); }
+        catch (UnsupportedOperationException expected) { idsReadOnly = true; }
+        byte[] detachedRequest = captured.request();
+        detachedRequest[0] = 0;
+        ok(idsReadOnly && new String(captured.request(), java.nio.charset.StandardCharsets.UTF_8).startsWith("{"),
+                "captured population IDs stay immutable and request access remains defensive");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
         resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
         resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);

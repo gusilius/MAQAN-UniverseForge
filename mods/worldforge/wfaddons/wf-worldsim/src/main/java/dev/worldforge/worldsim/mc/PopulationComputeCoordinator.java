@@ -27,7 +27,7 @@ public final class PopulationComputeCoordinator {
     private static boolean nativeDisabled;
     private static long lastScannedWorldDay = Long.MIN_VALUE;
     private static long lastScannedRegistryGeneration = Long.MIN_VALUE;
-    private static final int CAPTURE_MEMBERS_PER_TICK = 2_048;
+    private static final int CAPTURE_MEMBERS_PER_TICK = 512;
     private static PopulationComputeBridge.Scan activeScan;
     private static int scanRegistryCursor;
     private static int scanMemberCursor;
@@ -148,7 +148,7 @@ public final class PopulationComputeCoordinator {
         WorldForgeComputeRuntime.Ticket ticket=new WorldForgeComputeRuntime.Ticket(
                 worldId,OPERATION_KEY,scanTargetWorldDay,lifecycleEpoch,
                 PopulationComputeBridge.SCHEMA_VERSION,NativeWorldSimulation.NATIVE_ABI_VERSION);
-        boolean submitted=runtime.submit(ticket,captured.request(),EMPTY_SECONDARY,
+        boolean submitted=captured.submit(runtime,ticket,EMPTY_SECONDARY,
                 (primary,secondary)->new WorldForgeComputeRuntime.Output(
                         NativeWorldSimulation.advancePopulation(primary),EMPTY_SECONDARY));
         if(submitted) pending=new Pending(captured,ticket,registryGeneration);
