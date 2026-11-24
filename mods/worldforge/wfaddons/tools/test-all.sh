@@ -55,6 +55,7 @@ PURE_ADAPTER_SRC=(
   wf-people/src/main/java/dev/worldforge/people/mc/NpcSpawnSpatialIndex.java
   wf-people/src/main/java/dev/worldforge/people/mc/NpcSpawnTargetLookup.java
   "$CORE/src/main/java/dev/worldforge/mod/economy/TreasuryArchiveMigration.java"
+  tests/support/dev/worldforge/people/mc/PeopleMod.java
 )
 for source in "${PURE_ADAPTER_SRC[@]}"; do
   if [ ! -f "$source" ]; then
