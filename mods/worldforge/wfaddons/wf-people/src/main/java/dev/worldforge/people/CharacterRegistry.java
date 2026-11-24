@@ -1147,6 +1147,7 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
+        if (previous == null) orderedIds.add(restored.id);
         indexPosts(restored);
         byGlobalId.put(restored.globalId, restored.id);
         indexEntityBindings(restored);
