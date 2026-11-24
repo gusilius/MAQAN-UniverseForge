@@ -1566,6 +1566,15 @@ public final class CharacterRegistry {
             if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
         }
 
+        // A wholesale identity replacement cannot overlap scoped users. Old leases
+        // would still point at objects from the previous generation of this registry.
+        if (!activeAccessLeases.isEmpty())
+            throw new IllegalStateException("Cannot replace Character registry while scoped leases are active");
+        // Candidate hints belong to the previous identity generation and must not survive restore.
+        evictionCandidateHead = null;
+        evictionCandidateTail = null;
+        evictionCandidateById.clear();
+
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         orderedIds = loadedIds;
