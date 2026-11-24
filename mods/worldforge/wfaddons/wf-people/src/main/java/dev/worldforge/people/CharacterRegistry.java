@@ -90,8 +90,8 @@ public final class CharacterRegistry {
 
     /**
      * Temporary key-only iterator for one synchronous traversal. Do not retain it across
-     * ticks: LinkedHashMap iterator state can still retain its last node and Character value.
-     * Long-lived population work must use idSnapshot() instead.
+     * ticks: collection iterators can retain internal state. Long-lived population work
+     * must use idPage()/idAt() instead of retaining this iterator.
      */
     public Iterator<String> idIteratorAfter(String exclusiveId) {
         int start = 0;
@@ -104,7 +104,8 @@ public final class CharacterRegistry {
         return orderedIds.subList(start, orderedIds.size()).iterator();
     }
 
-    /** Legacy compatibility snapshot. New population schedulers should use idPage(). */
+    /** Legacy compatibility snapshot; avoid for large populations because it is O(population) RAM. */
+    @Deprecated
     public List<String> idSnapshot() {
         return new ArrayList<>(orderedIds);
     }
