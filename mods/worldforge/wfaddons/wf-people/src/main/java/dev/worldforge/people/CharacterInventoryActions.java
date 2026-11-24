@@ -6,6 +6,8 @@ import dev.worldforge.mod.api.ActionResult;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Domain adapter for inventory mutations. UI, commands and NPC interactions submit stable
@@ -82,6 +84,128 @@ public final class CharacterInventoryActions {
                 List.of(deceased.globalId), nowMinute, durableFile,
                 () -> CharacterInventory.claimEstate(deceased, claimant),
                 "Estate claimed");
+    }
+
+
+    /*
+     * Storage-aware overloads. The legacy overloads above remain for compatibility
+     * with isolated tools/tests; production callers should pass the world authority
+     * so every canonical participant is leased, transaction-pinned and dirtied.
+     */
+    public static ActionExecutionService.Task createContainer(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character owner, Character actor,
+            String containerId, List<String> accessGlobalIds, long nowMinute, Path durableFile) {
+        if (!owner.globalId.equals(actor.globalId))
+            throw new IllegalArgumentException("Only the canonical container owner can create a shared container");
+        return executeScoped(journal, request, "inventory.container.create", owner, actor,
+                List.of(containerId), authority, List.of(owner.globalId),
+                chars -> CharacterInventory.createContainer(chars.get(owner.globalId), containerId, accessGlobalIds),
+                nowMinute, durableFile, "Container created");
+    }
+
+    public static ActionExecutionService.Task deposit(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character owner, Character actor,
+            String containerId, String itemId, int amount, long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.container.deposit", owner, actor,
+                List.of(containerId, itemId, Integer.toString(amount)), authority,
+                List.of(owner.globalId, actor.globalId),
+                chars -> CharacterInventory.deposit(chars.get(owner.globalId), containerId,
+                        chars.get(actor.globalId), itemId, amount),
+                nowMinute, durableFile, "Items deposited");
+    }
+
+    public static ActionExecutionService.Task withdraw(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character owner, Character actor,
+            String containerId, String itemId, int amount, long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.container.withdraw", owner, actor,
+                List.of(containerId, itemId, Integer.toString(amount)), authority,
+                List.of(owner.globalId, actor.globalId),
+                chars -> CharacterInventory.withdraw(chars.get(owner.globalId), containerId,
+                        chars.get(actor.globalId), itemId, amount),
+                nowMinute, durableFile, "Items withdrawn");
+    }
+
+    public static ActionExecutionService.Task transfer(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character from, Character to, String itemId, int amount,
+            long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.character.transfer", to, from,
+                List.of(itemId, Integer.toString(amount)), authority, List.of(from.globalId, to.globalId),
+                chars -> CharacterInventory.transfer(chars.get(from.globalId), chars.get(to.globalId), itemId, amount),
+                nowMinute, durableFile, "Items transferred");
+    }
+
+    public static ActionExecutionService.Task equip(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character person, String slot, String itemId,
+            long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.equipment.equip", person, person,
+                List.of(slot, itemId), authority, List.of(person.globalId),
+                chars -> CharacterInventory.equip(chars.get(person.globalId), slot, itemId),
+                nowMinute, durableFile, "Item equipped");
+    }
+
+    public static ActionExecutionService.Task unequip(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character person, String slot, long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.equipment.unequip", person, person,
+                List.of(slot), authority, List.of(person.globalId),
+                chars -> CharacterInventory.unequip(chars.get(person.globalId), slot),
+                nowMinute, durableFile, "Item unequipped");
+    }
+
+    public static ActionExecutionService.Task claimEstate(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character deceased, Character claimant,
+            long nowMinute, Path durableFile) {
+        return executeScoped(journal, request, "inventory.estate.claim", deceased, claimant,
+                List.of(deceased.globalId), authority, List.of(deceased.globalId, claimant.globalId),
+                chars -> CharacterInventory.claimEstate(authority, chars.get(deceased.globalId),
+                        chars.get(claimant.globalId)),
+                nowMinute, durableFile, "Estate claimed");
+    }
+
+    public static ActionExecutionService.Task grantAccess(
+            ActionExecutionService journal, ActionExecutionService.Request request,
+            CharacterAuthority authority, Character owner, Character actor,
+            String containerId, String granteeGlobalId, long nowMinute, Path durableFile,
+            java.util.function.BooleanSupplier persist) {
+        if (!owner.globalId.equals(actor.globalId))
+            throw new IllegalArgumentException("Only the canonical container owner can grant access");
+        return executeScopedDurable(journal, request, "inventory.container.grant_access", owner, actor,
+                List.of(containerId, granteeGlobalId), authority, List.of(owner.globalId),
+                chars -> CharacterInventory.grantContainerAccess(chars.get(owner.globalId), containerId, granteeGlobalId),
+                persist, nowMinute, durableFile, "Container access granted");
+    }
+
+    private static ActionExecutionService.Task executeScoped(
+            ActionExecutionService journal, ActionExecutionService.Request request, String actionId,
+            Character target, Character actor, List<String> args, CharacterAuthority authority,
+            List<String> participantIds, Function<Map<String, Character>, Boolean> mutation,
+            long nowMinute, Path durableFile, String successMessage) {
+        return execute(journal, request, actionId, target, actor, args, nowMinute, durableFile,
+                () -> mutateScoped(authority, participantIds, mutation), successMessage);
+    }
+
+    private static ActionExecutionService.Task executeScopedDurable(
+            ActionExecutionService journal, ActionExecutionService.Request request, String actionId,
+            Character target, Character actor, List<String> args, CharacterAuthority authority,
+            List<String> participantIds, Function<Map<String, Character>, Boolean> mutation,
+            java.util.function.BooleanSupplier persist, long nowMinute, Path durableFile, String successMessage) {
+        return executeDurable(journal, request, actionId, target, actor, args, nowMinute, durableFile,
+                () -> mutateScoped(authority, participantIds, mutation), persist, successMessage);
+    }
+
+    private static boolean mutateScoped(CharacterAuthority authority, List<String> participantIds,
+                                        Function<Map<String, Character>, Boolean> mutation) {
+        Objects.requireNonNull(authority, "authority");
+        boolean[] changed = {false};
+        CharacterAccessService.mutateGlobals(authority, participantIds,
+                characters -> changed[0] = mutation.apply(characters));
+        return changed[0];
     }
 
     public static ActionExecutionService.Task depositExact(
