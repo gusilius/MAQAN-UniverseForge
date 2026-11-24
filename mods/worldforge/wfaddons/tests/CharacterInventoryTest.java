@@ -517,6 +517,8 @@ public final class CharacterInventoryTest {
         corruptDestinationMarker.put("role", "destination");
         corruptPlayer.props.put(corruptMarkerKey, corruptSourceMarker);
         corruptOwner.props.put(corruptMarkerKey, corruptDestinationMarker);
+        // Production execution publishes the sparse UUID index before persisting PREPARED.
+        corruptAuthority.noteInventoryTransfer(corruptTransactionId, corruptPlayer.globalId, corruptOwner.globalId);
         boolean corruptMarkerAccepted = CharacterInventoryTransactions.reconcile(
                 corruptAuthority, character -> true);
         ok(!corruptMarkerAccepted
@@ -528,8 +530,14 @@ public final class CharacterInventoryTest {
                 "mismatched WAL endpoint identities fail closed without clearing markers or mutating either inventory");
         corruptPlayer.props.remove(corruptMarkerKey);
         corruptOwner.props.remove(corruptMarkerKey);
+        corruptAuthority.clear();
         String malformedMarkerKey = CharacterInventory.TRANSFER_MARKER_PREFIX + "malformed";
         corruptPlayer.props.put(malformedMarkerKey, "not-a-marker-map");
+        // Simulate restart: malformed durable data is discovered while rebuilding the
+        // sparse recovery index from the restored partition, not by a population scan.
+        corruptAuthority.beginWorld(new WorldId(UUID.fromString("66666666-6666-4666-8666-666666666666")));
+        corruptAuthority.registerMap("__players__", corruptPlayers);
+        corruptAuthority.registerMap("settlement:corrupt", corruptKeep);
         boolean malformedMarkerAccepted = CharacterInventoryTransactions.reconcile(
                 corruptAuthority, character -> true);
         ok(!malformedMarkerAccepted && CharacterInventory.hasPendingTransfer(corruptPlayer)
