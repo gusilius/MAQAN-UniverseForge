@@ -749,7 +749,10 @@ public final class CharacterInventory {
                     clearTransferredEstate(people.get(deceasedGlobalId), heir);
                     return true;
                 });
-                if (reconciled) return heirLocal;
+                if (reconciled) {
+                    authority.clearEstateIncoming(priorRecipient[0], deceasedGlobalId);
+                    return heirLocal;
+                }
             }
         }
 
@@ -764,7 +767,7 @@ public final class CharacterInventory {
         if (heirGlobalId != null) {
             CharacterRegistry heirRegistry = authority == null ? registry : authority.registryForGlobal(heirGlobalId);
             if (heirRegistry == null) heirRegistry = registry;
-            CharacterAccessService.mutateScoped(authority, registry,
+            boolean transferred = CharacterAccessService.mutateScoped(authority, registry,
                     List.of(deceasedGlobalId, heirGlobalId), people -> {
                 Character deceased = people.get(deceasedGlobalId);
                 Character heir = people.get(heirGlobalId);
@@ -782,6 +785,7 @@ public final class CharacterInventory {
                 }
                 throw new IllegalStateException("Estate heir is no longer available: " + heirGlobalId);
             });
+            if (transferred && authority != null) authority.noteEstateIncoming(heirGlobalId, deceasedGlobalId);
             return heirGlobalId;
         }
         CharacterAccessService.mutateScoped(authority, registry, List.of(deceasedGlobalId), people -> {
@@ -1000,35 +1004,14 @@ public final class CharacterInventory {
         deceased.props.put("estate.settled", true);
     }
 
-    /** Reconcile recipient-first cross-registry estate commits after every partition has loaded. */
+    /** Reconcile only sparse incoming-estate markers; never hydrate or walk the world population. */
     public static void reconcileEstates(CharacterAuthority authority) {
         Objects.requireNonNull(authority);
-        for (CharacterIdentity identity : authority.identities()) {
-            Character heir = authority.get(identity);
-            if (heir == null) continue;
-            for (Map.Entry<String, Object> entry : new ArrayList<>(heir.props.entrySet())) {
-                if (!entry.getKey().startsWith("estate.incoming.") || !(entry.getValue() instanceof String deceasedGlobalId))
-                    continue;
-                Character deceased = authority.getGlobal(deceasedGlobalId);
-                if (deceased == null) continue;
-                String transferId = entry.getKey().substring("estate.incoming.".length());
-                if (transferId.equals(deceased.props.get("estate.transfer_receipt"))) continue;
-                boolean alreadyCommitted = !deceased.alive
-                        && Boolean.TRUE.equals(deceased.props.get("estate.settled"))
-                        && "inherited".equals(deceased.props.get("estate.status"))
-                        && heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))
-                        && items(deceased).isEmpty() && equipment(deceased).isEmpty()
-                        && containers(deceased).isEmpty();
-                if (alreadyCommitted) {
-                    deceased.props.put("estate.transfer_receipt", transferId);
-                    deceased.props.remove("estate.transfer_pending");
-                    continue;
-                }
-                deceased.props.put("estate.transfer_pending", transferId);
-                deceased.props.put("estate.recipient_global_id", heir.globalId);
-                CharacterRegistry registry = authority.registryForGlobal(deceasedGlobalId);
-                if (registry != null) registry.kill(deceased.id);
-            }
+        for (CharacterAuthority.EstateIncoming incoming : authority.pendingEstateIncoming()) {
+            CharacterRegistry deceasedRegistry = authority.registryForGlobal(incoming.deceasedGlobalId());
+            if (deceasedRegistry == null) continue;
+            settleEstateById(authority, deceasedRegistry, incoming.deceasedGlobalId());
+            authority.clearEstateIncoming(incoming.heirGlobalId(), incoming.deceasedGlobalId());
         }
     }
 
