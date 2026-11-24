@@ -855,18 +855,22 @@ public class SettleMod {
         return lease == null ? null : new PersonBinding(fallbackRegistry, lease);
     }
 
-    private static Character resolvePerson(CharacterRegistry fallbackRegistry, String id) {
-        PersonBinding binding = resolvePersonBinding(fallbackRegistry, id);
-        return binding == null ? null : binding.character();
-    }
-
-    public static Character residentCharacter(WFWorker body) {
-        if (body == null) return null;
+    /**
+     * Executes a caller action while the resident Character is pinned. A raw Character
+     * must never escape this callback: the lease is closed on every exit path.
+     */
+    public static boolean withResidentCharacter(WFWorker body,
+                                                java.util.function.Consumer<Character> action) {
+        if (body == null || action == null) return false;
         Colony colony = COLONIES.get(body.colonyId);
         Worker worker = body.worker();
         CharacterRegistry registry = registryForColony(colony);
-        return registry == null || worker == null || worker.person == null || worker.person.isBlank()
-                ? null : resolvePerson(registry, worker.person);
+        if (registry == null || worker == null || worker.person == null || worker.person.isBlank()) return false;
+        try (PersonBinding binding = resolvePersonBinding(registry, worker.person)) {
+            if (binding == null || !binding.character().alive) return false;
+            action.accept(binding.character());
+            return true;
+        }
     }
 
     public static boolean ownsAny(String uuid) {
@@ -1735,16 +1739,23 @@ public class SettleMod {
             if (map == null) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
-            Set<String> known = new HashSet<>();
-            for (Character character : registry.all())
-                if (character.globalId != null && !character.globalId.isBlank()) known.add(character.globalId);
-            for (String residentId : colony.residentCharacterIds)
-                if (!known.contains(residentId)) {
+            // Validate only this colony's durable foreign keys. Never traverse/materialize the
+            // entire Character registry for a periodic resident-link audit.
+            for (String residentId : colony.residentCharacterIds) {
+                boolean present = false;
+                CharacterRegistry owner = PeopleMod.authority().registryForGlobal(residentId);
+                if (owner != null) {
+                    try (var lease = owner.access().acquireGlobal(residentId)) {
+                        present = lease != null && residentId.equals(lease.globalId());
+                    }
+                }
+                if (!present) {
                     String issue = colony.s.id + "|" + residentId;
                     if (REPORTED_RESIDENT_LINK_ERRORS.add(issue))
                         LOGGER.error("wf_settle: orphan resident Character ID {} in colony {} (map {}); no duplicate Character was created",
                                 residentId, colony.s.id, colony.sourceMapId);
                 }
+            }
         }
     }
 
@@ -2243,8 +2254,6 @@ public class SettleMod {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
-        // Batch callers provide a projection built once for the whole materialization pass.
-        // This keeps per-resident idempotency checks O(1), rather than rescanning all workers.
         if (workerColonyByPerson != null) {
             String assignedColony = workerColonyByPerson.get(characterId);
             if (assignedColony != null) return colonyId.equals(assignedColony);
@@ -2253,52 +2262,83 @@ public class SettleMod {
             String assignedColony = WORKER_COLONY_BY_PERSON.get(characterId);
             if (assignedColony != null) return colonyId.equals(assignedColony);
         }
-        CharacterRegistry registry = null;
-        Character person = PeopleMod.authority().getGlobal(characterId);
-        if (person != null) {
-            registry = PeopleMod.authority().registryForGlobal(characterId);
-        } else {
-            // Legacy local cN references are only meaningful inside the destination colony's map.
-            registry = registryForColony(colony);
-            person = registry == null ? null : registry.get(characterId);
+
+        CharacterRegistry registry = PeopleMod.authority().registryForGlobal(characterId);
+        boolean globalIdentity = registry != null;
+        if (registry == null) registry = registryForColony(colony); // legacy local cN identity
+        if (registry == null) return false;
+
+        try (var lease = globalIdentity ? registry.access().acquireGlobal(characterId)
+                : registry.access().acquire(characterId)) {
+            if (lease == null) return false;
+            Character person = lease.get();
+            if (!person.alive) return false;
+            String globalId = person.globalId;
+            String restoredProfession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
+                    ? p : PopulationSimulation.profession(person);
+            if (restoredProfession == null || restoredProfession.isBlank()
+                    || DEFS == null || !DEFS.professions.containsKey(restoredProfession))
+                restoredProfession = "laborer";
+            String targetProfession = restoredProfession;
+            String place = "settlement:" + colony.s.id;
+
+            // The worker projection is created first, but is rolled back if the canonical
+            // Character mutation cannot be committed. The Character itself is mutated only
+            // through the UUID/local-ID access service, which pins and marks it dirty.
+            dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
+            try {
+                if (globalIdentity) {
+                    registry.access().mutateGlobal(globalId, current -> {
+                        if (!current.alive || !globalId.equals(current.globalId))
+                            throw new IllegalStateException("Character changed while returning to settlement: " + globalId);
+                        if (!targetProfession.equals(PopulationSimulation.profession(current)))
+                            PopulationSimulation.assignProfession(current, targetProfession, PeopleMod.YEAR);
+                        current.props.remove("population.pre_military_profession");
+                        registry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                        registry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
+                        current.props.put("population.location", colony.s.id);
+                        current.props.put("population.employer", place);
+                        if (!current.has("settlement_worker", place))
+                            registry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
+                    });
+                } else {
+                    registry.access().mutate(person.id, current -> {
+                        if (!current.alive || !globalId.equals(current.globalId))
+                            throw new IllegalStateException("Legacy Character changed while returning to settlement: " + globalId);
+                        if (!targetProfession.equals(PopulationSimulation.profession(current)))
+                            PopulationSimulation.assignProfession(current, targetProfession, PeopleMod.YEAR);
+                        current.props.remove("population.pre_military_profession");
+                        registry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                        registry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
+                        current.props.put("population.location", colony.s.id);
+                        current.props.put("population.employer", place);
+                        if (!current.has("settlement_worker", place))
+                            registry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
+                    });
+                }
+                colony.s.updateWorkerKnownMember(worker, current -> {
+                    current.person = globalId;
+                    current.profession = targetProfession;
+                });
+            } catch (RuntimeException | Error failure) {
+                colony.s.removeWorkerProjectionByPerson(globalId);
+                throw failure;
+            }
+
+            if (workerColonyByPerson != null) workerColonyByPerson.put(globalId, colonyId);
+            if (workerOwnershipIndexBuilt) {
+                WORKER_COLONY_BY_PERSON.put(globalId, colonyId);
+                captureWorkerOwnershipRevision();
+            }
+            refreshMilitaryDepartureIndex();
+            Set<String> departureColonies = MILITARY_DEPARTURE_COLONIES.remove(globalId);
+            if (departureColonies != null) for (String formerColonyId : departureColonies) {
+                Colony formerColony = COLONIES.get(formerColonyId);
+                if (formerColony != null && formerColony.s != null)
+                    formerColony.s.acknowledgeDepartureForPerson(globalId, "transfer:military");
+            }
+            return true;
         }
-        if (person == null || !person.alive) return false;
-        String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
-                ? p : PopulationSimulation.profession(person);
-        if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
-            profession = "laborer";
-        dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
-        String restoredPersonId = person.globalId;
-        String restoredProfession = profession;
-        colony.s.updateWorkerKnownMember(worker, current -> {
-            current.person = restoredPersonId;
-            current.profession = restoredProfession;
-        });
-        // Keep the canonical Character's active profession in sync with the restored worker assignment.
-        // This records the military service interval in the normal profession history.
-        if (!profession.equals(PopulationSimulation.profession(person)))
-            PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
-        person.props.remove("population.pre_military_profession");
-        registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-        registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
-        String place = "settlement:" + colony.s.id;
-        person.props.put("population.location", colony.s.id);
-        person.props.put("population.employer", place);
-        if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
-        if (workerColonyByPerson != null) workerColonyByPerson.put(characterId, colonyId);
-        if (workerOwnershipIndexBuilt) {
-            WORKER_COLONY_BY_PERSON.put(person.globalId, colonyId);
-            captureWorkerOwnershipRevision();
-        }
-        // Only settlements with a queued military departure for this Character are visited.
-        refreshMilitaryDepartureIndex();
-        Set<String> departureColonies = MILITARY_DEPARTURE_COLONIES.remove(person.globalId);
-        if (departureColonies != null) for (String departureColonyId : departureColonies) {
-            Colony formerColony = COLONIES.get(departureColonyId);
-            if (formerColony != null && formerColony.s != null)
-                formerColony.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
-        }
-        return true;
     }
 
     /** Remit the configured settlement tax share to the owning realm through the global ledger. */
