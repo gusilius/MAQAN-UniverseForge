@@ -582,18 +582,16 @@ public final class PopulationSimulation {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
                             cursor.ids, 0, false, "");
                 } else {
-                    WORLD_DAY_CURSORS.put(registry, cursor);
+                    WORLD_DAY_CURSORS.remove(registry);
                     return true;
                 }
             }
             int pageEnd = Math.min(cursor.ids.size(), cursor.nextIndex + maxCharacters);
             List<String> page = cursor.ids.subList(cursor.nextIndex, pageEnd);
-            int processed = 0;
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 for (String characterId : page) {
                     cursor.lastProcessedId = characterId;
                     cursor.nextIndex++;
-                    processed++;
                     Character character = registry.get(characterId);
                     if (character == null || !character.alive) continue;
                     int currentAge = age(character, year);
