@@ -1159,9 +1159,10 @@ public final class CharacterRegistry {
         if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
                 || !(root.get("character") instanceof Map<?, ?> rawCharacter))
             throw new IllegalArgumentException("Invalid incremental Character record");
-        Map<String, String> globalOwners = new HashMap<>();
-        Map<String, String> entityOwners = new HashMap<>();
-        Character restored = decodeCharacter(rawCharacter, identityNamespace, globalOwners, entityOwners);
+        // A WAL/checkpoint frame contains exactly one Character. Cross-record ownership
+        // is checked against the canonical registry indexes below, so allocating two
+        // temporary owner HashMaps for every replayed NPC is redundant.
+        Character restored = decodeCharacter(rawCharacter, identityNamespace, null, null);
         if (expectedGlobalId != null && !expectedGlobalId.equals(restored.globalId))
             throw new IllegalArgumentException("Character WAL identity mismatch: frame="
                     + expectedGlobalId + " payload=" + restored.globalId);
@@ -1171,11 +1172,15 @@ public final class CharacterRegistry {
         String globalOwnerId = byGlobalId.get(restored.globalId);
         if (globalOwnerId != null && !globalOwnerId.equals(restored.id))
             throw new IllegalArgumentException("Duplicate canonical global Character identity: " + restored.globalId);
-        for (String uuid : entityOwners.keySet()) {
-            String owner = entityOwnerByUuid.get(uuid);
-            if (owner != null && !owner.equals(restored.id))
-                throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
-                        + " is already owned by Character " + owner);
+        Object rawBindings = restored.props.get("population.entity_bindings");
+        if (rawBindings instanceof Map<?, ?> bindings) {
+            for (Object rawUuid : bindings.values()) {
+                if (!(rawUuid instanceof String uuid)) continue; // decoder already validates the shape
+                String owner = entityOwnerByUuid.get(uuid);
+                if (owner != null && !owner.equals(restored.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                            + " is already owned by Character " + owner);
+            }
         }
 
         if (previous != null) {
@@ -1288,10 +1293,12 @@ public final class CharacterRegistry {
                 throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex);
             }
         }
-        String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
-        if (previousGlobalOwner != null)
-            throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId
-                    + " (" + previousGlobalOwner + ", " + id + ")");
+        if (globalOwners != null) {
+            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
+            if (previousGlobalOwner != null)
+                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId
+                        + " (" + previousGlobalOwner + ", " + id + ")");
+        }
         Character character = new Character(id, globalId, name);
         character.house = optionalString(m, "house");
         character.culture = optionalString(m, "culture");
@@ -1343,10 +1350,12 @@ public final class CharacterRegistry {
             for (Object bindingValue : bindings.values()) {
                 if (!(bindingValue instanceof String uuid) || uuid.isBlank())
                     throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
-                String previousOwner = entityOwners.putIfAbsent(uuid, id);
-                if (previousOwner != null && !previousOwner.equals(id))
-                    throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
-                            + " привязан к двум персонажам: " + previousOwner + " и " + id);
+                if (entityOwners != null) {
+                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
+                    if (previousOwner != null && !previousOwner.equals(id))
+                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                                + " привязан к двум персонажам: " + previousOwner + " и " + id);
+                }
             }
         }
         return character;
