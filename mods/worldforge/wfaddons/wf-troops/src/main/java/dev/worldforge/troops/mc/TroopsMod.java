@@ -329,7 +329,7 @@ public class TroopsMod {
         dev.worldforge.people.CharacterAccessService.Lease lease = owner.access().acquireGlobal(globalId);
         if (lease == null) return null;
         Character person = lease.get();
-        if (!person.alive || !globalId.equals(person.globalId)) {
+        if (!globalId.equals(person.globalId)) {
             lease.close();
             return null;
         }
@@ -853,7 +853,7 @@ public class TroopsMod {
         long worldMinute = Math.max(0,troop.level().getDayTime()/20L);
         try (PersonBinding fallenBinding = acquirePersonGlobal(characterId)) {
             Character fallen = fallenBinding == null ? null : fallenBinding.character();
-            if (fallen != null) {
+            if (fallen != null && fallen.alive) {
                 Entity attackerEntity = source == null ? null : source.getEntity();
                 if (attackerEntity != null) {
                     MilitaryPsychology.recordBattleOutcome(fallen, false,
