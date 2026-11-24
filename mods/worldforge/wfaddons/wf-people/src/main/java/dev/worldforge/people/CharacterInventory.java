@@ -838,8 +838,10 @@ public final class CharacterInventory {
                 if (living != null) return living;
             }
         } else {
-            for (CharacterIdentity identity : registry.identities()) {
-                String living = livingCandidate(null, registry, identity.globalCharacterId());
+            for (int index = 0, count = registry.size(); index < count; index++) {
+                String localId = registry.idAt(index);
+                String globalId = registry.globalIdForLocalId(localId);
+                String living = livingCandidate(null, registry, globalId);
                 if (living != null && !living.equals(deceasedGlobalId)) return living;
             }
         }
