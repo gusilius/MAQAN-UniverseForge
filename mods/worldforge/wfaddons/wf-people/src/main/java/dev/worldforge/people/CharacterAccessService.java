@@ -40,6 +40,13 @@ public final class CharacterAccessService {
         for (Character character : registry.all()) coordinator.register(character.globalId);
     }
 
+    /** Registers newly-created canonical identities without scanning the registry. */
+    public void registerCreated(Character character) {
+        Objects.requireNonNull(character, "character");
+        CharacterPersistenceCoordinator persistence = coordinator();
+        if (persistence != null) persistence.register(character.globalId);
+    }
+
     public void replacePersistenceWriter(CharacterWalWriter writer) {
         CharacterPersistenceCoordinator persistence = coordinator();
         if (persistence != null) persistence.replaceWriter(writer);
