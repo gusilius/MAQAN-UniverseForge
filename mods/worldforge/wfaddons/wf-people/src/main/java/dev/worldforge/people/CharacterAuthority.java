@@ -162,9 +162,10 @@ public final class CharacterAuthority {
         addFamilyEdge(familyLegacy, legacyFamilyKey(identity.mapId(), person.mother),
                 legacyFamilyKey(identity.mapId(), person.id));
 
-        removeFamilyIndex(familyBySpouseLegacy, previousSpouseLegacy, person.globalId);
+        removeFamilyIndex(familyBySpouseLegacy,
+                legacyFamilyKey(identity.mapId(), previousSpouseLegacy), person.globalId);
         removeFamilyIndex(familyBySpouseGlobal, previousSpouseGlobal, person.globalId);
-        addFamilyIndex(familyBySpouseLegacy, person.spouse, identity);
+        addFamilyIndex(familyBySpouseLegacy, legacyFamilyKey(identity.mapId(), person.spouse), identity);
         addFamilyIndex(familyBySpouseGlobal, familyId(person, "family.spouse_global_id"), identity);
     }
 
@@ -382,7 +383,7 @@ public final class CharacterAuthority {
                     addFamilyEdge(parentChildGlobal, person.globalId, childId);
             }
 
-            addFamilyIndex(spouseLegacy, person.spouse, identity);
+            addFamilyIndex(spouseLegacy, legacyFamilyKey(mapId, person.spouse), identity);
             addFamilyIndex(spouseGlobal, spouseGlobalId, identity);
         }
         familyGlobal = parentChildGlobal;
