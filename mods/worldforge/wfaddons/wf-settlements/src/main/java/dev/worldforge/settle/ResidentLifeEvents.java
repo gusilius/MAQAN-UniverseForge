@@ -139,6 +139,8 @@ public final class ResidentLifeEvents {
         if (session.lastAdvanceToken == tickToken) return false;
         session.lastAdvanceToken = tickToken;
 
+        final int passYear = session.year;
+        final long passWorldDay = session.worldDay;
         int remaining = residentBudget;
         while (remaining > 0 && session.phase < 4) {
             if (session.phase == 0 && session.cursor >= session.initialSize) {
@@ -166,7 +168,7 @@ public final class ResidentLifeEvents {
                     final boolean[] eligible = {false};
                     registry.access().mutate(localId, person -> {
                         registry.refreshLifeStages(List.of(person), session.year);
-                        newbornId[0] = processPregnancy(registry, person, session.year, session.worldDay, names);
+                        newbornId[0] = processPregnancy(registry, person, passYear, passWorldDay, names);
                         eligible[0] = person.alive && (person.spouse == null || person.spouse.isBlank())
                                 && PopulationSimulation.age(person, session.year) >= 18;
                     });
@@ -175,7 +177,7 @@ public final class ResidentLifeEvents {
                 }
             } else if (session.phase == 1) {
                 for (int index = session.cursor; index < end; index++)
-                    withSessionPerson(session, index, person -> advanceChildhoodPerson(registry, person, session.year));
+                    withSessionPerson(session, index, person -> advanceChildhoodPerson(registry, person, passYear));
             } else if (session.phase == 2) {
                 for (int index = session.cursor; index < end; index++)
                     processMaritalConflictById(registry, personIdAt(session, index), session.year);
@@ -215,12 +217,13 @@ public final class ResidentLifeEvents {
         }
         if (refresh.lastAdvanceToken == tickToken) return false;
         refresh.lastAdvanceToken = tickToken;
+        final int refreshYear = year;
         int end = refresh.cursor + Math.min(residentBudget, refresh.end - refresh.cursor);
         if (end > refresh.cursor) {
             
             for (int index = refresh.cursor; index < end; index++) {
                 String localId = registry.idAt(index);
-                registry.access().mutate(localId, person -> registry.refreshLifeStages(List.of(person), year));
+                registry.access().mutate(localId, person -> registry.refreshLifeStages(List.of(person), refreshYear));
             }
             refresh.cursor = end;
         }
@@ -649,8 +652,10 @@ public final class ResidentLifeEvents {
                                 "reached education milestone " + (milestone * 25), Math.max(0L, year * 525600L), 1);
                     }
                     if (guardian != null) {
-                        ResidentSocial.adjust(child, guardian.globalId, 1);
-                        registry.access().mutate(guardian.id, current -> ResidentSocial.adjust(current, child.globalId, 1));
+                        String guardianGlobalId = guardian.globalId;
+                        ResidentSocial.adjust(child, guardianGlobalId, 1);
+                        registry.access().mutate(guardian.id,
+                                current -> ResidentSocial.adjust(current, child.globalId, 1));
                         if (age >= 10) {
                             int annualXp = age >= 13 ? 10 : 5;
                             PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
