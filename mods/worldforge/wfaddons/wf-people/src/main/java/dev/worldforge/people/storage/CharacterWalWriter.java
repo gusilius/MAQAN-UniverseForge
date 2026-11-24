@@ -123,9 +123,12 @@ public final class CharacterWalWriter implements AutoCloseable {
      * submit(), so checkpoint cannot race a newly accepted record after observing idle.
      * Returns false without changing writer state when any accepted record is outstanding.
      */
-    public synchronized boolean closeIfIdle() throws IOException {
-        if (outstanding.get() != 0) return false;
-        accepting.set(false);
+    public boolean closeIfIdle() throws IOException {
+        synchronized (this) {
+            if (outstanding.get() != 0) return false;
+            accepting.set(false);
+        }
+        // Never hold the producer monitor while joining: callbacks may submit work.
         try { worker.join(); }
         catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
