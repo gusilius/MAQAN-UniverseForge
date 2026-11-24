@@ -59,12 +59,13 @@ public final class CharacterDirtyQueueTest {
         for (int i = 0; i < 12; i++)
             priority.enqueue("critical-" + i, 1, CharacterDirtyQueue.Priority.CRITICAL);
         priority.enqueue("background", 1, CharacterDirtyQueue.Priority.BACKGROUND);
+        check(priority.criticalCount() == 12, "critical backlog metric is maintained without scanning pending UUIDs");
         List<CharacterDirtyQueue.Entry> priorityBatch = priority.takeBatch(12);
         check(priorityBatch.get(0).priority() == CharacterDirtyQueue.Priority.CRITICAL
                         && priorityBatch.get(8).globalId().equals("background"),
                 "critical work leads, but background work is served after a bounded critical burst");
         priority.acknowledge("background", 1);
-        check(priority.pendingCount() == 12,
+        check(priority.pendingCount() == 12 && priority.criticalCount() == 12,
                 "acknowledging one class does not erase other pending priorities");
         System.out.println("CharacterDirtyQueueTest: OK");
     }
