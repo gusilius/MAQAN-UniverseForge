@@ -823,7 +823,7 @@ public final class CharacterInventory {
             String living = livingCandidate(authority, registry, id);
             if (living != null) descendants.add(living);
         }
-        descendants.sort(Comparator.comparingInt(id -> birthYear(authority, registry, id))
+        descendants.sort(Comparator.comparingInt((String id) -> birthYear(authority, registry, id))
                 .thenComparing(id -> id));
         if (!descendants.isEmpty()) return descendants.get(0);
         String father = livingCandidate(authority, registry, fatherId);
@@ -832,7 +832,7 @@ public final class CharacterInventory {
         if (mother != null) return mother;
         if (authority != null) {
             List<String> kin = new ArrayList<>(authority.kinCandidateGlobalIds(deceasedGlobalId));
-            kin.sort(Comparator.comparingInt(id -> birthYear(authority, registry, id)).thenComparing(id -> id));
+            kin.sort(Comparator.comparingInt((String id) -> birthYear(authority, registry, id)).thenComparing(id -> id));
             for (String id : kin) {
                 String living = livingCandidate(authority, registry, id);
                 if (living != null) return living;
