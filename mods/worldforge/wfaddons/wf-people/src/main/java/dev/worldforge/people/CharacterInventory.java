@@ -1028,6 +1028,7 @@ public final class CharacterInventory {
         deceased.props.put("estate.recipient_global_id", heir.globalId);
         deceased.props.put("estate.status", "inherited");
         deceased.props.put("estate.settled", true);
+        deceased.props.put("death.lifecycle.completed", true);
     }
 
     /** Reconcile only sparse incoming-estate markers; never hydrate or walk the world population. */
