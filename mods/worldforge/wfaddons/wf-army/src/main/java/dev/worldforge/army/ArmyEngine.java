@@ -520,7 +520,7 @@ public final class ArmyEngine {
         target.supply = Math.max(0, Math.min(1, target.supply * targetWeight + source.supply * sourceWeight));
         if (target.commander == null || target.commander.isBlank()) target.commander = source.commander == null ? "" : source.commander;
         if (target.commanderGlobalId == null || target.commanderGlobalId.isBlank())
-            target.commanderGlobalId = source.commanderGlobalId == null ? "" : source.commanderGlobalId;
+            target.setCommanderGlobalId(source.commanderGlobalId);
         target.martial = Math.max(target.martial, source.martial);
         for (Map.Entry<String, Integer> entry : source.units.entrySet()) target.add(entry.getKey(), entry.getValue());
         armies.remove(from);
@@ -554,7 +554,7 @@ public final class ArmyEngine {
         split.martial = source.martial;
         // A split preserves command authority by UUID without pinning the commander object.
         split.commander = source.commander == null ? "" : source.commander;
-        split.commanderGlobalId = source.commanderGlobalId == null ? "" : source.commanderGlobalId;
+        split.setCommanderGlobalId(source.commanderGlobalId);
         split.morale = source.morale;
         split.supply = source.supply;
         split.add(type, n);
@@ -1334,12 +1334,11 @@ public final class ArmyEngine {
             Army a = new Army(((Number) m.get("id")).intValue(), (String) m.get("realm"), (String) m.get("name"), ((Number) m.get("loc")).intValue());
             a.commander = (String) m.get("commander");
             Object commanderId = m.get("commanderGlobalId");
-            a.commanderGlobalId = commanderId instanceof String id ? id : "";
-            if (!a.commanderGlobalId.isBlank()) {
-                try { java.util.UUID.fromString(a.commanderGlobalId); }
-                catch (IllegalArgumentException malformed) {
-                    throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id, malformed);
-                }
+            if (commanderId != null && !(commanderId instanceof String))
+                throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id);
+            try { a.setCommanderGlobalId((String) commanderId); }
+            catch (IllegalArgumentException malformed) {
+                throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id, malformed);
             }
             a.martial = ((Number) m.get("martial")).intValue();
             a.morale = ((Number) m.get("morale")).doubleValue(); if (m.get("supply") instanceof Number sp) a.supply = sp.doubleValue(); a.mercenary = Boolean.TRUE.equals(m.get("merc")); a.siegeTitle = ((Number) m.get("siege")).intValue();
