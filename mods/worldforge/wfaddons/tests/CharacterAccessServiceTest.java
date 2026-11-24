@@ -126,6 +126,8 @@ public final class CharacterAccessServiceTest {
             Character evictable = registry.create("Eviction Subject", "", "test", "f", 12);
             String evictableLocalId = evictable.id;
             String evictableGlobalId = evictable.globalId;
+            check(!registry.evictMaterialized(evictableGlobalId),
+                    "dirty identity cannot be evicted before its WAL frame and checkpoint are durable");
             int acceptedDirty = coordinator.persistDirtyBatch(globalId -> {
                 try (CharacterAccessService.Lease lease = access.acquireGlobal(globalId)) {
                     if (lease == null) throw new IllegalStateException("missing Character during test flush");
@@ -141,15 +143,14 @@ public final class CharacterAccessServiceTest {
             check(registry.evictMaterialized(evictableGlobalId)
                             && registry.materializedSize() == registry.size() - 1,
                     "durably checkpointed unleased Character can leave the materialized object map");
-            check(registry.get(evictableLocalId) != null
-                            && evictableGlobalId.equals(registry.get(evictableLocalId).globalId)
-                            && registry.materializedSize() == registry.size(),
-                    "local-ID lookup lazily hydrates the same canonical identity from checkpoint");
-            check(registry.getByGlobalId(evictableGlobalId) == registry.get(evictableLocalId),
-                    "global-ID lookup reuses the one hydrated canonical object");
-            try (CharacterAccessService.Lease evictionLease = access.acquireGlobal(evictableGlobalId)) {
-                check(evictionLease != null && evictionLease.get() == registry.get(evictableLocalId)
-                                && !registry.evictMaterialized(evictableGlobalId),
+            try (CharacterAccessService.Lease hydratedLease = access.acquireGlobal(evictableGlobalId)) {
+                check(hydratedLease != null && evictableGlobalId.equals(hydratedLease.get().globalId)
+                                && registry.materializedSize() == registry.size(),
+                        "global UUID acquisition lazily hydrates the canonical identity from checkpoint");
+                check(registry.get(evictableLocalId) == hydratedLease.get()
+                                && registry.getByGlobalId(evictableGlobalId) == hydratedLease.get(),
+                        "local/global lookups reuse the one hydrated canonical object");
+                check(!registry.evictMaterialized(evictableGlobalId),
                         "active scoped lease prevents concurrent physical eviction");
             }
         } finally {
