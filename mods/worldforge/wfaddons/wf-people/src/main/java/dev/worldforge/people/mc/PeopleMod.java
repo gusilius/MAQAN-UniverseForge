@@ -748,10 +748,27 @@ public class PeopleMod {
         CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
         if (owner == null || estateWalTransfer(character) != null
                 || CharacterInventory.hasPendingTransfer(character)) return false;
-        CharacterWalWriter writer = CHARACTER_WAL_WRITERS.get(owner);
-        if (writer == null) return false;
-        return writer.submit(character.globalId,
-                owner.toJsonRecord(character).getBytes(StandardCharsets.UTF_8), durable);
+        CharacterPersistenceCoordinator persistence = owner.access().persistenceCoordinator();
+        if (persistence == null) return false;
+        try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                     owner.access().acquireGlobal(character.globalId)) {
+            if (lease == null || lease.get() != character) return false;
+            // Bulk/stress writes must use the same generation ticket and forced-receipt
+            // validation as normal persistence. Never submit directly to the raw writer.
+            CompletableFuture<CharacterWal.Record> coordinated = persistence.persistMutation(
+                    character.globalId,
+                    () -> owner.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8));
+            coordinated.whenComplete((record, failure) -> {
+                if (failure != null) durable.completeExceptionally(failure);
+                else durable.complete(record);
+            });
+            return !coordinated.isCompletedExceptionally();
+        } catch (RuntimeException failure) {
+            durable.completeExceptionally(failure);
+            LOGGER.error("wf_people: could not enqueue coordinated stress persistence for {}",
+                    character.globalId, failure);
+            return false;
+        }
     }
 
     public static int characterWalQueueDepth(CharacterRegistry registry) {
