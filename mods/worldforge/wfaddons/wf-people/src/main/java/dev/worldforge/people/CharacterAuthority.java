@@ -347,6 +347,13 @@ public final class CharacterAuthority {
         return owner == null ? null : owner.get(identity.characterId());
     }
 
+    /** Resolves an unambiguous legacy partition-local ID to its canonical UUID without hydration. */
+    public synchronized String globalIdForLegacyId(String characterId) {
+        refreshIndex();
+        Set<CharacterIdentity> matches = byLegacyId.get(characterId);
+        return matches == null || matches.size() != 1 ? null : matches.iterator().next().globalCharacterId();
+    }
+
     public synchronized CharacterRegistry registry(String mapId) { return registries.get(mapId); }
 
     public synchronized Collection<CharacterIdentity> identities() {
