@@ -263,10 +263,6 @@ public final class CharacterRegistry {
         return total;
     }
 
-    synchronized boolean isCurrentLease(String id, Character expected) {
-        return byId.get(id) == expected;
-    }
-
     /** Resolves a canonical global UUID without scanning the local registry. */
     public Character getByGlobalId(String globalId) { return characterByGlobalId(globalId); }
 
