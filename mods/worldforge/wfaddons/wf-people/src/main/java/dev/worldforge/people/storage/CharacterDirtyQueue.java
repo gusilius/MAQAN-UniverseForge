@@ -1,6 +1,5 @@
 package dev.worldforge.people.storage;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -11,8 +10,8 @@ import java.util.Set;
 
 /**
  * Lossless UUID-only dirty work index for the canonical Character WAL pipeline.
- * The pending map is authoritative; deques are delivery hints only. There is no
- * fixed-capacity admission queue, so overload creates backlog rather than data loss.
+ * The pending map is authoritative. Intrusive ready lists provide O(1) enqueue,
+ * promotion, dequeue and acknowledgement without scanning a population-sized backlog.
  */
 public final class CharacterDirtyQueue {
     public enum Priority { CRITICAL, BACKGROUND }
@@ -25,34 +24,76 @@ public final class CharacterDirtyQueue {
         }
     }
 
+    private static final class ReadyNode {
+        final String id;
+        final Priority priority;
+        ReadyNode previous;
+        ReadyNode next;
+        ReadyNode(String id, Priority priority) { this.id = id; this.priority = priority; }
+    }
+
+    private static final class ReadyList {
+        ReadyNode first;
+        ReadyNode last;
+        int size;
+
+        void addLast(ReadyNode node) {
+            node.previous = last;
+            node.next = null;
+            if (last == null) first = node;
+            else last.next = node;
+            last = node;
+            size++;
+        }
+
+        ReadyNode removeFirst() {
+            ReadyNode node = first;
+            if (node != null) remove(node);
+            return node;
+        }
+
+        void remove(ReadyNode node) {
+            if (node.previous == null) first = node.next;
+            else node.previous.next = node.next;
+            if (node.next == null) last = node.previous;
+            else node.next.previous = node.previous;
+            node.previous = null;
+            node.next = null;
+            size--;
+        }
+    }
+
     private final Map<String, Entry> pending = new HashMap<>();
-    private final ArrayDeque<String> criticalReady = new ArrayDeque<>();
-    private final ArrayDeque<String> backgroundReady = new ArrayDeque<>();
-    private final Set<String> queued = new HashSet<>();
+    private final Map<String, ReadyNode> readyById = new HashMap<>();
+    private final ReadyList criticalReady = new ReadyList();
+    private final ReadyList backgroundReady = new ReadyList();
     private final Set<String> inFlight = new HashSet<>();
     private int consecutiveCriticalDeliveries;
     private int criticalPending;
 
+    /** Coalesces repeated mutations to the newest generation and strongest priority. */
     public synchronized void enqueue(String globalId, long generation) {
         enqueue(globalId, generation, Priority.BACKGROUND);
     }
 
-    /** Coalesces by UUID and keeps the newest generation and strongest priority. */
     public synchronized void enqueue(String globalId, long generation, Priority priority) {
         Entry next = new Entry(globalId, generation, priority);
         Entry previous = pending.get(globalId);
-        Priority effective = previous != null
-                && previous.priority() == Priority.CRITICAL ? Priority.CRITICAL : priority;
+        Priority effective = previous != null && previous.priority() == Priority.CRITICAL
+                ? Priority.CRITICAL : priority;
         if (previous != null && previous.generation() > generation) generation = previous.generation();
         pending.put(globalId, new Entry(globalId, generation, effective));
+
         if (previous == null && effective == Priority.CRITICAL) criticalPending++;
         else if (previous != null && previous.priority() != Priority.CRITICAL
                 && effective == Priority.CRITICAL) criticalPending++;
-        if (!inFlight.contains(globalId) && queued.add(globalId)) appendReady(globalId, effective);
-        else if (queued.contains(globalId) && previous != null
-                && previous.priority() != Priority.CRITICAL && effective == Priority.CRITICAL) {
-            backgroundReady.remove(globalId);
-            criticalReady.addLast(globalId);
+
+        if (inFlight.contains(globalId)) return;
+        ReadyNode queued = readyById.get(globalId);
+        if (queued == null) appendReady(globalId, effective);
+        else if (queued.priority != effective) {
+            removeReady(globalId);
+            appendReady(globalId, effective);
         }
     }
 
@@ -61,36 +102,49 @@ public final class CharacterDirtyQueue {
         if (current == null || current.priority() == Priority.CRITICAL) return;
         pending.put(globalId, new Entry(globalId, current.generation(), Priority.CRITICAL));
         criticalPending++;
-        if (queued.contains(globalId)) {
-            backgroundReady.remove(globalId);
-            if (!criticalReady.contains(globalId)) criticalReady.addLast(globalId);
+        if (!inFlight.contains(globalId)) {
+            ReadyNode queued = readyById.get(globalId);
+            if (queued != null && queued.priority != Priority.CRITICAL) {
+                removeReady(globalId);
+                appendReady(globalId, Priority.CRITICAL);
+            }
         }
     }
 
     private void appendReady(String id, Priority priority) {
-        if (priority == Priority.CRITICAL) criticalReady.addLast(id);
-        else backgroundReady.addLast(id);
+        if (readyById.containsKey(id)) return;
+        ReadyNode node = new ReadyNode(id, priority);
+        readyById.put(id, node);
+        list(priority).addLast(node);
     }
 
-    /** Takes at most maxCount entries; critical work is served before background work. */
+    private void removeReady(String id) {
+        ReadyNode node = readyById.remove(id);
+        if (node != null) list(node.priority).remove(node);
+    }
+
+    private ReadyList list(Priority priority) {
+        return priority == Priority.CRITICAL ? criticalReady : backgroundReady;
+    }
+
+    /** Takes at most maxCount entries; a bounded critical burst prevents background starvation. */
     public synchronized List<Entry> takeBatch(int maxCount) {
         if (maxCount < 1) throw new IllegalArgumentException("maxCount must be positive");
-        List<Entry> batch = new ArrayList<>(Math.min(maxCount, readyCount()));
-        while (batch.size() < maxCount) {
-            boolean takeCritical = !criticalReady.isEmpty()
-                    && (backgroundReady.isEmpty() || consecutiveCriticalDeliveries < 8);
-            String id;
+        List<Entry> batch = new ArrayList<>(Math.min(maxCount, readyById.size()));
+        while (batch.size() < maxCount && readyById.size() > 0) {
+            boolean takeCritical = criticalReady.size > 0
+                    && (backgroundReady.size == 0 || consecutiveCriticalDeliveries < 8);
+            ReadyNode node;
             if (takeCritical) {
-                id = criticalReady.pollFirst();
+                node = criticalReady.removeFirst();
                 consecutiveCriticalDeliveries++;
             } else {
-                id = backgroundReady.pollFirst();
+                node = backgroundReady.removeFirst();
                 consecutiveCriticalDeliveries = 0;
             }
-            if (id == null) break;
-            queued.remove(id);
-            Entry entry = pending.get(id);
-            if (entry == null || !inFlight.add(id)) continue;
+            readyById.remove(node.id, node);
+            Entry entry = pending.get(node.id);
+            if (entry == null || entry.priority() != node.priority || !inFlight.add(node.id)) continue;
             batch.add(entry);
         }
         return List.copyOf(batch);
@@ -103,12 +157,7 @@ public final class CharacterDirtyQueue {
         if (current.generation() <= durableGeneration) {
             pending.remove(globalId);
             inFlight.remove(globalId);
-            // In-flight IDs were already removed from the deques. Avoid an O(backlog)
-            // linear remove on every durable receipt at million-character scale.
-            if (queued.remove(globalId)) {
-                criticalReady.remove(globalId);
-                backgroundReady.remove(globalId);
-            }
+            removeReady(globalId);
             if (current.priority() == Priority.CRITICAL) criticalPending--;
         } else {
             inFlight.remove(globalId);
@@ -126,12 +175,12 @@ public final class CharacterDirtyQueue {
 
     private void requeue(String id) {
         Entry current = pending.get(id);
-        if (current != null && !inFlight.contains(id) && queued.add(id))
+        if (current != null && !inFlight.contains(id) && !readyById.containsKey(id))
             appendReady(id, current.priority());
     }
 
     public synchronized int pendingCount() { return pending.size(); }
-    public synchronized int readyCount() { return criticalReady.size() + backgroundReady.size(); }
+    public synchronized int readyCount() { return readyById.size(); }
     public synchronized int inFlightCount() { return inFlight.size(); }
     public synchronized int criticalCount() { return criticalPending; }
     public synchronized boolean contains(String globalId) { return pending.containsKey(globalId); }
