@@ -1762,7 +1762,7 @@ public class SettleMod {
         String race = "";
         String culture = "";
         String place = "settlement:" + colony.s.id;
-        List<Character> pendingProfessionTransitions = new ArrayList<>();
+        List<String> pendingProfessionTransitionIds = new ArrayList<>();
 
         // Consume persisted departures before reconciling current workers. A crash/reload cannot erase a death or migration.
         for (Settlement.WorkerDeparture departure : new ArrayList<>(colony.s.pendingDepartures())) {
@@ -1830,19 +1830,38 @@ public class SettleMod {
                     && colony.s.defs.professions.containsKey(target)) {
                 if (!target.equals(worker.profession)) colony.s.setProfession(worker.id, target);
                 profession = target;
-                if (!pendingProfessionTransitions.contains(person)) pendingProfessionTransitions.add(person);
+                if (!pendingProfessionTransitionIds.contains(person.globalId)) pendingProfessionTransitionIds.add(person.globalId);
             }
+            boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
+            boolean settlementSpecialist = java.util.Set.of("lumberjack", "sawyer", "farmer", "miner", "smith",
+                    "builder", "blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
+            boolean characterNeedsSync = !person.has("settlement_worker", place)
+                    || !Objects.equals(person.props.get("population.employer"), place)
+                    || !Objects.equals(person.props.get("population.location"), colony.s.id)
+                    || (person.culture == null || person.culture.isBlank())
+                    || !profession.equals(PopulationSimulation.profession(person))
+                    || !PopulationSimulation.hasDuty(person, Duty.WORKER)
+                    || (settlementSoldier != PopulationSimulation.hasDuty(person, Duty.SOLDIER)
+                        && (settlementSoldier || Boolean.TRUE.equals(person.props.get("population.settlement_soldier_duty"))))
+                    || (settlementSpecialist != PopulationSimulation.hasDuty(person, Duty.SPECIALIST)
+                        && (settlementSpecialist || Boolean.TRUE.equals(person.props.get("population.settlement_specialist_duty"))))
+                    || !Objects.equals(person.props.get("wf_unit_kind"), "worker")
+                    || !Objects.equals(person.props.get("wf_settlement_id"), colony.s.id)
+                    || !Objects.equals(person.props.get("wf_worker_id"), worker.id)
+                    || !Objects.equals(person.props.get("wf_profession"), worker.profession == null ? "laborer" : worker.profession)
+                    || !Objects.equals(person.props.get("wf_assigned_profession"), worker.assignedProfession == null ? "" : worker.assignedProfession)
+                    || !Objects.equals(person.props.get("wf_building_uid"), worker.building)
+                    || !Objects.equals(person.props.get("wf_race_id"), race)
+                    || !Objects.equals(person.props.get("wf_culture_id"), culture)
+                    || person.props.containsKey("population.pending_settlement_profession");
             if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
             personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
-            boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
             if (settlementSoldier && !PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
                 personRegistry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_soldier_duty", true);
             } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
                 personRegistry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
             }
-            boolean settlementSpecialist = java.util.Set.of("lumberjack", "sawyer", "farmer", "miner", "smith",
-                    "builder", "blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
             if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
                 personRegistry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_specialist_duty", true);
@@ -1858,19 +1877,26 @@ public class SettleMod {
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
-            // The lease prevents eviction, but does not itself advance the canonical dirty generation.
-            // Publish exactly one dirty mutation after the complete worker/Character reconciliation.
-            var persistence = personRegistry.access().persistenceCoordinator();
-            if (persistence == null)
-                throw new IllegalStateException("Character persistence coordinator is not attached for " + person.globalId);
-            persistence.markDirty(person.globalId);
+            // A lease protects lifetime; only an actual reconciliation advances persistence generation.
+            if (characterNeedsSync) {
+                var persistence = personRegistry.access().persistenceCoordinator();
+                if (persistence == null)
+                    throw new IllegalStateException("Character persistence coordinator is not attached for " + person.globalId);
+                persistence.markDirty(person.globalId);
+            }
             }
         }
-        if (!pendingProfessionTransitions.isEmpty() && saveDurably(server)) {
-            for (Character person : pendingProfessionTransitions) {
-                Object marker = person.props.remove("population.pending_settlement_profession");
-                if (!PeopleMod.persistCharacter(person, server) && marker != null)
-                    person.props.put("population.pending_settlement_profession", marker);
+        if (!pendingProfessionTransitionIds.isEmpty() && saveDurably(server)) {
+            for (String globalId : pendingProfessionTransitionIds) {
+                CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+                if (owner == null) continue;
+                try (PersonBinding binding = resolvePersonBinding(owner, globalId)) {
+                    if (binding == null) continue;
+                    Character person = binding.character();
+                    Object marker = person.props.remove("population.pending_settlement_profession");
+                    if (!PeopleMod.persistCharacter(person, server) && marker != null)
+                        person.props.put("population.pending_settlement_profession", marker);
+                }
             }
         }
     }
