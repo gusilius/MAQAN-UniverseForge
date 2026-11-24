@@ -829,6 +829,21 @@ public final class PopulationSimulationTest {
         ok(appendInvalidates && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,
                 "scheduler iterator recovers after append without replaying acknowledged Characters");
 
+        CharacterRegistry scheduledAppendRegistry = new CharacterRegistry();
+        Character scheduledA = scheduledAppendRegistry.create("Scheduled A", "", "", "n", 270);
+        Character scheduledB = scheduledAppendRegistry.create("Scheduled B", "", "", "n", 270);
+        Character scheduledC = scheduledAppendRegistry.create("Scheduled C", "", "", "n", 270);
+        boolean scheduledFirst = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        Character scheduledD = scheduledAppendRegistry.create("Scheduled D", "", "", "n", 270);
+        boolean scheduledSecond = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        boolean scheduledThird = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        ok(!scheduledFirst && !scheduledSecond && scheduledThird
+                        && PopulationSimulation.need(scheduledA, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledB, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledC, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledD, Need.HUNGER) == 10,
+                "population scheduler resumes after append and simulates each new Character exactly once");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

@@ -21,7 +21,7 @@ public final class PopulationSimulation {
         boolean catchUpPass;
         String lastProcessedId = "";
         WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
-                       Iterator<Character> iterator, int nextIndex, boolean catchUpPass) {
+                       Iterator<Character> iterator, int nextIndex, boolean catchUpPass, String lastProcessedId) {
             this.targetDay = targetDay;
             this.fallbackDay = fallbackDay;
             this.year = year;
@@ -29,6 +29,7 @@ public final class PopulationSimulation {
             this.iterator = iterator;
             this.nextIndex = nextIndex;
             this.catchUpPass = catchUpPass;
+            this.lastProcessedId = lastProcessedId == null ? "" : lastProcessedId;
         }
     }
     /** Read-only scheduler progress for diagnostics; does not advance or mutate the cursor. */
@@ -566,17 +567,16 @@ public final class PopulationSimulation {
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
                     || cursor.membershipGeneration != generation) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        registry.iteratorAfter(""), 0, false);
+                        registry.iteratorAfter(""), 0, false, "");
             } else if (cursor.targetDay != targetWorldDay) {
                 // Keep the unfinished suffix. Once it is drained, a second pass catches up
                 // the already-visited prefix to the newest world-day target.
                 if (cursor.nextIndex >= memberCount) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            registry.iteratorAfter(""), 0, false);
+                            registry.iteratorAfter(""), 0, false, "");
                 } else {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.iterator, cursor.nextIndex, true);
-                    cursor.lastProcessedId = lastProcessedId(cursor);
+                            cursor.iterator, cursor.nextIndex, true, cursor.lastProcessedId);
                 }
             }
             int processed = 0;
@@ -606,7 +606,7 @@ public final class PopulationSimulation {
             }
             if (!cursor.iterator.hasNext() && cursor.catchUpPass) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        registry.iteratorAfter(""), 0, false);
+                        registry.iteratorAfter(""), 0, false, "");
                 WORLD_DAY_CURSORS.put(registry, cursor);
                 return false;
             }
@@ -615,9 +615,6 @@ public final class PopulationSimulation {
         }
     }
 
-    private static String lastProcessedId(WorldDayCursor cursor) {
-        return cursor.lastProcessedId;
-    }
 
     /** Exclusive Java fallback with per-Character durable world-day receipts. */
     public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
