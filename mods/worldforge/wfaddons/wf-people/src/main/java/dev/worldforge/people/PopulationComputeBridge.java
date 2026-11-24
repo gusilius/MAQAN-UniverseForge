@@ -128,7 +128,6 @@ public final class PopulationComputeBridge {
             }
         }
 
-        private int start(int index) { return starts[index]; }
         private int limit(int index) { return limits[index]; }
         /** Number of stable Character partitions in this scan. */
         public int registryCount() { return registries.size(); }
