@@ -1011,6 +1011,7 @@ public final class CharacterInventory {
         deceased.props.put("estate.recipient_global_id", heir.globalId);
         deceased.props.put("estate.status", "inherited");
         deceased.props.put("estate.settled", true);
+        deceased.props.put("death.lifecycle.completed", true);
     }
 
     private static void clearTransferredEstate(Character deceased, Character heir) {
