@@ -128,7 +128,8 @@ public class PeopleMod {
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
     /** One shared per-tick budget across every canonical population partition. */
     private static final int POPULATION_FALLBACK_BUDGET_PER_TICK = 256;
-    /** Dirty persistence is serviced every five server ticks under one global CPU/byte budget. */
+    /** Dirty persistence and deferred lifecycle consequences share bounded server-tick windows. */
+    private static int bereavementPartitionCursor;
     private static final int DIRTY_SAVE_INTERVAL_TICKS = 5;
     private static final int DIRTY_SAVE_MAX_PARTITIONS_PER_PASS = 8;
     private static final int DIRTY_SAVE_MAX_CHARACTERS_PER_PARTITION = 64;
@@ -1209,8 +1210,10 @@ public class PeopleMod {
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0 && !Boolean.getBoolean("wf.acceptance.contour02"))
                 socialInitiatives(e.getServer());
-            if (ticks % DIRTY_SAVE_INTERVAL_TICKS == 0)
+            if (ticks % DIRTY_SAVE_INTERVAL_TICKS == 0) {
                 serviceDirtyPersistence(e.getServer());
+                servicePendingBereavement();
+            }
             // Routine Character mutations are already committed to the per-partition WAL
             // by persistCharacter(). A population-wide JSON checkpoint here serialized every
             // Character on the server thread and stalled the tick loop at scale. Keep full
@@ -1218,6 +1221,25 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
         }
+    }
+
+    /**
+     * Applies deferred death memories from UUID queues only. Each pass visits at most two
+     * partitions and processes at most sixteen recipients, independent of world population.
+     */
+    private static void servicePendingBereavement() {
+        List<CharacterRegistry> registries = populationFallbackRegistries(populationRegistryGeneration);
+        int count = registries.size();
+        if (count == 0) return;
+        int visits = Math.min(2, count);
+        int perPartitionBudget = Math.max(1, 16 / visits);
+        for (int offset = 0; offset < visits; offset++) {
+            int index = (bereavementPartitionCursor + offset) % count;
+            CharacterRegistry registry = registries.get(index);
+            if (registry.pendingBereavementEvents() > 0)
+                registry.processPendingBereavementBatch(perPartitionBudget);
+        }
+        bereavementPartitionCursor = (bereavementPartitionCursor + visits) % count;
     }
 
     /**
