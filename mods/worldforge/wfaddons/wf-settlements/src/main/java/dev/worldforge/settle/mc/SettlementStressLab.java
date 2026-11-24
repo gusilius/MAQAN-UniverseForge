@@ -124,7 +124,7 @@ public final class SettlementStressLab {
             player.teleportTo(source.getLevel(), spawn.getX() + 0.5, spawnY,
                     spawn.getZ() + 0.5, Set.of(), source.getRotation().y, source.getRotation().x);
         } catch (RuntimeException error) {
-            SettleMod.LOGGER.error("WF_STRESS contour=04_settlements setup_failed stage=fake_player_attach", error);
+            SettleMod.LOGGER.error("WF_STRESS_CONTOUR04_SETUP_FAILED stage=fake_player_attach", error);
             source.sendFailure(Component.literal("WF_STRESS_CONTOUR04_SETUP_FAILED stage=fake_player_attach: " + error));
             return 0;
         }
