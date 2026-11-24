@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.storage.*;
 
 import java.nio.file.Files;
@@ -67,6 +68,29 @@ public final class CharacterAccessServiceTest {
                             && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY,
                     "UUID mutation API marks the canonical identity dirty after releasing pins");
 
+
+            Character second = registry.create("Multi Subject", "", "test", "f", 2);
+            String secondId = second.id;
+            dev.worldforge.people.CharacterAuthority authority = new dev.worldforge.people.CharacterAuthority();
+            authority.beginWorld(WorldId.parse("00000000-0000-0000-0000-000000000001"));
+            authority.registerMap("overworld", registry);
+            access.mutateGlobals(authority, java.util.List.of(second.globalId, original.globalId, second.globalId),
+                    participants -> {
+                        participants.get(original.globalId).name = "Batch First";
+                        participants.get(second.globalId).name = "Batch Second";
+                    });
+            check("Batch First".equals(original.name) && "Batch Second".equals(second.name)
+                            && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && gate.decision(second.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && registry.activeAccessLeaseCount() == 0,
+                    "multi-character mutation deduplicates UUIDs and dirties every canonical participant");
+            boolean invalidBatchRejected = false;
+            try { CharacterAccessService.mutateGlobals(authority, java.util.List.of(original.globalId, " "),
+                    ignored -> { }); }
+            catch (IllegalArgumentException expected) { invalidBatchRejected = true; }
+            check(invalidBatchRejected && registry.activeAccessLeaseCount() == 0,
+                    "invalid multi-character scope is rejected without leaking leases");
+
             boolean failedMutation = false;
             try {
                 access.mutate(original.id, character -> {
@@ -89,8 +113,8 @@ public final class CharacterAccessServiceTest {
         Character secondCharacter = registry.create("Second Subject", "", "test", "f", 2);
         CharacterRegistry restored = new CharacterRegistry();
         restored.fromJson(registry.toJson(), "lease-restore-test");
-        check(restored.size() == 2 && restored.idAt(0).equals(original.id)
-                        && restored.idAt(1).equals(secondCharacter.id) && restored.get(original.id) != null,
+        check(restored.size() == 3 && restored.idAt(0).equals(original.id)
+                        && restored.idAt(1).equals(secondId) && restored.idAt(2).equals(secondCharacter.id) && restored.get(original.id) != null,
                 "streamed restore publishes staged objects and identity order");
         original.traits.add("resilient");
         String validRecord = registry.toJsonRecord(original);

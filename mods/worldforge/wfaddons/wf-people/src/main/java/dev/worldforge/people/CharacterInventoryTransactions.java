@@ -19,6 +19,27 @@ public final class CharacterInventoryTransactions {
 
     private CharacterInventoryTransactions() { }
 
+
+    /**
+     * Storage-aware entry point: both endpoints remain leased and transaction-pinned
+     * through prepare, item mutation, durable commit and marker cleanup.
+     */
+    public static boolean executeExactStorageAware(String transactionId, CharacterAuthority authority,
+                                                   Character owner, Character actor, String containerId,
+                                                   String itemId, String data, int sourceSlot, int amount,
+                                                   boolean deposit, Persister persister) {
+        Objects.requireNonNull(authority, "authority");
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(actor, "actor");
+        boolean[] result = {false};
+        CharacterAccessService.mutateGlobals(authority,
+                java.util.List.of(owner.globalId, actor.globalId), characters ->
+                        result[0] = executeExact(transactionId, authority,
+                                characters.get(owner.globalId), characters.get(actor.globalId),
+                                containerId, itemId, data, sourceSlot, amount, deposit, persister));
+        return result[0];
+    }
+
     public static boolean executeExact(String transactionId, CharacterAuthority authority,
                                        Character owner, Character actor, String containerId,
                                        String itemId, String data, int sourceSlot, int amount,

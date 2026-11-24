@@ -2,7 +2,13 @@ package dev.worldforge.people;
 
 import dev.worldforge.people.storage.CharacterEvictionGate;
 import dev.worldforge.people.storage.CharacterPersistenceCoordinator;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -87,6 +93,81 @@ public final class CharacterAccessService {
                 }
             }
         }
+    }
+
+
+    /**
+     * Mutates several canonical Characters as one coordinated in-memory scope.
+     * UUIDs are deduplicated and acquired in lexical order to avoid lock-order
+     * inversions. Every participant stays leased and transaction-pinned until
+     * all participants have been marked dirty. Domain rollback remains the
+     * responsibility of the owning operation.
+     */
+    public static void mutateGlobals(CharacterAuthority authority, Collection<String> globalIds,
+                                     Consumer<Map<String, Character>> mutation) {
+        Objects.requireNonNull(authority, "authority");
+        Objects.requireNonNull(globalIds, "globalIds");
+        Objects.requireNonNull(mutation, "mutation");
+        TreeSet<String> orderedIds = new TreeSet<>();
+        for (String id : globalIds) {
+            if (id == null || id.isBlank())
+                throw new IllegalArgumentException("Character UUIDs must be non-blank");
+            orderedIds.add(id);
+        }
+        if (orderedIds.isEmpty()) throw new IllegalArgumentException("At least one Character UUID is required");
+
+        List<Lease> leases = new ArrayList<>(orderedIds.size());
+        List<CharacterEvictionGate.Pin> transactions = new ArrayList<>(orderedIds.size());
+        Map<String, Character> characters = new LinkedHashMap<>();
+        Map<String, CharacterPersistenceCoordinator> coordinators = new LinkedHashMap<>();
+        boolean callbackStarted = false;
+        try {
+            for (String id : orderedIds) {
+                CharacterRegistry owner = authority.registryForGlobal(id);
+                if (owner == null) throw new IllegalArgumentException("Unknown Character UUID: " + id);
+                CharacterAccessService access = owner.access();
+                CharacterPersistenceCoordinator persistence = access.coordinator();
+                if (persistence == null)
+                    throw new IllegalStateException("Character persistence coordinator is not attached for " + id);
+                Lease lease = access.acquireGlobal(id);
+                if (lease == null || authority.getGlobal(id) != lease.get()) {
+                    if (lease != null) lease.close();
+                    throw new IllegalStateException("Character identity changed while acquiring " + id);
+                }
+                leases.add(lease);
+                characters.put(id, lease.get());
+                coordinators.put(id, persistence);
+            }
+            for (String id : orderedIds)
+                transactions.add(coordinators.get(id).beginTransaction(id));
+            callbackStarted = true;
+            mutation.accept(Collections.unmodifiableMap(characters));
+        } finally {
+            if (callbackStarted) {
+                RuntimeException dirtyFailure = null;
+                for (String id : orderedIds) {
+                    try { coordinators.get(id).markDirty(id); }
+                    catch (RuntimeException failure) {
+                        if (dirtyFailure == null) dirtyFailure = failure;
+                        else dirtyFailure.addSuppressed(failure);
+                    }
+                }
+                closePins(transactions);
+                closeLeases(leases);
+                if (dirtyFailure != null) throw dirtyFailure;
+            } else {
+                closePins(transactions);
+                closeLeases(leases);
+            }
+        }
+    }
+
+    private static void closePins(List<CharacterEvictionGate.Pin> pins) {
+        for (int i = pins.size() - 1; i >= 0; i--) pins.get(i).close();
+    }
+
+    private static void closeLeases(List<Lease> leases) {
+        for (int i = leases.size() - 1; i >= 0; i--) leases.get(i).close();
     }
 
     public static final class Lease implements AutoCloseable {
