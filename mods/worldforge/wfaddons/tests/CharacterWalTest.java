@@ -89,6 +89,11 @@ public final class CharacterWalTest {
                 }
                 ok(failedActionPreservedWal,
                         "failed checkpoint action preserves every WAL frame for crash recovery");
+                List<CharacterWal.Record> latestRecords = new ArrayList<>();
+                wal.replayLatestEach(latestRecords::add);
+                ok(latestRecords.size() == 1 && latestRecords.get(0).globalId().equals(id)
+                                && latestRecords.get(0).payloadUtf8().equals("{\"version\":2}"),
+                        "latest-only WAL replay collapses repeated mutations to one durable record per Character");
                 wal.checkpoint(() -> wal.replayEach(record -> store.put(record.globalId(), record.payload())));
                 CharacterRecordStore.Record stored = store.get(id);
                 ok(wal.replayAll().isEmpty() && stored != null
