@@ -75,7 +75,7 @@ public final class CharacterAccessServiceTest {
             dev.worldforge.people.CharacterAuthority authority = new dev.worldforge.people.CharacterAuthority();
             authority.beginWorld(WorldId.parse("00000000-0000-0000-0000-000000000001"));
             authority.registerMap("overworld", registry);
-            access.mutateGlobals(authority, java.util.List.of(second.globalId, original.globalId, second.globalId),
+            access.mutateGlobals(authority, java.util.List.of(secondPerson.globalId, original.globalId, secondPerson.globalId),
                     participants -> {
                         participants.get(original.globalId).name = "Batch First";
                         participants.get(secondPerson.globalId).name = "Batch Second";
@@ -101,7 +101,7 @@ public final class CharacterAccessServiceTest {
             } catch (IllegalStateException expected) { failedScopedMutation = true; }
             check(failedScopedMutation
                             && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
-                            && gate.decision(second.globalId) == CharacterEvictionGate.Decision.DIRTY
+                            && gate.decision(secondPerson.globalId) == CharacterEvictionGate.Decision.DIRTY
                             && registry.activeAccessLeaseCount() == 0,
                     "failed scoped mutation dirties every participant and releases all pins");
 
