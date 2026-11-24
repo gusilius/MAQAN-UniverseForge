@@ -1143,6 +1143,7 @@ public class TroopsMod {
             Object lastMorale = person.props.remove("military.morale");
             if (lastMorale instanceof Number n)
                 person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
+            owner.access().mutateGlobal(person.globalId, ignored -> { });
             if (!PeopleMod.persistCharacter(person, server)) return false;
             if (ModList.get().isLoaded("wf_settle")
                     && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(server)) return false;
