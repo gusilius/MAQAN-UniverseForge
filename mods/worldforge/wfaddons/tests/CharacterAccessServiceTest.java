@@ -122,6 +122,27 @@ public final class CharacterAccessServiceTest {
             check(failedMutation && gate.decision(original.globalId) == CharacterEvictionGate.Decision.DIRTY
                             && registry.activeAccessLeaseCount() == 0,
                     "failed partial mutation remains dirty and releases lease/transaction pins");
+
+            Character evictable = registry.create("Eviction Subject", "", "test", "f", 12);
+            String evictablePayload = registry.toJsonRecord(evictable);
+            store.put(evictable.globalId, evictablePayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            coordinator.registerPersisted(evictable.globalId);
+            String evictableLocalId = evictable.id;
+            String evictableGlobalId = evictable.globalId;
+            check(registry.evictMaterialized(evictableGlobalId)
+                            && registry.materializedSize() == registry.size() - 1,
+                    "durably checkpointed unleased Character can leave the materialized object map");
+            check(registry.get(evictableLocalId) != null
+                            && evictableGlobalId.equals(registry.get(evictableLocalId).globalId)
+                            && registry.materializedSize() == registry.size(),
+                    "local-ID lookup lazily hydrates the same canonical identity from checkpoint");
+            check(registry.getByGlobalId(evictableGlobalId) == registry.get(evictableLocalId),
+                    "global-ID lookup reuses the one hydrated canonical object");
+            try (CharacterAccessService.Lease evictionLease = access.acquireGlobal(evictableGlobalId)) {
+                check(evictionLease != null && evictionLease.get() == registry.get(evictableLocalId)
+                                && !registry.evictMaterialized(evictableGlobalId),
+                        "active scoped lease prevents concurrent physical eviction");
+            }
         } finally {
             coordinator.close();
             try (var paths = Files.walk(root)) {
