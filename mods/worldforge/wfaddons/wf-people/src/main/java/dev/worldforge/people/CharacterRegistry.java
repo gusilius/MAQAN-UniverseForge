@@ -3,6 +3,7 @@ package dev.worldforge.people;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.people.storage.CharacterRecordStore;
 
 import java.util.*;
 import java.io.IOException;
