@@ -79,7 +79,10 @@ public final class PopulationComputeBridge {
         private CharacterRegistry registry(int index) { return registries.get(index); }
         private int start(int index) { return starts[index]; }
         private int limit(int index) { return limits[index]; }
-        private int registryCount() { return registries.size(); }
+        /** Number of stable Character partitions in this scan. */
+        public int registryCount() { return registries.size(); }
+        /** First member offset for a partition, exposed for the cross-addon bounded coordinator. */
+        public int start(int index) { return starts[index]; }
         public int firstMemberCursor() { return starts.length == 0 ? 0 : starts[0]; }
         private boolean current() {
             for (int i = 0; i < registries.size(); i++)
