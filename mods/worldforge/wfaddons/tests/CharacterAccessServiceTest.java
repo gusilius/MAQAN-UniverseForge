@@ -41,6 +41,20 @@ public final class CharacterAccessServiceTest {
         check(!registry.isAccessPinned(original.id) && registry.activeAccessLeaseCount() == 0,
                 "last lease release removes the sparse registry pin entry");
 
+        check(registry.evictionCandidateCount() == 1,
+                "last lease release enqueues one deduplicated idle-eviction candidate");
+        try (CharacterAccessService.Lease renewed = access.acquire(original.id)) {
+            check(renewed != null && registry.evictionCandidateCount() == 0,
+                    "new access cancels the queued idle candidate in constant time");
+        }
+        check(registry.evictionCandidateCount() == 1
+                        && registry.pollEvictionCandidates(1, Long.MAX_VALUE).isEmpty()
+                        && registry.evictionCandidateCount() == 1,
+                "idle candidate remains queued until its minimum idle delay expires");
+        check(registry.pollEvictionCandidates(1, 0L).equals(java.util.List.of(original.id))
+                        && registry.evictionCandidateCount() == 0,
+                "bounded candidate polling returns only released UUIDs without scanning the registry");
+
         boolean closedAccessRejected = false;
         try { second.get(); } catch (IllegalStateException expected) { closedAccessRejected = true; }
         check(closedAccessRejected, "closed lease cannot expose a Character reference");
