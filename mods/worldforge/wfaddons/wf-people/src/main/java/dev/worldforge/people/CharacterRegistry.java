@@ -245,14 +245,10 @@ public final class CharacterRegistry {
 
     public CharacterAccessService access() { return accessService; }
 
-    synchronized void releaseAccess(String id, Character expected) {
+    synchronized void releaseAccess(String id) {
         Integer count = activeAccessLeases.get(id);
         if (count == null || count <= 0)
             throw new IllegalStateException("Character access lease underflow for " + id);
-        if (byId.get(id) != expected && count == 1) {
-            // A restore may replace the map while an old lease is still closing.
-            // The pin belongs to the lease, not to the replacement Character.
-        }
         if (count == 1) activeAccessLeases.remove(id);
         else activeAccessLeases.put(id, count - 1);
     }
