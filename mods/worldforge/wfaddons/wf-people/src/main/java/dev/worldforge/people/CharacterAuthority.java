@@ -13,6 +13,8 @@ public final class CharacterAuthority {
     /** Canonical undirected parent/child adjacency and directed spouse reverse projection. */
     private Map<String, Set<String>> familyGlobal = new HashMap<>();
     private Map<String, Set<String>> familyBySpouseGlobal = new HashMap<>();
+    /** Sparse recovery index: only recipients with durable incoming estate markers are retained. */
+    private final Map<String, Set<String>> pendingEstateIncoming = new HashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
     private final Map<CharacterRegistry, String> registryMapIds = new IdentityHashMap<>();
@@ -40,6 +42,7 @@ public final class CharacterAuthority {
         byLegacyId.clear();
         familyGlobal.clear();
         familyBySpouseGlobal.clear();
+        pendingEstateIncoming.clear();
         indexedMembershipGenerations.clear();
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
@@ -97,6 +100,7 @@ public final class CharacterAuthority {
                     + " between " + existingGlobal.mapId() + "/" + existingGlobal.characterId()
                     + " and " + mapId + "/" + character.id);
         byLegacyId.computeIfAbsent(character.id, ignored -> new LinkedHashSet<>()).add(identity);
+        indexEstateIncoming(character);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         sortedIdentityCache = null;
     }
@@ -111,6 +115,7 @@ public final class CharacterAuthority {
         WorldId currentWorld = worldId;
         if (mapId == null || currentWorld == null) return;
         if (previous != null) {
+            removeEstateIncomingForHeir(previous.globalId);
             CharacterIdentity oldIdentity = new CharacterIdentity(
                     currentWorld, mapId, previous.id, previous.globalId);
             if (!previous.globalId.equals(replacement.globalId)) {
@@ -131,6 +136,7 @@ public final class CharacterAuthority {
                     + " and " + mapId + "/" + replacement.id);
 
         byLegacyId.computeIfAbsent(replacement.id, ignored -> new LinkedHashSet<>()).add(identity);
+        indexEstateIncoming(replacement);
         indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         sortedIdentityCache = null;
         // The reverse family projection is day-scoped and may contain edges from the old record.
@@ -216,6 +222,7 @@ public final class CharacterAuthority {
                 CharacterIdentity identity = existing.next().getValue();
                 if (!identity.mapId().equals(mapId)) continue;
                 existing.remove();
+                removeEstateIncomingForHeir(identity.globalCharacterId());
                 Set<CharacterIdentity> legacy = byLegacyId.get(identity.characterId());
                 if (legacy != null) {
                     legacy.remove(identity);
@@ -231,6 +238,7 @@ public final class CharacterAuthority {
                 if (collision != null && !collision.equals(identity))
                     throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
                 byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
+                indexEstateIncoming(character);
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         }
@@ -345,6 +353,41 @@ public final class CharacterAuthority {
         CharacterIdentity identity = matches.iterator().next();
         CharacterRegistry owner = registries.get(identity.mapId());
         return owner == null ? null : owner.get(identity.characterId());
+    }
+
+    public record EstateIncoming(String heirGlobalId, String deceasedGlobalId) { }
+
+    /** Called after a recipient-side estate marker is committed to the heir ledger. */
+    public synchronized void noteEstateIncoming(String heirGlobalId, String deceasedGlobalId) {
+        if (heirGlobalId == null || heirGlobalId.isBlank()
+                || deceasedGlobalId == null || deceasedGlobalId.isBlank()) return;
+        pendingEstateIncoming.computeIfAbsent(heirGlobalId, ignored -> new LinkedHashSet<>())
+                .add(deceasedGlobalId);
+    }
+
+    public synchronized void clearEstateIncoming(String heirGlobalId, String deceasedGlobalId) {
+        Set<String> values = pendingEstateIncoming.get(heirGlobalId);
+        if (values == null) return;
+        values.remove(deceasedGlobalId);
+        if (values.isEmpty()) pendingEstateIncoming.remove(heirGlobalId);
+    }
+
+    /** Snapshot contains only unresolved estate pairs, never the world population. */
+    public synchronized List<EstateIncoming> pendingEstateIncoming() {
+        List<EstateIncoming> result = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : pendingEstateIncoming.entrySet())
+            for (String deceased : entry.getValue()) result.add(new EstateIncoming(entry.getKey(), deceased));
+        return List.copyOf(result);
+    }
+
+    private void indexEstateIncoming(Character heir) {
+        for (Map.Entry<String, Object> entry : heir.props.entrySet())
+            if (entry.getKey().startsWith("estate.incoming.") && entry.getValue() instanceof String deceased)
+                noteEstateIncoming(heir.globalId, deceased);
+    }
+
+    private void removeEstateIncomingForHeir(String heirGlobalId) {
+        if (heirGlobalId != null) pendingEstateIncoming.remove(heirGlobalId);
     }
 
     /** Resolves an unambiguous legacy partition-local ID to its canonical UUID without hydration. */
