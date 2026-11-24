@@ -1456,20 +1456,32 @@ public class PeopleMod {
                         person.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
                         if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
                                 FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
-                        cooldowns.put(playerId, ticks);
-                        while (cooldowns.size() > 64) {
-                            String oldest = null;
-                            long oldestTick = Long.MAX_VALUE;
-                            for (Map.Entry<String,Object> entry : cooldowns.entrySet()) {
-                                if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
-                                    oldest = entry.getKey();
-                                    oldestTick = value.longValue();
+                        // Dialogue initiation updates durable Character state. Route the
+                        // cooldown/intent commit through the coordinator while the outer
+                        // read lease still pins the exact object used by the dialogue session.
+                        registry.access().mutate(body.characterId(), updated -> {
+                            Map<String,Object> committedCooldowns = new HashMap<>();
+                            Object committedRaw = updated.props.get("social.initiative_cooldowns");
+                            if (committedRaw instanceof Map<?,?> values)
+                                for (Map.Entry<?,?> entry : values.entrySet())
+                                    if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
+                                        committedCooldowns.put(key, n.longValue());
+                            committedCooldowns.put(playerId, ticks);
+                            while (committedCooldowns.size() > 64) {
+                                String oldest = null;
+                                long oldestTick = Long.MAX_VALUE;
+                                for (Map.Entry<String,Object> entry : committedCooldowns.entrySet()) {
+                                    if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
+                                        oldest = entry.getKey();
+                                        oldestTick = value.longValue();
+                                    }
                                 }
+                                if (oldest == null) break;
+                                committedCooldowns.remove(oldest);
                             }
-                            if (oldest == null) break;
-                            cooldowns.remove(oldest);
-                        }
-                        person.props.put("social.initiative_cooldowns", cooldowns);
+                            updated.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
+                            updated.props.put("social.initiative_cooldowns", committedCooldowns);
+                        });
                         break;
                     }
                 }
