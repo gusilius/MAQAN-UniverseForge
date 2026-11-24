@@ -967,17 +967,11 @@ public final class CharacterRegistry {
             if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
             addLivingCandidate(recipients, childId);
         }
-        Character father = deceased.father.isBlank() ? null : resolveMaterialized(deceased.father);
-        Character mother = deceased.mother.isBlank() ? null : resolveMaterialized(deceased.mother);
-        if (father != null) for (String siblingId : father.children) {
-            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
-            addLivingCandidate(recipients, siblingId);
-        }
-        if (mother != null && recipients.size() < MAX_BEREAVEMENT_RECIPIENTS)
-            for (String siblingId : mother.children) {
-                if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
-                addLivingCandidate(recipients, siblingId);
-            }
+        String fatherGlobal = globalIdForLocalId(deceased.father);
+        String motherGlobal = globalIdForLocalId(deceased.mother);
+        addLivingSiblings(recipients, fatherGlobal);
+        if (recipients.size() < MAX_BEREAVEMENT_RECIPIENTS) addLivingSiblings(recipients, motherGlobal);
+
         Object rawRelationships = deceased.props.get("social.relationships");
         if (rawRelationships instanceof Map<?, ?> relationships) {
             int inspected = 0;
@@ -986,10 +980,13 @@ public final class CharacterRegistry {
                         || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
                 if (!(entry.getKey() instanceof String globalId)
                         || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
-                Character friend = characterByGlobalId(globalId);
-                if (friend != null && friend.alive && friend != deceased
-                        && relationshipScore(friend, deceased.globalId) >= 35)
-                    recipients.add(friend.globalId);
+                String localId = localIdForGlobalId(globalId);
+                if (localId == null) continue;
+                try (CharacterAccessService.Lease lease = access().acquire(localId)) {
+                    if (lease != null && lease.get().alive
+                            && relationshipScore(lease.get(), deceased.globalId) >= 35)
+                        recipients.add(globalId);
+                }
             }
         }
         deceased.props.put("death.bereavement.recipients", new ArrayList<>(recipients));
@@ -999,13 +996,32 @@ public final class CharacterRegistry {
         recordDomainMutation();
     }
 
+    private void addLivingSiblings(Set<String> recipients, String parentGlobalId) {
+        if (parentGlobalId == null || parentGlobalId.isBlank()
+                || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
+        String parentLocalId = localIdForGlobalId(parentGlobalId);
+        if (parentLocalId == null) return;
+        List<String> childLocalIds;
+        try (CharacterAccessService.Lease lease = access().acquire(parentLocalId)) {
+            if (lease == null) return;
+            childLocalIds = List.copyOf(lease.get().children);
+        }
+        for (String childLocalId : childLocalIds) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, childLocalId);
+        }
+    }
+
     private static final int MAX_BEREAVEMENT_RECIPIENTS = 256;
     public static final int DEFAULT_BEREAVEMENT_BATCH_SIZE = 32;
 
     private void addLivingCandidate(Set<String> candidates, String localId) {
         if (localId == null || localId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
-        Character candidate = resolveMaterialized(localId);
-        if (candidate != null && candidate.alive) candidates.add(candidate.globalId);
+        String globalId = globalIdForLocalId(localId);
+        if (globalId == null || globalId.equals("")) return;
+        try (CharacterAccessService.Lease lease = access().acquire(localId)) {
+            if (lease != null && lease.get().alive) candidates.add(globalId);
+        }
     }
 
     /**
