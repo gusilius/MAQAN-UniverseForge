@@ -16,12 +16,12 @@ public final class PopulationSimulation {
         final long fallbackDay;
         final int year;
         final long membershipGeneration;
-        Iterator<Character> iterator;
+        Iterator<String> iterator;
         int nextIndex;
         boolean catchUpPass;
         String lastProcessedId = "";
         WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipGeneration,
-                       Iterator<Character> iterator, int nextIndex, boolean catchUpPass, String lastProcessedId) {
+                       Iterator<String> iterator, int nextIndex, boolean catchUpPass, String lastProcessedId) {
             this.targetDay = targetDay;
             this.fallbackDay = fallbackDay;
             this.year = year;
@@ -567,13 +567,13 @@ public final class PopulationSimulation {
             if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
                     || cursor.membershipGeneration != generation) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        registry.iteratorAfter(""), 0, false, "");
+                        registry.idIteratorAfter(""), 0, false, "");
             } else if (cursor.targetDay != targetWorldDay) {
                 // Keep the unfinished suffix. Once it is drained, a second pass catches up
                 // the already-visited prefix to the newest world-day target.
                 if (cursor.nextIndex >= memberCount) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            registry.iteratorAfter(""), 0, false, "");
+                            registry.idIteratorAfter(""), 0, false, "");
                 } else {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
                             cursor.iterator, cursor.nextIndex, true, cursor.lastProcessedId);
@@ -583,22 +583,23 @@ public final class PopulationSimulation {
                 // A completed pass deliberately drops its iterator so it cannot retain the
                 // last Character. Reopen only when membership grew or a new target requires work.
                 if (cursor.nextIndex >= memberCount) return true;
-                cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+                cursor.iterator = registry.idIteratorAfter(cursor.lastProcessedId);
             }
             int processed = 0;
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 while (processed < maxCharacters && cursor.iterator.hasNext()) {
-                    Character character;
+                    String characterId;
                     try {
-                        character = cursor.iterator.next();
+                        characterId = cursor.iterator.next();
                     } catch (ConcurrentModificationException appendedBetweenTicks) {
-                        cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+                        cursor.iterator = registry.idIteratorAfter(cursor.lastProcessedId);
                         continue;
                     }
-                    cursor.lastProcessedId = character.id;
+                    cursor.lastProcessedId = characterId;
                     cursor.nextIndex++;
                     processed++;
-                    if (!character.alive) continue;
+                    Character character = registry.get(characterId);
+                    if (character == null || !character.alive) continue;
                     int currentAge = age(character, year);
                     registry.applyLifeStageResult(character, currentAge,
                             lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
@@ -608,11 +609,11 @@ public final class PopulationSimulation {
                     advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
                 }
             } catch (ConcurrentModificationException appendedDuringBatch) {
-                cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+                cursor.iterator = registry.idIteratorAfter(cursor.lastProcessedId);
             }
             if (!cursor.iterator.hasNext() && cursor.catchUpPass) {
                 cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                        registry.iteratorAfter(""), 0, false, "");
+                        registry.idIteratorAfter(""), 0, false, "");
                 WORLD_DAY_CURSORS.put(registry, cursor);
                 return false;
             }
