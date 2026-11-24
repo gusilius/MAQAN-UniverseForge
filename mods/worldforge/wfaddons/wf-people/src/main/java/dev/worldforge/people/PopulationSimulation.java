@@ -596,7 +596,6 @@ public final class PopulationSimulation {
                             appendGeneration, cursor.snapshotSize, 0, false);
                 } else {
                     cursor.complete = true;
-                    cursor.membershipAppendGeneration = appendGeneration;
                     WORLD_DAY_CURSORS.put(registry, cursor);
                     return true;
                 }
@@ -629,11 +628,12 @@ public final class PopulationSimulation {
             if (complete && cursor.catchUpPass) {
                 WORLD_DAY_CURSORS.put(registry,
                         new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
-                                registry.membershipAppendGeneration(), cursor.snapshotSize, 0, false));
+                                cursor.membershipAppendGeneration, cursor.snapshotSize, 0, false));
                 return false;
             }
             cursor.complete = complete;
-            cursor.membershipAppendGeneration = registry.membershipAppendGeneration();
+            // Keep the append generation tied to snapshotSize. If an append raced this
+            // batch, the next call must observe it and extend the boundary.
             WORLD_DAY_CURSORS.put(registry, cursor);
             return complete;
         }
