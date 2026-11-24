@@ -546,6 +546,9 @@ public class PeopleMod {
                 registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
                 replayed[0]++;
             });
+            // Independent WAL frames may be replayed before their parent records.
+            // Rebuild reciprocal family edges only after the full partition is present.
+            registry.reconcileFamilyLinksAfterRecordRestore();
             CHARACTER_RECORD_STORES.put(registry, records);
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, checkpointRecords[0] >= registry.size());
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
