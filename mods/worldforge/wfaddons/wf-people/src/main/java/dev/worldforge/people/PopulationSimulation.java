@@ -610,8 +610,14 @@ public final class PopulationSimulation {
                 WORLD_DAY_CURSORS.put(registry, cursor);
                 return false;
             }
+            boolean complete = !cursor.iterator.hasNext();
+            if (complete) {
+                // LinkedHashMap iterators retain their last returned node (and therefore its
+                // Character value). Do not pin one Character per registry after a pass finishes.
+                cursor.iterator = null;
+            }
             WORLD_DAY_CURSORS.put(registry, cursor);
-            return !cursor.iterator.hasNext();
+            return complete;
         }
     }
 
