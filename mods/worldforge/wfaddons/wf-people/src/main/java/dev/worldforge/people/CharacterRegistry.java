@@ -1049,8 +1049,11 @@ public final class CharacterRegistry {
     private String familyGlobalOrLegacy(Character character, String key, String legacyId) {
         Object value = character.props.get(key);
         if (value instanceof String globalId && !globalId.isBlank()) return globalId;
-        String local = globalIdForLocalId(legacyId);
-        return local != null ? local : authority == null ? null : authority.globalIdForLegacyId(legacyId);
+        String local = legacyId == null || legacyId.isBlank() ? null : globalIdForLocalId(legacyId);
+        if (local != null && !local.isBlank()) return local;
+        String resolved = authority == null || legacyId == null || legacyId.isBlank()
+                ? null : authority.globalIdForLegacyId(legacyId);
+        return resolved == null || resolved.isBlank() ? "" : resolved;
     }
 
     /**
