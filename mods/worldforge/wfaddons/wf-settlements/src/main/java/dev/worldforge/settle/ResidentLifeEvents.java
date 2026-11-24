@@ -78,6 +78,7 @@ public final class ResidentLifeEvents {
     }
 
     private static final class RegistryPassState {
+        long membershipResetGeneration = Long.MIN_VALUE;
         int familyYear = Integer.MIN_VALUE;
         int stageSize = -1;
         int lastCallYear = Integer.MIN_VALUE;
@@ -115,6 +116,14 @@ public final class ResidentLifeEvents {
         RegistryPassState state;
         synchronized (REGISTRY_PASSES) {
             state = REGISTRY_PASSES.computeIfAbsent(registry, ignored -> new RegistryPassState());
+            long generation = registry.membershipResetGeneration();
+            if (state.membershipResetGeneration != generation) {
+                state.membershipResetGeneration = generation;
+                state.familyYear = Integer.MIN_VALUE;
+                state.stageSize = -1;
+                state.session = null;
+                state.stageRefresh = null;
+            }
         }
         YearSession session = state.session;
         if (session != null && session.membershipResetGeneration != registry.membershipResetGeneration()) {
