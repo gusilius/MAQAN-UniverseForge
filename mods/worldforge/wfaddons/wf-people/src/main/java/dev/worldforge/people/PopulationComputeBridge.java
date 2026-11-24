@@ -128,6 +128,12 @@ public final class PopulationComputeBridge {
             }
         }
 
+        /** Releases the final LinkedHashMap nodes retained by exhausted scan iterators. */
+        private void releaseIterators() {
+            Arrays.fill(memberIterators, null);
+            Arrays.fill(iteratorPositions, -1);
+        }
+
         private int limit(int index) { return limits[index]; }
         /** Number of stable Character partitions in this scan. */
         public int registryCount() { return registries.size(); }
@@ -258,6 +264,7 @@ public final class PopulationComputeBridge {
             }
         }
         boolean complete=registryCursor>=scan.registryCount();
+        if (complete) scan.releaseIterators();
         Map<String,Object> request=new LinkedHashMap<>();
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);
