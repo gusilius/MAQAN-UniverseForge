@@ -1028,7 +1028,10 @@ public final class CharacterRegistry {
                     Character deceased = lease.get();
                     Object rawRecipients = deceased.props.get("death.bereavement.recipients");
                     if (!(rawRecipients instanceof List<?> raw)) {
-                        access().mutate(deceasedLocalId, current -> current.props.put("death.bereavement.completed", true));
+                        CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
+                            people.get(deceasedGlobalId).props.put("death.bereavement.completed", true);
+                            return true;
+                        });
                         pendingBereavement.removeFirst();
                         continue;
                     }
@@ -1047,7 +1050,6 @@ public final class CharacterRegistry {
                     cursor++;
                     processed++;
                     final int committedCursor = cursor;
-                    final int deathIntensity;
                     String survivorLocalId = localIdForGlobalId(survivorGlobalId);
                     if (survivorLocalId == null || survivorGlobalId.equals(deceasedGlobalId)) {
                         CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
@@ -1056,7 +1058,6 @@ public final class CharacterRegistry {
                         });
                         continue;
                     }
-                    final int[] intensityResult = {0};
                     CharacterAccessService.mutateScoped(authority, this,
                             List.of(deceasedGlobalId, survivorGlobalId), people -> {
                         Character deceased = people.get(deceasedGlobalId);
@@ -1093,7 +1094,6 @@ public final class CharacterRegistry {
                                     "death of " + deceasedName, -intensity * 15, minute);
                         }
                         deceased.props.put("death.bereavement.cursor", committedCursor);
-                        intensityResult[0] = intensity;
                         return true;
                     });
                 }
