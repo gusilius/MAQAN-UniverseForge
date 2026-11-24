@@ -2267,9 +2267,10 @@ public class SettleMod {
         boolean globalIdentity = registry != null;
         if (registry == null) registry = registryForColony(colony); // legacy local cN identity
         if (registry == null) return false;
+        final CharacterRegistry ownerRegistry = registry;
 
-        try (var lease = globalIdentity ? registry.access().acquireGlobal(characterId)
-                : registry.access().acquire(characterId)) {
+        try (var lease = globalIdentity ? ownerRegistry.access().acquireGlobal(characterId)
+                : ownerRegistry.access().acquire(characterId)) {
             if (lease == null) return false;
             Character person = lease.get();
             if (!person.alive) return false;
@@ -2286,23 +2287,27 @@ public class SettleMod {
             // Character mutation cannot be committed. The Character itself is mutated only
             // through the UUID/local-ID access service, which pins and marks it dirty.
             dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
+            colony.s.updateWorkerKnownMember(worker, current -> {
+                current.person = globalId;
+                current.profession = targetProfession;
+            });
             try {
                 if (globalIdentity) {
-                    registry.access().mutateGlobal(globalId, current -> {
+                    ownerRegistry.access().mutateGlobal(globalId, current -> {
                         if (!current.alive || !globalId.equals(current.globalId))
                             throw new IllegalStateException("Character changed while returning to settlement: " + globalId);
                         if (!targetProfession.equals(PopulationSimulation.profession(current)))
                             PopulationSimulation.assignProfession(current, targetProfession, PeopleMod.YEAR);
                         current.props.remove("population.pre_military_profession");
-                        registry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-                        registry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
+                        ownerRegistry.setDuty(current.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                        ownerRegistry.setDuty(current.id, Duty.WORKER, true, PeopleMod.YEAR);
                         current.props.put("population.location", colony.s.id);
                         current.props.put("population.employer", place);
                         if (!current.has("settlement_worker", place))
-                            registry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
+                            ownerRegistry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
                     });
                 } else {
-                    registry.access().mutate(person.id, current -> {
+                    ownerRegistry.access().mutate(person.id, current -> {
                         if (!current.alive || !globalId.equals(current.globalId))
                             throw new IllegalStateException("Legacy Character changed while returning to settlement: " + globalId);
                         if (!targetProfession.equals(PopulationSimulation.profession(current)))
@@ -2316,10 +2321,6 @@ public class SettleMod {
                             registry.appoint(current.id, "settlement_worker", place, PeopleMod.YEAR);
                     });
                 }
-                colony.s.updateWorkerKnownMember(worker, current -> {
-                    current.person = globalId;
-                    current.profession = targetProfession;
-                });
             } catch (RuntimeException | Error failure) {
                 colony.s.removeWorkerProjectionByPerson(globalId);
                 throw failure;
