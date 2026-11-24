@@ -268,8 +268,11 @@ public final class CharacterInventoryTest {
                         && "inherited".equals(crossMapDeceased.props.get("estate.status"))
                         && playerHeir.globalId.equals(crossMapDeceased.props.get("estate.recipient_global_id")),
                 "death estate resolves a spouse in the separate global player registry");
+        ok(worldAuthority.pendingEstateIncoming().size() == 1,
+                "estate recovery index contains only the incoming recipient/source UUID pair");
         CharacterInventory.reconcileEstates(worldAuthority);
-        ok(settlementPeople.pendingBereavementEvents() > 0
+        ok(worldAuthority.pendingEstateIncoming().isEmpty()
+                        && settlementPeople.pendingBereavementEvents() > 0
                         && settlementPeople.processPendingBereavementBatch(1) == 1
                         && settlementPeople.activeAccessLeaseCount() == 0
                         && playerPeople.activeAccessLeaseCount() == 0,
@@ -540,8 +543,9 @@ public final class CharacterInventoryTest {
         ok(CharacterInventory.remove(overflowHeir, "minecraft:emerald", 1)
                         && overflowRegistry.kill(overflowDead.id).size() == 1
                         && CharacterInventory.count(overflowDead, "minecraft:emerald") == 0
-                        && CharacterInventory.count(overflowHeir, "minecraft:emerald") == 1_000_000,
-                "failed estate settlement can retry after capacity is available");
+                        && CharacterInventory.count(overflowHeir, "minecraft:emerald") == 1_000_000
+                        && overflowRegistry.activeAccessLeaseCount() == 0,
+                "failed estate settlement can retry after capacity is available and releases all leases");
         ok(deathEvents[0] == 1 && dismissEvents[0] == 1 && overflowDead.posts.isEmpty(),
                 "estate retry completes service dismissal and death lifecycle exactly once");
 
