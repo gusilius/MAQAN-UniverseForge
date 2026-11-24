@@ -53,6 +53,20 @@ public final class CharacterAccessServiceTest {
                         && restored.idAt(1).equals(secondCharacter.id)
                         && restored.get(original.id) != null,
                 "streamed restore publishes the staged map and insertion-order ID directory without changing order");
+
+        original.traits.add("resilient");
+        String validRecord = registry.toJsonRecord(original);
+        String duplicateTraitRecord = validRecord.replace(
+                "\"traits\":[\"resilient\"]", "\"traits\":[\"resilient\",\"resilient\"]");
+        boolean duplicateTraitRejected = false;
+        try {
+            new CharacterRegistry().applyJsonRecord(duplicateTraitRecord,
+                    "lease-restore-test", original.globalId);
+        } catch (IllegalArgumentException expected) {
+            duplicateTraitRejected = true;
+        }
+        check(duplicateTraitRejected,
+                "incremental record decoder still rejects duplicate traits while reusing the Character trait set");
         if (failures != 0) throw new AssertionError(failures + " CharacterAccessService checks failed");
     }
 }
