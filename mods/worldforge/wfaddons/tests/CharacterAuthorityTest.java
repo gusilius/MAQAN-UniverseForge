@@ -172,6 +172,28 @@ public final class CharacterAuthorityTest {
                 "one-sided legacy spouse links remain discoverable through the reverse family index");
 
 
+        CharacterRegistry liveMarriageRegistry = new CharacterRegistry();
+        Character liveA = liveMarriageRegistry.create("Live A", "", "", "f", 0);
+        Character liveB = liveMarriageRegistry.create("Live B", "", "", "m", 0);
+        Character liveC = liveMarriageRegistry.create("Live C", "", "", "m", 0);
+        CharacterAuthority liveMarriageAuthority = new CharacterAuthority();
+        liveMarriageAuthority.beginWorld(world);
+        liveMarriageAuthority.registerMap("live-marriage", liveMarriageRegistry);
+        liveMarriageAuthority.rebuildFamilyIndex(1);
+        liveMarriageRegistry.marry(liveA.id, liveB.id, 1);
+        check(liveMarriageAuthority.kinCandidates(liveA).contains(liveB)
+                        && liveMarriageAuthority.kinCandidates(liveB).contains(liveA),
+                "marriage immediately publishes reciprocal global spouse edges without a yearly rebuild");
+        check(liveMarriageRegistry.divorce(liveA.id, liveB.id, 2)
+                        && !liveMarriageAuthority.kinCandidates(liveA).contains(liveB)
+                        && !liveMarriageAuthority.kinCandidates(liveB).contains(liveA),
+                "divorce immediately removes both reverse spouse edges");
+        liveMarriageRegistry.marry(liveA.id, liveC.id, 3);
+        check(liveMarriageAuthority.kinCandidates(liveA).contains(liveC)
+                        && liveMarriageAuthority.kinCandidates(liveC).contains(liveA)
+                        && !liveMarriageAuthority.kinCandidates(liveA).contains(liveB),
+                "remarriage publishes the new spouse and never retains the former spouse");
+
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);
         authority.registerMap("reload", reload);
