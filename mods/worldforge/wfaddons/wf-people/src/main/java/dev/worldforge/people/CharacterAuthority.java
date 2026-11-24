@@ -121,7 +121,6 @@ public final class CharacterAuthority {
         if (mapId == null || currentWorld == null) return;
         if (previous != null) {
             removeEstateIncomingForHeir(previous.globalId);
-            removeInventoryTransfersForCharacter(previous.globalId);
             CharacterIdentity oldIdentity = new CharacterIdentity(
                     currentWorld, mapId, previous.id, previous.globalId);
             if (!previous.globalId.equals(replacement.globalId)) {
@@ -230,7 +229,6 @@ public final class CharacterAuthority {
                 if (!identity.mapId().equals(mapId)) continue;
                 existing.remove();
                 removeEstateIncomingForHeir(identity.globalCharacterId());
-                removeInventoryTransfersForCharacter(identity.globalCharacterId());
                 Set<CharacterIdentity> legacy = byLegacyId.get(identity.characterId());
                 if (legacy != null) {
                     legacy.remove(identity);
@@ -427,13 +425,6 @@ public final class CharacterAuthority {
                     && destination instanceof String destinationId)
                 noteInventoryTransfer(transactionId, sourceId, destinationId);
         }
-    }
-
-    private void removeInventoryTransfersForCharacter(String globalId) {
-        if (globalId == null) return;
-        pendingInventoryTransfers.values().removeIf(transfer ->
-                globalId.equals(transfer.sourceGlobalId())
-                        || globalId.equals(transfer.destinationGlobalId()));
     }
 
     /** Resolves an unambiguous legacy partition-local ID to its canonical UUID without hydration. */
