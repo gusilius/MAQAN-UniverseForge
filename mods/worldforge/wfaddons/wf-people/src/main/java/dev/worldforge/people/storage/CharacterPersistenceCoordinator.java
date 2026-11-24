@@ -24,6 +24,10 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private final LongAdder dirtyFailed = new LongAdder();
     private final LongAdder dirtyBytes = new LongAdder();
     private final LongAdder dirtyServiceNanos = new LongAdder();
+    /** Epoch invalidates checkpoint eligibility whenever any identity becomes dirty. */
+    private final AtomicLong dirtyEpoch = new AtomicLong();
+    /** -1 until a complete checkpoint has incorporated the current dirty epoch. */
+    private volatile long checkpointEpoch = -1L;
 
     public record DirtyMetrics(int pending, int ready, int inFlight, int critical,
                                long accepted, long failed, long serializedBytes, long serviceNanos) { }
@@ -52,18 +56,23 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public void register(String globalId) {
         evictionGate.register(globalId);
         CharacterEvictionGate.PersistenceTicket dirty = evictionGate.dirtyTicket(globalId);
-        if (dirty != null) dirtyQueue.enqueue(globalId, dirty.generation());
+        if (dirty != null) {
+            dirtyEpoch.incrementAndGet();
+            dirtyQueue.enqueue(globalId, dirty.generation());
+        }
     }
     public void registerPersisted(String globalId) {
         evictionGate.registerPersisted(globalId);
     }
     public long markDirty(String globalId) {
         long generation = evictionGate.markDirty(globalId);
+        dirtyEpoch.incrementAndGet();
         dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.BACKGROUND);
         return generation;
     }
     public long markDirtyCritical(String globalId) {
         long generation = evictionGate.markDirty(globalId);
+        dirtyEpoch.incrementAndGet();
         dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.CRITICAL);
         return generation;
     }
@@ -207,7 +216,31 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         return evictionGate.decision(globalId);
     }
 
-    public boolean canEvict(String globalId) { return evictionGate.canEvict(globalId); }
+    public long dirtyEpoch() { return dirtyEpoch.get(); }
+
+    /**
+     * Called only after the WAL has been compacted into the addressable record store.
+     * Any concurrent mutation or unacknowledged dirty UUID invalidates the checkpoint.
+     */
+    public boolean markCheckpointCompleted(long expectedDirtyEpoch) {
+        if (dirtyEpoch.get() != expectedDirtyEpoch
+                || dirtyQueue.pendingCount() != 0 || dirtyQueue.inFlightCount() != 0) return false;
+        checkpointEpoch = expectedDirtyEpoch;
+        // Close the race with a mutation between the first epoch read and publication.
+        if (dirtyEpoch.get() != expectedDirtyEpoch
+                || dirtyQueue.pendingCount() != 0 || dirtyQueue.inFlightCount() != 0) {
+            checkpointEpoch = -1L;
+            return false;
+        }
+        return true;
+    }
+
+    public boolean canEvict(String globalId) {
+        long currentEpoch = dirtyEpoch.get();
+        return checkpointEpoch == currentEpoch
+                && dirtyQueue.pendingCount() == 0 && dirtyQueue.inFlightCount() == 0
+                && evictionGate.canEvict(globalId);
+    }
 
     @Override public void close() throws IOException {
         IOException failure = null;
