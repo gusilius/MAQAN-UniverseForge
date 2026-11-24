@@ -439,21 +439,19 @@ public class PeopleTest {
         boolean trailingSnapshotDataRejected = false;
         try {
             Json.readObjectArray(new java.io.StringReader(
-                    """
-                    {"format":"wf-people/3","next":1,"characters":[]} trailing
-                    """),
-                    "characters", ignoredRecord -> { });
+                    "{\"format\":\"wf-people/3\",\"next\":1,\"characters\":[]} trailing"),
                     "characters", ignoredRecord -> { });
         } catch (IllegalArgumentException expected) { trailingSnapshotDataRejected = true; }
         ok(trailingSnapshotDataRejected,
                 "streaming snapshot parser rejects trailing bytes after the root object");
 
         Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
+        Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
         try (dev.worldforge.people.storage.CharacterRecordStore store =
                      new dev.worldforge.people.storage.CharacterRecordStore(recordStorePath)) {
             String storeId = "00000000-0000-0000-0000-000000000123";
-            byte[] firstPayload = """{"name":"first"}""".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            byte[] secondPayload = """{"name":"updated"}""".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] firstPayload = "{\"name\":\"first\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] secondPayload = "{\"name\":\"updated\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             store.put(storeId, firstPayload);
             boolean firstStored = store.get(storeId) != null
                     && store.get(storeId).payloadUtf8().equals(new String(firstPayload, java.nio.charset.StandardCharsets.UTF_8));
