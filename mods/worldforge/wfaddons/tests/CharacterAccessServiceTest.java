@@ -44,6 +44,15 @@ public final class CharacterAccessServiceTest {
 
         check(access.acquire("missing") == null, "missing local ID returns no lease");
         check(access.acquireGlobal("not-a-uuid") == null, "unknown global UUID returns no lease");
+
+        Character secondCharacter = registry.create("Second Subject", "", "test", "f", 2);
+        CharacterRegistry restored = new CharacterRegistry();
+        restored.fromJson(registry.toJson(), "lease-restore-test");
+        check(restored.size() == 2
+                        && restored.idAt(0).equals(original.id)
+                        && restored.idAt(1).equals(secondCharacter.id)
+                        && restored.get(original.id) != null,
+                "streamed restore publishes the staged map and insertion-order ID directory without changing order");
         if (failures != 0) throw new AssertionError(failures + " CharacterAccessService checks failed");
     }
 }
