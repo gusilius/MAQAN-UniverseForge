@@ -400,33 +400,55 @@ public final class CharacterAuthority {
         refreshIndex();
         if (person == null) return List.of();
         LinkedHashSet<CharacterIdentity> matches = new LinkedHashSet<>();
-        addFamilyMatches(matches, familyByParentLegacy, person.father);
-        addFamilyMatches(matches, familyByParentLegacy, person.mother);
-        addFamilyMatches(matches, familyByParentGlobal, familyId(person, "family.father_global_id"));
-        addFamilyMatches(matches, familyByParentGlobal, familyId(person, "family.mother_global_id"));
-        addFamilyMatches(matches, familyByParentLegacy, person.id);
+        String fatherGlobal = familyId(person, "family.father_global_id");
+        String motherGlobal = familyId(person, "family.mother_global_id");
+        String spouseGlobal = familyId(person, "family.spouse_global_id");
+        boolean hasGlobalChildren = person.props.get("family.children_global_ids") instanceof List<?>;
+
+        // Global UUID links are authoritative. Legacy cN IDs are map-local and can collide
+        // across partitions; consult their reverse indexes only when the corresponding
+        // canonical link is absent, otherwise unrelated people can become false relatives.
+        if (!fatherGlobal.isBlank()) {
+            addFamilyMatches(matches, familyByParentGlobal, fatherGlobal);
+            addGlobalIdentityMatch(matches, fatherGlobal);
+        } else {
+            addFamilyMatches(matches, familyByParentLegacy, person.father);
+            addLegacyIdentityMatches(matches, person.father);
+        }
+        if (!motherGlobal.isBlank()) {
+            addFamilyMatches(matches, familyByParentGlobal, motherGlobal);
+            addGlobalIdentityMatch(matches, motherGlobal);
+        } else {
+            addFamilyMatches(matches, familyByParentLegacy, person.mother);
+            addLegacyIdentityMatches(matches, person.mother);
+        }
+
+        // The current Character's global UUID is stable and unambiguous in both directions.
         addFamilyMatches(matches, familyByParentGlobal, person.globalId);
-        addFamilyMatches(matches, familyByChildLegacy, person.id);
         addFamilyMatches(matches, familyByChildGlobal, person.globalId);
-        addFamilyMatches(matches, familyBySpouseLegacy, person.id);
-        addFamilyMatches(matches, familyBySpouseGlobal, person.globalId);
-        // Resolve direct parent/spouse pointers against the O(1) identity indexes as well.
-        // This keeps newly-born relatives visible before the next annual family-index rebuild.
-        addLegacyIdentityMatches(matches, person.father);
-        addLegacyIdentityMatches(matches, person.mother);
-        addLegacyIdentityMatches(matches, person.spouse);
-        addGlobalIdentityMatch(matches, familyId(person, "family.father_global_id"));
-        addGlobalIdentityMatch(matches, familyId(person, "family.mother_global_id"));
-        addGlobalIdentityMatch(matches, familyId(person, "family.spouse_global_id"));
-        Object globalChildren = person.props.get("family.children_global_ids");
-        if (globalChildren instanceof List<?> ids) for (Object rawId : ids)
-            if (rawId instanceof String id) {
+        if (fatherGlobal.isBlank() && motherGlobal.isBlank()) {
+            addFamilyMatches(matches, familyByChildLegacy, person.id);
+        }
+        if (hasGlobalChildren) {
+            Object globalChildren = person.props.get("family.children_global_ids");
+            for (Object rawId : (List<?>) globalChildren) if (rawId instanceof String id) {
                 CharacterIdentity identity = byGlobalId.get(id);
                 if (identity != null) matches.add(identity);
             }
-        for (String childId : person.children) {
-            Set<CharacterIdentity> identities = byLegacyId.get(childId);
-            if (identities != null) matches.addAll(identities);
+        } else {
+            addFamilyMatches(matches, familyByParentLegacy, person.id);
+            for (String childId : person.children) {
+                Set<CharacterIdentity> identities = byLegacyId.get(childId);
+                if (identities != null) matches.addAll(identities);
+            }
+        }
+
+        if (!spouseGlobal.isBlank()) {
+            addFamilyMatches(matches, familyBySpouseGlobal, spouseGlobal);
+            addGlobalIdentityMatch(matches, spouseGlobal);
+        } else {
+            addFamilyMatches(matches, familyBySpouseLegacy, person.id);
+            addLegacyIdentityMatches(matches, person.spouse);
         }
 
         CharacterIdentity owner = byGlobalId.get(person.globalId);
