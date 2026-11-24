@@ -30,6 +30,10 @@ public final class CharacterWal implements AutoCloseable {
     public interface ReplayConsumer {
         void accept(Record record) throws IOException;
     }
+    @FunctionalInterface
+    public interface CheckpointAction {
+        void commit() throws IOException;
+    }
     public record Write(String globalId, byte[] payload) {
         public Write {
             Objects.requireNonNull(globalId, "globalId");
@@ -155,15 +159,25 @@ public final class CharacterWal implements AutoCloseable {
         return result;
     }
 
-    /** Call only after every legacy snapshot was durably committed. */
-    public synchronized void checkpoint() throws IOException {
+    /**
+     * Runs the durable compaction action while excluding concurrent appends, then retires
+     * the journal. If the action fails, every WAL frame remains available for recovery.
+     */
+    public synchronized void checkpoint(CheckpointAction action) throws IOException {
         ensureOpen();
+        Objects.requireNonNull(action, "action");
+        action.commit();
         for (Shard shard : shards) {
             shard.channel.truncate(0);
             shard.channel.position(0);
             shard.channel.force(true);
             shard.next = 1;
         }
+    }
+
+    /** Call only after every legacy snapshot was durably committed. */
+    public synchronized void checkpoint() throws IOException {
+        checkpoint(() -> { });
     }
 
     private long repairAndFindNext(FileChannel channel) throws IOException {
