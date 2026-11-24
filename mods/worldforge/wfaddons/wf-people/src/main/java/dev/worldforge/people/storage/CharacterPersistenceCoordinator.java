@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Single coordination point for the existing Character WAL, checkpoint store and
@@ -19,6 +20,19 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private volatile CharacterWalWriter writer;
     private final CharacterRecordStore records;
     private final CharacterDirtyQueue dirtyQueue = new CharacterDirtyQueue();
+    private final LongAdder dirtyAccepted = new LongAdder();
+    private final LongAdder dirtyFailed = new LongAdder();
+    private final LongAdder dirtyBytes = new LongAdder();
+    private final LongAdder dirtyServiceNanos = new LongAdder();
+
+    public record DirtyMetrics(int pending, int ready, int inFlight, int critical,
+                               long accepted, long failed, long serializedBytes, long serviceNanos) { }
+
+    public DirtyMetrics dirtyMetrics() {
+        return new DirtyMetrics(dirtyQueue.pendingCount(), dirtyQueue.readyCount(),
+                dirtyQueue.inFlightCount(), dirtyQueue.criticalCount(),
+                dirtyAccepted.sum(), dirtyFailed.sum(), dirtyBytes.sum(), dirtyServiceNanos.sum());
+    }
 
     public CharacterPersistenceCoordinator(CharacterEvictionGate evictionGate,
                                             CharacterWal wal,
@@ -42,7 +56,12 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     }
     public long markDirty(String globalId) {
         long generation = evictionGate.markDirty(globalId);
-        dirtyQueue.enqueue(globalId, generation);
+        dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.BACKGROUND);
+        return generation;
+    }
+    public long markDirtyCritical(String globalId) {
+        long generation = evictionGate.markDirty(globalId);
+        dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.CRITICAL);
         return generation;
     }
     public CharacterDirtyQueue dirtyQueue() { return dirtyQueue; }
@@ -58,6 +77,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         Objects.requireNonNull(snapshot, "snapshot");
         if (maxCharacters < 1 || maxBytes < 1)
             throw new IllegalArgumentException("Dirty batch limits must be positive");
+        long serviceStart = System.nanoTime();
         java.util.List<CharacterDirtyQueue.Entry> batch = dirtyQueue.takeBatch(maxCharacters);
         long[] used = {0L};
         int accepted = 0;
@@ -68,10 +88,16 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                 if (payload.length > maxBytes - used[0])
                     throw new DirtyBatchBudgetExceededException("Character dirty batch byte budget exceeded");
                 used[0] += payload.length;
+                dirtyBytes.add(payload.length);
                 return payload;
             });
             future.whenComplete((record, failure) -> {
-                if (failure != null) dirtyQueue.retry(entry);
+                if (failure != null) {
+                    dirtyFailed.increment();
+                    dirtyQueue.retry(entry);
+                } else {
+                    dirtyAccepted.increment();
+                }
             });
             if (future.isCompletedExceptionally()) {
                 for (int remaining = index + 1; remaining < batch.size(); remaining++)
@@ -80,6 +106,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
             }
             accepted++;
         }
+        dirtyServiceNanos.add(System.nanoTime() - serviceStart);
         return accepted;
     }
 
@@ -105,7 +132,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
         final CharacterEvictionGate.PersistenceTicket ticket;
         try {
-            if (markDirtyFirst) markDirty(globalId);
+            if (markDirtyFirst) markDirtyCritical(globalId);
             ticket = evictionGate.capture(globalId);
         } catch (RuntimeException | Error failure) {
             transaction.close();
