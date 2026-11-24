@@ -222,117 +222,115 @@ public final class CharacterInventoryTransactions {
         };
     }
 
-    /** Reconcile after the player registry and every currently loaded map registry have been indexed. */
+    /** Reconcile sparse UUID transaction entries without scanning or materializing the world population. */
     public static boolean reconcile(CharacterAuthority authority, Persister persister) {
-        Objects.requireNonNull(authority); Objects.requireNonNull(persister);
-        Map<String, Character> sourceCharacters = new LinkedHashMap<>();
-        Map<String, Character> destinationCharacters = new LinkedHashMap<>();
-        Map<String, Map<String, Object>> sourceMarkers = new LinkedHashMap<>();
-        Map<String, Map<String, Object>> destinationMarkers = new LinkedHashMap<>();
-        Map<String, Map<String, Object>> bothMarkers = new LinkedHashMap<>();
-        Map<String, Map<String, Object>> transactionHeaders = new LinkedHashMap<>();
-
-        for (CharacterIdentity identity : authority.identities()) {
-            Character person = authority.get(identity);
-            if (person == null) continue;
-            for (Map.Entry<String, Object> property : new java.util.ArrayList<>(person.props.entrySet())) {
-                if (!property.getKey().startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)) continue;
-                if (!(property.getValue() instanceof Map<?, ?> raw)) return false;
-                Map<String, Object> record = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> field : raw.entrySet())
-                    if (field.getKey() instanceof String name) record.put(name, field.getValue());
-                Object transactionRaw = record.get("transaction_id");
-                if (!(transactionRaw instanceof String transactionId) || transactionId.isBlank()) return false;
-                String role = String.valueOf(record.get("role"));
-                if (!validMarker(authority, property.getKey(), record, person, role)) return false;
-                Map<String, Object> header = transactionHeader(record);
-                Map<String, Object> previousHeader = transactionHeaders.putIfAbsent(transactionId, header);
-                if (previousHeader != null && !previousHeader.equals(header)) return false;
-                switch (role) {
-                    case "source" -> {
-                        if (sourceCharacters.putIfAbsent(transactionId, person) != null) return false;
-                        sourceMarkers.put(transactionId, record);
-                    }
-                    case "destination" -> {
-                        if (destinationCharacters.putIfAbsent(transactionId, person) != null) return false;
-                        destinationMarkers.put(transactionId, record);
-                    }
-                    case "both" -> {
-                        if (bothMarkers.putIfAbsent(transactionId, record) != null) return false;
-                        sourceCharacters.put(transactionId, person);
-                    }
-                    default -> { return false; }
-                }
-            }
-        }
-
-        java.util.Set<String> transactions = new java.util.LinkedHashSet<>();
-        transactions.addAll(sourceMarkers.keySet());
-        transactions.addAll(destinationMarkers.keySet());
-        transactions.addAll(bothMarkers.keySet());
-        for (String transactionId : transactions) {
-            Character source = sourceCharacters.get(transactionId);
-            Character destination = destinationCharacters.get(transactionId);
-            Map<String, Object> sourceMarker = sourceMarkers.get(transactionId);
-            Map<String, Object> destinationMarker = destinationMarkers.get(transactionId);
+        Objects.requireNonNull(authority);
+        Objects.requireNonNull(persister);
+        for (CharacterAuthority.InventoryTransfer transfer : authority.pendingInventoryTransfers()) {
+            String transactionId = transfer.transactionId();
+            String sourceId = transfer.sourceGlobalId();
+            String destinationId = transfer.destinationGlobalId();
             String key = CharacterInventory.transferMarkerKey(transactionId);
-
-            if (bothMarkers.containsKey(transactionId)) {
-                Map<String, Object> marker = bothMarkers.get(transactionId);
-                String phase = String.valueOf(marker.get("phase"));
-                if (source == null || !(PREPARED.equals(phase) || BOTH_COMMITTED.equals(phase))) return false;
-                CharacterInventory.removeTransferMarker(source, key);
-                if (!persister.persist(source)) return false;
-                continue;
-            }
-
-            String destinationPhase = destinationMarker == null ? "" : String.valueOf(destinationMarker.get("phase"));
-            String sourcePhase = sourceMarker == null ? "" : String.valueOf(sourceMarker.get("phase"));
-            if (DESTINATION_COMMITTED.equals(destinationPhase)) {
-                if (sourceMarker != null && PREPARED.equals(sourcePhase)) {
-                    if (source == null || !CharacterInventory.completeTransferSourceDebit(source, sourceMarker))
+            final boolean[] valid = {true};
+            try {
+                CharacterAccessService.mutateScoped(authority, null,
+                        java.util.List.of(sourceId, destinationId), people -> {
+                    Character source = people.get(sourceId);
+                    Character destination = people.get(destinationId);
+                    Map<String, Object> sourceMarker = markerRecord(source, key);
+                    Map<String, Object> destinationMarker = source == destination
+                            ? null : markerRecord(destination, key);
+                    if (source == destination) {
+                        if (sourceMarker == null) return false;
+                        if (!validMarker(authority, key, sourceMarker, source, "both")) {
+                            valid[0] = false;
+                            return false;
+                        }
+                        CharacterInventory.removeTransferMarker(source, key);
+                        if (!persister.persist(source)) valid[0] = false;
+                        return true;
+                    }
+                    if (sourceMarker == null && destinationMarker == null) return false;
+                    if (sourceMarker != null && !validMarker(authority, key, sourceMarker, source, "source")) {
+                        valid[0] = false;
                         return false;
-                    sourceMarker.put("phase", SOURCE_COMMITTED);
-                    CharacterInventory.putTransferMarker(source, key, sourceMarker);
-                    if (!persister.persist(source)) return false;
-                } else if (sourceMarker != null && !SOURCE_COMMITTED.equals(sourcePhase)) {
+                    }
+                    if (destinationMarker != null
+                            && !validMarker(authority, key, destinationMarker, destination, "destination")) {
+                        valid[0] = false;
+                        return false;
+                    }
+                    Map<String, Object> header = transactionHeader(sourceMarker != null
+                            ? sourceMarker : destinationMarker);
+                    if (sourceMarker != null && destinationMarker != null
+                            && !header.equals(transactionHeader(destinationMarker))) {
+                        valid[0] = false;
+                        return false;
+                    }
+
+                    String destinationPhase = destinationMarker == null
+                            ? "" : String.valueOf(destinationMarker.get("phase"));
+                    String sourcePhase = sourceMarker == null
+                            ? "" : String.valueOf(sourceMarker.get("phase"));
+                    if (DESTINATION_COMMITTED.equals(destinationPhase)) {
+                        if (sourceMarker != null && PREPARED.equals(sourcePhase)) {
+                            if (!CharacterInventory.completeTransferSourceDebit(source, sourceMarker)) {
+                                valid[0] = false;
+                                return false;
+                            }
+                            sourceMarker.put("phase", SOURCE_COMMITTED);
+                            CharacterInventory.putTransferMarker(source, key, sourceMarker);
+                            if (!persister.persist(source)) valid[0] = false;
+                        } else if (sourceMarker != null && !SOURCE_COMMITTED.equals(sourcePhase)) {
+                            valid[0] = false;
+                            return false;
+                        }
+                        if (sourceMarker != null) {
+                            CharacterInventory.removeTransferMarker(source, key);
+                            if (!persister.persist(source)) valid[0] = false;
+                        }
+                        if (destinationMarker != null) {
+                            CharacterInventory.removeTransferMarker(destination, key);
+                            if (!persister.persist(destination)) valid[0] = false;
+                        }
+                        return true;
+                    }
+                    if (SOURCE_COMMITTED.equals(sourcePhase) && destinationMarker == null) {
+                        CharacterInventory.removeTransferMarker(source, key);
+                        if (!persister.persist(source)) valid[0] = false;
+                        return true;
+                    }
+                    if ((sourceMarker == null || PREPARED.equals(sourcePhase))
+                            && (destinationMarker == null || PREPARED.equals(destinationPhase))) {
+                        if (sourceMarker != null) {
+                            CharacterInventory.removeTransferMarker(source, key);
+                            if (!persister.persist(source)) valid[0] = false;
+                        }
+                        if (destinationMarker != null) {
+                            CharacterInventory.removeTransferMarker(destination, key);
+                            if (!persister.persist(destination)) valid[0] = false;
+                        }
+                        return true;
+                    }
+                    valid[0] = false;
                     return false;
-                }
-                // A missing source marker means its debit was committed before cleanup was interrupted.
-                if (source != null && CharacterInventory.transferMarker(source, key) != null) {
-                    CharacterInventory.removeTransferMarker(source, key);
-                    if (!persister.persist(source)) return false;
-                }
-                if (destination != null) {
-                    CharacterInventory.removeTransferMarker(destination, key);
-                    if (!persister.persist(destination)) return false;
-                }
-                continue;
+                });
+            } catch (RuntimeException | Error failure) {
+                return false;
             }
-
-            if (SOURCE_COMMITTED.equals(sourcePhase) && destinationMarker == null) {
-                // Destination cleanup was saved first after the source debit was already durable.
-                CharacterInventory.removeTransferMarker(source, key);
-                if (!persister.persist(source)) return false;
-                continue;
-            }
-
-            if ((sourceMarker == null || PREPARED.equals(sourcePhase))
-                    && (destinationMarker == null || PREPARED.equals(destinationPhase))) {
-                // No destination commit exists. PREPARED records are only write-ahead locks;
-                // the item transfer never became durable and is discarded.
-                if (source != null && sourceMarker != null) {
-                    CharacterInventory.removeTransferMarker(source, key);
-                    if (!persister.persist(source)) return false;
-                }
-                if (destination != null && destinationMarker != null) {
-                    CharacterInventory.removeTransferMarker(destination, key);
-                    if (!persister.persist(destination)) return false;
-                }
-                continue;
-            }
-            return false; // Unknown marker combination: fail closed, never guess where items belong.
+            if (!valid[0]) return false;
+            authority.clearInventoryTransfer(transactionId);
         }
         return true;
     }
+
+    private static Map<String, Object> markerRecord(Character person, String key) {
+        Object raw = CharacterInventory.transferMarker(person, key);
+        if (!(raw instanceof Map<?, ?> map)) return null;
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet())
+            if (entry.getKey() instanceof String name) result.put(name, entry.getValue());
+        return result;
+    }
+
 }
