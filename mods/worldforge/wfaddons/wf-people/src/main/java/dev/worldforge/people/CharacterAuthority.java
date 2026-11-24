@@ -144,8 +144,16 @@ public final class CharacterAuthority {
         familyIndexDay = Long.MIN_VALUE;
     }
 
-    /** Updates the reverse parent indexes after a canonical birth without a world scan. */
+    /** Updates parent and spouse reverse projections after a canonical family mutation. */
     synchronized void familyChanged(Character person) {
+        familyChanged(person, "", "");
+    }
+
+    /**
+     * Applies a spouse-edge delta in O(1) average. The previous edge is removed before the
+     * current one is published, so marriage, divorce and remarriage never require a world scan.
+     */
+    synchronized void familyChanged(Character person, String previousSpouseLegacy, String previousSpouseGlobal) {
         if (person == null) return;
         CharacterIdentity identity = byGlobalId.get(person.globalId);
         if (identity == null) return;
@@ -153,6 +161,19 @@ public final class CharacterAuthority {
         addFamilyIndex(familyByParentLegacy, person.mother, identity);
         addFamilyIndex(familyByParentGlobal, familyId(person, "family.father_global_id"), identity);
         addFamilyIndex(familyByParentGlobal, familyId(person, "family.mother_global_id"), identity);
+
+        removeFamilyIndex(familyBySpouseLegacy, previousSpouseLegacy, person.globalId);
+        removeFamilyIndex(familyBySpouseGlobal, previousSpouseGlobal, person.globalId);
+        addFamilyIndex(familyBySpouseLegacy, person.spouse, identity);
+        addFamilyIndex(familyBySpouseGlobal, familyId(person, "family.spouse_global_id"), identity);
+    }
+
+    private static void removeFamilyIndex(Map<String, Set<String>> index, String key, String globalId) {
+        if (key == null || key.isBlank() || globalId == null || globalId.isBlank()) return;
+        Set<String> values = index.get(key);
+        if (values == null) return;
+        values.remove(globalId);
+        if (values.isEmpty()) index.remove(key, values);
     }
 
     /**
