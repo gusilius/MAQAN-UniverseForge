@@ -167,10 +167,10 @@ public final class ResidentLifeEvents {
                     final String[] newbornId = {null};
                     final boolean[] eligible = {false};
                     registry.access().mutate(localId, person -> {
-                        registry.refreshLifeStages(List.of(person), session.year);
+                        registry.refreshLifeStages(List.of(person), passYear);
                         newbornId[0] = processPregnancy(registry, person, passYear, passWorldDay, names);
                         eligible[0] = person.alive && (person.spouse == null || person.spouse.isBlank())
-                                && PopulationSimulation.age(person, session.year) >= 18;
+                                && PopulationSimulation.age(person, passYear) >= 18;
                     });
                     if (newbornId[0] != null) session.newbornIds.add(newbornId[0]);
                     if (eligible[0]) session.eligibleSingleIds.add(globalId);
