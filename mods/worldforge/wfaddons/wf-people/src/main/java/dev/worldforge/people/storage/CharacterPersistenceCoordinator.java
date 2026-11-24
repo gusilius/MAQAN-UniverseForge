@@ -38,25 +38,25 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public CharacterEvictionGate.Pin acquireLease(String globalId) { return evictionGate.acquireLease(globalId); }
     public CharacterEvictionGate.Pin beginTransaction(String globalId) { return evictionGate.beginTransaction(globalId); }
 
-    /**
-     * Persist a mutation result. The dirty generation is advanced before the snapshot
-     * is captured, so callers that still mutate legacy public fields cannot accidentally
-     * acknowledge an old generation as clean merely by requesting a write.
-     */
+    /** Persist a mutation result while pinning the identity before advancing its generation. */
     public CompletableFuture<CharacterWal.Record> persistMutation(String globalId, Supplier<byte[]> snapshot) {
-        Objects.requireNonNull(snapshot, "snapshot");
-        markDirty(globalId);
-        return persistSnapshot(globalId, snapshot);
+        return persistScoped(globalId, snapshot, true);
     }
 
     /** Capture the generation before serialization; later mutations make this receipt stale. */
     public CompletableFuture<CharacterWal.Record> persistSnapshot(String globalId, Supplier<byte[]> snapshot) {
+        return persistScoped(globalId, snapshot, false);
+    }
+
+    private CompletableFuture<CharacterWal.Record> persistScoped(
+            String globalId, Supplier<byte[]> snapshot, boolean markDirtyFirst) {
         Objects.requireNonNull(snapshot, "snapshot");
         CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
         final CharacterEvictionGate.PersistenceTicket ticket;
         try {
+            if (markDirtyFirst) evictionGate.markDirty(globalId);
             ticket = evictionGate.capture(globalId);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             transaction.close();
             throw failure;
         }
@@ -87,7 +87,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         try {
             byte[] payload = Objects.requireNonNull(snapshot.get(), "snapshot payload");
             writer.submit(globalId, payload, durable);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             durable.completeExceptionally(new IOException("Could not prepare or enqueue Character WAL write", failure));
         }
         return result;
