@@ -79,15 +79,18 @@ public final class CharacterInventoryTransactions {
         if (source == destination) {
             Map<String, Object> before = new LinkedHashMap<>(source.props);
             CharacterInventory.putTransferMarker(source, markerKey, marker(common, "both", PREPARED));
+            authority.noteInventoryTransfer(transactionId, source.globalId, destination.globalId);
             if (!persister.persist(source)) return false;
             if (!mutate(owner, actor, containerId, itemId, data, sourceSlot, amount, deposit)) {
                 restore(source, before);
+                authority.clearInventoryTransfer(transactionId);
                 persister.persist(source);
                 return false;
             }
             CharacterInventory.putTransferMarker(source, markerKey, marker(common, "both", BOTH_COMMITTED));
             if (!persister.persist(source)) return false;
             CharacterInventory.removeTransferMarker(source, markerKey);
+            authority.clearInventoryTransfer(transactionId);
             persister.persist(source); // Cleanup-only failure is recovered by startup.
             return true;
         }
@@ -96,12 +99,14 @@ public final class CharacterInventoryTransactions {
         Map<String, Object> destinationBefore = new LinkedHashMap<>(destination.props);
         CharacterInventory.putTransferMarker(source, markerKey, marker(common, "source", PREPARED));
         CharacterInventory.putTransferMarker(destination, markerKey, marker(common, "destination", PREPARED));
+        authority.noteInventoryTransfer(transactionId, source.globalId, destination.globalId);
         // PREPARED is durable before either inventory changes. A partial prepare is safe to discard.
         if (!persister.persist(source)) return false;
 
         if (!mutate(owner, actor, containerId, itemId, data, sourceSlot, amount, deposit)) {
             restore(source, sourceBefore);
             restore(destination, destinationBefore);
+            authority.clearInventoryTransfer(transactionId);
             persister.persist(source);
             return false;
         }
@@ -117,6 +122,7 @@ public final class CharacterInventoryTransactions {
 
         CharacterInventory.removeTransferMarker(source, markerKey);
         CharacterInventory.removeTransferMarker(destination, markerKey);
+        authority.clearInventoryTransfer(transactionId);
         persister.persist(source); // The item movement itself is already durably committed.
         return true;
     }
