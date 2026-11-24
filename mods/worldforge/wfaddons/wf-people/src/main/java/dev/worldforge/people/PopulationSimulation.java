@@ -575,7 +575,7 @@ public final class PopulationSimulation {
                 // Keep the unfinished suffix. Once drained, a second pass catches up the prefix.
                 if (cursor.nextIndex >= cursor.ids.size()) {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
-                            cursor.ids, 0, false, "");
+                            registry.idSnapshot(), 0, false, "");
                 } else {
                     cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, generation,
                             cursor.ids, cursor.nextIndex, true, cursor.lastProcessedId);
