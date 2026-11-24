@@ -178,7 +178,7 @@ public final class ResidentLifeEvents {
                     withSessionPerson(session, index, person -> advanceChildhoodPerson(registry, person, session.year));
             } else if (session.phase == 2) {
                 for (int index = session.cursor; index < end; index++)
-                    withSessionPerson(session, index, person -> processMaritalConflict(registry, person, session.year));
+                    processMaritalConflictById(registry, personIdAt(session, index), session.year);
             } else {
                 for (int i = session.cursor; i < end; i++)
                     processRelationshipReviewById(registry, session.eligibleSingleIds, i, session.year);
