@@ -87,6 +87,15 @@ public final class CharacterRecordStore implements AutoCloseable {
         }
     }
 
+    /**
+     * Persists a WAL record without making another payload-sized copy. The record is immutable
+     * and this method consumes its private bytes synchronously without retaining the array.
+     */
+    public synchronized void put(CharacterWal.Record record) throws IOException {
+        Objects.requireNonNull(record, "record");
+        put(record.globalId(), record.payloadView());
+    }
+
     /** Returns null when the key is absent; checksum or key/path mismatches fail closed. */
     public synchronized Record get(String globalId) throws IOException {
         ensureOpen();
