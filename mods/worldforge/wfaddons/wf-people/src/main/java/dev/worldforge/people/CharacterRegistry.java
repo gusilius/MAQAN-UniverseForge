@@ -960,15 +960,20 @@ public final class CharacterRegistry {
         if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))
                 || deceased.props.containsKey("death.bereavement.recipients")) return;
         LinkedHashSet<String> recipients = new LinkedHashSet<>();
-        addLivingCandidate(recipients, deceased.spouse);
-        addLivingCandidate(recipients, deceased.father);
-        addLivingCandidate(recipients, deceased.mother);
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.spouse_global_id", deceased.spouse));
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.father_global_id", deceased.father));
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.mother_global_id", deceased.mother));
+        Object globalChildren = deceased.props.get("family.children_global_ids");
+        if (globalChildren instanceof List<?> ids) for (Object value : ids) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            if (value instanceof String globalId) addLivingCandidateGlobal(recipients, globalId);
+        }
         for (String childId : deceased.children) {
             if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
             addLivingCandidate(recipients, childId);
         }
-        String fatherGlobal = globalIdForLocalId(deceased.father);
-        String motherGlobal = globalIdForLocalId(deceased.mother);
+        String fatherGlobal = familyGlobalOrLegacy(deceased, "family.father_global_id", deceased.father);
+        String motherGlobal = familyGlobalOrLegacy(deceased, "family.mother_global_id", deceased.mother);
         addLivingSiblings(recipients, fatherGlobal);
         if (recipients.size() < MAX_BEREAVEMENT_RECIPIENTS) addLivingSiblings(recipients, motherGlobal);
 
@@ -999,16 +1004,25 @@ public final class CharacterRegistry {
     private void addLivingSiblings(Set<String> recipients, String parentGlobalId) {
         if (parentGlobalId == null || parentGlobalId.isBlank()
                 || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
-        String parentLocalId = localIdForGlobalId(parentGlobalId);
+        CharacterRegistry parentRegistry = authority == null ? this : authority.registryForGlobal(parentGlobalId);
+        if (parentRegistry == null) return;
+        String parentLocalId = parentRegistry.localIdForGlobalId(parentGlobalId);
         if (parentLocalId == null) return;
-        List<String> childLocalIds;
-        try (CharacterAccessService.Lease lease = access().acquire(parentLocalId)) {
+        List<String> childGlobalIds = new ArrayList<>();
+        try (CharacterAccessService.Lease lease = parentRegistry.access().acquire(parentLocalId)) {
             if (lease == null) return;
-            childLocalIds = List.copyOf(lease.get().children);
+            for (String childLocalId : lease.get().children) {
+                String childGlobalId = parentRegistry.globalIdForLocalId(childLocalId);
+                if (childGlobalId != null) childGlobalIds.add(childGlobalId);
+            }
+            Object globalChildren = lease.get().props.get("family.children_global_ids");
+            if (globalChildren instanceof List<?> ids)
+                for (Object id : ids) if (id instanceof String value && !childGlobalIds.contains(value))
+                    childGlobalIds.add(value);
         }
-        for (String childLocalId : childLocalIds) {
+        for (String childGlobalId : childGlobalIds) {
             if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
-            addLivingCandidate(recipients, childLocalId);
+            addLivingCandidateGlobal(recipients, childGlobalId);
         }
     }
 
@@ -1016,12 +1030,25 @@ public final class CharacterRegistry {
     public static final int DEFAULT_BEREAVEMENT_BATCH_SIZE = 32;
 
     private void addLivingCandidate(Set<String> candidates, String localId) {
-        if (localId == null || localId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
-        String globalId = globalIdForLocalId(localId);
-        if (globalId == null || globalId.equals("")) return;
-        try (CharacterAccessService.Lease lease = access().acquire(localId)) {
+        addLivingCandidateGlobal(candidates, globalIdForLocalId(localId));
+    }
+
+    private void addLivingCandidateGlobal(Set<String> candidates, String globalId) {
+        if (globalId == null || globalId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
+        CharacterRegistry owner = authority == null ? this : authority.registryForGlobal(globalId);
+        if (owner == null) return;
+        String localId = owner.localIdForGlobalId(globalId);
+        if (localId == null) return;
+        try (CharacterAccessService.Lease lease = owner.access().acquire(localId)) {
             if (lease != null && lease.get().alive) candidates.add(globalId);
         }
+    }
+
+    private String familyGlobalOrLegacy(Character character, String key, String legacyId) {
+        Object value = character.props.get(key);
+        if (value instanceof String globalId && !globalId.isBlank()) return globalId;
+        String local = globalIdForLocalId(legacyId);
+        return local != null ? local : authority == null ? null : authority.globalIdForLegacyId(legacyId);
     }
 
     /**
