@@ -39,6 +39,10 @@ public final class CharacterRegistry {
     private Map<String, Character> byId = new HashMap<>();
     /** Append-only insertion-order directory. It stores IDs, never Character references. */
     private List<String> orderedIds = new ArrayList<>();
+    /** Monotonic append counter; distinct from full identity-directory replacement. */
+    private long membershipAppendGeneration;
+    /** Changes only when restore replaces the ordered identity directory wholesale. */
+    private long membershipResetGeneration;
     /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
     private final Map<String, Integer> activeAccessLeases = new HashMap<>();
     private final CharacterAccessService accessService = new CharacterAccessService(this);
@@ -246,6 +250,12 @@ public final class CharacterRegistry {
 
     /** Stable across appends; changes only when the registry's ordered population is replaced. */
     public long membershipGeneration() { return membershipGeneration; }
+
+    /** Changes only when new identities are appended; existing cursor prefixes remain valid. */
+    public long membershipAppendGeneration() { return membershipAppendGeneration; }
+
+    /** Changes when a restore replaces the identity directory and invalidates all old offsets. */
+    public long membershipResetGeneration() { return membershipResetGeneration; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -696,6 +706,12 @@ public final class CharacterRegistry {
         character.props.put("character.lifecycle.events", history);
         recordDomainMutation();
         for (Listener listener : listeners) listener.lifecycle(character, event);
+    }
+
+    /** Records an append without invalidating already-processed insertion-order offsets. */
+    private void markMembershipAppend() {
+        membershipAppendGeneration++;
+        markMembershipMutation();
     }
 
     /** Advances the shared lane after a canonical Character write has completed. */
@@ -1162,7 +1178,7 @@ public final class CharacterRegistry {
             pendingBereavement.addLast(restored.globalId);
         CharacterAuthority currentAuthority = authority;
         if (currentAuthority != null) currentAuthority.characterReplaced(this, previous, restored);
-        if (previous == null) markMembershipMutation();
+        if (previous == null) markMembershipAppend();
         recordDomainMutation();
     }
 
@@ -1395,6 +1411,7 @@ public final class CharacterRegistry {
         // Publish only after every record, identity and entity binding has passed validation.
         byId = new HashMap<>(loaded);
         orderedIds = new ArrayList<>(loaded.keySet());
+        membershipResetGeneration++;
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
         for (Character character : loaded.values()) indexPosts(character);
