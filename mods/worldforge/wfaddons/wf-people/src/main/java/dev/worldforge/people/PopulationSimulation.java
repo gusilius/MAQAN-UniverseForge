@@ -551,7 +551,7 @@ public final class PopulationSimulation {
         synchronized (WORLD_DAY_CURSORS) {
             WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
             return cursor == null ? null : new WorldDayProgress(cursor.targetDay,
-                    cursor.membershipGeneration, cursor.nextIndex, cursor.catchUpPass);
+                    cursor.membershipResetGeneration, cursor.nextIndex, cursor.catchUpPass);
         }
     }
 
