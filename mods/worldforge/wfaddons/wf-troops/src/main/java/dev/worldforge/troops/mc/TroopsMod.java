@@ -428,8 +428,9 @@ public class TroopsMod {
 
         String transitionCharacterId = troop.characterId == null ? "" : troop.characterId;
         if (transitionCharacterId.isBlank() && ModList.get().isLoaded("wf_people")) {
-            PersonBinding existingBinding = findCharacterForTroopEntity(entityId);
-            if (existingBinding != null) transitionCharacterId = existingBinding.character().globalId;
+            try (PersonBinding existingBinding = findCharacterForTroopEntity(entityId)) {
+                if (existingBinding != null) transitionCharacterId = existingBinding.character().globalId;
+            }
         }
         var pendingTransition = transitionCharacterId.isBlank() ? null : TRANSITIONS.get(transitionCharacterId);
         if (pendingTransition != null && pendingTransition.troopEntityId().equals(entityId)) {
@@ -739,48 +740,53 @@ public class TroopsMod {
 
     /** Records wounds on the canonical Character before a lethal hit can close the entity binding. */
     static void recordInjury(TroopEntity troop,int severity,String cause) {
-        PersonBinding binding=bindPerson(troop,false);
-        if(binding==null||!binding.character().alive)return;
-        long minute=Math.max(0,troop.level().getDayTime()/20L);
-        int nextInjury=CharacterDevelopment.injuryCount(binding.character())+1;
-        String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
-        if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute))
-            troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
+        try (PersonBinding binding = bindPerson(troop,false)) {
+            if(binding==null||!binding.character().alive)return;
+            long minute=Math.max(0,troop.level().getDayTime()/20L);
+            int nextInjury=CharacterDevelopment.injuryCount(binding.character())+1;
+            String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
+            if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute))
+                troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
+        }
     }
 
     static double injuryCombatMultiplier(TroopEntity troop) {
-        PersonBinding binding=bindPerson(troop,false);
-        return binding==null?1.0:CharacterDevelopment.injuryCombatMultiplier(binding.character());
+        try (PersonBinding binding=bindPerson(troop,false)) {
+            return binding==null?1.0:CharacterDevelopment.injuryCombatMultiplier(binding.character());
+        }
     }
 
     /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
     static void syncMilitaryMorale(TroopEntity troop) {
-        PersonBinding binding = bindPerson(troop, false);
-        if (binding == null) return;
-        CharacterDevelopment.setMilitaryMorale(binding.character(), troop.moralePct());
+        try (PersonBinding binding = bindPerson(troop, false)) {
+            if (binding == null) return;
+            CharacterDevelopment.setMilitaryMorale(binding.character(), troop.moralePct());
+        }
     }
 
     /** Shared character identity, soldier duty, profession, combat XP and skill ranks. */
     static void syncPerson(TroopEntity troop) {
-        PersonBinding binding = bindPerson(troop, true);
-        if (binding == null) return;
-        Character person = binding.character();
-        String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
-        if (!profession.equals(PopulationSimulation.profession(person)))
-            binding.registry().changeProfession(person.id, profession, PeopleMod.YEAR);
-        binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
-        long characterXp = PopulationSimulation.trainingXp(person, "combat");
-        if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
-        else PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
-        PopulationSimulation.setSkillRank(person, "combat", troop.veteranRank());
-        person.props.put("wf_unit_kind", "soldier");
-        person.props.put("wf_troop_uuid", troop.getUUID().toString());
-        person.props.put("wf_troop_unit", troop.unitId());
-        person.props.put("wf_army_id", troop.armyId);
-        person.props.put("wf_combat_xp", troop.combatXp());
-        person.props.put("wf_veteran_rank", troop.veteranRank());
-        CharacterDevelopment.setMilitaryMorale(person, troop.moralePct());
-        PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
+        try (PersonBinding binding = bindPerson(troop, true)) {
+            if (binding == null) return;
+            Character person = binding.character();
+            String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
+            if (!profession.equals(PopulationSimulation.profession(person)))
+                binding.registry().changeProfession(person.id, profession, PeopleMod.YEAR);
+            binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+            long characterXp = PopulationSimulation.trainingXp(person, "combat");
+            if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
+            else PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
+            PopulationSimulation.setSkillRank(person, "combat", troop.veteranRank());
+            person.props.put("wf_unit_kind", "soldier");
+            person.props.put("wf_troop_uuid", troop.getUUID().toString());
+            person.props.put("wf_troop_unit", troop.unitId());
+            person.props.put("wf_army_id", troop.armyId);
+            person.props.put("wf_combat_xp", troop.combatXp());
+            person.props.put("wf_veteran_rank", troop.veteranRank());
+            CharacterDevelopment.setMilitaryMorale(person, troop.moralePct());
+            PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
+            binding.registry().access().mutateGlobal(person.globalId, ignored -> { });
+        }
     }
 
     @SubscribeEvent
