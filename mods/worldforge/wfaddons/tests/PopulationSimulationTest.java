@@ -528,6 +528,18 @@ public final class PopulationSimulationTest {
         detachedRequest[0] = 0;
         ok(idsReadOnly && new String(captured.request(), java.nio.charset.StandardCharsets.UTF_8).startsWith("{"),
                 "captured population IDs stay immutable and request access remains defensive");
+
+        CharacterRegistry cursorRegistry = new CharacterRegistry();
+        Character cursorA = cursorRegistry.create("Cursor A", "", "north", "m", 280);
+        Character cursorB = cursorRegistry.create("Cursor B", "", "north", "f", 282);
+        Character cursorC = cursorRegistry.create("Cursor C", "", "north", "m", 284);
+        PopulationComputeBridge.Scan cursorScan = PopulationComputeBridge.beginScan(java.util.List.of(cursorRegistry));
+        Character cursorFirst = cursorScan.nextCharacter(0, 0);
+        Character cursorSecond = cursorScan.nextCharacter(0, 1);
+        cursorRegistry.create("Cursor Appended", "", "north", "f", 286);
+        Character cursorThird = cursorScan.nextCharacter(0, 2);
+        ok(cursorFirst == cursorA && cursorSecond == cursorB && cursorThird == cursorC,
+                "population scan reuses sequential iterators and recovers safely after append invalidation");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
         resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
         resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);

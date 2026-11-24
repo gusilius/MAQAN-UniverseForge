@@ -14,6 +14,11 @@ public final class PopulationComputeBridge {
         private final List<CharacterRegistry> registries;
         private final long[] membershipGenerations;
         private final int[] starts, limits;
+        // Reuse one insertion-order iterator across successive server-tick slices. Repeated
+        // List.get(index) would restart from the head for every Character and become O(n^2).
+        @SuppressWarnings("unchecked")
+        private final Iterator<Character>[] memberIterators;
+        private final int[] iteratorPositions;
 
         private Scan(Collection<CharacterRegistry> source, int[] starts, int[] limits) {
             List<CharacterRegistry> ordered = new ArrayList<>();
@@ -26,6 +31,9 @@ public final class PopulationComputeBridge {
             this.membershipGenerations = new long[ordered.size()];
             this.starts = starts == null ? new int[ordered.size()] : starts.clone();
             this.limits = limits == null ? new int[ordered.size()] : limits.clone();
+            this.memberIterators = (Iterator<Character>[]) new Iterator<?>[ordered.size()];
+            this.iteratorPositions = new int[ordered.size()];
+            Arrays.fill(this.iteratorPositions, -1);
             if (this.starts.length != ordered.size() || this.limits.length != ordered.size())
                 throw new IllegalArgumentException("Population scan partition shape changed");
             for (int i = 0; i < ordered.size(); i++) {
@@ -78,6 +86,48 @@ public final class PopulationComputeBridge {
         }
 
         private CharacterRegistry registry(int index) { return registries.get(index); }
+
+        /**
+         * Returns the next Character at the requested stable cursor. Sequential slices reuse
+         * their iterator, so scanning N residents costs O(N), not O(N * numberOfSlices).
+         * If a registry append invalidates LinkedHashMap's fail-fast iterator, rebuild it once
+         * at the requested cursor; a failed/stale slice can use the same recovery path.
+         */
+        private Character nextCharacter(int registryIndex, int memberIndex) {
+            CharacterRegistry registry = registries.get(registryIndex);
+            Iterator<Character> iterator = memberIterators[registryIndex];
+            if (iterator == null || iteratorPositions[registryIndex] != memberIndex) {
+                iterator = registry.all().iterator();
+                for (int skipped = 0; skipped < memberIndex; skipped++) {
+                    if (!iterator.hasNext())
+                        throw new ConcurrentModificationException("Character population changed during cursor recovery");
+                    iterator.next();
+                }
+                memberIterators[registryIndex] = iterator;
+                iteratorPositions[registryIndex] = memberIndex;
+            }
+            try {
+                if (!iterator.hasNext())
+                    throw new ConcurrentModificationException("Character population changed during cursor scan");
+                Character character = iterator.next();
+                iteratorPositions[registryIndex] = memberIndex + 1;
+                return character;
+            } catch (ConcurrentModificationException changed) {
+                iterator = registry.all().iterator();
+                for (int skipped = 0; skipped < memberIndex; skipped++) {
+                    if (!iterator.hasNext())
+                        throw new ConcurrentModificationException("Character population changed during cursor recovery");
+                    iterator.next();
+                }
+                if (!iterator.hasNext())
+                    throw new ConcurrentModificationException("Character population changed during cursor recovery");
+                Character character = iterator.next();
+                memberIterators[registryIndex] = iterator;
+                iteratorPositions[registryIndex] = memberIndex + 1;
+                return character;
+            }
+        }
+
         private int start(int index) { return starts[index]; }
         private int limit(int index) { return limits[index]; }
         /** Number of stable Character partitions in this scan. */
@@ -192,7 +242,7 @@ public final class PopulationComputeBridge {
             CharacterRegistry registry=scan.registry(registryCursor);
             int end=scan.limit(registryCursor);
             while(memberCursor<end&&inspected<scanLimit){
-                Character character=registry.all().get(memberCursor++);
+                Character character=scan.nextCharacter(registryCursor,memberCursor++);
                 inspected++;
                 if(!character.alive)continue;
                 Object rawWorldDay=character.props.get("population.last_simulated_world_day");
