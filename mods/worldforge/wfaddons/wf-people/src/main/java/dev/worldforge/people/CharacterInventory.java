@@ -765,18 +765,16 @@ public final class CharacterInventory {
                     lease.get().props.getOrDefault("population.home", "")));
         }
         if (heirGlobalId != null) {
-            CharacterRegistry heirRegistry = authority == null ? registry : authority.registryForGlobal(heirGlobalId);
-            if (heirRegistry == null) heirRegistry = registry;
             boolean transferred = CharacterAccessService.mutateScoped(authority, registry,
                     List.of(deceasedGlobalId, heirGlobalId), people -> {
                 Character deceased = people.get(deceasedGlobalId);
                 Character heir = people.get(heirGlobalId);
                 if (heir.alive && (deceased.alive || pending[0] != null)) {
-                    deceased.alive = false;
                     boolean incomingCommitted = pending[0] != null
                             && deceased.globalId.equals(heir.props.get("estate.incoming." + pending[0]));
                     if (incomingCommitted) clearTransferredEstate(deceased, heir);
                     else transferAll(deceased, heir);
+                    deceased.alive = false;
                     deceased.props.put("estate.recipient", heir.id);
                     deceased.props.put("estate.recipient_global_id", heir.globalId);
                     deceased.props.put("estate.status", "inherited");
