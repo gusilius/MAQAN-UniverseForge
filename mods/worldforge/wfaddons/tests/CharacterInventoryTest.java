@@ -269,6 +269,11 @@ public final class CharacterInventoryTest {
                         && playerHeir.globalId.equals(crossMapDeceased.props.get("estate.recipient_global_id")),
                 "death estate resolves a spouse in the separate global player registry");
         CharacterInventory.reconcileEstates(worldAuthority);
+        ok(settlementPeople.pendingBereavementEvents() > 0
+                        && settlementPeople.processPendingBereavementBatch(1) == 1
+                        && settlementPeople.activeAccessLeaseCount() == 0
+                        && playerPeople.activeAccessLeaseCount() == 0,
+                "cross-partition bereavement advances one UUID recipient at a time and releases every lease");
         ok(!crossMapDeceased.props.containsKey("estate.transfer_pending")
                         && crossMapDeceased.props.get("estate.transfer_receipt") instanceof String,
                 "completed cross-registry estate retires its active marker while preserving a durable receipt");
