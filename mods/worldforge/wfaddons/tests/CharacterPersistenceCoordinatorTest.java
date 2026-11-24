@@ -30,7 +30,10 @@ public final class CharacterPersistenceCoordinatorTest {
             coordinator.register(id);
             check(!coordinator.canEvict(id), "unpersisted identity remains resident");
 
-            CharacterWal.Record first = coordinator.persist(id, firstPayload).get(10, TimeUnit.SECONDS);
+            var firstFuture = coordinator.persist(id, firstPayload);
+            check(writer.pending() == 1, "accepted WAL record remains outstanding until durable completion");
+            CharacterWal.Record first = firstFuture.get(10, TimeUnit.SECONDS);
+            check(writer.pending() == 0, "completed WAL receipt leaves no outstanding writer work");
             check(first.globalId().equals(id) && coordinator.canEvict(id),
                     "forced WAL receipt cleans exactly the captured generation");
 

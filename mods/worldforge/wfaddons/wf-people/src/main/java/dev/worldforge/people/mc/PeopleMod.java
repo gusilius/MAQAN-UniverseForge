@@ -553,11 +553,10 @@ public class PeopleMod {
         CharacterWalWriter writer = CHARACTER_WAL_WRITERS.get(registry);
         // A forced append batch is already durable. Defer checkpointing while the
         // asynchronous writer has queued or in-flight records; never stall the tick.
-        if (writer != null && writer.pending() > 0) return;
-        // Keep the writer registered until close/drain succeeds. A failed writer must
-        // remain visible so a later save cannot silently checkpoint around its error.
+        // Atomically close only when no accepted record is queued, being batched or in flight.
+        // closeIfIdle shares the submit monitor, eliminating the check-then-submit race.
         if (writer != null) {
-            writer.close();
+            if (!writer.closeIfIdle()) return;
             CHARACTER_WAL_WRITERS.remove(registry, writer);
         }
         boolean restartWriter = writer != null;

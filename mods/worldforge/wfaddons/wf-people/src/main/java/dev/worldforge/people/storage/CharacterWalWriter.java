@@ -8,6 +8,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Bounded single-writer queue. Accepted records are grouped into durable batches,
@@ -20,6 +21,9 @@ public final class CharacterWalWriter implements AutoCloseable {
     private final CharacterWal wal;
     private final ArrayBlockingQueue<Pending> queue;
     private final AtomicBoolean accepting = new AtomicBoolean(true);
+    // Counts every accepted record until its durable future has been completed or failed.
+    // Unlike queue.size(), this includes the worker's batch-assembly and in-flight windows.
+    private final AtomicInteger outstanding = new AtomicInteger();
     private final Thread worker;
     private volatile IOException failure;
     private volatile int inFlight;
@@ -44,8 +48,12 @@ public final class CharacterWalWriter implements AutoCloseable {
                 rejection = failure != null ? failure : new IOException("Character WAL writer is closed");
                 accepted = false;
             } else {
+                outstanding.incrementAndGet();
                 accepted = queue.offer(new Pending(globalId, payload.clone(), durable));
-                if (!accepted) rejection = new IOException("Character WAL writer queue is full");
+                if (!accepted) {
+                    outstanding.decrementAndGet();
+                    rejection = new IOException("Character WAL writer queue is full");
+                }
             }
         }
         if (!accepted) durable.completeExceptionally(rejection);
@@ -53,7 +61,7 @@ public final class CharacterWalWriter implements AutoCloseable {
     }
 
     public int queued() { return queue.size(); }
-    public int pending() { return queue.size() + inFlight; }
+    public int pending() { return outstanding.get(); }
     public int capacity() { return queue.size() + queue.remainingCapacity(); }
     public IOException failure() { return failure; }
 
@@ -88,9 +96,13 @@ public final class CharacterWalWriter implements AutoCloseable {
                     for (Pending item : batch) item.durable.completeExceptionally(io);
                     accepting.set(false);
                     Pending queued;
-                    while ((queued = queue.poll()) != null) queued.durable.completeExceptionally(io);
+                    while ((queued = queue.poll()) != null) {
+                        queued.durable.completeExceptionally(io);
+                        outstanding.decrementAndGet();
+                    }
                     break;
                 } finally {
+                    outstanding.addAndGet(-batch.size());
                     inFlight = 0;
                 }
             }
@@ -99,8 +111,29 @@ public final class CharacterWalWriter implements AutoCloseable {
             IOException io = new IOException("Character WAL writer interrupted", ex);
             failure = io;
             Pending pending;
-            while ((pending = queue.poll()) != null) pending.durable.completeExceptionally(io);
+            while ((pending = queue.poll()) != null) {
+                pending.durable.completeExceptionally(io);
+                outstanding.decrementAndGet();
+            }
         }
+    }
+
+    /**
+     * Atomically closes only an idle writer. The monitor serializes this check against
+     * submit(), so checkpoint cannot race a newly accepted record after observing idle.
+     * Returns false without changing writer state when any accepted record is outstanding.
+     */
+    public synchronized boolean closeIfIdle() throws IOException {
+        if (outstanding.get() != 0) return false;
+        accepting.set(false);
+        try { worker.join(); }
+        catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while closing idle Character WAL writer", ex);
+        }
+        IOException error = failure;
+        if (error != null) throw error;
+        return true;
     }
 
     @Override public synchronized void close() throws IOException {
