@@ -2,6 +2,7 @@ package dev.worldforge.tests;
 
 import dev.worldforge.people.storage.CharacterWal;
 import dev.worldforge.people.storage.CharacterWalWriter;
+import dev.worldforge.people.storage.CharacterRecordStore;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,6 +73,27 @@ public final class CharacterWalTest {
                                 && new String(replayed.get(299).payload(), java.nio.charset.StandardCharsets.UTF_8).equals("record-299")
                                 && lastStreamed[0].equals("record-299"),
                         "batch append and streaming replay preserve every durable record in shard sequence");
+            }
+
+            Path compactDir = root.resolve("compact");
+            Path compactStoreDir = root.resolve("compact-store");
+            try (CharacterWal wal = new CharacterWal(compactDir, 8);
+                 CharacterRecordStore store = new CharacterRecordStore(compactStoreDir)) {
+                wal.append(id, "{\"version\":1}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                wal.append(id, "{\"version\":2}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                boolean failedActionPreservedWal = false;
+                try {
+                    wal.checkpoint(() -> { throw new IOException("simulated record-store failure"); });
+                } catch (IOException expected) {
+                    failedActionPreservedWal = wal.replayAll().size() == 2;
+                }
+                ok(failedActionPreservedWal,
+                        "failed checkpoint action preserves every WAL frame for crash recovery");
+                wal.checkpoint(() -> wal.replayEach(record -> store.put(record.globalId(), record.payload())));
+                CharacterRecordStore.Record stored = store.get(id);
+                ok(wal.replayAll().isEmpty() && stored != null
+                                && stored.payloadUtf8().equals("{\"version\":2}"),
+                        "serialized WAL compaction persists the newest per-character record before truncation");
             }
 
             Path corrupt = root.resolve("corrupt");
