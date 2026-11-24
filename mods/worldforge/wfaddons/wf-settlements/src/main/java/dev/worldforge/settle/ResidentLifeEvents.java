@@ -278,7 +278,6 @@ public final class ResidentLifeEvents {
             schedule.queued.remove(due.motherGlobalId());
             String motherLocalId = registry.localIdForGlobalId(due.motherGlobalId());
             if (motherLocalId == null) continue;
-            final boolean[] dueAndAlive = {false};
             final boolean[] motherAlive = {false};
             final String[] fatherGlobalId = {null};
             try (CharacterAccessService.Lease motherLease = registry.access().acquire(motherLocalId)) {
@@ -290,7 +289,6 @@ public final class ResidentLifeEvents {
                     String fatherLocalId = FamilyPlanning.dueFatherId(mother, worldDay);
                     fatherGlobalId[0] = fatherLocalId == null || fatherLocalId.isBlank()
                             ? null : registry.globalIdForLocalId(fatherLocalId);
-                    dueAndAlive[0] = true;
                 }
             }
             if (motherAlive[0] && fatherGlobalId[0] != null)
