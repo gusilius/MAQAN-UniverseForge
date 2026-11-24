@@ -802,6 +802,18 @@ public final class PopulationSimulationTest {
                 "world-day rollover preserves unfinished population cursor and catches every Character up without starvation"
                         + " (complete=" + rolloverComplete + ", guard=" + rolloverGuard + ", allAtNewestDay=" + allAtNewestDay + ")");
 
+        CharacterRegistry rangeRegistry = new CharacterRegistry();
+        Character rangeA = rangeRegistry.create("Range A", "", "", "n", 270);
+        Character rangeB = rangeRegistry.create("Range B", "", "", "n", 270);
+        Character rangeC = rangeRegistry.create("Range C", "", "", "n", 270);
+        ok(rangeRegistry.range(1, 3).equals(java.util.List.of(rangeB, rangeC))
+                        && rangeRegistry.range(2, 2).isEmpty(),
+                "bounded registry range preserves insertion order and supports empty windows");
+        boolean invalidRangeRejected = false;
+        try { rangeRegistry.range(0, 4); }
+        catch (IndexOutOfBoundsException expected) { invalidRangeRejected = true; }
+        ok(invalidRangeRejected, "bounded registry range rejects a window beyond captured membership");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

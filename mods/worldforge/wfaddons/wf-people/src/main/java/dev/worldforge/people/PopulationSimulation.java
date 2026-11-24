@@ -565,7 +565,7 @@ public final class PopulationSimulation {
             }
             int end = (int) Math.min((long) memberCount, (long) start + maxCharacters);
             if (start < end) {
-                List<Character> batch = members.subList(start, end);
+                List<Character> batch = registry.range(start, end);
                 try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                     for (Character character : batch) {
                         if (!character.alive) continue;

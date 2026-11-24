@@ -46,6 +46,30 @@ public final class CharacterRegistry {
     private final Map<String, LinkedHashSet<String>> characterIdsByRolePlace = new HashMap<>();
 
     /**
+     * Copies only the requested insertion-order window. Unlike AbstractList.subList,
+     * this walks the backing LinkedHashMap iterator directly; orderedView.get(index)
+     * is intentionally O(index) to avoid a second population-sized reference array.
+     * The returned batch is bounded by the caller's requested range.
+     */
+    public List<Character> range(int fromInclusive, int toExclusive) {
+        int size = byId.size();
+        if (fromInclusive < 0 || toExclusive < fromInclusive || toExclusive > size)
+            throw new IndexOutOfBoundsException("range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
+        if (fromInclusive == toExclusive) return List.of();
+        List<Character> result = new ArrayList<>(toExclusive - fromInclusive);
+        Iterator<Character> iterator = byId.values().iterator();
+        for (int skipped = 0; skipped < fromInclusive; skipped++) {
+            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during range capture");
+            iterator.next();
+        }
+        for (int index = fromInclusive; index < toExclusive; index++) {
+            if (!iterator.hasNext()) throw new ConcurrentModificationException("Character membership changed during range capture");
+            result.add(iterator.next());
+        }
+        return result;
+    }
+
+    /**
      * Compatibility view over LinkedHashMap insertion order. Do not retain a second
      * population-sized list of IDs: at multi-million scale that duplicate reference
      * array alone costs tens of megabytes. Iteration walks the canonical map directly.
