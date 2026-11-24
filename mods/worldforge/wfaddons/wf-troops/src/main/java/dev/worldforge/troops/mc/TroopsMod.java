@@ -409,12 +409,13 @@ public class TroopsMod {
         // Death is terminal even when a later army-roster receipt also exists.
         if (ModList.get().isLoaded("wf_people")
                 && troop.characterId != null && !troop.characterId.isBlank()) {
-            Character existingCharacter = PeopleMod.authority().getGlobal(troop.characterId);
-            if (existingCharacter != null && !existingCharacter.alive) {
+            try (PersonBinding existing = acquirePersonGlobal(troop.characterId)) {
+                if (existing != null && !existing.character().alive) {
                 removeLive(entityId);
                 SQUADS.remove(entityId);
                 troop.discard();
                 return;
+                }
             }
         }
 
@@ -835,14 +836,15 @@ public class TroopsMod {
             return false;
         }
         if (characterId.isBlank()) {
-            PersonBinding binding = bindPerson(troop, false);
-            if (binding == null || binding.character() == null) {
-                actionPersistenceBlocked = true;
-                LOGGER.error("wf_troops: refusing to remove soldier {} because its canonical Character cannot be resolved",
-                        entityId);
-                return false;
+            try (PersonBinding binding = bindPerson(troop, false)) {
+                if (binding == null) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: refusing to remove soldier {} because its canonical Character cannot be resolved",
+                            entityId);
+                    return false;
+                }
+                characterId = binding.character().globalId;
             }
-            characterId = binding.character().globalId;
         }
 
         long worldMinute = Math.max(0,troop.level().getDayTime()/20L);
@@ -1023,10 +1025,10 @@ public class TroopsMod {
             dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people"))
             return false;
-        try {
-            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
-            if (person == null || owner == null || !person.alive) return false;
+        try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
+            if (binding == null) return false;
+            Character person = binding.character();
+            CharacterRegistry owner = binding.registry();            if (person == null || owner == null || !person.alive) return false;
             if (body == null) {
                 UUID entityId = UUID.fromString(pending.troopEntityId());
                 for (ServerLevel level : server.getAllLevels()) {
@@ -1079,6 +1081,8 @@ public class TroopsMod {
             SQUADS.remove(pending.troopEntityId());
             body.discard();
             return true;
+            }
+
         } catch (RuntimeException error) {
             LOGGER.error("wf_troops: strategic return transition for {} will retry: {}",
                     pending.characterGlobalId(), error.toString(), error);
@@ -1092,10 +1096,10 @@ public class TroopsMod {
         if (pending != null && pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN)
             return completeStrategicReturnTransition(pending, body);
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
-        try {
-            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
-            if (person == null || owner == null || !person.alive) return false;
+        try (PersonBinding binding = acquirePersonGlobal(pending.characterGlobalId())) {
+            if (binding == null) return false;
+            Character person = binding.character();
+            CharacterRegistry owner = binding.registry();            if (person == null || owner == null || !person.alive) return false;
             if (body == null) {
                 try {
                     UUID entityId = UUID.fromString(pending.troopEntityId());
@@ -1147,6 +1151,8 @@ public class TroopsMod {
             SQUADS.remove(id);
             body.discard();
             return true;
+            }
+
         } catch (RuntimeException error) {
             LOGGER.error("wf_troops: pending {} transition for Character {} will retry: {}",
                     pending.kind(), pending.characterGlobalId(), error.toString(), error);
