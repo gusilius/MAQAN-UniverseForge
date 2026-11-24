@@ -13,6 +13,7 @@ import dev.worldforge.settle.ResidentSocial;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public final class ResidentLifeEventsTest {
     private static int failures;
