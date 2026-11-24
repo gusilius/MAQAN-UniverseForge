@@ -309,6 +309,9 @@ public final class CharacterRegistry {
 
     public synchronized String globalIdForLocalId(String localId) { return globalIdByLocalId.get(localId); }
 
+    /** Reverse UUID directory lookup; does not materialize or hydrate the Character object. */
+    public synchronized String localIdForGlobalId(String globalId) { return byGlobalId.get(globalId); }
+
     private Character resolveMaterialized(String localId) {
         Character current = byId.get(localId);
         if (current != null) return current;
