@@ -7,7 +7,7 @@ import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterAuthority;
-import dev.worldforge.people.PeopleMod;
+import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
 
