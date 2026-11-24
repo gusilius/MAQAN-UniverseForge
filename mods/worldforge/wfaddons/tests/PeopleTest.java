@@ -151,8 +151,7 @@ public class PeopleTest {
         ok(restoredFather != null && restoredMother != null && restoredChild != null
                         && restoredFather.children.contains(restoredChild.id)
                         && restoredMother.children.contains(restoredChild.id)
-                        && restoredChild.id.equals(restoredFather.spouse)
-                        == false,
+                        && !restoredChild.id.equals(restoredFather.spouse),
                 "independent WAL record replay restores reciprocal family parent/child indexes");
         ok(restoredFather != null && restoredMother != null
                         && restoredFather.id.equals(restoredMother.spouse)
