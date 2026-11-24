@@ -1497,7 +1497,6 @@ public final class CharacterRegistry {
         orderedIds = loadedIds;
         orderedIdSet = new HashSet<>(loadedIds);
         globalIdByLocalId.clear();
-        byGlobalId.forEach((globalId, localId) -> globalIdByLocalId.put(localId, globalId));
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
@@ -1506,6 +1505,7 @@ public final class CharacterRegistry {
         pendingBereavement.clear();
         for (Character character : loaded.values()) {
             byGlobalId.put(character.globalId, character.id);
+            globalIdByLocalId.put(character.id, character.globalId);
             if (!Boolean.TRUE.equals(character.props.get("death.bereavement.completed"))
                     && character.props.get("death.bereavement.recipients") instanceof List<?>)
                 pendingBereavement.addLast(character.globalId);
