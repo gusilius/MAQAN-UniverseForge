@@ -133,7 +133,11 @@ public final class CharacterInventory {
         if (authority == null || sourceGlobalId == null || destinationGlobalId == null
                 || sourceGlobalId.isBlank() || destinationGlobalId.isBlank()
                 || sourceGlobalId.equals(destinationGlobalId)) return false;
-        return CharacterAccessService.mutateGlobalsIfChanged(authority,
+        // Inventory operations also run during bootstrap and in isolated registries
+        // before the world persistence coordinator is attached. mutateScoped keeps the
+        // UUID ordering and leases in both cases, and marks dirty when production
+        // coordinators are present.
+        return CharacterAccessService.mutateScoped(authority, null,
                 List.of(sourceGlobalId, destinationGlobalId), people ->
                         transfer(people.get(sourceGlobalId), people.get(destinationGlobalId), itemId, amount));
     }
