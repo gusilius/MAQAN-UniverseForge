@@ -589,12 +589,27 @@ public class PeopleMod {
             // and truncation and being retired without reaching the checkpoint store.
             wal.checkpoint(() -> {
                 if (fullBootstrap) {
-                    // First checkpoint, legacy migration, or new/deleted membership:
-                    // establish a complete durable baseline before WAL-only passes.
-                    for (Character character : registry.all()) {
-                        records.put(character.globalId,
-                                registry.toJsonRecord(character).getBytes(StandardCharsets.UTF_8));
+                    // Bootstrap only missing UUID records. Existing addressable checkpoints
+                    // remain on disk and must not be hydrated merely to rewrite them.
+                    // New/missing identities are captured under a lease; a missing record
+                    // cannot be evicted, so acquire(localId) resolves the resident object.
+                    for (int offset = 0; offset < registry.size(); offset += 256) {
+                        for (String localId : registry.idPage(offset, 256)) {
+                            String globalId = registry.globalIdForLocalId(localId);
+                            if (globalId == null)
+                                throw new java.io.IOException("Character identity directory is missing UUID for " + localId);
+                            if (records.contains(globalId)) continue;
+                            try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                                         registry.access().acquire(localId)) {
+                                if (lease == null)
+                                    throw new java.io.IOException("Missing checkpoint identity is not materialized: " + globalId);
+                                records.put(globalId, registry.toJsonRecord(lease.get())
+                                        .getBytes(StandardCharsets.UTF_8));
+                            }
+                        }
                     }
+                    // Existing checkpoint records may have newer journal frames.
+                    wal.replayLatestEach(records::put);
                 } else {
                     // Existing records are already durable. Only journaled changes need
                     // compaction; do not serialize or scan unchanged Characters.
