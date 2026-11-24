@@ -541,12 +541,12 @@ public final class PopulationSimulationTest {
         ok(cursorFirst == cursorA && cursorSecond == cursorB && cursorThird == cursorC,
                 "population scan resolves stable key-only ID snapshots after registry append");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
-        cursorRegistry.create("Cursor Later", "", "north", "m", 288);
+        Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
         ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
                         && stableIds.size() == 4 && cursorRegistry.size() == 5,
                 "ID snapshot is detached from Character values and remains stable when new members are appended");
         ok(cursorRegistry.idPage(1, 2).equals(java.util.List.of(cursorB.id, cursorC.id))
-                        && cursorRegistry.idAt(4).equals(stableIds.get(3 + 1))
+                        && cursorRegistry.idAt(4).equals(cursorLater.id)
                         && cursorRegistry.idPage(cursorRegistry.size(), 8).isEmpty(),
                 "bounded ID pages and indexed ID lookup avoid full-population snapshots");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
