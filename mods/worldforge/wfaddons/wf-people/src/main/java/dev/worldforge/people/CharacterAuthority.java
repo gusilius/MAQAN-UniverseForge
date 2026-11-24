@@ -157,10 +157,8 @@ public final class CharacterAuthority {
         if (identity == null) return;
         addFamilyEdge(familyGlobal, familyId(person, "family.father_global_id"), person.globalId);
         addFamilyEdge(familyGlobal, familyId(person, "family.mother_global_id"), person.globalId);
-        addFamilyEdge(familyLegacy, legacyFamilyKey(identity.mapId(), person.father),
-                legacyFamilyKey(identity.mapId(), person.id));
-        addFamilyEdge(familyLegacy, legacyFamilyKey(identity.mapId(), person.mother),
-                legacyFamilyKey(identity.mapId(), person.id));
+        addLegacyFamilyEdge(familyLegacy, identity.mapId(), person.father, person.id);
+        addLegacyFamilyEdge(familyLegacy, identity.mapId(), person.mother, person.id);
 
         removeFamilyIndex(familyBySpouseLegacy,
                 legacyFamilyKey(identity.mapId(), previousSpouseLegacy), person.globalId);
@@ -369,13 +367,13 @@ public final class CharacterAuthority {
             String spouseGlobalId = familyId(person, "family.spouse_global_id");
 
             // Parent pointers and parent-owned child lists are both accepted as source data.
-            addFamilyEdge(parentChildLegacy, legacyFamilyKey(mapId, person.father), personLegacy);
-            addFamilyEdge(parentChildLegacy, legacyFamilyKey(mapId, person.mother), personLegacy);
+            addLegacyFamilyEdge(parentChildLegacy, mapId, person.father, person.id);
+            addLegacyFamilyEdge(parentChildLegacy, mapId, person.mother, person.id);
             addFamilyEdge(parentChildGlobal, fatherGlobal, person.globalId);
             addFamilyEdge(parentChildGlobal, motherGlobal, person.globalId);
 
             for (String childId : person.children)
-                addFamilyEdge(parentChildLegacy, personLegacy, legacyFamilyKey(mapId, childId));
+                addLegacyFamilyEdge(parentChildLegacy, mapId, person.id, childId);
 
             Object globalChildren = person.props.get("family.children_global_ids");
             if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
@@ -520,6 +518,23 @@ public final class CharacterAuthority {
     private static String legacyFamilyKey(String mapId, String legacyId) {
         if (mapId == null || mapId.isBlank() || legacyId == null || legacyId.isBlank()) return "";
         return mapId.length() + ":" + mapId + legacyId;
+    }
+
+    private void addLegacyFamilyEdge(Map<String, Set<String>> index, String mapId,
+                                     String firstLegacyId, String secondLegacyId) {
+        if (!hasLegacyIdentityInMap(firstLegacyId, mapId)
+                || !hasLegacyIdentityInMap(secondLegacyId, mapId)) return;
+        addFamilyEdge(index, legacyFamilyKey(mapId, firstLegacyId),
+                legacyFamilyKey(mapId, secondLegacyId));
+    }
+
+    private boolean hasLegacyIdentityInMap(String legacyId, String mapId) {
+        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return false;
+        Set<CharacterIdentity> identities = byLegacyId.get(legacyId);
+        if (identities == null) return false;
+        for (CharacterIdentity identity : identities)
+            if (mapId.equals(identity.mapId())) return true;
+        return false;
     }
 
     private static void addFamilyEdge(Map<String, Set<String>> index, String first, String second) {
