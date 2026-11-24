@@ -39,8 +39,6 @@ public final class CharacterRegistry {
     private Map<String, Character> byId = new HashMap<>();
     /** Append-only insertion-order directory. It stores IDs, never Character references. */
     private List<String> orderedIds = new ArrayList<>();
-    /** O(1) membership test: hydration must not append a second directory entry. */
-    private Set<String> orderedIdSet = new HashSet<>();
     /** Retained identity routing for evicted objects; values are compact strings only. */
     private final Map<String, String> globalIdByLocalId = new HashMap<>();
     /** Monotonic append counter; distinct from full identity-directory replacement. */
@@ -298,7 +296,7 @@ public final class CharacterRegistry {
     private Character resolveMaterialized(String localId) {
         Character current = byId.get(localId);
         if (current != null) return current;
-        if (!orderedIdSet.contains(localId)) return null;
+        if (!globalIdByLocalId.containsKey(localId)) return null;
         return accessService.hydrate(localId);
     }
 
@@ -466,7 +464,7 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        if (orderedIdSet.add(c.id)) orderedIds.add(c.id);
+        if (!globalIdByLocalId.containsKey(c.id)) orderedIds.add(c.id);
         byGlobalId.put(c.globalId, c.id);
         globalIdByLocalId.put(c.id, c.globalId);
         // Register the new identity directly; no population-wide scan is needed.
@@ -1234,7 +1232,7 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
-        if (orderedIdSet.add(restored.id)) orderedIds.add(restored.id);
+        if (!globalIdByLocalId.containsKey(restored.id)) orderedIds.add(restored.id);
         globalIdByLocalId.put(restored.id, restored.globalId);
         indexPosts(restored);
         byGlobalId.put(restored.globalId, restored.id);
@@ -1495,7 +1493,6 @@ public final class CharacterRegistry {
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         orderedIds = loadedIds;
-        orderedIdSet = new HashSet<>(loadedIds);
         globalIdByLocalId.clear();
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();
