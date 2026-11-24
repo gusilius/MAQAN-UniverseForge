@@ -69,6 +69,7 @@ public final class CharacterAccessServiceTest {
         CharacterPersistenceCoordinator coordinator =
                 new CharacterPersistenceCoordinator(gate, wal, writer, store);
         String secondId = null;
+        String evictableLocalId = null;
         try {
             access.attachPersistenceCoordinator(coordinator);
             try (CharacterAccessService.Lease lease = access.acquireGlobal(original.globalId)) {
@@ -138,7 +139,7 @@ public final class CharacterAccessServiceTest {
                     "failed partial mutation remains dirty and releases lease/transaction pins");
 
             Character evictable = registry.create("Eviction Subject", "", "test", "f", 12);
-            String evictableLocalId = evictable.id;
+            evictableLocalId = evictable.id;
             String evictableGlobalId = evictable.globalId;
             check(!registry.evictMaterialized(evictableGlobalId),
                     "dirty identity cannot be evicted before its WAL frame and checkpoint are durable");
