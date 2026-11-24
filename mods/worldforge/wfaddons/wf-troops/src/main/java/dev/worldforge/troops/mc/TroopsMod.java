@@ -2299,12 +2299,21 @@ public class TroopsMod {
 
     private static PersonBinding findRealmCharacter(String realmId, String characterId) {
         if (!ModList.get().isLoaded("wf_people") || realmId == null || realmId.isBlank()) return null;
+        PersonBinding match = null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null || !map.titles.realms.containsKey(realmId)) continue;
             PersonBinding candidate = acquireInRegistry(PeopleMod.registry(map), characterId);
-            if (candidate != null) return candidate;
+            if (candidate == null) continue;
+            if (match != null) {
+                // Legacy map-local IDs can collide between maps that reuse a realm ID.
+                // Fail closed rather than appointing a different canonical person.
+                candidate.close();
+                match.close();
+                return null;
+            }
+            match = candidate;
         }
-        return null;
+        return match;
     }
 
     private static int appointArmyCommander(CommandSourceStack src, int armyId, String characterId) {
