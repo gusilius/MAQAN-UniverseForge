@@ -539,7 +539,12 @@ public final class PopulationSimulationTest {
         cursorRegistry.create("Cursor Appended", "", "north", "f", 286);
         Character cursorThird = cursorScan.nextCharacter(0, 2);
         ok(cursorFirst == cursorA && cursorSecond == cursorB && cursorThird == cursorC,
-                "population scan reuses sequential iterators and recovers safely after append invalidation");
+                "population scan resolves stable key-only ID snapshots after registry append");
+        java.util.List<String> stableIds = cursorRegistry.idSnapshot();
+        cursorRegistry.create("Cursor Later", "", "north", "m", 288);
+        ok(stableIds.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id, cursorRegistry.all().get(3).id))
+                        && stableIds.size() == 4 && cursorRegistry.size() == 5,
+                "ID snapshot is detached from Character values and remains stable when new members are appended");
         java.util.Iterator<String> idOnlyCursor = cursorRegistry.idIteratorAfter(cursorA.id);
         ok(idOnlyCursor.hasNext() && cursorB.id.equals(idOnlyCursor.next())
                         && idOnlyCursor.hasNext() && cursorC.id.equals(idOnlyCursor.next()),
