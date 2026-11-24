@@ -6,6 +6,7 @@ import dev.worldforge.people.CharacterHealth;
 import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterAccessService;
+import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.people.PeopleMod;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
@@ -368,9 +369,13 @@ public final class ResidentLifeEvents {
                                           java.util.function.Consumer<Character> action) {
         String globalId = personIdAt(session, index);
         if (globalId == null || globalId.isBlank()) return;
-        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+        CharacterAuthority authority = PeopleMod.authority();
+        CharacterRegistry owner = authority == null ? session.registry : authority.registryForGlobal(globalId);
         if (owner == null) return;
-        owner.access().mutateGlobal(globalId, action);
+        if (authority == null) {
+            String localId = owner.localIdForGlobalId(globalId);
+            if (localId != null) owner.access().mutate(localId, action);
+        } else owner.access().mutateGlobal(globalId, action);
     }
 
     private static String processPregnancy(CharacterRegistry registry, Character person, int year,
@@ -387,8 +392,7 @@ public final class ResidentLifeEvents {
                 ? null : registry.globalIdForLocalId(spouseLocalId);
         if (spouseGlobalId == null) return null;
         final boolean[] conceived = {false};
-        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
-                List.of(person.globalId, spouseGlobalId), people -> {
+        mutatePair(registry, List.of(person.globalId, spouseGlobalId), people -> {
                     Character mother = people.get(person.globalId), spouse = people.get(spouseGlobalId);
                     if (mother == null || spouse == null || !mother.alive || !spouse.alive
                             || !mother.id.equals(spouse.spouse)) return false;
@@ -410,8 +414,7 @@ public final class ResidentLifeEvents {
             return null;
         }
         final String[] childGlobalId = {null};
-        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
-                List.of(mother.globalId, fatherGlobalId), people -> {
+        mutatePair(registry, List.of(mother.globalId, fatherGlobalId), people -> {
                     Character currentMother = people.get(mother.globalId);
                     Character father = people.get(fatherGlobalId);
                     if (currentMother == null || father == null || !currentMother.alive || !father.alive) {
@@ -450,7 +453,8 @@ public final class ResidentLifeEvents {
 
     private static void processMaritalConflictById(CharacterRegistry registry, String personGlobalId, int year) {
         if (personGlobalId == null || personGlobalId.isBlank()) return;
-        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(personGlobalId);
+        CharacterAuthority authority = PeopleMod.authority();
+        CharacterRegistry owner = authority == null ? registry : authority.registryForGlobal(personGlobalId);
         if (owner == null) return;
         String spouseGlobalId;
         try (CharacterAccessService.Lease lease = owner.access().acquireGlobal(personGlobalId)) {
@@ -462,8 +466,7 @@ public final class ResidentLifeEvents {
             spouseGlobalId = owner.globalIdForLocalId(person.spouse);
         }
         if (spouseGlobalId == null || spouseGlobalId.isBlank()) return;
-        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
-                List.of(personGlobalId, spouseGlobalId), people -> {
+        mutatePair(registry, List.of(personGlobalId, spouseGlobalId), people -> {
                     Character person = people.get(personGlobalId), spouse = people.get(spouseGlobalId);
                     if (!person.alive || !spouse.alive || !person.id.equals(spouse.spouse)
                             || year <= number(person.props.get("family.marital_review_year"), 0)) return false;
@@ -502,7 +505,8 @@ public final class ResidentLifeEvents {
                                                        int index, int year) {
         String firstId = eligibleIds.get(index);
         if (firstId == null || firstId.isBlank()) return;
-        CharacterRegistry firstOwner = PeopleMod.authority().registryForGlobal(firstId);
+        CharacterAuthority authority = PeopleMod.authority();
+        CharacterRegistry firstOwner = authority == null ? registry : authority.registryForGlobal(firstId);
         if (firstOwner == null) return;
         try (CharacterAccessService.Lease lease = firstOwner.access().acquireGlobal(firstId)) {
             if (lease == null) return;
@@ -519,7 +523,7 @@ public final class ResidentLifeEvents {
         for (int probe = 0; probe < checks; probe++) {
             String secondId = eligibleIds.get(index + 1 + ((startOffset + probe) % available));
             if (secondId == null || secondId.isBlank() || firstId.equals(secondId)) continue;
-            CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(), List.of(firstId, secondId), people -> {
+            mutatePair(registry, List.of(firstId, secondId), people -> {
                 Character first = people.get(firstId), second = people.get(secondId);
                 return reviewRelationshipPair(registry, first, second, year);
             });
@@ -756,6 +760,34 @@ public final class ResidentLifeEvents {
             frontier = next;
         }
         return result;
+    }
+
+    /**
+     * Production path delegates to the world authority, which pins all UUIDs in lexical order
+     * and advances dirty generations. Standalone domain tests use local leases because no
+     * world authority/persistence coordinator is attached to their in-memory registry.
+     */
+    private static boolean mutatePair(CharacterRegistry registry, Collection<String> globalIds,
+                                      java.util.function.Function<Map<String, Character>, Boolean> mutation) {
+        CharacterAuthority authority = PeopleMod.authority();
+        if (authority != null)
+            return CharacterAccessService.mutateGlobalsIfChanged(authority, globalIds, mutation);
+        TreeSet<String> ordered = new TreeSet<>(globalIds);
+        List<CharacterAccessService.Lease> leases = new ArrayList<>(ordered.size());
+        Map<String, Character> characters = new LinkedHashMap<>();
+        try {
+            for (String globalId : ordered) {
+                String localId = registry.localIdForGlobalId(globalId);
+                if (localId == null) return false;
+                CharacterAccessService.Lease lease = registry.access().acquire(localId);
+                if (lease == null) return false;
+                leases.add(lease);
+                characters.put(globalId, lease.get());
+            }
+            return Boolean.TRUE.equals(mutation.apply(Collections.unmodifiableMap(characters)));
+        } finally {
+            for (int i = leases.size() - 1; i >= 0; i--) leases.get(i).close();
+        }
     }
 
     private static String string(Object value) { return value instanceof String s ? s : ""; }
