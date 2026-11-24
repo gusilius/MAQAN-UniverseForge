@@ -10,12 +10,9 @@ public final class CharacterAuthority {
     private final Map<String, CharacterIdentity> byGlobalId = new ConcurrentHashMap<>();
     private final Map<String, Set<CharacterIdentity>> byLegacyId = new ConcurrentHashMap<>();
     /** Family reverse indexes: estate succession must never scan every living Character per death. */
-    /** Undirected parent/child adjacency; legacy keys are partition-qualified. */
+    /** Canonical undirected parent/child adjacency and directed spouse reverse projection. */
     private Map<String, Set<String>> familyGlobal = new HashMap<>();
-    private Map<String, Set<String>> familyLegacy = new HashMap<>();
-    /** Directed spouse reverse projection: spouse ID -> Character that points to it. */
     private Map<String, Set<String>> familyBySpouseGlobal = new HashMap<>();
-    private Map<String, Set<String>> familyBySpouseLegacy = new HashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedMembershipGenerations = new HashMap<>();
     private final Map<CharacterRegistry, String> registryMapIds = new IdentityHashMap<>();
@@ -42,9 +39,7 @@ public final class CharacterAuthority {
         byGlobalId.clear();
         byLegacyId.clear();
         familyGlobal.clear();
-        familyLegacy.clear();
         familyBySpouseGlobal.clear();
-        familyBySpouseLegacy.clear();
         indexedMembershipGenerations.clear();
         sortedIdentityCache = null;
         familyIndexDay = Long.MIN_VALUE;
@@ -155,16 +150,19 @@ public final class CharacterAuthority {
         if (person == null) return;
         CharacterIdentity identity = byGlobalId.get(person.globalId);
         if (identity == null) return;
-        addFamilyEdge(familyGlobal, familyId(person, "family.father_global_id"), person.globalId);
-        addFamilyEdge(familyGlobal, familyId(person, "family.mother_global_id"), person.globalId);
-        addLegacyFamilyEdge(familyLegacy, identity.mapId(), person.father, person.id);
-        addLegacyFamilyEdge(familyLegacy, identity.mapId(), person.mother, person.id);
+        String fatherGlobal = familyId(person, "family.father_global_id");
+        String motherGlobal = familyId(person, "family.mother_global_id");
+        if (fatherGlobal.isBlank()) fatherGlobal = legacyGlobalId(person.father, identity.mapId());
+        if (motherGlobal.isBlank()) motherGlobal = legacyGlobalId(person.mother, identity.mapId());
+        addFamilyEdge(familyGlobal, fatherGlobal, person.globalId);
+        addFamilyEdge(familyGlobal, motherGlobal, person.globalId);
 
-        removeFamilyIndex(familyBySpouseLegacy,
-                legacyFamilyKey(identity.mapId(), previousSpouseLegacy), person.globalId);
-        removeFamilyIndex(familyBySpouseGlobal, previousSpouseGlobal, person.globalId);
-        addFamilyIndex(familyBySpouseLegacy, legacyFamilyKey(identity.mapId(), person.spouse), identity);
-        addFamilyIndex(familyBySpouseGlobal, familyId(person, "family.spouse_global_id"), identity);
+        String oldSpouseGlobal = previousSpouseGlobal == null || previousSpouseGlobal.isBlank()
+                ? legacyGlobalId(previousSpouseLegacy, identity.mapId()) : previousSpouseGlobal;
+        String currentSpouseGlobal = familyId(person, "family.spouse_global_id");
+        if (currentSpouseGlobal.isBlank()) currentSpouseGlobal = legacyGlobalId(person.spouse, identity.mapId());
+        removeFamilyIndex(familyBySpouseGlobal, oldSpouseGlobal, person.globalId);
+        addFamilyIndex(familyBySpouseGlobal, currentSpouseGlobal, identity);
     }
 
     private static void removeFamilyIndex(Map<String, Set<String>> index, String key, String globalId) {
@@ -352,42 +350,36 @@ public final class CharacterAuthority {
         refreshIndex();
         if (familyIndexDay == day) return;
         Map<String, Set<String>> parentChildGlobal = new HashMap<>();
-        Map<String, Set<String>> parentChildLegacy = new HashMap<>();
         Map<String, Set<String>> spouseGlobal = new HashMap<>();
-        Map<String, Set<String>> spouseLegacy = new HashMap<>();
 
         for (CharacterIdentity identity : byGlobalId.values()) {
             CharacterRegistry owner = registries.get(identity.mapId());
             Character person = owner == null ? null : owner.get(identity.characterId());
             if (person == null) continue;
             String mapId = identity.mapId();
-            String personLegacy = legacyFamilyKey(mapId, person.id);
             String fatherGlobal = familyId(person, "family.father_global_id");
             String motherGlobal = familyId(person, "family.mother_global_id");
             String spouseGlobalId = familyId(person, "family.spouse_global_id");
 
-            // Parent pointers and parent-owned child lists are both accepted as source data.
-            addLegacyFamilyEdge(parentChildLegacy, mapId, person.father, person.id);
-            addLegacyFamilyEdge(parentChildLegacy, mapId, person.mother, person.id);
+            // Upgrade map-local legacy pointers to canonical UUID edges while the owning
+            // partition is known. Ambiguous cN IDs in other maps are never consulted.
+            if (fatherGlobal.isBlank()) fatherGlobal = legacyGlobalId(person.father, mapId);
+            if (motherGlobal.isBlank()) motherGlobal = legacyGlobalId(person.mother, mapId);
+            if (spouseGlobalId.isBlank()) spouseGlobalId = legacyGlobalId(person.spouse, mapId);
             addFamilyEdge(parentChildGlobal, fatherGlobal, person.globalId);
             addFamilyEdge(parentChildGlobal, motherGlobal, person.globalId);
 
             for (String childId : person.children)
-                addLegacyFamilyEdge(parentChildLegacy, mapId, person.id, childId);
-
+                addFamilyEdge(parentChildGlobal, person.globalId, legacyGlobalId(childId, mapId));
             Object globalChildren = person.props.get("family.children_global_ids");
             if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
                 if (rawId instanceof String childId && !childId.isBlank())
                     addFamilyEdge(parentChildGlobal, person.globalId, childId);
             }
-
-            addFamilyIndex(spouseLegacy, legacyFamilyKey(mapId, person.spouse), identity);
             addFamilyIndex(spouseGlobal, spouseGlobalId, identity);
         }
         familyGlobal = parentChildGlobal;
-        familyLegacy = parentChildLegacy;
         familyBySpouseGlobal = spouseGlobal;
-        familyBySpouseLegacy = spouseLegacy;
         familyIndexDay = day;
     }
 
@@ -411,43 +403,31 @@ public final class CharacterAuthority {
         // canonical link is absent, otherwise unrelated people can become false relatives.
         CharacterIdentity personIdentity = byGlobalId.get(person.globalId);
         String localMap = personIdentity == null ? "" : personIdentity.mapId();
+        if (fatherGlobal.isBlank()) fatherGlobal = legacyGlobalId(person.father, localMap);
+        if (motherGlobal.isBlank()) motherGlobal = legacyGlobalId(person.mother, localMap);
         if (!fatherGlobal.isBlank()) {
             addFamilyMatches(matches, familyGlobal, fatherGlobal);
             addGlobalIdentityMatch(matches, fatherGlobal);
-        } else {
-            addFamilyMatchesLegacyLocal(matches, familyLegacy, person.father, localMap);
-            addLegacyIdentityMatchesLocal(matches, person.father, localMap);
         }
         if (!motherGlobal.isBlank()) {
             addFamilyMatches(matches, familyGlobal, motherGlobal);
             addGlobalIdentityMatch(matches, motherGlobal);
-        } else {
-            addFamilyMatchesLegacyLocal(matches, familyLegacy, person.mother, localMap);
-            addLegacyIdentityMatchesLocal(matches, person.mother, localMap);
         }
 
-        // Undirected parent/child adjacency covers both directions with one entry per edge.
+        // Undirected canonical adjacency covers parents, children and siblings.
         addFamilyMatches(matches, familyGlobal, person.globalId);
-        addFamilyMatchesLegacyLocal(matches, familyLegacy, person.id, localMap);
         if (hasGlobalChildren) {
             Object globalChildren = person.props.get("family.children_global_ids");
-            for (Object rawId : (List<?>) globalChildren) if (rawId instanceof String id) {
-                CharacterIdentity identity = byGlobalId.get(id);
-                if (identity != null) matches.add(identity);
-            }
+            for (Object rawId : (List<?>) globalChildren) if (rawId instanceof String id)
+                addGlobalIdentityMatch(matches, id);
         }
-        // Mixed-version saves can contain both global child UUIDs and legacy child IDs.
-        // Merge both projections, but keep legacy resolution inside the owning partition.
-        addFamilyMatchesLegacyLocal(matches, familyLegacy, person.id, localMap);
         for (String childId : person.children)
-            addLegacyIdentityMatchesLocal(matches, childId, localMap);
+            addLegacyIdentityMatchLocal(matches, childId, localMap);
 
+        if (spouseGlobal.isBlank()) spouseGlobal = legacyGlobalId(person.spouse, localMap);
         if (!spouseGlobal.isBlank()) {
             addFamilyMatches(matches, familyBySpouseGlobal, spouseGlobal);
             addGlobalIdentityMatch(matches, spouseGlobal);
-        } else {
-            addFamilyMatchesLegacyLocal(matches, familyBySpouseLegacy, person.id, localMap);
-            addLegacyIdentityMatchesLocal(matches, person.spouse, localMap);
         }
         // A one-sided spouse pointer may exist in old saves even when this Character has
         // no spouse field of its own. Preserve that reverse relationship by canonical UUID.
@@ -469,31 +449,23 @@ public final class CharacterAuthority {
         return Collections.unmodifiableList(result);
     }
 
-    private void addLegacyIdentityMatches(Set<CharacterIdentity> target, String legacyId) {
-        if (legacyId == null || legacyId.isBlank()) return;
-        Set<CharacterIdentity> found = byLegacyId.get(legacyId);
-        if (found != null) target.addAll(found);
+    private void addLegacyIdentityMatchLocal(Set<CharacterIdentity> target, String legacyId, String mapId) {
+        CharacterIdentity identity = legacyIdentity(legacyId, mapId);
+        if (identity != null) target.add(identity);
     }
 
-    /** Legacy IDs are partition-local; never resolve their reverse edges across other maps. */
-    private void addLegacyIdentityMatchesLocal(Set<CharacterIdentity> target, String legacyId, String mapId) {
-        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return;
+    private CharacterIdentity legacyIdentity(String legacyId, String mapId) {
+        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return null;
         Set<CharacterIdentity> found = byLegacyId.get(legacyId);
-        if (found == null) return;
+        if (found == null) return null;
         for (CharacterIdentity identity : found)
-            if (mapId.equals(identity.mapId())) target.add(identity);
+            if (mapId.equals(identity.mapId())) return identity;
+        return null;
     }
 
-    private void addFamilyMatchesLegacyLocal(Set<CharacterIdentity> target,
-                                             Map<String, Set<String>> index,
-                                             String legacyId, String mapId) {
-        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return;
-        Set<String> found = index.get(legacyFamilyKey(mapId, legacyId));
-        if (found == null) return;
-        for (String globalId : found) {
-            CharacterIdentity identity = byGlobalId.get(globalId);
-            if (identity != null && mapId.equals(identity.mapId())) target.add(identity);
-        }
+    private String legacyGlobalId(String legacyId, String mapId) {
+        CharacterIdentity identity = legacyIdentity(legacyId, mapId);
+        return identity == null ? "" : identity.globalCharacterId();
     }
 
     private void addGlobalIdentityMatch(Set<CharacterIdentity> target, String globalId) {
@@ -513,28 +485,6 @@ public final class CharacterAuthority {
     private static String familyId(Character person, String key) {
         Object value = person.props.get(key);
         return value instanceof String id && !id.isBlank() ? id : "";
-    }
-
-    private static String legacyFamilyKey(String mapId, String legacyId) {
-        if (mapId == null || mapId.isBlank() || legacyId == null || legacyId.isBlank()) return "";
-        return mapId.length() + ":" + mapId + legacyId;
-    }
-
-    private void addLegacyFamilyEdge(Map<String, Set<String>> index, String mapId,
-                                     String firstLegacyId, String secondLegacyId) {
-        if (!hasLegacyIdentityInMap(firstLegacyId, mapId)
-                || !hasLegacyIdentityInMap(secondLegacyId, mapId)) return;
-        addFamilyEdge(index, legacyFamilyKey(mapId, firstLegacyId),
-                legacyFamilyKey(mapId, secondLegacyId));
-    }
-
-    private boolean hasLegacyIdentityInMap(String legacyId, String mapId) {
-        if (legacyId == null || legacyId.isBlank() || mapId == null || mapId.isBlank()) return false;
-        Set<CharacterIdentity> identities = byLegacyId.get(legacyId);
-        if (identities == null) return false;
-        for (CharacterIdentity identity : identities)
-            if (mapId.equals(identity.mapId())) return true;
-        return false;
     }
 
     private static void addFamilyEdge(Map<String, Set<String>> index, String first, String second) {
