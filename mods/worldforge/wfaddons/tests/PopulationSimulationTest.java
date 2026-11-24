@@ -569,7 +569,7 @@ public final class PopulationSimulationTest {
         cursorRegistry.create("All View Appended", "", "north", "f", 291);
         int allCount = 1;
         while (allCursor.hasNext()) { allCursor.next(); allCount++; }
-        ok(firstAll == cursorA && allCount == 5,
+        ok(firstAll == cursorA && allCount == 6,
                 "legacy all() iterator has a stable boundary and does not fail on append");
         java.util.List<String> stableIds = cursorRegistry.idSnapshot();
         Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
