@@ -622,6 +622,17 @@ public final class PopulationSimulationTest {
                         java.util.List.of(bridgeRegistry)),
                 "population bridge rejects stale revision before applying a result");
 
+        CharacterRegistry replacementRegistry = new CharacterRegistry();
+        Character beforeReplacement = replacementRegistry.create("Replace Me", "", "north", "f", 280);
+        PopulationComputeBridge.Captured replacementCapture = PopulationComputeBridge.capture(
+                "population-replacement-test", 301, 1, java.util.List.of(replacementRegistry));
+        String replacementRecord = replacementRegistry.toJsonRecord(beforeReplacement);
+        replacementRegistry.applyJsonRecord(replacementRecord, "population-replacement-test", beforeReplacement.globalId);
+        Character afterReplacement = replacementRegistry.getByGlobalId(beforeReplacement.globalId);
+        ok(afterReplacement != null && afterReplacement != beforeReplacement
+                        && !PopulationComputeBridge.apply(replacementCapture, new byte[0], java.util.List.of(replacementRegistry)),
+                "population compute acknowledgement resolves the current canonical UUID and rejects a replaced Character instance");
+
         CharacterRegistry incrementalRegistry = new CharacterRegistry();
         java.util.List<Character> batchedPeople = new java.util.ArrayList<>();
         for (int i = 0; i < 600; i++) {
