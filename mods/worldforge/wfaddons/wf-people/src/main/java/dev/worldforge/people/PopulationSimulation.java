@@ -579,6 +579,12 @@ public final class PopulationSimulation {
                             cursor.iterator, cursor.nextIndex, true, cursor.lastProcessedId);
                 }
             }
+            if (cursor.iterator == null) {
+                // A completed pass deliberately drops its iterator so it cannot retain the
+                // last Character. Reopen only when membership grew or a new target requires work.
+                if (cursor.nextIndex >= memberCount) return true;
+                cursor.iterator = registry.iteratorAfter(cursor.lastProcessedId);
+            }
             int processed = 0;
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 while (processed < maxCharacters && cursor.iterator.hasNext()) {
