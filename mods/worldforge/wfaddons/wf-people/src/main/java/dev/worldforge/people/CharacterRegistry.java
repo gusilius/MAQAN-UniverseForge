@@ -325,6 +325,8 @@ public final class CharacterRegistry {
 
     public void addListener(Listener l) { listeners.add(l); }
 
+    /** @deprecated Unpinned compatibility reference; use acquire(id) and close its lease. */
+    @Deprecated
     public Character get(String id) { return resolveMaterialized(id); }
 
     /** Internal non-hydrating lookup used by the storage/access boundary. */
@@ -516,6 +518,8 @@ public final class CharacterRegistry {
     }
 
     /** Resolves a canonical global UUID without scanning the local registry. */
+    /** @deprecated Unpinned compatibility reference; use acquireGlobal(globalId). */
+    @Deprecated
     public Character getByGlobalId(String globalId) { return characterByGlobalId(globalId); }
 
     private Character characterByGlobalId(String globalId) {
