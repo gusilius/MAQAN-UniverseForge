@@ -1403,6 +1403,17 @@ public class PeopleMod {
                 }
             }
         }
+        // A player-controlled Character may be represented by the player entity rather
+        // than WFNpc. Keep its canonical identity resident while that account is online.
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            String globalId = PLAYER_CHARACTERS.get(player.getUUID().toString());
+            if (globalId == null) continue;
+            CharacterRegistry owner = AUTHORITY.registryForGlobal(globalId);
+            if (owner == null || owner == PLAYER_REGISTRY) continue;
+            String localId = owner.localIdForGlobalId(globalId);
+            if (localId != null)
+                playerProtected.computeIfAbsent(owner, ignored -> new HashSet<>()).add(localId);
+        }
 
         int visits = Math.min(EVICTION_PARTITIONS_PER_PASS, registries.size());
         int inspected = 0;
