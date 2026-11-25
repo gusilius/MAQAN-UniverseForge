@@ -405,7 +405,15 @@ public final class CharacterAuthority {
         return owner.bindEntity(person.id, bodyKind, entityUuid);
     }
 
-    /** Returns null for an ambiguous legacy cN id; callers must provide map identity. */
+    /** Resolves an unambiguous legacy ID to identity metadata without hydrating a Character. */
+    public synchronized CharacterIdentity identityOfLegacy(String characterId) {
+        refreshIndex();
+        Set<CharacterIdentity> matches = byLegacyId.get(characterId);
+        return matches == null || matches.size() != 1 ? null : matches.iterator().next();
+    }
+
+    /** @deprecated Unpinned raw reference; use identityOfLegacy() then acquire(identity). */
+    @Deprecated
     public synchronized Character getLegacy(String characterId) {
         refreshIndex();
         Set<CharacterIdentity> matches = byLegacyId.get(characterId);
