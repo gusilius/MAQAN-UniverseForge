@@ -228,11 +228,10 @@ public class CourtMod {
             refresh.membershipGeneration = generation;
             refresh.cursor = 0;
         }
-        List<Character> people = registry.all();
-        int end = Math.min(people.size(), refresh.cursor + VIRTUAL_COURT_SCAN_BUDGET);
-        for (int index = refresh.cursor; index < end; index++) {
-            Character person = people.get(index);
-            if (!person.alive || !person.props.containsKey("emergence.polity_id")) continue;
+        int peopleCount = registry.all().size();
+        int pageSize = Math.min(VIRTUAL_COURT_SCAN_BUDGET, Math.max(0, peopleCount - refresh.cursor));
+        scanCharacterPage(registry, refresh.cursor, pageSize, person -> {
+            if (!person.alive || !person.props.containsKey("emergence.polity_id")) return;
             for (Character.Post post : person.posts) {
                 if (!post.place.startsWith("realm:")) continue;
                 String realmId = post.place.substring("realm:".length());
@@ -252,9 +251,9 @@ public class CourtMod {
                 Object name = person.props.get("emergence.polity_name");
                 if (name instanceof String text && !text.isBlank()) realm.name = text;
             }
-        }
-        refresh.cursor = end;
-        boolean scanComplete = end >= people.size();
+        });
+        refresh.cursor += pageSize;
+        boolean scanComplete = refresh.cursor >= peopleCount;
         if (scanComplete) {
             // Re-scan continuously in bounded slices. This also observes role changes and deaths
             // that do not alter registry membership, without an O(population) pass per server tick.
@@ -265,7 +264,7 @@ public class CourtMod {
             data.refreshRealmIndex();
             if (refresh.completedPasses == 1 || refresh.completedPasses % 100 == 0)
                 LOGGER.info("wf_court: virtual realm projection dimension={} people={} passes={} budget={}",
-                        dimension, people.size(), refresh.completedPasses, VIRTUAL_COURT_SCAN_BUDGET);
+                        dimension, peopleCount, refresh.completedPasses, VIRTUAL_COURT_SCAN_BUDGET);
         }
         if (data.realmList().isEmpty()) return VIRTUAL_COURTS.get(dimension);
         CourtSim sim = VIRTUAL_COURTS.computeIfAbsent(dimension, key -> {
@@ -334,4 +333,33 @@ public class CourtMod {
 
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent e) { CourtCommands.register(e.getDispatcher()); }
+    /** Reflective bounded lease bridge keeps wf-court binary-compatible with older wf-people API jars. */
+    private static void scanCharacterPage(CharacterRegistry registry, int offset, int limit,
+                                          java.util.function.Consumer<Character> visitor) {
+        if (limit <= 0) return;
+        Object access = null;
+        try {
+            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
+            access = registry.getClass().getMethod("access").invoke(registry);
+            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
+            Object rawPage = idPage.invoke(registry, offset, limit);
+            if (!(rawPage instanceof List<?> ids)) throw new IllegalStateException("Character ID page API returned a non-list");
+            for (Object rawId : ids) {
+                Object lease = acquire.invoke(access, String.valueOf(rawId));
+                if (lease == null) throw new IllegalStateException("Could not lease canonical Character " + rawId);
+                try {
+                    Character person = (Character) lease.getClass().getMethod("get").invoke(lease);
+                    visitor.accept(person);
+                } finally {
+                    ((AutoCloseable) lease).close();
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-court requires the bounded Character ID/lease API", error);
+        } catch (Exception error) {
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Could not close wf-court Character lease", error);
+        }
+    }
+
 }

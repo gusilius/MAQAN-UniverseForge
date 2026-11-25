@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.people.storage.*;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,6 +11,54 @@ import java.util.concurrent.TimeUnit;
 /** Exercises the existing WAL -> streaming checkpoint store -> eviction eligibility boundary. */
 public final class CharacterPersistenceCoordinatorTest {
     private static int failures;
+    private static void physicalRegistryEvictionRoundTrip(Path root) throws Exception {
+        Files.createDirectories(root);
+        CharacterRegistry registry = new CharacterRegistry();
+        CharacterEvictionGate gate = new CharacterEvictionGate();
+        CharacterWal wal = new CharacterWal(root.resolve("wal"), 4);
+        CharacterWalWriter writer = new CharacterWalWriter(wal, 16, "wf-character-physical-eviction-test");
+        CharacterRecordStore records = new CharacterRecordStore(root.resolve("records"));
+        CharacterPersistenceCoordinator coordinator =
+                new CharacterPersistenceCoordinator(gate, wal, writer, records);
+        registry.access().attachPersistenceCoordinator(coordinator);
+        try {
+            Character original = registry.create("Eviction Test", "House Durable", "culture-durable", "f", 1200);
+            original.props.put("eviction.round_trip.marker", "preserved");
+            String globalId = original.globalId;
+            try (var lease = registry.access().acquireGlobal(globalId)) {
+                coordinator.persistMutation(globalId,
+                        () -> registry.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8))
+                        .get(10, TimeUnit.SECONDS);
+            }
+            coordinator.checkpointLatest();
+            check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch()),
+                    "physical eviction fixture publishes a complete addressable checkpoint");
+            check(registry.evictMaterialized(globalId),
+                    "registry physically removes a clean, unleased canonical Character object");
+            check(registry.materializedSize() == 0 && registry.size() == 1,
+                    "eviction removes only the materialized object while retaining UUID directory identity");
+            java.io.StringWriter partitionSnapshot = new java.io.StringWriter();
+            registry.writeJson(partitionSnapshot);
+            check(registry.materializedSize() == 0 && partitionSnapshot.toString().contains(globalId)
+                            && partitionSnapshot.toString().contains("Eviction Test"),
+                    "full partition checkpoint serializes evicted records directly without rehydrating NPCs");
+            try (var lease = registry.access().acquireGlobal(globalId)) {
+                check(lease != null, "UUID lookup lazily rehydrates an evicted Character");
+                Character restored = lease.get();
+                check(restored != original && globalId.equals(restored.globalId)
+                                && "House Durable".equals(restored.house)
+                                && "culture-durable".equals(restored.culture)
+                                && "preserved".equals(restored.props.get("eviction.round_trip.marker")),
+                        "lazy hydration restores the same canonical UUID and complete durable record");
+                check(registry.size() == 1 && registry.materializedSize() == 1,
+                        "rehydration does not create a duplicate Character identity");
+            }
+        } finally {
+            registry.access().detachPersistenceCoordinator();
+            coordinator.close();
+        }
+    }
+
     private static void check(boolean value, String label) {
         System.out.println((value ? "ok   " : "FAIL ") + label);
         if (!value) failures++;
@@ -138,6 +188,7 @@ public final class CharacterPersistenceCoordinatorTest {
         } finally {
             coordinator.close();
         }
+        physicalRegistryEvictionRoundTrip(root.resolve("physical-eviction"));
         try (var paths = Files.walk(root)) {
             paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                 try { Files.deleteIfExists(path); } catch (Exception ignored) { }

@@ -1685,10 +1685,17 @@ public final class CharacterRegistry {
         Json.writeNumber(writer, next);
         writer.write(",\"characters\":[");
         boolean first = true;
-        for (Character c : orderedView) {
-            if (only != null && !only.contains(c.id)) continue;
+        for (String localId : orderedIds) {
+            if (only != null && !only.contains(localId)) continue;
             if (!first) writer.write(',');
             first = false;
+            Character c = byId.get(localId);
+            if (c == null) {
+                // An evicted identity is already durable. Copy its one-record checkpoint
+                // directly into the partition snapshot instead of hydrating it back into RAM.
+                writeEvictedCharacterRecord(writer, localId);
+                continue;
+            }
             // Emit fields directly: do not allocate a per-Character Map or duplicate
             // children/posts/traits collections during a large checkpoint.
             writer.write('{');
@@ -1724,6 +1731,24 @@ public final class CharacterRegistry {
             writer.write('}');
         }
         writer.write("]}");
+    }
+
+    /** Writes an evicted Character from its durable one-record checkpoint without materializing it. */
+    private void writeEvictedCharacterRecord(Writer writer, String localId) throws IOException {
+        String globalId = globalIdByLocalId.get(localId);
+        if (globalId == null || globalId.isBlank())
+            throw new IOException("Evicted Character has no global UUID directory entry: " + localId);
+        CharacterRecordStore.Record record = accessService.loadCheckpoint(globalId);
+        if (record == null || !globalId.equals(record.globalId()))
+            throw new IOException("Evicted Character has no matching durable checkpoint: " + globalId);
+        Object decoded = Json.parse(record.payloadUtf8());
+        if (!(decoded instanceof Map<?, ?> root)
+                || !"wf-people-record/1".equals(root.get("format"))
+                || !(root.get("character") instanceof Map<?, ?> character)
+                || !localId.equals(character.get("id"))
+                || !globalId.equals(character.get("global_id")))
+            throw new IOException("Evicted Character checkpoint identity/schema mismatch: " + globalId);
+        writer.write(Json.write(character));
     }
 
     /** Parses generated local IDs without compiling a regular expression per NPC. */

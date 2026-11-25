@@ -2211,9 +2211,11 @@ public final class WorldSimMod {
         String candidate = globalValue instanceof String value && !value.isBlank()
                 ? value.trim() : localValue == null ? "" : localValue.trim();
         if (candidate.isBlank()) return "";
-        dev.worldforge.people.Character character = PeopleMod.authority().getGlobal(candidate);
-        if (character == null && registry != null) character = registry.get(candidate);
-        if (character != null) return character.globalId;
+        if (PeopleMod.authority().registryForGlobal(candidate) != null) return candidate;
+        if (registry != null) {
+            String globalId = registry.globalIdForLocalId(candidate);
+            if (globalId != null && !globalId.isBlank()) return globalId;
+        }
         try { return java.util.UUID.fromString(candidate).toString(); }
         catch (IllegalArgumentException ignored) { return ""; }
     }
@@ -2733,11 +2735,16 @@ public final class WorldSimMod {
                         Worker worker = bandProgress.workerSnapshot.get(bandProgress.workerCleanupCursor);
                         if (worker.person != null && !worker.person.isBlank()
                                 && !bandProgress.residentIdSet.contains(worker.person)) {
-                            dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
-                            if (former != null) {
-                                String reason = !former.alive ? "death:emergence" : "transfer:emergence";
-                                colony.s.removeWorkerByPerson(worker.person, reason);
-                                workerColonyByPerson.remove(worker.person, colony.s.id);
+                            CharacterRegistry formerRegistry = PeopleMod.authority().registryForGlobal(worker.person);
+                            if (formerRegistry != null) {
+                                try (var formerLease = formerRegistry.access().acquireGlobal(worker.person)) {
+                                    if (formerLease != null) {
+                                        dev.worldforge.people.Character former = formerLease.get();
+                                        String reason = !former.alive ? "death:emergence" : "transfer:emergence";
+                                        colony.s.removeWorkerByPerson(worker.person, reason);
+                                        workerColonyByPerson.remove(worker.person, colony.s.id);
+                                    }
+                                }
                             }
                         }
                         bandProgress.workerCleanupCursor++;
@@ -3298,8 +3305,12 @@ public final class WorldSimMod {
         var existing = RealmsMod.POLITICS.title(titleId);
         if (existing != null && existing.holderCharacterId != null
                 && !existing.holderCharacterId.isBlank()) {
-            var currentHolder = PeopleMod.authority().getGlobal(existing.holderCharacterId);
-            if (currentHolder != null && currentHolder.alive) return;
+            CharacterRegistry currentHolderRegistry = PeopleMod.authority().registryForGlobal(existing.holderCharacterId);
+            if (currentHolderRegistry != null) {
+                try (var currentHolderLease = currentHolderRegistry.access().acquireGlobal(existing.holderCharacterId)) {
+                    if (currentHolderLease != null && currentHolderLease.get().alive) return;
+                }
+            }
         }
         Set<String> alreadyHoldingRealmTitles = RealmsMod.POLITICS.titles().stream()
                 .filter(title -> title != null && existing != null
@@ -4621,14 +4632,22 @@ public final class WorldSimMod {
                 }
                 case "dynastic_marriage" -> {
                     String first = action.get("first").getAsString(), second = action.get("second").getAsString();
-                    dev.worldforge.people.Character a = PeopleMod.authority().getGlobal(first);
-                    dev.worldforge.people.Character b = PeopleMod.authority().getGlobal(second);
-                    if (a == null || b == null) yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
-                    if (second.equals(a.spouse) && first.equals(b.spouse))
-                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED;
-                    if (a.alive && b.alive && a.spouse.isEmpty() && b.spouse.isEmpty())
-                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
-                    yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    CharacterRegistry firstRegistry = PeopleMod.authority().registryForGlobal(first);
+                    CharacterRegistry secondRegistry = PeopleMod.authority().registryForGlobal(second);
+                    if (firstRegistry == null || secondRegistry == null)
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    try (var firstLease = firstRegistry.access().acquireGlobal(first);
+                         var secondLease = secondRegistry.access().acquireGlobal(second)) {
+                        if (firstLease == null || secondLease == null)
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                        dev.worldforge.people.Character a = firstLease.get();
+                        dev.worldforge.people.Character b = secondLease.get();
+                        if (second.equals(a.spouse) && first.equals(b.spouse))
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED;
+                        if (a.alive && b.alive && a.spouse.isEmpty() && b.spouse.isEmpty())
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    }
                 }
                 case "declare_war" -> {
                     String attacker = action.get("attacker").getAsString();
@@ -4699,7 +4718,7 @@ public final class WorldSimMod {
             if (colony == null || colony.s == null || wanted <= 0) return false;
             if (!colony.s.defs.professions.containsKey(to)) return false;
             int changed = 0;
-            List<dev.worldforge.people.Character> pendingProfessionTransitions = new ArrayList<>();
+            List<String> pendingProfessionTransitionIds = new ArrayList<>();
             List<Worker> candidates = new ArrayList<>(colony.s.workers);
             candidates.sort(Comparator.comparingInt(worker -> worker.id));
             for (Worker worker : candidates) {
@@ -4711,45 +4730,52 @@ public final class WorldSimMod {
                 if (!workerSource && !workerTarget) continue;
                 if (worker.person == null || worker.person.isBlank()) continue;
 
-                // A settlement Worker is only a projection of its canonical Character.
-                // Reconcile either side of an interrupted legacy transition, but never
-                // change a worker whose authoritative Character is missing or unrelated.
-                var person = PeopleMod.authority().getGlobal(worker.person);
                 CharacterRegistry owner = PeopleMod.authority().registryForGlobal(worker.person);
-                if (person == null || owner == null || !person.alive) continue;
-                String canonicalProfession = PopulationSimulation.profession(person);
-                boolean characterSource = "unemployed".equals(from)
-                        ? canonicalProfession.isBlank() || "laborer".equals(canonicalProfession)
-                                || "general_worker".equals(canonicalProfession)
-                        : from.equals(canonicalProfession);
-                boolean characterTarget = to.equals(canonicalProfession);
-                if (!characterSource && !characterTarget) continue;
-                if (characterSource) {
-                    if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
-                    Map<String, Object> transition = new LinkedHashMap<>();
-                    transition.put("request_id", requestId);
-                    transition.put("settlement", settlementId);
-                    transition.put("worker_id", worker.id);
-                    transition.put("character_id", person.globalId);
-                    transition.put("from", from);
-                    transition.put("profession", to);
-                    person.props.put("population.pending_settlement_profession", transition);
-                    owner.changeProfession(person.id, to, PeopleMod.YEAR);
+                if (owner == null) continue;
+                try (var personLease = owner.access().acquireGlobal(worker.person)) {
+                    if (personLease == null) continue;
+                    dev.worldforge.people.Character person = personLease.get();
+                    if (!person.alive) continue;
+                    String canonicalProfession = PopulationSimulation.profession(person);
+                    boolean characterSource = "unemployed".equals(from)
+                            ? canonicalProfession.isBlank() || "laborer".equals(canonicalProfession)
+                                    || "general_worker".equals(canonicalProfession)
+                            : from.equals(canonicalProfession);
+                    boolean characterTarget = to.equals(canonicalProfession);
+                    if (!characterSource && !characterTarget) continue;
+                    if (characterSource) {
+                        if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
+                        Map<String, Object> transition = new LinkedHashMap<>();
+                        transition.put("request_id", requestId);
+                        transition.put("settlement", settlementId);
+                        transition.put("worker_id", worker.id);
+                        transition.put("character_id", person.globalId);
+                        transition.put("from", from);
+                        transition.put("profession", to);
+                        person.props.put("population.pending_settlement_profession", transition);
+                        owner.changeProfession(person.id, to, PeopleMod.YEAR);
+                    }
+                    // Persist the Character and its projection-recovery marker first. The
+                    // settlement synchronizer will honor this marker after restart instead of
+                    // overwriting the canonical profession with a stale Worker snapshot.
+                    if (!PeopleMod.persistCharacter(person, server)) return false;
+                    if (workerSource) colony.s.setProfession(worker.id, to);
+                    if (characterSource) pendingProfessionTransitionIds.add(person.globalId);
+                    changed++;
                 }
-                // Persist the Character and its projection-recovery marker first. The
-                // settlement synchronizer will honor this marker after restart instead of
-                // overwriting the canonical profession with a stale Worker snapshot.
-                if (!PeopleMod.persistCharacter(person, server)) return false;
-                if (workerSource) colony.s.setProfession(worker.id, to);
-                if (characterSource) pendingProfessionTransitions.add(person);
-                changed++;
             }
             if (changed == 0 || !SettleMod.saveDurably(server)) return false;
-            for (dev.worldforge.people.Character person : pendingProfessionTransitions) {
-                Object marker = person.props.remove("population.pending_settlement_profession");
-                if (!PeopleMod.persistCharacter(person, server)) {
-                    if (marker != null) person.props.put("population.pending_settlement_profession", marker);
-                    return false;
+            for (String globalId : pendingProfessionTransitionIds) {
+                CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+                if (owner == null) return false;
+                try (var personLease = owner.access().acquireGlobal(globalId)) {
+                    if (personLease == null) return false;
+                    dev.worldforge.people.Character person = personLease.get();
+                    Object marker = person.props.remove("population.pending_settlement_profession");
+                    if (!PeopleMod.persistCharacter(person, server)) {
+                        if (marker != null) person.props.put("population.pending_settlement_profession", marker);
+                        return false;
+                    }
                 }
             }
             return true;

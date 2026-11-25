@@ -7,6 +7,7 @@ import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 /** Deterministic bridge from canonical wf-people courts to Statecraft title holders. */
 public final class PoliticalIdentitySynchronizer {
@@ -29,29 +30,29 @@ public final class PoliticalIdentitySynchronizer {
         Objects.requireNonNull(map, "title map");
         Objects.requireNonNull(people, "character registry");
         Objects.requireNonNull(politics, "statecraft");
-        Map<String, Character> byGlobalId = new HashMap<>();
+        Map<String, Boolean> aliveByGlobalId = new HashMap<>();
         List<String> problems = new ArrayList<>();
-        for (Character character : people.all()) {
+        forEachCharacter(people, character -> {
             if (character.globalId == null || character.globalId.isBlank()) {
                 problems.add("Character " + character.id + " has no global ID");
-                continue;
+                return;
             }
-            Character previous = byGlobalId.putIfAbsent(character.globalId, character);
-            if (previous != null && previous != character)
+            Boolean previous = aliveByGlobalId.putIfAbsent(character.globalId, character.alive);
+            if (previous != null)
                 problems.add("Duplicate global Character ID " + character.globalId);
-        }
+        });
 
         int linked = 0, already = 0;
         Set<Integer> crownTitleIds = new HashSet<>();
         for (TitleData.Realm realm : map.realmList()) {
             String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", "")).trim();
             if (rulerId.isBlank()) continue;
-            Character ruler = byGlobalId.get(rulerId);
-            if (ruler == null) {
+            Boolean rulerAlive = aliveByGlobalId.get(rulerId);
+            if (rulerAlive == null) {
                 problems.add("Realm " + realm.id + " references missing ruler Character ID " + rulerId);
                 continue;
             }
-            if (!ruler.alive) {
+            if (!rulerAlive) {
                 problems.add("Realm " + realm.id + " references deceased ruler " + rulerId);
                 continue;
             }
@@ -66,14 +67,14 @@ public final class PoliticalIdentitySynchronizer {
                 problems.add("Statecraft title was not imported: " + Statecraft.mapTitleId(mapId, crown.key));
                 continue;
             }
-            int result = reconcileHolder(title, ruler, byGlobalId, politics, "realm " + realm.id);
+            int result = reconcileHolder(title, rulerId, aliveByGlobalId, politics, "realm " + realm.id);
             if (result > 0) linked++;
             else if (result == 0) already++;
             else problems.add(politics.lastError);
         }
 
-        // wf-people owns territorial offices. Match each ruler role to the actual map
-        // tier key, then bind its living office holder to that exact canonical title.
+        // wf-people owns territorial offices. The projection stores UUIDs only:
+        // no Character instance survives the short read lease used to inspect a post.
         if (roleDefs != null) {
             Map<String, List<Role>> rulerRolesByTier = new LinkedHashMap<>();
             for (Role role : roleDefs.all()) {
@@ -82,17 +83,16 @@ public final class PoliticalIdentitySynchronizer {
             }
             Set<String> rulerRoleIds = rulerRolesByTier.values().stream().flatMap(Collection::stream)
                     .map(role -> role.id).collect(java.util.stream.Collectors.toSet());
-            Map<String, List<Character>> officeHoldersByPost = new HashMap<>();
-            for (Character character : people.all()) {
-                if (!character.alive) continue;
+            Map<String, List<String>> officeHoldersByPost = new HashMap<>();
+            forEachCharacter(people, character -> {
+                if (!character.alive) return;
                 for (Character.Post post : character.posts) {
                     if (rulerRoleIds.contains(post.role))
                         officeHoldersByPost.computeIfAbsent(post.place + "#" + post.role,
-                                ignored -> new ArrayList<>()).add(character);
+                                ignored -> new ArrayList<>()).add(character.globalId);
                 }
-            }
-            for (List<Character> holders : officeHoldersByPost.values())
-                holders.sort(Comparator.comparing(character -> character.globalId));
+            });
+            for (List<String> holders : officeHoldersByPost.values()) holders.sort(String::compareTo);
             for (TitleData.Title sourceTitle : map.allTitles()) {
                 if (crownTitleIds.contains(sourceTitle.id)) continue;
                 if (sourceTitle.tier < 0 || sourceTitle.tier >= map.tiers.size()) continue;
@@ -105,11 +105,10 @@ public final class PoliticalIdentitySynchronizer {
                 List<Role> roles = rulerRolesByTier.getOrDefault(tierKey, List.of());
                 if (roles.isEmpty()) continue;
                 String place = "title:" + sourceTitle.id;
-                List<Character> officeHolders = new ArrayList<>();
+                List<String> officeHolders = new ArrayList<>();
                 for (Role role : roles)
                     officeHolders.addAll(officeHoldersByPost.getOrDefault(place + "#" + role.id, List.of()));
-                officeHolders = officeHolders.stream().distinct()
-                        .sorted(Comparator.comparing(character -> character.globalId)).toList();
+                officeHolders = officeHolders.stream().distinct().sorted().toList();
                 Statecraft.Title politicalTitle = politics.title(Statecraft.mapTitleId(mapId, sourceTitle.key));
                 if (politicalTitle == null) {
                     problems.add("Owned map title was not imported into Statecraft: " + sourceTitle.key);
@@ -120,11 +119,10 @@ public final class PoliticalIdentitySynchronizer {
                     continue;
                 }
                 if (officeHolders.size() > 1) {
-                    problems.add("Multiple living ruler office holders for title " + sourceTitle.key
-                            + ": " + officeHolders.stream().map(character -> character.globalId).toList());
+                    problems.add("Multiple living ruler office holders for title " + sourceTitle.key + ": " + officeHolders);
                     continue;
                 }
-                int result = reconcileHolder(politicalTitle, officeHolders.get(0), byGlobalId, politics,
+                int result = reconcileHolder(politicalTitle, officeHolders.get(0), aliveByGlobalId, politics,
                         tierKey + " title " + sourceTitle.key);
                 if (result > 0) linked++;
                 else if (result == 0) already++;
@@ -132,6 +130,35 @@ public final class PoliticalIdentitySynchronizer {
             }
         }
         return new Report(linked, already, problems);
+    }
+
+    /** Bounded page + scoped lease bridge; reflection preserves compatibility with older compile-only wf-people jars. */
+    private static void forEachCharacter(CharacterRegistry registry, Consumer<Character> visitor) {
+        try {
+            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
+            Object access = registry.getClass().getMethod("access").invoke(registry);
+            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
+            int count = registry.all().size();
+            for (int offset = 0; offset < count; offset += 256) {
+                Object rawPage = idPage.invoke(registry, offset, 256);
+                if (!(rawPage instanceof List<?> ids))
+                    throw new IllegalStateException("Character ID page API returned a non-list");
+                for (Object rawId : ids) {
+                    Object lease = acquire.invoke(access, String.valueOf(rawId));
+                    if (lease == null) throw new IllegalStateException("Could not lease canonical Character " + rawId);
+                    try {
+                        visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease));
+                    } finally {
+                        ((AutoCloseable) lease).close();
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-realms requires the bounded Character ID/lease API", error);
+        } catch (Exception error) {
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Could not close wf-realms Character lease", error);
+        }
     }
 
     private static TitleData.Title crown(TitleData map, TitleData.Realm realm) {
@@ -147,28 +174,27 @@ public final class PoliticalIdentitySynchronizer {
     }
 
     /** 1=linked, 0=already correct, -1=conflict/error. */
-    private static int reconcileHolder(Statecraft.Title title, Character desired,
-                                        Map<String, Character> byGlobalId, Statecraft politics,
+    private static int reconcileHolder(Statecraft.Title title, String desiredId,
+                                        Map<String, Boolean> aliveByGlobalId, Statecraft politics,
                                         String scope) {
         String currentId = title.holderCharacterId == null ? "" : title.holderCharacterId;
         if (currentId.isBlank()) {
-            if (politics.grantTitle(title.id, desired.globalId)) return 1;
-            politics.lastError = "Could not assign " + scope + " ruler " + desired.globalId
+            if (politics.grantTitle(title.id, desiredId)) return 1;
+            politics.lastError = "Could not assign " + scope + " ruler " + desiredId
                     + " to " + title.id + ": " + politics.lastError;
             return -1;
         }
-        if (currentId.equals(desired.globalId)) return 0;
-        Character current = byGlobalId.get(currentId);
-        if (current != null && current.alive) {
+        if (currentId.equals(desiredId)) return 0;
+        if (Boolean.TRUE.equals(aliveByGlobalId.get(currentId))) {
             politics.lastError = "Conflicting living holder for " + scope + ": "
-                    + currentId + " (requested " + desired.globalId + ")";
+                    + currentId + " (requested " + desiredId + ")";
             return -1;
         }
         // A missing/deceased holder is a stale reference and may be repaired;
         // a different living canonical Character is a real political conflict.
-        if (politics.grantTitle(title.id, desired.globalId)) return 1;
+        if (politics.grantTitle(title.id, desiredId)) return 1;
         politics.lastError = "Could not repair stale " + scope + " office holder "
-                + desired.globalId + ": " + politics.lastError;
+                + desiredId + ": " + politics.lastError;
         return -1;
     }
 }

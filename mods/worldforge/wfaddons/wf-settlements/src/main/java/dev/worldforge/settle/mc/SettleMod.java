@@ -2549,9 +2549,7 @@ public class SettleMod {
                 CharacterRegistry people = net.minecraftforge.fml.ModList.get().isLoaded("wf_people")
                         ? PeopleMod.registry(map) : null;
                 int characterCount = people == null ? -1 : people.all().size();
-                Set<String> houseNames = new HashSet<>();
-                if (people != null) for (Character character : people.all())
-                    if (character.house != null && !character.house.isBlank()) houseNames.add(character.house);
+                Set<String> houseNames = people == null ? Set.of() : houseNamesSnapshot(people);
                 int houseCount = houseNames.size();
                 int titleCount = map.titles == null ? 0 : map.titles.allTitles().size();
                 for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
@@ -2564,9 +2562,7 @@ public class SettleMod {
                     if (repeated != existing)
                         throw new IllegalStateException("Repeated blueprint import allocated a second Colony: " + id);
                 }
-                Set<String> housesAfter = new HashSet<>();
-                if (people != null) for (Character character : people.all())
-                    if (character.house != null && !character.house.isBlank()) housesAfter.add(character.house);
+                Set<String> housesAfter = people == null ? Set.of() : houseNamesSnapshot(people);
                 if (COLONIES.size() != colonyCountAfterFirstImport
                         || (people != null && (people.all().size() != characterCount || !housesAfter.equals(houseNames)))
                         || (map.titles != null && map.titles.allTitles().size() != titleCount))
@@ -2798,4 +2794,19 @@ public class SettleMod {
         ResidentInteraction.register(e);
         SettlementStressLab.register(e.getDispatcher());
     }
+    private static Set<String> houseNamesSnapshot(CharacterRegistry registry) {
+        try {
+            Object raw = registry.getClass().getMethod("houseNamesSnapshot").invoke(registry);
+            if (raw instanceof Collection<?> values) {
+                Set<String> result = new HashSet<>();
+                for (Object value : values) if (value instanceof String name && !name.isBlank()) result.add(name);
+                return Set.copyOf(result);
+            }
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.warn("wf_settle: compact Character house-name projection unavailable; skipping optional name-count audit: {}",
+                    error.toString());
+        }
+        return Set.of();
+    }
+
 }

@@ -385,16 +385,12 @@ public class RealmsMod {
         return Statecraft.stableDynastyId(mapId, characterText(character, "culture"), house);
     }
 
-    private static String dynastyDisplayName(Object founder, String mapId, String dynastyId) {
-        if (founder == null) return "Дом " + dynastyId;
-        String race = characterPropText(founder, "origin.race");
-        String culture = characterText(founder, "culture");
+    private static String dynastyDisplayName(String race, String culture, String house, String mapId, String dynastyId) {
         long seed = 0x44594E415354594CL ^ ((long) mapId.hashCode() << 32) ^ dynastyId.hashCode();
         try {
             return PeopleMod.NAMES.generate(race, culture, "dynasties", new Random(seed));
         } catch (RuntimeException missingPool) {
-            String house = characterText(founder, "house");
-            return house.isBlank() ? "Дом " + dynastyId : "Дом " + house;
+            return house == null || house.isBlank() ? "Дом " + dynastyId : "Дом " + house;
         }
     }
 
@@ -427,38 +423,40 @@ public class RealmsMod {
                 // lag the source module in the addon build order. Read optional dynasty metadata
                 // reflectively so this bridge remains binary-compatible without copying Character.
                 Map<String, String> founders = new LinkedHashMap<>();
-                Map<String, Object> founderCharacters = new LinkedHashMap<>();
                 Map<String, Integer> founderYears = new LinkedHashMap<>();
+                Map<String, String> founderRaces = new LinkedHashMap<>();
+                Map<String, String> founderCultures = new LinkedHashMap<>();
+                Map<String, String> founderHouses = new LinkedHashMap<>();
                 Map<String, String> dynastyNames = new LinkedHashMap<>();
                 Map<String, String> characterHouses = new LinkedHashMap<>();
-                for (Object character : people.all()) {
+                forEachCanonicalCharacter(people, character -> {
                     String globalId = characterText(character, "globalId");
                     if (!globalId.isBlank()) characterNames.put(globalId, characterText(character, "name"));
                     String house = characterDynastyId(character, map.name);
-                    if (house.isBlank()) continue;
+                    if (house.isBlank()) return;
                     int birthYear = characterNumber(character, "birthYear");
                     if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
-                        founders.put(house, characterText(character, "globalId"));
-                        founderCharacters.put(house, character);
+                        founders.put(house, globalId);
                         founderYears.put(house, birthYear);
+                        founderRaces.put(house, characterPropText(character, "origin.race"));
+                        founderCultures.put(house, characterText(character, "culture"));
+                        founderHouses.put(house, characterText(character, "house"));
                     }
-                    if (!globalId.isBlank()) characterHouses.put(globalId, house);
-                }
+                    if (!globalId.isBlank()) {
+                        characterHouses.put(globalId, house);
+                        POLITICS.addDynastyMember(house, globalId);
+                    }
+                });
                 for (Map.Entry<String, String> entry : founders.entrySet()) {
                     String house = entry.getKey();
-                    Object founder = founderCharacters.get(house);
-                    String displayName = dynastyDisplayName(founder, map.name, house);
+                    String displayName = dynastyDisplayName(founderRaces.getOrDefault(house, ""),
+                            founderCultures.getOrDefault(house, ""), founderHouses.getOrDefault(house, ""),
+                            map.name, house);
                     dynastyNames.put(house, displayName);
                     Statecraft.Dynasty dynasty = POLITICS.dynasty(house);
                     if (dynasty == null) POLITICS.registerDynasty(house, entry.getValue(), displayName);
                     else if (dynasty.name == null || dynasty.name.isBlank() || dynasty.name.equals(house))
                         POLITICS.setDynastyName(house, displayName);
-                }
-                for (Object character : people.all()) {
-                    String house = characterDynastyId(character, map.name);
-                    String globalId = characterText(character, "globalId");
-                    if (house.isBlank() || globalId.isBlank()) continue;
-                    POLITICS.addDynastyMember(house, globalId);
                 }
                 // One canonical bridge owns the initial map-court -> Statecraft crown-holder link.
                 PoliticalIdentitySynchronizer.Report rulerSync =
@@ -992,4 +990,34 @@ public class RealmsMod {
         if (result == 0) return 0;
         return info(source, realm);
     }
+    /** Bounded UUID/lease scan avoids retaining a whole CharacterRegistry in optional bridges. */
+    private static void forEachCanonicalCharacter(CharacterRegistry registry,
+                                                   java.util.function.Consumer<Object> visitor) {
+        try {
+            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
+            Object access = registry.getClass().getMethod("access").invoke(registry);
+            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
+            int count = registry.all().size();
+            for (int offset = 0; offset < count; offset += 256) {
+                Object rawPage = idPage.invoke(registry, offset, 256);
+                if (!(rawPage instanceof List<?> ids))
+                    throw new IllegalStateException("Character ID page API returned a non-list");
+                for (Object rawId : ids) {
+                    Object lease = acquire.invoke(access, String.valueOf(rawId));
+                    if (lease == null) throw new IllegalStateException("Could not lease canonical Character " + rawId);
+                    try {
+                        visitor.accept(lease.getClass().getMethod("get").invoke(lease));
+                    } finally {
+                        ((AutoCloseable) lease).close();
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-realms requires the bounded Character ID/lease API", error);
+        } catch (Exception error) {
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Could not close wf-realms Character lease", error);
+        }
+    }
+
 }

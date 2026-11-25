@@ -66,8 +66,9 @@ public final class EmergentPopulationIndex {
         String globalId = character.globalId;
         if (globalId == null || globalId.isBlank())
             throw new IllegalArgumentException("Emergent Character must have a canonical global UUID");
-        if (!knownGlobalIds.add(globalId)) return;
         Object rawBand = character.props.get("emergence.band_id");
+        if (!(rawBand instanceof String bandId) || bandId.isBlank()) return;
+        if (!knownGlobalIds.add(globalId)) return;
         Object rawFamily = character.props.get("emergence.family_group_index");
         int familyIndex = rawFamily instanceof Number number ? number.intValue() : -1;
         Object rawRace = character.props.get("origin.race");
@@ -78,11 +79,9 @@ public final class EmergentPopulationIndex {
                 character.culture == null ? "" : character.culture,
                 character.father == null ? "" : character.father,
                 character.mother == null ? "" : character.mother));
-        if (rawBand instanceof String bandId && !bandId.isBlank()) {
-            emergent.add(globalId);
-            if (character.alive)
-                livingByBand.computeIfAbsent(bandId, ignored -> new ArrayList<>()).add(globalId);
-        }
+        emergent.add(globalId);
+        if (character.alive)
+            livingByBand.computeIfAbsent(bandId, ignored -> new ArrayList<>()).add(globalId);
     }
 
     /** Compact immutable metadata captured while a short lease is held. */
