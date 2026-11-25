@@ -167,6 +167,7 @@ public final class ResidentEquipment {
         person.props.remove(ITEM_KEY);
         person.props.put(TIER_KEY, tier);
         person.props.put(ROLE_KEY, role);
+        dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
     }
 
     private static ItemStack load(Character person) {
@@ -189,8 +190,13 @@ public final class ResidentEquipment {
                         new CharacterInventory.Item(itemId, 1, legacy.save(new CompoundTag()).toString()), false);
             }
             person.props.remove(ITEM_KEY);
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
             return legacy;
-        } catch (Exception ignored) { person.props.remove(ITEM_KEY); return ItemStack.EMPTY; }
+        } catch (Exception ignored) {
+            person.props.remove(ITEM_KEY);
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
+            return ItemStack.EMPTY;
+        }
     }
 
     public static void sync(WFWorker body) {
@@ -252,6 +258,7 @@ public final class ResidentEquipment {
             save(person, crafted, chosen, requiredRole(worker, colony));
             body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
             person.props.put("equipment.last_craft", colony.s.year());
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
             return ActionResult.ok("Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".");
         }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
@@ -281,6 +288,7 @@ public final class ResidentEquipment {
             save(person, stack, tier, String.valueOf(person.props.getOrDefault(ROLE_KEY, "worker")));
             body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
             person.props.put("equipment.last_repair", colony.s.year());
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
             return ActionResult.ok("Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".");
         }, ActionResult.fail("Персонаж рабочего недоступен."));
     }
@@ -337,6 +345,7 @@ public final class ResidentEquipment {
             Object last = person.props.get("equipment.craft_attempt");
             if (last instanceof Number n && now - n.longValue() < 120) return null;
             person.props.put("equipment.craft_attempt", now);
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
             ItemStack before = load(person);
             if (!before.isEmpty() && before.getMaxDamage() > 0 && before.getDamageValue() > 0) {
                 ActionResult repaired = repairAction(body);
@@ -378,6 +387,7 @@ public final class ResidentEquipment {
                     int tier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : 0;
                     save(person, stack, tier, requiredRole(worker, colony));
                 }
+                dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
             }
             return null;
         }, null);

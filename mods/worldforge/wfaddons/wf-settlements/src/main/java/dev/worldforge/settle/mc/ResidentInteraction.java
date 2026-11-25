@@ -414,6 +414,7 @@ public final class ResidentInteraction {
                         "Доставить " + required + " ед. ресурса «" + resourceName + "» в поселение",
                         resource, required, colony.s.year());
                 person.props.put(QUEST_KEY, next.toMap());
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
                 player.sendSystemMessage(Component.literal("§e" + person.name + ": Нам нужны " + required
                         + " ед. ресурса «" + resourceName + "». Поможете доставить?"));
             }
@@ -560,6 +561,7 @@ public final class ResidentInteraction {
 
     private static void saveQuest(Character person, ResidentQuest quest) {
         person.props.put(QUEST_KEY, new LinkedHashMap<>(quest.toMap()));
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
     }
 
     private static String relationship(Character person, ServerPlayer player) {
