@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.storage.*;
 
@@ -170,25 +171,27 @@ public final class CharacterAccessServiceTest {
                             && registry.materializedSize() == registry.size() - 1,
                     "durably checkpointed unleased Character can leave the materialized object map");
             try (CharacterAccessService.Lease hydratedLease = access.acquireGlobal(evictableGlobalId)) {
-                Character hydrated = hydratedLease.get();
-                check(hydratedLease != null && evictableGlobalId.equals(hydrated.globalId)
+                check(hydratedLease != null && evictableGlobalId.equals(hydratedLease.get().globalId)
                                 && registry.materializedSize() == registry.size(),
                         "global UUID acquisition lazily hydrates the canonical identity from checkpoint");
-                check(registry.get(evictableLocalId) == hydrated
-                                && registry.getByGlobalId(evictableGlobalId) == hydrated,
-                        "local/global lookups reuse the one hydrated canonical object");
-                check("Persisted Eviction Subject".equals(hydrated.name)
-                                && "House of Eviction".equals(hydrated.house)
-                                && "family-spouse-local".equals(hydrated.spouse)
-                                && "family-father-local".equals(hydrated.father)
-                                && "family-mother-local".equals(hydrated.mother)
-                                && hydrated.children.contains("family-child-local")
-                                && "lumberjack".equals(hydrated.props.get("profession.id"))
-                                && "estate-receipt-eviction-test".equals(hydrated.props.get("estate.transfer_receipt"))
-                                && CharacterInventory.count(hydrated, "minecraft:bread") == 3,
-                        "rehydration preserves family, profession, estate receipt and canonical inventory");
-                check(!registry.evictMaterialized(evictableGlobalId),
-                        "active scoped lease prevents concurrent physical eviction");
+                if (hydratedLease != null) {
+                    Character hydrated = hydratedLease.get();
+                    check(registry.get(evictableLocalId) == hydrated
+                                    && registry.getByGlobalId(evictableGlobalId) == hydrated,
+                            "local/global lookups reuse the one hydrated canonical object");
+                    check("Persisted Eviction Subject".equals(hydrated.name)
+                                    && "House of Eviction".equals(hydrated.house)
+                                    && "family-spouse-local".equals(hydrated.spouse)
+                                    && "family-father-local".equals(hydrated.father)
+                                    && "family-mother-local".equals(hydrated.mother)
+                                    && hydrated.children.contains("family-child-local")
+                                    && "lumberjack".equals(hydrated.props.get("profession.id"))
+                                    && "estate-receipt-eviction-test".equals(hydrated.props.get("estate.transfer_receipt"))
+                                    && CharacterInventory.count(hydrated, "minecraft:bread") == 3,
+                            "rehydration preserves family, profession, estate receipt and canonical inventory");
+                    check(!registry.evictMaterialized(evictableGlobalId),
+                            "active scoped lease prevents concurrent physical eviction");
+                }
             }
             try (CharacterAccessService.Lease presence = access.acquirePresenceGlobal(evictableGlobalId)) {
                 check(presence != null && !coordinator.canEvict(evictableGlobalId),
