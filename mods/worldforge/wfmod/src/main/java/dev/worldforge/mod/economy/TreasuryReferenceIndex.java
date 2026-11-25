@@ -19,10 +19,10 @@ import java.io.ByteArrayOutputStream;
 final class TreasuryReferenceIndex {
     private static final int BUCKETS = 256;
     private static final int RECORD_BYTES = 16;
-    // A 16M-bit Bloom filter is only 2 MiB, independent of journal cardinality.
-    // It lets the common "new idempotency key" path reject absent archive keys
-    // without scanning a growing disk bucket for every new citizen transaction.
-    private static final int BLOOM_BITS = 1 << 24;
+    // A 128M-bit (16 MiB) Bloom filter remains compact while keeping false positives
+    // very low even when the archive grows to several million citizen postings.
+    // It rejects absent idempotency keys without scanning growing disk buckets.
+    private static final int BLOOM_BITS = 1 << 27;
     private static final int BLOOM_MASK = BLOOM_BITS - 1;
     private static final int BLOOM_HASHES = 7;
     private final Path directory;
