@@ -265,6 +265,30 @@ jobs:
           if ($env:SETTLEMENT_OUTCOME -ne "success") {
             "Contour 04 failed; all four requested runtime contours have been attempted." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
+      - name: Contour 05 — progressive Economy / Trade / Treasury scale and recovery
+        id: economy_stress
+        continue-on-error: true
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_ECONOMY_STRESS_ENABLED: "true"
+          WF_ECONOMY_STRESS_MAX_POPULATION: "1000000"
+          WF_ECONOMY_STRESS_MAX_SETTLEMENTS: "1000"
+          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
+        run: |
+          bash tools/test-all.sh ../wfmod "" economy
+
+      - name: Aggregate Economy / Trade / Treasury contour result
+        if: always()
+        shell: pwsh
+        env:
+          ECONOMY_OUTCOME: ${{ steps.economy_stress.outcome }}
+        run: |
+          "CONTOUR_05_ECONOMY_OUTCOME=$env:ECONOMY_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:ECONOMY_OUTCOME -ne "success") {
+            "Contour 05 failed; preserving diagnostics and continuing to the remaining inventory." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
       # Dual-world Genesis is intentionally deferred while the four independent
       # runtime contours are stabilized. Do not spend another multi-hour runner here.
       - name: Dual-world Genesis — deferred by current acceptance scope
