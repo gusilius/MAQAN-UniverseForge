@@ -50,6 +50,7 @@ public final class SocialLifeStressLab {
         final MinecraftServer server;
         final CharacterRegistry registry;
         final List<Character> population;
+        final List<String> stressCharacterIds = new java.util.ArrayList<>();
         final Relations relations = new Relations();
         final int target;
         final int daysTarget;
@@ -83,7 +84,6 @@ public final class SocialLifeStressLab {
         CharacterRegistry restoredRegistry;
         int familyCodecCursor;
         int familyCodecTarget;
-        long familyCodecMembershipGeneration;
         int familyCodecRestarts;
         long familyIntegrityErrors = -1L;
         long restoredFamilyIntegrityErrors = -1L;
@@ -201,6 +201,7 @@ public final class SocialLifeStressLab {
                 Character person = run.registry.create("Social Stress Citizen " + ordinal,
                         "social-stress-house-" + group, "social-stress-culture",
                         (ordinal & 1) == 0 ? "f" : "m", year - age);
+                run.stressCharacterIds.add(person.id);
                 String polity = "social-stress-polity-" + group;
                 String band = "social-stress-band-" + group;
                 person.props.put("emergence.polity_id", polity);
@@ -268,6 +269,7 @@ public final class SocialLifeStressLab {
             }
             Character child = run.registry.addChild(father, mother, "Social Stress Child " + run.births,
                     (run.births & 1) == 0 ? "f" : "m", year);
+            run.stressCharacterIds.add(child.id);
             child.props.put("population.last_simulated_world_day", Long.toString(day));
             FamilyPlanning.complete(mother, father, year, child.id);
             if (!mother.children.contains(child.id) || !father.children.contains(child.id)
@@ -370,43 +372,36 @@ public final class SocialLifeStressLab {
     }
 
     private static void verifyFamilySource(Run run) {
-        run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
-        run.familyLinks = familyLinkCount(run.registry);
-        run.familySourceFingerprint = familyGraphFingerprint(run.registry);
+        run.familyIntegrityErrors = familyIntegrityErrors(run.registry, run.stressCharacterIds);
+        run.familyLinks = familyLinkCount(run.registry, run.stressCharacterIds);
+        run.familySourceFingerprint = familyGraphFingerprint(run.registry, run.stressCharacterIds);
         run.restoredRegistry = new CharacterRegistry();
         run.familyCodecCursor = 0;
-        run.familyCodecTarget = run.registry.size();
-        run.familyCodecMembershipGeneration = run.registry.membershipAppendGeneration();
+        run.familyCodecTarget = run.stressCharacterIds.size();
         run.familyCodecRestarts = 0;
         run.phase = "VERIFYING_FAMILY_CODEC";
         RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_begin characters={} batch={}",
                 run.familyCodecTarget, 128);
     }
 
-    /** Bounded canonical record round-trip; never build a second full-registry JSON tree/string. */
+    /** Bounded canonical record round-trip over this contour's own stable cohort. */
     private static void verifyFamilyCodecBatch(Run run) {
-        // The production world continues to advance between bounded codec batches. Never
-        // compare a source graph captured at one membership generation with a restored
-        // graph assembled from a later, growing registry: restart from a fresh boundary.
-        if (run.registry.size() != run.familyCodecTarget
-                || run.registry.membershipAppendGeneration() != run.familyCodecMembershipGeneration) {
-            restartFamilyCodecAtStableBoundary(run);
-            return;
-        }
+        if (run.stressCharacterIds.size() != run.familyCodecTarget)
+            throw new IllegalStateException("Social stress cohort changed after lifecycle completion");
         int end = Math.min(run.familyCodecTarget, run.familyCodecCursor + 128);
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for (int i = run.familyCodecCursor; i < end; i++) {
-                Character person = run.registry.get(run.registry.idAt(i));
-                if (person == null) throw new IllegalStateException("Missing source Character at family codec index " + i);
-                run.restoredRegistry.applyJsonRecord(
-                        run.registry.toJsonRecord(person), "contour-03-social-roundtrip");
+                String id = run.stressCharacterIds.get(i);
+                Character person = run.registry.get(id);
+                if (person == null) throw new IllegalStateException("Missing source Character " + id);
+                run.restoredRegistry.applyJsonRecord(run.registry.toJsonRecord(person), "contour-03-social-roundtrip");
             }
         }
         run.familyCodecCursor = end;
         if (run.familyCodecCursor % 4096 == 0 || run.familyCodecCursor == run.familyCodecTarget)
             RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_progress characters={}/{} heapBytes={}",
                     run.familyCodecCursor, run.familyCodecTarget, usedHeapBytes());
-        if (run.familyCodecCursor >= run.familyCodecTarget && run.registry.size() == run.familyCodecTarget) {
+        if (run.familyCodecCursor >= run.familyCodecTarget) {
             run.restoredRegistry.reconcileFamilyLinksAfterRecordRestore();
             run.phase = "VERIFYING_FAMILY_RESULT";
         }
@@ -414,58 +409,48 @@ public final class SocialLifeStressLab {
 
     private static void restartFamilyCodecAtStableBoundary(Run run) {
         if (++run.familyCodecRestarts > 5)
-            throw new IllegalStateException("Canonical Character membership kept changing during family codec verification");
-        run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
-        run.familyLinks = familyLinkCount(run.registry);
-        run.familySourceFingerprint = familyGraphFingerprint(run.registry);
-        run.familyCodecTarget = run.registry.size();
-        run.familyCodecMembershipGeneration = run.registry.membershipAppendGeneration();
+            throw new IllegalStateException("Social stress family graph kept changing during codec verification");
+        run.familyIntegrityErrors = familyIntegrityErrors(run.registry, run.stressCharacterIds);
+        run.familyLinks = familyLinkCount(run.registry, run.stressCharacterIds);
+        run.familySourceFingerprint = familyGraphFingerprint(run.registry, run.stressCharacterIds);
+        run.familyCodecTarget = run.stressCharacterIds.size();
         run.familyCodecCursor = 0;
         run.restoredRegistry = new CharacterRegistry();
-        RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_restart={} stableCharacters={} membershipGeneration={}",
-                run.familyCodecRestarts, run.familyCodecTarget, run.familyCodecMembershipGeneration);
+        RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_restart={} cohortCharacters={}",
+                run.familyCodecRestarts, run.familyCodecTarget);
     }
 
     private static void verifyFamilyResult(Run run) {
-        if (run.registry.size() != run.familyCodecTarget
-                || run.registry.membershipAppendGeneration() != run.familyCodecMembershipGeneration) {
-            restartFamilyCodecAtStableBoundary(run);
-            run.phase = "VERIFYING_FAMILY_CODEC";
-            return;
-        }
-        run.restoredFamilyIntegrityErrors = familyIntegrityErrors(run.restoredRegistry);
-        long restoredLinks = familyLinkCount(run.restoredRegistry);
-        long currentSourceLinks = familyLinkCount(run.registry);
-        long currentSourceFingerprint = familyGraphFingerprint(run.registry);
+        if (run.stressCharacterIds.size() != run.familyCodecTarget)
+            throw new IllegalStateException("Social stress cohort changed during family codec round-trip");
+        run.restoredFamilyIntegrityErrors = familyIntegrityErrors(run.restoredRegistry, run.stressCharacterIds);
+        long restoredLinks = familyLinkCount(run.restoredRegistry, run.stressCharacterIds);
+        long currentSourceLinks = familyLinkCount(run.registry, run.stressCharacterIds);
+        long currentSourceFingerprint = familyGraphFingerprint(run.registry, run.stressCharacterIds);
         if (currentSourceFingerprint != run.familySourceFingerprint) {
             restartFamilyCodecAtStableBoundary(run);
             run.phase = "VERIFYING_FAMILY_CODEC";
             return;
         }
         run.familySaveLoadVerified = currentSourceLinks == run.familyLinks
-                && run.restoredRegistry.size() == run.registry.size()
-                && run.restoredFamilyIntegrityErrors == 0L
-                && run.familyIntegrityErrors == 0L
+                && run.restoredRegistry.size() == run.stressCharacterIds.size()
+                && run.restoredFamilyIntegrityErrors == 0L && run.familyIntegrityErrors == 0L
                 && restoredLinks == run.familyLinks;
         run.status = run.lifecyclePassed && run.relationsSaveLoadVerified && run.familySaveLoadVerified
                 ? "PASS" : "FAILED";
-        if (!run.relationsSaveLoadVerified)
-            run.failure = "relations_save_load_verification_failed";
-        else if (!run.familySaveLoadVerified)
-            run.failure = "canonical_family_save_load_verification_failed";
+        if (!run.relationsSaveLoadVerified) run.failure = "relations_save_load_verification_failed";
+        else if (!run.familySaveLoadVerified) run.failure = "canonical_family_save_load_verification_failed";
         writeReport(run, run.familyIntegrityErrors, run.restoredFamilyIntegrityErrors, run.familyLinks,
                 run.relationsSaveLoadVerified, run.familySaveLoadVerified);
         run.phase = "COMPLETE";
     }
 
-    private static long familyIntegrityErrors(CharacterRegistry registry) {
+    private static long familyIntegrityErrors(CharacterRegistry registry, List<String> ids) {
         long errors = 0L;
-        for (Character person : registry.all()) {
+        for (String id : ids) {
+            Character person = registry.get(id);
             if (person == null || person.id == null || person.id.isBlank()
-                    || person.globalId == null || person.globalId.isBlank()) {
-                errors++;
-                continue;
-            }
+                    || person.globalId == null || person.globalId.isBlank()) { errors++; continue; }
             if (person.spouse != null && !person.spouse.isBlank()) {
                 Character spouse = registry.get(person.spouse);
                 if (spouse == null || !person.id.equals(spouse.spouse)) errors++;
@@ -486,23 +471,26 @@ public final class SocialLifeStressLab {
         return errors;
     }
 
-    /** Compact O(1)-memory fence for source family state across multi-tick codec batches. */
-    private static long familyGraphFingerprint(CharacterRegistry registry) {
+    /** Fingerprint only the stress cohort; unrelated world NPCs may join concurrently. */
+    private static long familyGraphFingerprint(CharacterRegistry registry, List<String> ids) {
         long hash = 0xcbf29ce484222325L;
-        for (Character person : registry.all()) {
+        for (String id : ids) {
+            Character person = registry.get(id);
+            if (person == null) throw new IllegalStateException("Missing stress Character while fingerprinting: " + id);
             hash = (hash ^ person.id.hashCode()) * 0x100000001b3L;
             hash = (hash ^ String.valueOf(person.spouse).hashCode()) * 0x100000001b3L;
             hash = (hash ^ String.valueOf(person.father).hashCode()) * 0x100000001b3L;
             hash = (hash ^ String.valueOf(person.mother).hashCode()) * 0x100000001b3L;
-            for (String child : person.children)
-                hash = (hash ^ child.hashCode()) * 0x100000001b3L;
+            for (String child : person.children) hash = (hash ^ child.hashCode()) * 0x100000001b3L;
         }
         return hash;
     }
 
-    private static long familyLinkCount(CharacterRegistry registry) {
+    private static long familyLinkCount(CharacterRegistry registry, List<String> ids) {
         long links = 0L;
-        for (Character person : registry.all()) {
+        for (String id : ids) {
+            Character person = registry.get(id);
+            if (person == null) throw new IllegalStateException("Missing stress Character while counting family links: " + id);
             if (person.spouse != null && !person.spouse.isBlank()) links++;
             if (person.father != null && !person.father.isBlank()) links++;
             if (person.mother != null && !person.mother.isBlank()) links++;
