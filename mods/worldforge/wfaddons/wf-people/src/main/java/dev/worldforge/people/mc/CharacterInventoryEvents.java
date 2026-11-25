@@ -7,6 +7,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.people.CharacterInventoryActions;
+import dev.worldforge.people.CharacterAccessService;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.BlockPos;
@@ -219,7 +220,10 @@ public final class CharacterInventoryEvents {
         ActionExecutionService.Task task = CharacterInventoryActions.executeDurable(
                 WorldForgeApi.actionExecution(), request, "inventory.container.claim", owner, owner,
                 args, minute, WorldForgeMod.actionExecutionFile(player.getServer()),
-                () -> CharacterInventory.importContainerItems(owner, containerId, sourceKey, stacks),
+                () -> CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
+                        List.of(owner.globalId), participants ->
+                                CharacterInventory.importContainerItems(
+                                        participants.get(owner.globalId), containerId, sourceKey, stacks)),
                 () -> PeopleMod.persistCharacter(owner, player.getServer()),
                 "Physical container imported");
         if (task.status() != ActionExecutionService.Status.SUCCEEDED
@@ -280,9 +284,12 @@ public final class CharacterInventoryEvents {
         ActionExecutionService.Task task = CharacterInventoryActions.executeDurable(
                 WorldForgeApi.actionExecution(), request, actionId, owner, actor, args, minute,
                 WorldForgeMod.actionExecutionFile(player.getServer()),
-                () -> grant
-                        ? CharacterInventory.grantContainerAccess(owner, menu.containerId(), grantee.globalId)
-                        : CharacterInventory.revokeContainerAccess(owner, menu.containerId(), grantee.globalId),
+                () -> CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(),
+                        List.of(owner.globalId), participants -> grant
+                                ? CharacterInventory.grantContainerAccess(
+                                        participants.get(owner.globalId), menu.containerId(), grantee.globalId)
+                                : CharacterInventory.revokeContainerAccess(
+                                        participants.get(owner.globalId), menu.containerId(), grantee.globalId)),
                 () -> PeopleMod.persistCharacter(owner, player.getServer()),
                 grant ? "Access granted" : "Access revoked");
         if (task.status() != ActionExecutionService.Status.SUCCEEDED) {

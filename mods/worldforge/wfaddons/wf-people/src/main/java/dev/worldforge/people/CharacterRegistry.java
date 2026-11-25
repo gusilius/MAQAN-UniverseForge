@@ -74,6 +74,8 @@ public final class CharacterRegistry {
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
     /** Character-local body-kind lookup used without hydrating an evicted Character. */
     private final Map<String, Map<String, String>> entityBindingsByCharacterId = new HashMap<>();
+    /** Sparse account-to-Character UUID index; it stores no Character references. */
+    private final Map<String, String> playerGlobalIdByAccount = new HashMap<>();
     /** Reverse post index: succession and office queries must not scan the population. */
     private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
     /** Exact role/place projection for bounded office-holder queries. */
@@ -880,6 +882,22 @@ public final class CharacterRegistry {
         if (localId == null || bodyKind == null) return null;
         Map<String, String> bindings = entityBindingsByCharacterId.get(localId);
         return bindings == null ? null : bindings.get(bodyKind.toLowerCase(Locale.ROOT));
+    }
+
+    /** Indexes a persisted Genesis account binding by UUID without retaining the Character object. */
+    public synchronized void indexPlayerBinding(String localId, String accountUuid) {
+        String globalId = globalIdByLocalId.get(localId);
+        if (globalId == null) throw new IllegalArgumentException("Unknown Character local ID: " + localId);
+        String account = java.util.UUID.fromString(accountUuid).toString();
+        String previous = playerGlobalIdByAccount.putIfAbsent(account, globalId);
+        if (previous != null && !previous.equals(globalId))
+            throw new IllegalStateException("Player account is bound to multiple Characters: " + account);
+    }
+
+    public synchronized String playerGlobalIdForAccount(String accountUuid) {
+        if (accountUuid == null || accountUuid.isBlank()) return null;
+        try { return playerGlobalIdByAccount.get(java.util.UUID.fromString(accountUuid).toString()); }
+        catch (IllegalArgumentException invalid) { return null; }
     }
 
     private void removeEntityBindings(Character character) {
@@ -1875,6 +1893,17 @@ public final class CharacterRegistry {
         entityOwnerByUuid.putAll(entityOwners);
         entityBindingsByCharacterId.clear();
         for (Character character : loaded.values()) indexEntityBindings(character);
+        playerGlobalIdByAccount.clear();
+        for (Character character : loaded.values()) {
+            Object account = character.props.get("genesis.player_uuid");
+            if (account instanceof String value && !value.isBlank()) {
+                try { indexPlayerBinding(character.id, value); }
+                catch (IllegalArgumentException invalid) {
+                    // The partition loader reports malformed Genesis account bindings without
+                    // making an otherwise recoverable Character partition unreadable.
+                }
+            }
+        }
         membershipGeneration++;
         next = safeNext;
         markMembershipMutation();

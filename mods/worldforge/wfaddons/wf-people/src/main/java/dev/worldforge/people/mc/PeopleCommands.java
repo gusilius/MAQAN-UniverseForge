@@ -187,10 +187,25 @@ final class PeopleCommands {
     }
 
     private static int setOrgDirect(CommandSourceStack s, String id, String org) {
-        Character c = PeopleMod.findNpc(id);
-        if (c == null) { s.sendFailure(Component.literal("Нет персонажа " + id)); return 0; }
-        if (org.equals("none")) c.props.remove("org"); else c.props.put("org", org);
-        s.sendSuccess(() -> Component.literal(c.name + (org.equals("none") ? ": больше не представитель" : ": представитель " + org)), true);
-        return 1;
+        Character resolved = PeopleMod.findNpc(id);
+        if (resolved == null) { s.sendFailure(Component.literal("Нет персонажа " + id)); return 0; }
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(resolved.globalId);
+        if (owner == null) { s.sendFailure(Component.literal("Не найден реестр персонажа " + id)); return 0; }
+        try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                     owner.access().acquireGlobal(resolved.globalId)) {
+            if (lease == null) { s.sendFailure(Component.literal("Персонаж временно недоступен " + id)); return 0; }
+            Character character = lease.get();
+            if (org.equals("none")) character.props.remove("org");
+            else character.props.put("org", org);
+            CharacterRegistry.recordCharacterMutation(character);
+            if (!PeopleMod.persistCharacter(character, s.getServer())) {
+                s.sendFailure(Component.literal("Изменение не подтверждено WAL; повторите команду позже."));
+                return 0;
+            }
+            String name = character.name;
+            s.sendSuccess(() -> Component.literal(name + (org.equals("none")
+                    ? ": больше не представитель" : ": представитель " + org)), true);
+            return 1;
+        }
     }
 }

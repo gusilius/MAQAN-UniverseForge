@@ -498,6 +498,7 @@ public class PeopleMod {
                     if (!(raw instanceof String account) || account.isBlank()) continue;
                     try {
                         String canonical = UUID.fromString(account).toString();
+                        registry.indexPlayerBinding(localId, canonical);
                         String previous = PLAYER_CHARACTERS.putIfAbsent(canonical, character.globalId);
                         if (previous != null && !previous.equals(character.globalId))
                             throw new IllegalStateException("Minecraft player UUID is bound to multiple Characters: " + canonical);

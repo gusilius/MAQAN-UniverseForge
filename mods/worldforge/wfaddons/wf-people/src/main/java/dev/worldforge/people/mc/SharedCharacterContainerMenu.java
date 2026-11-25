@@ -43,7 +43,7 @@ public final class SharedCharacterContainerMenu extends ChestMenu {
         super(MenuType.GENERIC_9x6, id, playerInventory, view, 6);
         this.opener = opener;
         var ownerRegistry = PeopleMod.authority().registryForGlobal(owner.globalId);
-        this.ownerLease = ownerRegistry == null ? null : ownerRegistry.access().acquireGlobal(owner.globalId);
+        this.ownerLease = ownerRegistry == null ? null : ownerRegistry.access().acquirePresenceGlobal(owner.globalId);
         if (this.ownerLease == null || this.ownerLease.get() != owner) {
             if (this.ownerLease != null) this.ownerLease.close();
             throw new IllegalStateException("Could not pin canonical Character for the lifetime of its shared inventory menu");

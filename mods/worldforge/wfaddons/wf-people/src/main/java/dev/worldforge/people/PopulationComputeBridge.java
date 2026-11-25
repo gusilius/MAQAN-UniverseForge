@@ -303,19 +303,27 @@ public final class PopulationComputeBridge {
         for(Update update:updates){
             CapturedCharacter source=captured.characters.get(update.id);
             CharacterRegistry owner=source==null?null:source.owner();
-            Character character=owner==null?null:owner.getByGlobalId(update.id);
-            if(character==null||!character.alive||character.birthYear!=source.birthYear())return false;
+            if(owner==null)return false;
+            try(CharacterAccessService.Lease lease=owner.access().acquireGlobal(update.id)){
+                if(lease==null)return false;
+                Character character=lease.get();
+                if(!character.alive||character.birthYear!=source.birthYear())return false;
+            }
         }
         if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for(Update update:updates){
                 CapturedCharacter source=captured.characters.get(update.id);
                 CharacterRegistry owner=source.owner();
-                Character character=owner.getByGlobalId(update.id);
-                if(character==null||!character.alive||character.birthYear!=source.birthYear())
-                    throw new IllegalStateException("Canonical Character changed after population frame validation: "+update.id);
-                owner.applyLifeStageResult(character,update.age,update.stage,captured.year);
-                PopulationSimulation.applyComputedResult(character,update.needs,update.intent,update.simulatedDays,update.lastYear,update.worldDay);
+                try(CharacterAccessService.Lease lease=owner.access().acquireGlobal(update.id)){
+                    if(lease==null)
+                        throw new IllegalStateException("Canonical Character was not rehydratable after population frame validation: "+update.id);
+                    Character character=lease.get();
+                    if(!character.alive||character.birthYear!=source.birthYear())
+                        throw new IllegalStateException("Canonical Character changed after population frame validation: "+update.id);
+                    owner.applyLifeStageResult(character,update.age,update.stage,captured.year);
+                    PopulationSimulation.applyComputedResult(character,update.needs,update.intent,update.simulatedDays,update.lastYear,update.worldDay);
+                }
             }
         }
         return true;
