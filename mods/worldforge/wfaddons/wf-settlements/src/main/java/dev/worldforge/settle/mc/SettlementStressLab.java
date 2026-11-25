@@ -54,6 +54,7 @@ public final class SettlementStressLab {
     private final List<Colony> remote = new ArrayList<>();
     private final List<Double> tickMillis = new ArrayList<>();
     private long tickStartedNanos;
+    private boolean tickStartCaptured;
     private long runStartedNanos;
     private int created;
     private int elapsedTicks;
@@ -194,12 +195,15 @@ public final class SettlementStressLab {
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase == TickEvent.Phase.START) {
             tickStartedNanos = System.nanoTime();
+            tickStartCaptured = true;
             return;
         }
-        if (event.phase != TickEvent.Phase.END || failed) return;
+        if (event.phase != TickEvent.Phase.END || failed || !tickStartCaptured) return;
+        tickStartCaptured = false;
+        double measuredTickMillis = (System.nanoTime() - tickStartedNanos) / 1_000_000.0;
 
         if (runStartedNanos == 0) {
-            tickMillis.add((System.nanoTime() - tickStartedNanos) / 1_000_000.0);
+            tickMillis.add(measuredTickMillis);
             setupTicks++;
             createRemoteBatch();
             if (created >= targetRemoteColonies) finishSetup();
@@ -207,7 +211,7 @@ public final class SettlementStressLab {
         }
 
         long now = System.nanoTime();
-        tickMillis.add((now - tickStartedNanos) / 1_000_000.0);
+        tickMillis.add(measuredTickMillis);
         elapsedTicks++;
         navigationSamples += countNavigatingLocalWorkers();
 
