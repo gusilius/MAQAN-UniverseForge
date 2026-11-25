@@ -5,6 +5,7 @@ import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.Role;
@@ -32,7 +33,7 @@ final class NpcSpawner {
         passCounter = 0;
     }
 
-    private record Target(Character c, Role role, String spawnRoleId, double x, double z, double dist2) {}
+    private record Target(String characterId, Role role, String spawnRoleId, double x, double z, double dist2) {}
     private record SpawnAnchor(double x, double z, List<Target> targets) {}
 
     /** One title/realm traversal per level pass; each player queries only nearby spatial cells. */
@@ -48,7 +49,7 @@ final class NpcSpawner {
                 cells.add(created, x, z);
                 return created;
             });
-            anchor.targets().add(new Target(character, role, role.id, x, z, 0));
+            anchor.targets().add(new Target(character.id(), role, role.id, x, z, 0));
         }
 
         List<Target> nearby(double x, double z, double radius) {
@@ -59,8 +60,8 @@ final class NpcSpawner {
                 double distance = sq(anchor.x() - x, anchor.z() - z);
                 if (distance > radius2) continue;
                 for (Target target : anchor.targets()) {
-                    if (seen.add(target.c().id))
-                        result.add(new Target(target.c(), target.role(), target.spawnRoleId(), target.x(), target.z(), distance));
+                    if (seen.add(target.characterId()))
+                        result.add(new Target(target.characterId(), target.role(), target.spawnRoleId(), target.x(), target.z(), distance));
                 }
             }
             return result;
@@ -152,8 +153,7 @@ final class NpcSpawner {
         double px = player.getX(), pz = player.getZ();
         Map<String, Target> targets = new LinkedHashMap<>();
         for (Target target : index.nearby(px, pz, NEAR))
-            addTargetAndFamily(targets, registry, target.c(), target.role(),
-                    target.x(), target.z(), target.dist2());
+            addTargetAndFamily(targets, registry, target);
 
         List<Target> list = new ArrayList<>(targets.values());
         list.sort(Comparator.comparingDouble(Target::dist2));
@@ -162,30 +162,44 @@ final class NpcSpawner {
             if (sq(body.getX() - px, body.getZ() - pz) <= FAR * FAR) near++;
         for (Target target : list) {
             if (near >= PER_PLAYER) break;
-            if (bodies.containsKey(target.c().id)) continue;
-            WFNpc npc = spawn(level, target);
-            if (npc != null) {
-                bodies.put(target.c().id, npc);
-                near++;
+            if (bodies.containsKey(target.characterId())) continue;
+            try (CharacterAccessService.Lease lease = registry.access().acquire(target.characterId())) {
+                if (lease == null || !lease.get().alive) continue;
+                WFNpc npc = spawn(level, target, lease.get());
+                if (npc != null) {
+                    bodies.put(target.characterId(), npc);
+                    near++;
+                }
             }
         }
     }
 
-    /** A title holder's immediate family shares the residence and becomes visible with it. */
-    private static void addTargetAndFamily(Map<String, Target> targets, CharacterRegistry registry,
-                                           Character head, Role role, double x, double z, double distanceSquared) {
-        targets.putIfAbsent(head.id, new Target(head, role, role.id, x, z, distanceSquared));
-        if (!role.family) return;
-
-        if (head.spouse != null && !head.spouse.isBlank()) {
-            Character spouse = registry.get(head.spouse);
-            if (spouse != null && spouse.alive)
-                targets.putIfAbsent(spouse.id, new Target(spouse, role, role.id + ".family", x, z, distanceSquared + 0.01));
-        }
-        for (String childId : head.children) {
-            Character child = registry.get(childId);
-            if (child != null && child.alive)
-                targets.putIfAbsent(child.id, new Target(child, role, role.id + ".family", x, z, distanceSquared + 0.02));
+    /** Store only IDs in the target set; leases cover every read of the canonical records. */
+    private static void addTargetAndFamily(Map<String, Target> targets, CharacterRegistry registry, Target head) {
+        targets.putIfAbsent(head.characterId(), head);
+        if (!head.role().family) return;
+        try (CharacterAccessService.Lease lease = registry.access().acquire(head.characterId())) {
+            if (lease == null || !lease.get().alive) return;
+            Character person = lease.get();
+            String spouseId = person.spouse;
+            if (spouseId != null && !spouseId.isBlank()) {
+                try (CharacterAccessService.Lease spouseLease = registry.access().acquire(spouseId)) {
+                    if (spouseLease != null && spouseLease.get().alive) {
+                        Character spouse = spouseLease.get();
+                        targets.putIfAbsent(spouse.id, new Target(spouse.id, head.role(),
+                                head.role().id + ".family", head.x(), head.z(), head.dist2() + 0.01));
+                    }
+                }
+            }
+            for (String childId : person.children) {
+                try (CharacterAccessService.Lease childLease = registry.access().acquire(childId)) {
+                    if (childLease != null && childLease.get().alive) {
+                        Character child = childLease.get();
+                        targets.putIfAbsent(child.id, new Target(child.id, head.role(),
+                                head.role().id + ".family", head.x(), head.z(), head.dist2() + 0.02));
+                    }
+                }
+            }
         }
     }
 
@@ -198,8 +212,8 @@ final class NpcSpawner {
         return best;
     }
 
-    private static WFNpc spawn(ServerLevel level, Target t) {
-        Random rnd = new Random(t.c().id.hashCode() * 31L + t.spawnRoleId().hashCode());
+    private static WFNpc spawn(ServerLevel level, Target t, Character character) {
+        Random rnd = new Random(character.id.hashCode() * 31L + t.spawnRoleId().hashCode());
         double ang = rnd.nextDouble() * Math.PI * 2;
         double rad = t.role().noble ? 2 + rnd.nextDouble() * 5 : 4 + rnd.nextDouble() * 16;
         int x = (int) Math.floor(t.x() + Math.cos(ang) * rad), z = (int) Math.floor(t.z() + Math.sin(ang) * rad);
@@ -211,13 +225,13 @@ final class NpcSpawner {
         WFNpc npc = PeopleMod.NPC.get().create(level);
         if (npc == null) return null;
         npc.moveTo(x + 0.5, y, z + 0.5, rnd.nextFloat() * 360F, 0F);
-        npc.bind(t.c());
+        npc.bind(character);
         npc.setPost(x, z);
         if (!level.addFreshEntity(npc)) {
             npc.discard();
             return null;
         }
-        if (!regBind(level, t.c(), npc)) return null;
+        if (!regBind(level, character, npc)) return null;
         return npc;
     }
 
