@@ -67,7 +67,11 @@ public final class CharacterDirtyQueue {
     private final Map<String, ReadyNode> readyById = new HashMap<>();
     private final ReadyList criticalReady = new ReadyList();
     private final ReadyList backgroundReady = new ReadyList();
-    private final Set<String> inFlight = new HashSet<>();
+    /*
+     * Keep the exact Entry object returned to a worker. A delayed duplicate retry
+     * from an older attempt must never release a newer in-flight claim for this UUID.
+     */
+    private final Map<String, Entry> inFlightEntries = new HashMap<>();
     private int consecutiveCriticalDeliveries;
     private int criticalPending;
 
@@ -88,7 +92,7 @@ public final class CharacterDirtyQueue {
         else if (previous != null && previous.priority() != Priority.CRITICAL
                 && effective == Priority.CRITICAL) criticalPending++;
 
-        if (inFlight.contains(globalId)) return;
+        if (inFlightEntries.containsKey(globalId)) return;
         ReadyNode queued = readyById.get(globalId);
         if (queued == null) appendReady(globalId, effective);
         else if (queued.priority != effective) {
@@ -102,7 +106,7 @@ public final class CharacterDirtyQueue {
         if (current == null || current.priority() == Priority.CRITICAL) return;
         pending.put(globalId, new Entry(globalId, current.generation(), Priority.CRITICAL));
         criticalPending++;
-        if (!inFlight.contains(globalId)) {
+        if (!inFlightEntries.containsKey(globalId)) {
             ReadyNode queued = readyById.get(globalId);
             if (queued != null && queued.priority != Priority.CRITICAL) {
                 removeReady(globalId);
@@ -144,7 +148,8 @@ public final class CharacterDirtyQueue {
             }
             readyById.remove(node.id, node);
             Entry entry = pending.get(node.id);
-            if (entry == null || entry.priority() != node.priority || !inFlight.add(node.id)) continue;
+            if (entry == null || entry.priority() != node.priority || inFlightEntries.containsKey(node.id)) continue;
+            inFlightEntries.put(node.id, entry);
             batch.add(entry);
         }
         return List.copyOf(batch);
@@ -156,32 +161,35 @@ public final class CharacterDirtyQueue {
         if (current == null) return;
         if (current.generation() <= durableGeneration) {
             pending.remove(globalId);
-            inFlight.remove(globalId);
+            inFlightEntries.remove(globalId);
             removeReady(globalId);
             if (current.priority() == Priority.CRITICAL) criticalPending--;
         } else {
-            inFlight.remove(globalId);
+            inFlightEntries.remove(globalId);
             requeue(globalId);
         }
     }
 
-    /** Failed/rejected work returns to the appropriate queue tail without losing its UUID. */
+    /**
+     * Retries only the exact claim returned by takeBatch. A delayed duplicate retry
+     * cannot release a later claim for the same Character UUID.
+     */
     public synchronized void retry(Entry entry) {
         Objects.requireNonNull(entry, "entry");
-        if (!pending.containsKey(entry.globalId())) return;
-        inFlight.remove(entry.globalId());
+        if (inFlightEntries.get(entry.globalId()) != entry) return;
+        inFlightEntries.remove(entry.globalId());
         requeue(entry.globalId());
     }
 
     private void requeue(String id) {
         Entry current = pending.get(id);
-        if (current != null && !inFlight.contains(id) && !readyById.containsKey(id))
+        if (current != null && !inFlightEntries.containsKey(id) && !readyById.containsKey(id))
             appendReady(id, current.priority());
     }
 
     public synchronized int pendingCount() { return pending.size(); }
     public synchronized int readyCount() { return readyById.size(); }
-    public synchronized int inFlightCount() { return inFlight.size(); }
+    public synchronized int inFlightCount() { return inFlightEntries.size(); }
     public synchronized int criticalCount() { return criticalPending; }
     public synchronized boolean contains(String globalId) { return pending.containsKey(globalId); }
     public synchronized long generation(String globalId) {
