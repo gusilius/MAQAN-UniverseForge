@@ -32,6 +32,26 @@ public final class CharacterStats {
     private static final int GOOD = 0xFF4FCF5A, BAD = 0xFFE04A4A, NEUT = 0xFF4AA8FF, GOLD = 0xFFF0C85A;
     private static final Map<String, Trait> TRAITS = new LinkedHashMap<>();
 
+    // LifeSimulation asks for temperament/traits several times per resident pass.
+    // Revalidating every trait against all conflict pairs allocated a HashSet and
+    // copied a List on every read. Cache the immutable normalized result by Character
+    // identity and a tiny order-independent fingerprint of its (normally 3-5) traits.
+    // Weak keys ensure evicted Characters are not retained by this derived-data cache.
+    private record TraitCache(long fingerprint, int size, List<String> normalized) { }
+    private static final Map<Character, TraitCache> TRAIT_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static long traitFingerprint(Collection<String> values) {
+        long sum = 0x9E3779B97F4A7C15L;
+        long xor = 0xD6E8FEB86659FD93L;
+        for (String value : values) {
+            long hash = value == null ? 0L : value.hashCode() * 0x100000001B3L;
+            sum += hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63));
+        }
+        return sum ^ Long.rotateLeft(xor, values.size() & 63);
+    }
+
     private static void t(Trait t) { TRAITS.put(t.id, t); }
 
     static {
@@ -253,25 +273,34 @@ public final class CharacterStats {
     /** 3–5 stable, varied and mutually compatible traits; the same identity always yields the same profile. */
     public static List<String> traits(Character c) {
         if (!c.traits.isEmpty()) {
+            long fingerprint = traitFingerprint(c.traits);
+            TraitCache cachedTraits = TRAIT_CACHE.get(c);
+            if (cachedTraits != null && cachedTraits.size() == c.traits.size()
+                    && cachedTraits.fingerprint() == fingerprint) return cachedTraits.normalized();
+
             // Canonical Character records normally contain an already-normalized TreeSet.
-            // The old hot path copied the growing list once per trait and revalidated every
-            // prefix, multiplying tiny allocations for every social interaction.
-            if (compatibleTraits(c.traits)) return List.copyOf(c.traits);
-            // Keep tolerant normalization for legacy or externally-mutated records.
-            List<String> stored = new ArrayList<>(c.traits.size());
-            for (String id : c.traits) {
-                if (!TRAITS.containsKey(id)) continue;
-                boolean conflict = false;
-                for (String existing : stored) {
-                    if (TRAIT_CONFLICTS.stream().anyMatch(pair ->
-                            pair.contains(id) && pair.contains(existing))) {
-                        conflict = true;
-                        break;
+            List<String> normalized;
+            if (compatibleTraits(c.traits)) {
+                normalized = List.copyOf(c.traits);
+            } else {
+                // Keep tolerant normalization for legacy or externally-mutated records.
+                List<String> stored = new ArrayList<>(c.traits.size());
+                for (String id : c.traits) {
+                    if (!TRAITS.containsKey(id)) continue;
+                    boolean conflict = false;
+                    for (String existing : stored) {
+                        if (TRAIT_CONFLICTS.stream().anyMatch(pair ->
+                                pair.contains(id) && pair.contains(existing))) {
+                            conflict = true;
+                            break;
+                        }
                     }
+                    if (!conflict) stored.add(id);
                 }
-                if (!conflict) stored.add(id);
+                normalized = List.copyOf(stored);
             }
-            return stored;
+            TRAIT_CACHE.put(c, new TraitCache(fingerprint, c.traits.size(), normalized));
+            return normalized;
         }
         Object cached = c.props.get("people.derived_traits");
         if (cached instanceof List<?> values) {
