@@ -897,6 +897,45 @@ public class PeopleMod {
         return writer == null ? -1 : writer.pending();
     }
 
+    /**
+     * Non-blocking durable Character write for tick-driven materialization.
+     * Snapshot capture and WAL enqueue happen on the caller thread; the forced WAL
+     * append and addressable-record publication complete on the bounded writer thread.
+     * Callers must retain the returned future and advance their cursor only on success.
+     */
+    public static CompletableFuture<Boolean> persistCharacterAsync(Character character, MinecraftServer server) {
+        if (character == null || server == null) return CompletableFuture.completedFuture(false);
+        CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
+        if (owner == null) return CompletableFuture.completedFuture(false);
+        if (estateWalTransfer(character) != null || CharacterInventory.hasPendingTransfer(character))
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                    "Tick-driven async persistence cannot commit an estate or inventory transfer"));
+        CharacterWal wal = CHARACTER_WALS.get(owner);
+        if (wal == null) return CompletableFuture.completedFuture(false);
+        CharacterPersistenceCoordinator persistence = owner.access().persistenceCoordinator();
+        if (persistence == null) return CompletableFuture.completedFuture(false);
+        final CompletableFuture<CharacterWal.Record> durable;
+        try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                     owner.access().acquireGlobal(character.globalId)) {
+            if (lease == null || lease.get() != character) return CompletableFuture.completedFuture(false);
+            durable = persistence.persistMutation(character.globalId,
+                    () -> owner.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException failure) {
+            LOGGER.error("wf_people: could not enqueue asynchronous Character WAL write for {}",
+                    character.globalId, failure);
+            return CompletableFuture.completedFuture(false);
+        }
+        return durable.handle((record, failure) -> {
+            if (failure == null) return true;
+            Throwable cause = failure instanceof java.util.concurrent.CompletionException
+                    && failure.getCause() != null ? failure.getCause() : failure;
+            LOGGER.error("wf_people: asynchronous Character WAL write failed for {}",
+                    character.globalId, cause);
+            if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
+            return false;
+        });
+    }
+
     public static boolean persistCharacter(Character character, MinecraftServer server) {
         if (character == null || server == null) return false;
         CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
