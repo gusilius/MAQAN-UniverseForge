@@ -92,7 +92,6 @@ public final class CharacterRecordStore implements AutoCloseable {
                 Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
             }
             moved = true;
-            forceDirectory(directory);
         } finally {
             if (!moved) Files.deleteIfExists(temporary);
         }
@@ -154,6 +153,19 @@ public final class CharacterRecordStore implements AutoCloseable {
         boolean removed = Files.deleteIfExists(file);
         if (removed) forceDirectory(file.getParent());
         return removed;
+    }
+
+    /**
+     * Forces shard directory entries once after a complete WAL checkpoint batch.
+     * Individual record contents are force(true)'d before atomic rename; deferring
+     * directory fsync from every Character write to the checkpoint boundary removes
+     * one expensive metadata flush per resident while the WAL remains the crash source.
+     */
+    public synchronized void forceDirectories() throws IOException {
+        ensureOpen();
+        try (DirectoryStream<Path> shards = Files.newDirectoryStream(root)) {
+            for (Path shard : shards) if (Files.isDirectory(shard)) forceDirectory(shard);
+        }
     }
 
     /** Enumerates records without retaining the directory listing or decoded population. */
