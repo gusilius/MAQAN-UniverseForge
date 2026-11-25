@@ -574,6 +574,13 @@ public final class CharacterRegistry {
     /** Number of full Character objects currently resident in this registry. */
     public int materializedSize() { return byId.size(); }
 
+    /** Compact UUID-only reverse post lookup; never hydrates a Character. */
+    public synchronized List<String> idsAtPlace(String place) {
+        if (place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByPostPlace.get(place);
+        return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
+    }
+
     /** Returns living office holders at one place using the reverse post index. */
     public List<Character> holdersAtPlace(String place) {
         if (place == null || place.isBlank()) return List.of();

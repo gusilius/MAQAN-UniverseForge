@@ -120,40 +120,45 @@ public class RelationsMod {
     private static int open(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) { s.sendFailure(Component.literal("Только для игрока")); return 0; }
-        String json = RelationsMc.REL.viewJson(sp.getUUID().toString(), PeopleMod::findNpc, PeopleMod::roleName, RelationsMc.dayNumber());
+        String json = RelationsMc.REL.viewJson(sp.getUUID().toString(), PeopleMod::findNpcLease, PeopleMod::roleName, RelationsMc.dayNumber());
         WFNet.sendView(sp, "wf_relations:relations", json);
         return 1;
     }
 
     private static int dismiss(CommandSourceStack source, String id) {
         ServerPlayer player = source.getPlayer();
-        Character npc = PeopleMod.findNpc(id);
-        if (player == null || npc == null) return 0;
-        String actor = player.getUUID().toString();
-        long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "relations:dismiss:" + java.util.UUID.nameUUIDFromBytes(
-                (actor + ":" + source.getServer().getTickCount() + ":" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        try {
-            var task = WorldForgeApi.actionExecution().execute(
-                    new dev.worldforge.mod.api.ActionExecutionService.Request(
-                            requestId, "relations.dismiss_companion", actor, id, java.util.List.of(id), minute),
-                    req -> source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
-                            ? "Игрок отключился до изменения отношений" : null,
-                    (req, attempt) -> {
-                        if (!RelationsMc.REL.bond(actor, npc.id).employed)
-                            return dev.worldforge.mod.api.ActionResult.fail("Этот житель не состоит у вас на службе.");
-                        RelationsMc.REL.dismiss(actor, npc);
-                        return dev.worldforge.mod.api.ActionResult.ok(npc.name + " освобождён от службы.");
-                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
-            if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
-                source.sendFailure(Component.literal(task.message()));
+        if (player == null) return 0;
+        try (var npcLease = PeopleMod.findNpcLease(id)) {
+            if (npcLease == null) return 0;
+            Character npc = npcLease.get();
+            if (npc == null) return 0;
+            String actor = player.getUUID().toString();
+            long minute = WorldForgeApi.clock().worldMinute();
+            String requestId = "relations:dismiss:" + java.util.UUID.nameUUIDFromBytes(
+                    (actor + ":" + source.getServer().getTickCount() + ":" + id)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            try {
+                var task = WorldForgeApi.actionExecution().execute(
+                        new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                requestId, "relations.dismiss_companion", actor, id, java.util.List.of(id), minute),
+                        req -> source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
+                                ? "Игрок отключился до изменения отношений" : null,
+                        (req, attempt) -> {
+                            if (!RelationsMc.REL.bond(actor, npc.id).employed)
+                                return dev.worldforge.mod.api.ActionResult.fail("Этот житель не состоит у вас на службе.");
+                            RelationsMc.REL.dismiss(actor, npc);
+                            return dev.worldforge.mod.api.ActionResult.ok(npc.name + " освобождён от службы.");
+                        }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+                if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                    source.sendFailure(Component.literal(task.message()));
+                    return 0;
+                }
+                source.sendSuccess(() -> Component.literal(task.message()), false);
+                return open(source);
+            } catch (RuntimeException ex) {
+                source.sendFailure(Component.literal("Не удалось освободить жителя: " + ex.getMessage()));
                 return 0;
             }
-            source.sendSuccess(() -> Component.literal(task.message()), false);
-            return open(source);
-        } catch (RuntimeException ex) {
-            source.sendFailure(Component.literal("Не удалось освободить жителя: " + ex.getMessage()));
-            return 0;
         }
     }
 }

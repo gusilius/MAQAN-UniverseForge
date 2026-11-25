@@ -92,20 +92,17 @@ public final class CourtSim {
     private boolean populationLifecycleInitialized;
     private static final int YEARLY_LIFE_BUDGET_PER_TICK = 128;
     private static final class YearlyLifePass {
-        final List<Character> people;
         final int populationSize;
         final int year;
         int phase;
         int cursor;
-        YearlyLifePass(List<Character> people, int populationSize, int year) {
-            this.people = people;
+        YearlyLifePass(int populationSize, int year) {
             this.populationSize = populationSize;
             this.year = year;
         }
     }
     private YearlyLifePass yearlyLifePass;
-    private Map<String, List<Character>> regencyCandidateIndex = new HashMap<>();
-    private boolean regencyCandidateIndexBuilt;
+
 
     public CourtSim(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int startYear) {
         this(d, ed, reg, defs, names, seed, startYear, 0L, reg != null && reg.size() > 0);
@@ -255,7 +252,7 @@ public final class CourtSim {
             if (yearlyLifePass == null) {
                 populationLifecycleInitialized = false;
                 reg.prepareKinIndex(day);
-                yearlyLifePass = new YearlyLifePass(reg.all(), reg.size(), year());
+                yearlyLifePass = new YearlyLifePass(reg.size(), year());
             }
             advanceYearlyLifePass();
         } else if (ed != null) {
@@ -273,40 +270,55 @@ public final class CourtSim {
                 pass.cursor = 0;
                 continue;
             }
-            Character character = pass.people.get(pass.cursor++);
-            budget--;
-            if (!character.alive) continue;
-            if (pass.phase == 0) {
+            List<String> ids = characterIdPage(reg, pass.cursor, 1);
+            if (ids.isEmpty()) break;
+            String localId = ids.get(0);
+            final boolean[] resolved = {false};
+            boolean leased = withCharacterLease(reg, localId, character -> {
+                if (character == null) return;
+                resolved[0] = true;
+                if (!character.alive) return;
+                if (pass.phase == 0) {
+                    int age = pass.year - character.birthYear;
+                    if (age <= 16) {
+                        String fatherId = character.father, motherId = character.mother;
+                        withCharacterLease(reg, fatherId, father ->
+                                withCharacterLease(reg, motherId, mother ->
+                                        CharacterDevelopment.upbringingTick(character, father, mother, pass.year)));
+                    }
+                    double probability = age < 50 ? 0.003
+                            : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
+                    if (character.traits.contains("craven") || CharacterStats.traits(character).contains("lazy"))
+                        probability *= 1.05;
+                    if (rnd("death", character.id.hashCode() + day).nextDouble() < probability)
+                        die(character, "умер от старости или болезни");
+                    return;
+                }
+                if (!character.gender.equals("f")) return;
+                Object dueValue = character.props.get("family.pregnancy.due_day");
+                long dueDay = dueValue instanceof Number number ? number.longValue() : -1L;
+                if (dueDay >= 0L) {
+                    if (day < dueDay) return;
+                    String fatherId = FamilyPlanning.dueFatherId(character, day);
+                    withCharacterLease(reg, fatherId, biologicalFather -> {
+                        if (biologicalFather == null)
+                            FamilyPlanning.cancel(character, null, "father-unavailable", pass.year);
+                        else bear(biologicalFather, character, pass.year, day);
+                    });
+                    return;
+                }
+                if (character.spouse.isEmpty()) return;
+                String spouseId = character.spouse;
                 int age = pass.year - character.birthYear;
-                if (age <= 16) CharacterDevelopment.upbringingTick(character,
-                        character.father.isEmpty() ? null : reg.get(character.father),
-                        character.mother.isEmpty() ? null : reg.get(character.mother), pass.year);
-                double probability = age < 50 ? 0.003
-                        : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
-                if (character.traits.contains("craven") || CharacterStats.traits(character).contains("lazy"))
-                    probability *= 1.05;
-                if (rnd("death", character.id.hashCode() + day).nextDouble() < probability)
-                    die(character, "умер от старости или болезни");
-                continue;
-            }
-            if (!character.gender.equals("f")) continue;
-            Object dueValue = character.props.get("family.pregnancy.due_day");
-            long dueDay = dueValue instanceof Number number ? number.longValue() : -1L;
-            if (dueDay >= 0L) {
-                if (day < dueDay) continue;
-                String fatherId = FamilyPlanning.dueFatherId(character, day);
-                Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
-                if (biologicalFather == null)
-                    FamilyPlanning.cancel(character, biologicalFather, "father-unavailable", pass.year);
-                else
-                    bear(biologicalFather, character, pass.year, day);
-                continue;
-            }
-            if (character.spouse.isEmpty()) continue;
-            Character spouse = reg.get(character.spouse);
-            int age = pass.year - character.birthYear;
-            if (spouse == null || !spouse.alive || age < 18 || age > 45) continue;
-            FamilyPlanning.tryConceive(character, spouse, pass.year, day, seed);
+                if (age < 18 || age > 45) return;
+                withCharacterLease(reg, spouseId, spouse -> {
+                    if (spouse != null && spouse.alive)
+                        FamilyPlanning.tryConceive(character, spouse, pass.year, day, seed);
+                });
+            });
+            if (!leased || !resolved[0]) break;
+            pass.cursor++;
+            budget--;
         }
         if (pass.phase >= 2) {
             yearlyLifePass = null;
@@ -376,30 +388,36 @@ public final class CourtSim {
     public Regency regency(String realm) { return regencies.get(realm); }
 
     /** Adult members of the realm court who can legally serve as regent. */
-    private void rebuildRegencyCandidateIndex() {
-        Map<String, List<Character>> byPlace = new HashMap<>();
-        for (Character candidate : reg.all()) {
-            if (!candidate.alive || year() - candidate.birthYear < 16) continue;
-            for (Character.Post post : candidate.posts)
-                byPlace.computeIfAbsent(post.place, ignored -> new ArrayList<>()).add(candidate);
+    private static List<String> characterIdsAtPlace(CharacterRegistry registry, String place) {
+        try {
+            Object raw = registry.getClass().getMethod("idsAtPlace", String.class).invoke(registry, place);
+            if (!(raw instanceof List<?> values)) throw new IllegalStateException("Character post ID index is not a list");
+            List<String> ids = new ArrayList<>(values.size());
+            for (Object value : values) ids.add(String.valueOf(value));
+            return ids;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-court requires the UUID-only post index", error);
         }
-        regencyCandidateIndex = byPlace;
-        regencyCandidateIndexBuilt = true;
     }
 
-    public List<Character> regencyCandidates(String realm) {
-        if (!regencyCandidateIndexBuilt) rebuildRegencyCandidateIndex();
+    private record RegentCandidate(String id, int score) {}
+
+    public List<String> regencyCandidates(String realm) {
         String place = Courts.realmPlace(realm);
         Character sovereign = ruler(realm);
-        List<Character> candidates = new ArrayList<>();
-        for (Character candidate : regencyCandidateIndex.getOrDefault(place, List.of())) {
-            if (!candidate.alive || candidate == sovereign || year() - candidate.birthYear < 16
-                    || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) continue;
-            candidates.add(candidate);
+        String sovereignId = sovereign == null ? "" : sovereign.id;
+        List<RegentCandidate> candidates = new ArrayList<>();
+        for (String candidateId : characterIdsAtPlace(reg, place)) {
+            withCharacterLease(reg, candidateId, candidate -> {
+                if (candidate == null || !candidate.alive || candidate.id.equals(sovereignId)
+                        || year() - candidate.birthYear < 16
+                        || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) return;
+                candidates.add(new RegentCandidate(candidate.id, regentScore(realm, candidate, sovereignId)));
+            });
         }
-        candidates.sort(Comparator.comparingInt((Character candidate) -> regentScore(realm, candidate, sovereign)).reversed()
-                .thenComparing(candidate -> candidate.id));
-        return candidates;
+        candidates.sort(Comparator.comparingInt(RegentCandidate::score).reversed()
+                .thenComparing(RegentCandidate::id));
+        return candidates.stream().map(RegentCandidate::id).toList();
     }
 
     /** Number of existing council seats that support a regency candidate (no parallel faction registry). */
@@ -414,13 +432,13 @@ public final class CourtSim {
         return support;
     }
 
-    private int regentScore(String realm, Character candidate, Character heir) {
+    private int regentScore(String realm, Character candidate, String heirId) {
         int councilSupport = regencyCouncilSupport(realm, candidate);
         int score = CharacterStats.value(candidate, "diplomacy") * 2
                 + CharacterStats.value(candidate, "stewardship") * 2
                 + CharacterStats.value(candidate, "intrigue")
                 + councilSupport * 12;
-        if (heir != null) score += Math.max(-20, Math.min(20, opinion(candidate.id, heir.id) / 3));
+        if (heirId != null && !heirId.isBlank()) score += Math.max(-20, Math.min(20, opinion(candidate.id, heirId) / 3));
         Set<String> traits = new HashSet<>(CharacterStats.traits(candidate));
         if (traits.contains("just")) score += 5;
         if (traits.contains("honorable") || traits.contains("loyal")) score += 4;
@@ -439,14 +457,17 @@ public final class CourtSim {
             Character regent = reg.get(current.regent);
             if (regent != null && regent.alive && year() - regent.birthYear >= 16) return;
         }
-        List<Character> candidates = regencyCandidates(realm);
+        List<String> candidates = regencyCandidates(realm);
         if (current != null && current.heir.equals(heir.id) && current.regent.isEmpty() && candidates.isEmpty()) return;
-        String regentId = candidates.isEmpty() ? "" : candidates.get(0).id;
+        String regentId = candidates.isEmpty() ? "" : candidates.get(0);
         regencies.put(realm, new Regency(realm, heir.id, regentId, current == null ? day : current.startedDay));
-        Character regent = regentId.isEmpty() ? null : reg.get(regentId);
-        say(regent == null
+        final String[] regentName = {""};
+        if (!regentId.isEmpty()) withCharacterLease(reg, regentId, regent -> {
+            if (regent != null) regentName[0] = regent.name;
+        });
+        say(regentName[0].isBlank()
                 ? "В " + realmName(realm) + " началось малолетнее правление " + heir.name + ": двор должен назначить регента"
-                : regent.name + " становится регентом при малолетнем правителе " + heir.name + " (" + realmName(realm) + ")");
+                : regentName[0] + " становится регентом при малолетнем правителе " + heir.name + " (" + realmName(realm) + ")");
     }
 
     /** Explicit appointment is limited to adult members of this realm's existing court. */
@@ -471,24 +492,38 @@ public final class CourtSim {
     public boolean negotiateRegencyCrisis(String realm) {
         Regency current = regencies.get(realm);
         if (current == null || current.crisisStage < 1) return false;
-        List<Character> candidates = regencyCandidates(realm);
+        List<String> candidates = regencyCandidates(realm);
         if (candidates.isEmpty()) return false;
-        Character incumbent = reg.get(current.regent);
-        Character successor = candidates.stream()
-                .filter(candidate -> regencyCouncilSupport(realm, candidate) >= 2)
-                .max(Comparator.comparingInt((Character candidate) -> regencyCouncilSupport(realm, candidate))
-                        .thenComparingInt(candidate -> regentScore(realm, candidate, ruler(realm)))
-                        .thenComparing(candidate -> candidate.id, Comparator.reverseOrder()))
+        Character sovereign = ruler(realm);
+        String sovereignId = sovereign == null ? "" : sovereign.id;
+        record RegentChoice(String id, String name, int support, int score) {}
+        List<RegentChoice> choices = new ArrayList<>();
+        for (String candidateId : candidates) withCharacterLease(reg, candidateId, candidate -> {
+            if (candidate == null) return;
+            int support = regencyCouncilSupport(realm, candidate);
+            if (support < 2) return;
+            choices.add(new RegentChoice(candidate.id, candidate.name, support,
+                    regentScore(realm, candidate, sovereignId)));
+        });
+        RegentChoice successor = choices.stream()
+                .max(Comparator.comparingInt(RegentChoice::support)
+                        .thenComparingInt(RegentChoice::score)
+                        .thenComparing(RegentChoice::id, Comparator.reverseOrder()))
                 .orElse(null);
         if (successor == null) return false;
+        final String[] incumbentName = {""};
+        if (!current.regent.isBlank()) withCharacterLease(reg, current.regent, incumbent -> {
+            if (incumbent != null) incumbentName[0] = incumbent.name;
+        });
         int oldPressure = current.crisis;
-        if (incumbent != successor) {
+        if (!current.regent.equals(successor.id)) {
             Regency settled = new Regency(realm, current.heir, successor.id, current.startedDay);
             settled.crisis = Math.max(0, oldPressure - 45);
             settled.crisisStage = settled.crisis >= 60 ? 1 : 0;
             regencies.put(realm, settled);
-            say("Совет добился компромисса в " + realmName(realm) + ": регентом вместо " 
-                    + (incumbent == null ? "вакантного места" : incumbent.name) + " становится " + successor.name);
+            say("Совет добился компромисса в " + realmName(realm) + ": регентом вместо "
+                    + (incumbentName[0].isBlank() ? "вакантного места" : incumbentName[0])
+                    + " становится " + successor.name);
         } else {
             current.crisis = Math.max(0, oldPressure - 35);
             current.crisisStage = current.crisis >= 100 ? 2 : current.crisis >= 60 ? 1 : 0;
@@ -499,7 +534,6 @@ public final class CourtSim {
     }
 
     private void updateRegencies() {
-        rebuildRegencyCandidateIndex();
         for (String realm : new ArrayList<>(regencies.keySet())) ensureRegency(realm);
         for (TitleData.Realm realm : d.realmList()) {
             Character sovereign = ruler(realm.id);
@@ -998,16 +1032,16 @@ public final class CourtSim {
         if (!mine.isEmpty() && reg.get(mine) != null) ids.add(mine);
         for (TitleData.Realm r : d.realmList()) { Character c = ruler(r.id); if (c != null) ids.add(c.id); }
         for (Council.Seat st : Council.seats(reg, defs, realm)) if (st.holder != null) ids.add(st.holder.id);
-        for (Character candidate : regencyCandidates(realm)) { if (ids.size() > 48) break; ids.add(candidate.id); }
+        for (String candidate : regencyCandidates(realm)) { if (ids.size() > 48) break; ids.add(candidate); }
         Character me = ruler(realm);
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) { ids.add(sc.owner); ids.add(sc.target); }
         for (Pending p : pending) if (p.realm.equals(realm)) ids.add(p.character);
-        List<Character> own = Marriages.candidates(this, realm);
-        for (int i = 0; i < own.size() && i < 4; i++) ids.add(own.get(i).id);
+        List<String> own = Marriages.candidates(this, realm);
+        for (int i = 0; i < own.size() && i < 4; i++) ids.add(own.get(i));
         for (TitleData.Realm r : d.realmList()) {
             if (r.id.equals(realm)) continue;
-            List<Character> cs = Marriages.candidates(this, r.id);
-            for (int i = 0; i < cs.size() && i < 1; i++) ids.add(cs.get(i).id);
+            List<String> cs = Marriages.candidates(this, r.id);
+            for (int i = 0; i < cs.size() && i < 1; i++) ids.add(cs.get(i));
         }
         CourtSim v = new CourtSim(d, null, reg, defs, names, seed, startYear);
         v.day = day;
@@ -1105,4 +1139,43 @@ public final class CourtSim {
         for (Object o : (List<Object>) root.get("pending")) { List<Object> l = (List<Object>) o; pending.add(new Pending(((Number) l.get(0)).intValue(), (String) l.get(1), (String) l.get(2), (String) l.get(3), ((Number) l.get(4)).longValue())); }
         for (Object o : (List<Object>) root.get("news")) news.add((String) o);
     }
+    /** Bounded ID pages and short leases keep CourtSim's long-running passes UUID-only. */
+    private static List<String> characterIdPage(CharacterRegistry registry, int offset, int limit) {
+        if (limit <= 0) return List.of();
+        try {
+            Object raw = registry.getClass().getMethod("idPage", int.class, int.class)
+                    .invoke(registry, offset, limit);
+            if (!(raw instanceof List<?> values)) throw new IllegalStateException("Character ID page is not a list");
+            List<String> ids = new ArrayList<>(values.size());
+            for (Object value : values) ids.add(String.valueOf(value));
+            return ids;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-court requires the bounded Character ID page API", error);
+        }
+    }
+
+    private static boolean withCharacterLease(CharacterRegistry registry, String localId,
+                                               java.util.function.Consumer<Character> visitor) {
+        if (localId == null || localId.isBlank()) { visitor.accept(null); return true; }
+        Object lease = null;
+        try {
+            Object access = registry.getClass().getMethod("access").invoke(registry);
+            lease = access.getClass().getMethod("acquire", String.class).invoke(access, localId);
+            if (lease == null) { visitor.accept(null); return false; }
+            visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease));
+            return true;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-court could not acquire canonical Character lease " + localId, error);
+        } finally {
+            if (lease instanceof AutoCloseable closeable) {
+                try { closeable.close(); }
+                catch (Exception error) { throw new IllegalStateException("wf-court could not release Character lease " + localId, error); }
+            }
+        }
+    }
+
+
+
+
+
 }
