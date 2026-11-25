@@ -92,8 +92,9 @@ public final class CharacterEvictionGateTest {
         int trackedAfterEviction = gate.trackedIdentityCount();
         check(evictionCompleted
                         && postEvictionDecision == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY
-                        && trackedAfterEviction == 1
-                        && gate.decision(recovered) == CharacterEvictionGate.Decision.ELIGIBLE,
+                        && trackedAfterEviction == 2
+                        && gate.decision(recovered) == CharacterEvictionGate.Decision.ELIGIBLE
+                        && gate.decision(raceId) == CharacterEvictionGate.Decision.ELIGIBLE,
                 "successful physical eviction releases only its own runtime fence (completed="
                         + evictionCompleted + ", decision=" + postEvictionDecision
                         + ", remaining recovered identities=" + trackedAfterEviction + ")");
