@@ -546,6 +546,14 @@ public class PeopleMod {
                 registry.applyJsonRecord(record.payloadUtf8(), identityNamespace, record.globalId());
                 replayed[0]++;
             });
+            // Publish the latest replayed frame for each UUID into the addressable record
+            // store before eviction is enabled. The WAL is deliberately retained: a crash
+            // during this publication simply repeats the idempotent replay at next startup.
+            long[] publishedLatest = {0L};
+            wal.replayLatestEach(record -> {
+                records.put(record);
+                publishedLatest[0]++;
+            });
             // Independent WAL frames may be replayed before their parent records.
             // Rebuild reciprocal family edges only after the full partition is present.
             registry.reconcileFamilyLinksAfterRecordRestore();
@@ -561,8 +569,8 @@ public class PeopleMod {
             // physical eviction remains deliberately disabled.
             registry.access().attachPersistenceCoordinator(new CharacterPersistenceCoordinator(
                     new CharacterEvictionGate(), wal, writer, records));
-            LOGGER.info("wf_people: recovered Character partition={} checkpointRecords={} walRecords={} characters={}",
-                    partition, checkpointRecords[0], replayed[0], registry.size());
+            LOGGER.info("wf_people: recovered Character partition={} checkpointRecords={} walRecords={} addressableLatest={} characters={}",
+                    partition, checkpointRecords[0], replayed[0], publishedLatest[0], registry.size());
         } catch (Exception failure) {
             try { wal.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
             try { records.close(); } catch (Exception closeFailure) { failure.addSuppressed(closeFailure); }
