@@ -1742,7 +1742,7 @@ public class SettleMod {
         ColonyInterestIndex.clear();
         professionsSynced = false;
         IMPORTED_BLUEPRINTS.clear();
-        AUTONOMOUS_INFRASTRUCTURE_READY.clear();
+        AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.clear();
         DEFS = null;
         STRUCTURE_CATALOG = dev.worldforge.settle.StructureCatalog.empty();
         Blueprints.clearCache();
