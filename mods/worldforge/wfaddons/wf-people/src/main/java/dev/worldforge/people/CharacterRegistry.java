@@ -63,6 +63,8 @@ public final class CharacterRegistry {
     private EvictionCandidate evictionCandidateHead;
     private EvictionCandidate evictionCandidateTail;
     private final Map<String, EvictionCandidate> evictionCandidateById = new HashMap<>();
+    /** Round-robin cursor for bounded seeding of already-materialized idle identities. */
+    private int evictionSeedCursor;
     private final CharacterAccessService accessService = new CharacterAccessService(this);
     /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
     private final Map<String, String> byGlobalId = new HashMap<>();
@@ -425,6 +427,31 @@ public final class CharacterRegistry {
     public synchronized void requeueEvictionCandidate(String localId) {
         if (localId != null && !localId.isBlank() && !activeAccessLeases.containsKey(localId))
             enqueueEvictionCandidate(localId, System.nanoTime());
+    }
+
+    /**
+     * Seeds idle eviction hints from the materialized directory without scanning the whole
+     * population in one tick. The cursor advances even when the bounded hint queue is full;
+     * later passes wrap around and retry identities skipped under backpressure.
+     */
+    public synchronized int seedEvictionCandidates(int inspectionBudget) {
+        if (inspectionBudget < 1) throw new IllegalArgumentException("inspectionBudget must be positive");
+        int size = orderedIds.size();
+        if (size == 0) { evictionSeedCursor = 0; return 0; }
+        int inspected = Math.min(inspectionBudget, size);
+        int added = 0;
+        long now = System.nanoTime();
+        for (int i = 0; i < inspected; i++) {
+            if (evictionSeedCursor >= size) evictionSeedCursor = 0;
+            String localId = orderedIds.get(evictionSeedCursor++);
+            if (byId.containsKey(localId) && !activeAccessLeases.containsKey(localId)
+                    && !evictionCandidateById.containsKey(localId)
+                    && evictionCandidateById.size() < MAX_EVICTION_CANDIDATES) {
+                enqueueEvictionCandidate(localId, now);
+                added++;
+            }
+        }
+        return added;
     }
 
     public synchronized int evictionCandidateCount() { return evictionCandidateById.size(); }
