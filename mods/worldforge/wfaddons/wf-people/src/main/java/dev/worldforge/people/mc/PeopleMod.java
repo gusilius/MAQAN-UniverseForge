@@ -686,6 +686,9 @@ public class PeopleMod {
                     // compaction; do not serialize or scan unchanged Characters.
                     wal.replayLatestEach(records::put);
                 }
+                // Every record payload was forced before its atomic rename. Flush the
+                // shard directory entries once for the whole batch before WAL retirement.
+                records.forceDirectories();
             });
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
