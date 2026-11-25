@@ -394,15 +394,17 @@ public final class CharacterAuthority {
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
         if (identity == null) return false;
         CharacterRegistry owner = registries.get(identity.mapId());
-        Character person = owner == null ? null : owner.get(identity.characterId());
-        if (person == null || owner == null || !person.alive) return false;
+        if (owner == null) return false;
 
         // Check one reverse-index entry per partition, independent of population size.
         for (CharacterRegistry registry : registries.values()) {
             String existingOwner = registry.entityBindingOwner(entityUuid);
             if (existingOwner != null && !globalCharacterId.equals(existingOwner)) return false;
         }
-        return owner.bindEntity(person.id, bodyKind, entityUuid);
+        try (CharacterAccessService.Lease lease = owner.access().acquire(identity.characterId())) {
+            if (lease == null || !lease.globalId().equals(globalCharacterId) || !lease.get().alive) return false;
+            return owner.bindEntity(lease.localId(), bodyKind, entityUuid);
+        }
     }
 
     /** Resolves an unambiguous legacy ID to identity metadata without hydrating a Character. */
@@ -574,6 +576,8 @@ public final class CharacterAuthority {
      * Returns only possible relatives of a Character, preserving local-registry priority.
      * The index is rebuilt transactionally with registry membership changes, not per death.
      */
+    /** @deprecated Returns unpinned objects; use kinCandidateGlobalIds() and scoped leases. */
+    @Deprecated
     public synchronized List<Character> kinCandidates(Character person) {
         // Membership-generation checks are O(partitions): ordinary appends are already
         // indexed, while wholesale restore safely triggers one transactional rebuild.
