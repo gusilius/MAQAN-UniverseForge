@@ -289,8 +289,8 @@ jobs:
             "Contour 05 failed; preserving diagnostics and continuing to the remaining inventory." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
-      # Dual-world Genesis is intentionally deferred while the four independent
-      # runtime contours are stabilized. Do not spend another multi-hour runner here.
+      # Dual-world Genesis is intentionally deferred while the five requested
+      # independent load contours are stabilized. Do not spend another multi-hour runner here.
       - name: Dual-world Genesis — deferred by current acceptance scope
         id: dual_world_smoke
         if: ${{ false }}
@@ -320,12 +320,14 @@ jobs:
           POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
           SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
           SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
+          ECONOMY_OUTCOME: ${{ steps.economy_stress.outcome }}
         run: |
           $outcomes = [ordered]@{
             "01 Server Core" = $env:SERVER_CORE_OUTCOME
             "02 Population" = $env:POPULATION_OUTCOME
             "03 Families / Social" = $env:SOCIAL_OUTCOME
             "04 Settlements / Labor" = $env:SETTLEMENT_OUTCOME
+            "05 Economy / Trade / Treasury" = $env:ECONOMY_OUTCOME
           }
           $failed = @()
           foreach ($entry in $outcomes.GetEnumerator()) {
