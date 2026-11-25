@@ -736,14 +736,22 @@ public final class WorldSimMod {
                     .filter(id -> !id.isBlank())
                     .collect(java.util.stream.Collectors.toSet());
             Set<String> raceIds = new TreeSet<>();
+            long livingCharacters = 0;
+            long namedCharacters = 0;
+            long courtOffices = 0;
             if (source.registry != null) {
                 for (int offset = 0, count = source.registry.size(); offset < count; offset += 256) {
                     for (String localId : source.registry.idPage(offset, 256)) {
                         try (var lease = source.registry.access().acquire(localId)) {
                             if (lease == null) continue;
                             dev.worldforge.people.Character person = lease.get();
+                            if (!person.alive) continue;
+                            livingCharacters++;
+                            if (person.name != null && !person.name.isBlank()) namedCharacters++;
+                            courtOffices += person.posts.stream()
+                                    .filter(post -> post.place != null && post.place.startsWith("realm:")).count();
                             Object race = person.props.get("origin.race");
-                            if (person.alive && race != null && !String.valueOf(race).isBlank())
+                            if (race != null && !String.valueOf(race).isBlank())
                                 raceIds.add(String.valueOf(race));
                         }
                     }
@@ -798,10 +806,6 @@ public final class WorldSimMod {
                 }
                 overlapBuckets.computeIfAbsent(bucketX + ":" + bucketZ, ignored -> new ArrayList<>()).add(colony);
             }
-            long livingCharacters = sourcePeople.stream()
-                    .filter(person -> person.alive).count();
-            long namedCharacters = sourcePeople.stream()
-                    .filter(person -> person.alive && person.name != null && !person.name.isBlank()).count();
             long namedPolities = realms.stream()
                     .filter(realm -> realm.name != null && !realm.name.isBlank()).count();
             long namedTitles = RealmsMod.POLITICS.titles().stream()
@@ -809,14 +813,9 @@ public final class WorldSimMod {
                     .filter(title -> title.name != null && !title.name.isBlank()).count();
             long namedSettlements = activeColonies.stream()
                     .filter(colony -> colony.s.name != null && !colony.s.name.isBlank()).count();
-            long courtOffices = sourcePeople.stream()
-                    .filter(person -> person.alive)
-                    .flatMap(person -> person.posts.stream())
-                    .filter(post -> post.place != null && post.place.startsWith("realm:"))
-                    .count();
             long rulers = realms.stream().filter(realm -> {
                 Object id = realm.props.get("emergence.ruler_global_id");
-                return id != null && PeopleMod.authority().getGlobal(String.valueOf(id)) != null;
+                return id != null && PeopleMod.authority().registryForGlobal(String.valueOf(id)) != null;
             }).count();
             long governments = realms.stream().filter(realm -> {
                 var political = RealmsMod.REALMS.state(realm.id);
