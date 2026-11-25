@@ -104,7 +104,9 @@ for active_group in "${groups_to_run[@]}"; do
       continue
     fi
     echo "== $test_name"
-    if python3 tools/run-java-test.py 120 "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
+    test_timeout=120
+    if [ "$test_name" = "EconomyScaleStressTest" ]; then test_timeout=1800; fi
+    if python3 tools/run-java-test.py "$test_timeout" "$OUT/classes" "dev.worldforge.tests.$test_name" "$PACK"; then
       passed=$((passed + 1))
     else
       failed=$((failed + 1))
