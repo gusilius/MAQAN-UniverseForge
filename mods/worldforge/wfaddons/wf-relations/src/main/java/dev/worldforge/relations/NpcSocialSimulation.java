@@ -349,6 +349,24 @@ public final class NpcSocialSimulation {
                                           List<Character> members, int day, int year, long seed,
                                           Map<String, Map<String, Integer>> ancestryCache) {
         if (members.size() < 2) return 0;
+        // Canonical marriage is owned by CharacterRegistry, not by whether a random
+        // social pair happened to be sampled today. Project existing spouses into the
+        // Relations bond view once per visited group so UI, reports and social queries
+        // agree without inventing or changing marriages.
+        Map<String, Character> membersById = new HashMap<>(members.size() * 2);
+        for (Character member : members) if (member != null && member.alive)
+            membersById.put(member.id, member);
+        for (Character member : members) {
+            if (member == null || !member.alive || member.spouse == null || member.spouse.isBlank()) continue;
+            Character spouse = membersById.get(member.spouse);
+            if (spouse == null || !member.id.equals(spouse.spouse)) continue;
+            String memberKey = "npc:" + member.globalId;
+            String spouseKey = "npc:" + spouse.globalId;
+            Relations.Bond forward = relations.bond(memberKey, spouseKey);
+            Relations.Bond reverse = relations.bond(spouseKey, memberKey);
+            forward.married = reverse.married = true;
+            forward.dating = reverse.dating = false;
+        }
         int interactions = 0;
         long interactionEpoch = Math.floorDiv(day, 90);
         for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
