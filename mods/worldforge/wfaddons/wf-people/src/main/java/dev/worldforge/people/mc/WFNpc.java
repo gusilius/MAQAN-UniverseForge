@@ -1,6 +1,7 @@
 package dev.worldforge.people.mc;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterInventory;
@@ -163,12 +164,15 @@ public class WFNpc extends PathfinderMob {
         }
         CharacterRegistry reg = PeopleMod.peek(sl);
         if (reg == null) return;
-        Character c = reg.get(charId);
-        if (c == null || !c.alive) {
-            discard();
-            return;
+        try (CharacterAccessService.Lease lease = reg.access().acquire(charId)) {
+            if (lease == null || !lease.get().alive) {
+                discard();
+                return;
+            }
+            // The entity keeps only the stable local ID. Its short lease protects
+            // the canonical object while display/equipment state is copied.
+            bind(lease.get());
         }
-        bind(c);
     }
 
     @Override
