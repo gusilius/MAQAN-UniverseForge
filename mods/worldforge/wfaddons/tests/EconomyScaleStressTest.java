@@ -103,8 +103,11 @@ public final class EconomyScaleStressTest {
                 for (int sourceId = previousSettlements; sourceId + 1 < stage.settlements(); sourceId += 2) {
                     Settlement source = marketSettlements.get(settlementAccount(sourceId));
                     Settlement destination = marketSettlements.get(settlementAccount(sourceId + 1));
-                    source.stock.put("wood", 150.0);
-                    destination.stock.put("wood", 12.0);
+                    source.add("wood", 50);
+                    require(destination.spend(Map.of("wood", 88)),
+                            "could not prepare the destination's low-stock trade demand");
+                    source.amount("wood");
+                    destination.amount("wood");
                     source.tradeLeft = 100;
                     destination.tradeLeft = 100;
                     tradeNetwork.add(marketSettlements, source.id, destination.id, "wood", 2.0);
