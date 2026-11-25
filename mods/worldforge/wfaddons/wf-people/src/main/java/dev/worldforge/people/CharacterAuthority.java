@@ -282,11 +282,44 @@ public final class CharacterAuthority {
         return owner == null ? null : owner.get(identity.characterId());
     }
 
+    /** @deprecated Unpinned compatibility reference; use acquireGlobal(identity.globalCharacterId()). */
+    @Deprecated
     public synchronized Character get(CharacterIdentity identity) {
         refreshIndex();
         return resolve(identity);
     }
 
+    /** Preferred identity-scoped access. */
+    public synchronized CharacterAccessService.Lease acquire(CharacterIdentity identity) {
+        if (identity == null) return null;
+        refreshIndex();
+        if (!identity.equals(byGlobalId.get(identity.globalCharacterId()))) return null;
+        CharacterRegistry owner = registries.get(identity.mapId());
+        return owner == null ? null : owner.access().acquire(identity.characterId());
+    }
+
+    /**
+     * Preferred cross-partition access API. The returned lease pins the canonical Character
+     * until close(); callers must not retain lease.get() beyond that scope.
+     */
+    public synchronized CharacterAccessService.Lease acquireGlobal(String globalCharacterId) {
+        if (globalCharacterId == null || globalCharacterId.isBlank()) return null;
+        CharacterIdentity identity = byGlobalId.get(globalCharacterId);
+        if (identity != null) {
+            CharacterRegistry owner = registries.get(identity.mapId());
+            if (owner != null) return owner.access().acquireGlobal(globalCharacterId);
+        }
+        for (CharacterRegistry registry : registries.values()) {
+            if (registry.localIdForGlobalId(globalCharacterId) != null)
+                return registry.access().acquireGlobal(globalCharacterId);
+        }
+        return null;
+    }
+
+    /**
+     * @deprecated Returns an unpinned raw reference. Use acquireGlobal() and close the lease.
+     */
+    @Deprecated
     public synchronized Character getGlobal(String globalCharacterId) {
         if (globalCharacterId == null || globalCharacterId.isBlank()) return null;
         // The world index is a batch projection. During Genesis, characters are appended
