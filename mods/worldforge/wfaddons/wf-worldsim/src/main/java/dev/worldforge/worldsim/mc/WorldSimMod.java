@@ -2673,7 +2673,7 @@ public final class WorldSimMod {
                             emergentPeopleProgress.dirtyBindingSources.add(source.id);
                         } else {
                             settlementId = "emg_" + bandId;
-                            display = emergentSettlementName(source, bandId, residents);
+                            display = emergentSettlementName(source, bandId, sourceProgress.index.residentMetadata(bandId));
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
                             newlyCreatedSettlement = colony != null;
@@ -2706,7 +2706,7 @@ public final class WorldSimMod {
                         colony.s.setCanonicalPopulation(bandProgress.residentIds.size());
                         colony.s.types = SettleMod.TYPES;
                         colony.s.refreshType(bandProgress.residentIds.size(), emergentSettlementTerrain(source, band),
-                                emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
+                                emergentRaceShares(sourceProgress.index.residentMetadata(bandId)));
                         bandProgress.canonicalResidentsReplaced = true;
                         bandProgress.workerSnapshot = new ArrayList<>(colony.s.workers);
                     }
@@ -3069,9 +3069,9 @@ public final class WorldSimMod {
 
     /** Unique settlement naming uses only race/culture pools supplied by wf-people datapacks. */
     private static String emergentSettlementName(EmergenceSource source, String bandId,
-            List<dev.worldforge.people.Character> residents) {
+            List<EmergentPopulationIndex.Resident> residents) {
         Map<String, Long> races = residents.stream()
-                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -3249,7 +3249,7 @@ public final class WorldSimMod {
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
         Map<String, Long> cultures = residents.stream()
-                .map(person -> person.culture == null ? "" : person.culture)
+                .map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -3531,8 +3531,8 @@ public final class WorldSimMod {
                 Set<String> bandIds = new LinkedHashSet<>();
                 if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
                     for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
-                List<dev.worldforge.people.Character> members = new ArrayList<>();
-                for (String bandId : bandIds) members.addAll(populationIndex.livingResidents(bandId));
+                List<EmergentPopulationIndex.Resident> members = new ArrayList<>();
+                for (String bandId : bandIds) members.addAll(populationIndex.residentMetadata(bandId));
                 Set<String> neighbors = geographyIndex.neighbors(polityId);
                 String biomes = geographyIndex.biomeSummary(bandIds);
                 String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
@@ -4362,8 +4362,8 @@ public final class WorldSimMod {
     }
 
     private static final class EmergentFamily {
-        private dev.worldforge.people.Character father;
-        private dev.worldforge.people.Character mother;
+        private EmergentPopulationIndex.Resident father;
+        private EmergentPopulationIndex.Resident mother;
         private String house = "";
     }
 
@@ -4374,18 +4374,16 @@ public final class WorldSimMod {
             return families.computeIfAbsent(index, ignored -> new EmergentFamily());
         }
 
-        private static EmergentParents from(List<dev.worldforge.people.Character> residents, int year) {
+        private static EmergentParents from(List<EmergentPopulationIndex.Resident> residents, int year) {
             EmergentParents parents = new EmergentParents();
-            for (dev.worldforge.people.Character candidate : residents) {
-                if (!candidate.alive) continue;
-                Object rawIndex = candidate.props.get("emergence.family_group_index");
-                if (!(rawIndex instanceof Number number)) continue;
-                int index = number.intValue();
+            for (EmergentPopulationIndex.Resident candidate : residents) {
+                if (!candidate.alive()) continue;
+                int index = candidate.familyGroupIndex();
                 if (index < 0) continue;
                 EmergentFamily family = parents.family(index);
-                if (family.house.isBlank() && candidate.house != null) family.house = candidate.house;
-                if ("m".equals(candidate.gender) && family.father == null) family.father = candidate;
-                if ("f".equals(candidate.gender) && family.mother == null) family.mother = candidate;
+                if (family.house.isBlank() && candidate.house() != null) family.house = candidate.house();
+                if ("m".equals(candidate.gender()) && family.father == null) family.father = candidate;
+                if ("f".equals(candidate.gender()) && family.mother == null) family.mother = candidate;
             }
             return parents;
         }
@@ -4405,45 +4403,51 @@ public final class WorldSimMod {
             dev.worldforge.people.Character father = createEmergentAdult(
                     registry, source, bandId, "m", year, ordinal, reservedHouseNames, family.house);
             if (father == null) return null;
-            family.father = father;
+            family.father = residentMetadata(father, familyIndex);
             if (family.house.isBlank()) family.house = father.house;
             tagEmergentResident(father, bandId, source, householdId, familyIndex);
+            family.father = residentMetadata(father, familyIndex);
             return father;
         }
         if (role == dev.worldforge.worldsim.EmergentHouseholdPlan.Role.MOTHER) {
             String sharedHouse = family.house;
-            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house;
+            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house();
             dev.worldforge.people.Character mother = createEmergentAdult(
                     registry, source, bandId, "f", year, ordinal, reservedHouseNames, sharedHouse);
             if (mother == null) return null;
-            family.mother = mother;
             if (family.house.isBlank()) family.house = mother.house;
-            if (family.father != null && family.father.spouse.isBlank() && mother.spouse.isBlank()) {
-                try { registry.marry(family.father.id, mother.id, year); }
-                catch (RuntimeException error) {
+            if (family.father != null) {
+                try (var fatherLease = registry.access().acquireGlobal(family.father.globalId())) {
+                    var father = fatherLease == null ? null : fatherLease.get();
+                    if (father != null && father.spouse.isBlank() && mother.spouse.isBlank())
+                        registry.marry(father.id, mother.id, year);
+                } catch (RuntimeException error) {
                     LOGGER.warn("wf_worldsim: founding household marriage deferred for {} ({})", householdId, error.getMessage());
                 }
             }
             tagEmergentResident(mother, bandId, source, householdId, familyIndex);
+            family.mother = residentMetadata(mother, familyIndex);
             return mother;
         }
 
-        // Child slots belong to this household's own canonical parents, not one
-        // founding couple shared by an entire settlement. If a prior interrupted
-        // materialization left a missing partner, repair that slot before a birth.
         if (family.father == null || family.mother == null) {
             String gender = family.father == null ? "m" : "f";
             String sharedHouse = family.house;
-            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house;
+            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house();
             dev.worldforge.people.Character partner = createEmergentAdult(
                     registry, source, bandId, gender, year, ordinal, reservedHouseNames, sharedHouse);
             if (partner == null) return null;
-            if ("m".equals(gender)) family.father = partner; else family.mother = partner;
+            if ("m".equals(gender)) family.father = residentMetadata(partner, familyIndex);
+            else family.mother = residentMetadata(partner, familyIndex);
             if (family.house.isBlank()) family.house = partner.house;
-            if (family.father != null && family.mother != null
-                    && family.father.spouse.isBlank() && family.mother.spouse.isBlank()) {
-                try { registry.marry(family.father.id, family.mother.id, year); }
-                catch (RuntimeException error) {
+            if (family.father != null && family.mother != null) {
+                try (var fatherLease = registry.access().acquireGlobal(family.father.globalId());
+                     var motherLease = registry.access().acquireGlobal(family.mother.globalId())) {
+                    var father = fatherLease == null ? null : fatherLease.get();
+                    var mother = motherLease == null ? null : motherLease.get();
+                    if (father != null && mother != null && father.spouse.isBlank() && mother.spouse.isBlank())
+                        registry.marry(father.id, mother.id, year);
+                } catch (RuntimeException error) {
                     LOGGER.warn("wf_worldsim: repaired household marriage deferred for {} ({})", householdId, error.getMessage());
                 }
             }
@@ -4451,14 +4455,31 @@ public final class WorldSimMod {
             return partner;
         }
 
-        String gender = ordinal % 2 == 0 ? "m" : "f";
-        String name = emergentName(source, bandId, family.father.culture, gender, ordinal, year);
-        int childAge = Math.floorMod((int) (source.seed ^ bandId.hashCode()
-                ^ (long) ordinal * 0x9E3779B97F4A7C15L), 18);
-        dev.worldforge.people.Character child = registry.addChild(
-                family.father, family.mother, name, gender, year - childAge);
-        tagEmergentResident(child, bandId, source, householdId, familyIndex);
-        return child;
+        try (var fatherLease = registry.access().acquireGlobal(family.father.globalId());
+             var motherLease = registry.access().acquireGlobal(family.mother.globalId())) {
+            var father = fatherLease == null ? null : fatherLease.get();
+            var mother = motherLease == null ? null : motherLease.get();
+            if (father == null || mother == null) return null;
+            String gender = ordinal % 2 == 0 ? "m" : "f";
+            String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
+            int childAge = Math.floorMod((int) (source.seed ^ bandId.hashCode()
+                    ^ (long) ordinal * 0x9E3779B97F4A7C15L), 18);
+            dev.worldforge.people.Character child = registry.addChild(
+                    father, mother, name, gender, year - childAge);
+            tagEmergentResident(child, bandId, source, householdId, familyIndex);
+            return child;
+        }
+    }
+
+    private static EmergentPopulationIndex.Resident residentMetadata(
+            dev.worldforge.people.Character character, int familyIndex) {
+        Object race = character.props.get("origin.race");
+        return new EmergentPopulationIndex.Resident(character.globalId, character.id, character.alive,
+                character.birthYear, character.gender == null ? "" : character.gender, familyIndex,
+                character.house == null ? "" : character.house,
+                race == null ? "" : String.valueOf(race), character.culture == null ? "" : character.culture,
+                character.father == null ? "" : character.father,
+                character.mother == null ? "" : character.mother);
     }
 
     private static dev.worldforge.people.Character createEmergentAdult(
