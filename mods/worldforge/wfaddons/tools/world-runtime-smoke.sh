@@ -594,7 +594,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   done
   tail -n +"$((start_line + 1))" server.log | grep -q 'Done (' || { echo "ERROR: same-world restart timed out"; exit 19; }
   echo "SERVER_CORE_SAME_WORLD_RESTART=PASS"
-  printf '%s\n' "list" "save-all flush" >> in.txt
+  printf '%s\n' "list" >> in.txt
   sleep 10
   CURRENT_STAGE="server_core_final_shutdown"
   printf '%s\n' "stop" >> in.txt
