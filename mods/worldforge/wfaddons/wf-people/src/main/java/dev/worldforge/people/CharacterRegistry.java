@@ -290,6 +290,11 @@ public final class CharacterRegistry {
     /** Records one authoritative Character write, coalescing it inside an owning operation. */
     public static void recordCharacterMutation() { recordDomainMutation(); }
 
+    /** Marks the owning identity dirty for WAL persistence; no Character reference is retained. */
+    private void markCharacterDirty(Character character) {
+        if (character != null) accessService.markDirty(character.globalId);
+    }
+
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
 
@@ -649,7 +654,10 @@ public final class CharacterRegistry {
             }
             Object previousAge = character.props.put("population.age_years", age);
             if (!Objects.equals(previousAge, age)) changed = true;
-            if (changed && !lifecyclePublished) recordDomainMutation();
+            if (changed) {
+                markCharacterDirty(character);
+                if (!lifecyclePublished) recordDomainMutation();
+            }
         }
     }
 
@@ -669,16 +677,18 @@ public final class CharacterRegistry {
         boolean lifecyclePublished = false;
         for (Character character : people) {
             if (!character.alive) continue;
+            boolean characterChanged = false;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
-            if (!Objects.equals(previous, current)) changed = true;
+            if (!Objects.equals(previous, current)) { changed = true; characterChanged = true; }
             if (previous instanceof String old && !old.equals(current)) {
                 emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
                 lifecyclePublished = true;
             }
             Object age = PopulationSimulation.age(character, year);
             Object previousAge = character.props.put("population.age_years", age);
-            if (!Objects.equals(previousAge, age)) changed = true;
+            if (!Objects.equals(previousAge, age)) { changed = true; characterChanged = true; }
+            if (characterChanged) markCharacterDirty(character);
         }
         if (changed && !lifecyclePublished) recordDomainMutation();
     }
@@ -794,6 +804,7 @@ public final class CharacterRegistry {
                 && !bindings.containsValue(oldUuid)) entityOwnerByUuid.remove(oldUuid, c.id);
         entityOwnerByUuid.put(uuid, c.id);
         c.props.put("population.entity_bindings", bindings);
+        markCharacterDirty(c);
         recordDomainMutation();
         return true;
     }
@@ -818,6 +829,7 @@ public final class CharacterRegistry {
         if (!bindings.containsValue(uuid)) entityOwnerByUuid.remove(uuid, c.id);
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
+        markCharacterDirty(c);
         recordDomainMutation();
     }
 
@@ -913,6 +925,7 @@ public final class CharacterRegistry {
         while (history.size() > 64) history.remove(0);
         character.props.put("character.lifecycle.sequence", sequence);
         character.props.put("character.lifecycle.events", history);
+        markCharacterDirty(character);
         recordDomainMutation();
         for (Listener listener : listeners) listener.lifecycle(character, event);
     }
@@ -1067,6 +1080,7 @@ public final class CharacterRegistry {
         deceased.props.put("death.bereavement.cursor", 0);
         deceased.props.put("death.bereavement.year", deathYear);
         pendingBereavement.addLast(deceased.globalId);
+        markCharacterDirty(deceased);
         recordDomainMutation();
     }
 

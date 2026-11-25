@@ -63,6 +63,16 @@ public final class CharacterAccessService {
         }
     }
 
+    /** Marks one canonical identity dirty without retaining its Character object. */
+    void markDirty(String globalId) {
+        if (globalId == null || globalId.isBlank()) throw new IllegalArgumentException("Character UUID is required");
+        synchronized (PERSISTENCE) {
+            CharacterPersistenceCoordinator persistence = PERSISTENCE.get(registry);
+            if (persistence != null) persistence.markDirty(globalId);
+            else synchronized (pendingRegistrationIds) { pendingRegistrationIds.add(globalId); }
+        }
+    }
+
     /** Detaches the closed world's coordinator before this reusable registry starts a new server. */
     public void detachPersistenceCoordinator() {
         synchronized (PERSISTENCE) { PERSISTENCE.remove(registry); }
@@ -375,8 +385,7 @@ public final class CharacterAccessService {
          */
         public void markDirty() {
             if (closed.get()) throw new IllegalStateException("Character access lease is closed");
-            CharacterPersistenceCoordinator persistence = registry.access().coordinator();
-            if (persistence != null) persistence.markDirty(character.globalId);
+            registry.access().markDirty(character.globalId);
         }
 
         @Override public void close() {
