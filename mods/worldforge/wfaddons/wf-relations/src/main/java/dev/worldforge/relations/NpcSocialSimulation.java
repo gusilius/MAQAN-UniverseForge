@@ -44,7 +44,7 @@ public final class NpcSocialSimulation {
 
     private static volatile long contactIndexDay = Long.MIN_VALUE;
     private static volatile String contactIndexWorld = "";
-    private static volatile Map<CharacterRegistry, Map<String, List<Character>>> contactsByRegistry = Map.of();
+    private static volatile Map<CharacterRegistry, Map<String, List<String>>> contactsByRegistry = Map.of();
 
     private static final int CONTACT_INDEX_CHARACTERS_PER_TICK = 2048;
     // A count-only budget is unsafe when Character extension data varies widely.
@@ -54,15 +54,13 @@ public final class NpcSocialSimulation {
 
     private static final class RegistryScan {
         final CharacterRegistry registry;
-        final List<Character> people;
         final long membershipGeneration;
         int limit;
         int cursor;
 
         RegistryScan(CharacterRegistry registry) {
             this.registry = registry;
-            this.people = registry.all();
-            this.limit = people.size();
+            this.limit = registry.size();
             this.membershipGeneration = registry.membershipGeneration();
         }
     }
@@ -76,8 +74,8 @@ public final class NpcSocialSimulation {
         final List<RegistryScan> scans;
         // These maps remain private and are published through read-only views. Appends
         // extend their lists in place, so an index remains reusable during population growth.
-        final Map<CharacterRegistry, NavigableMap<String, List<Character>>> groups = new IdentityHashMap<>();
-        final Map<CharacterRegistry, NavigableMap<String, List<Character>>> publishedGroups = new IdentityHashMap<>();
+        final Map<CharacterRegistry, NavigableMap<String, List<String>>> groups = new IdentityHashMap<>();
+        final Map<CharacterRegistry, NavigableMap<String, List<String>>> publishedGroups = new IdentityHashMap<>();
         int scanIndex;
         boolean published;
 
@@ -145,7 +143,7 @@ public final class NpcSocialSimulation {
                 contactIndexBuild = null;
                 return false; // A wholesale restore gets a fresh, consistent scan next tick.
             }
-            int currentSize = scan.people.size();
+            int currentSize = scan.registry.size();
             if (currentSize > scan.limit) scan.limit = currentSize;
             if (scan.cursor < scan.limit && i < build.scanIndex) build.scanIndex = i;
         }
@@ -158,7 +156,10 @@ public final class NpcSocialSimulation {
             while (remaining > 0 && scan.cursor < scan.limit) {
                 if (processed > 0 && (processed & CONTACT_INDEX_DEADLINE_CHECK_MASK) == 0
                         && System.nanoTime() >= deadline) return false;
-                Character person = scan.people.get(scan.cursor++);
+                String localId = scan.registry.idAt(scan.cursor++);
+                try (dev.worldforge.people.CharacterAccessService.Lease lease = scan.registry.access().acquire(localId)) {
+                if (lease == null) continue;
+                Character person = lease.get();
                 processed++;
                 remaining--;
                 if (person == null || !person.alive || year - person.birthYear < 18
@@ -167,8 +168,8 @@ public final class NpcSocialSimulation {
                 if (polity.isBlank()) continue;
                 String band = String.valueOf(person.props.getOrDefault("emergence.band_id", polity));
                 if (band.isBlank()) band = polity;
-                NavigableMap<String, List<Character>> byBand = build.groups.get(scan.registry);
-                List<Character> members = byBand.get(band);
+                NavigableMap<String, List<String>> byBand = build.groups.get(scan.registry);
+                List<String> members = byBand.get(band);
                 if (members == null) {
                     members = new ArrayList<>();
                     byBand.put(band, members);
@@ -177,7 +178,8 @@ public final class NpcSocialSimulation {
                                 .put(band, Collections.unmodifiableList(members));
                     }
                 }
-                members.add(person);
+                members.add(person.globalId);
+                }
             }
             if (scan.cursor >= scan.limit) build.scanIndex++;
         }
@@ -194,7 +196,7 @@ public final class NpcSocialSimulation {
         // running, continue from its old cursor on the next tick instead of restarting.
         for (int i = 0; i < build.scans.size(); i++) {
             RegistryScan scan = build.scans.get(i);
-            int currentSize = scan.people.size();
+            int currentSize = scan.registry.size();
             if (currentSize > scan.limit) scan.limit = currentSize;
             if (scan.cursor < scan.limit) {
                 build.scanIndex = i;
@@ -208,9 +210,9 @@ public final class NpcSocialSimulation {
         if (CharacterRegistry.globalMembershipRevision() != membershipRevision) return false;
         build.membershipRevision = membershipRevision;
         if (!build.published) {
-            Map<CharacterRegistry, Map<String, List<Character>>> frozen = new IdentityHashMap<>();
+            Map<CharacterRegistry, Map<String, List<String>>> frozen = new IdentityHashMap<>();
             build.groups.forEach((registry, byBand) -> {
-                NavigableMap<String, List<Character>> readOnlyBands = new TreeMap<>();
+                NavigableMap<String, List<String>> readOnlyBands = new TreeMap<>();
                 byBand.forEach((band, members) ->
                         readOnlyBands.put(band, Collections.unmodifiableList(members)));
                 build.publishedGroups.put(registry, readOnlyBands);
@@ -227,7 +229,7 @@ public final class NpcSocialSimulation {
         return true;
     }
 
-    private static Map<CharacterRegistry, Map<String, List<Character>>> contactIndex(long day, int year) {
+    private static Map<CharacterRegistry, Map<String, List<String>>> contactIndex(long day, int year) {
         String world = String.valueOf(WorldForgeMod.worldId());
         return contactIndexDay == day && contactIndexYear == year && contactIndexWorld.equals(world)
                 && contactIndexRegistryGeneration == PeopleMod.populationRegistryGeneration()
@@ -237,7 +239,7 @@ public final class NpcSocialSimulation {
 
     public static int advance(Relations relations, int day, int year) {
         if (relations == null || !PeopleMod.identityPartitionsReady()) return 0;
-        Map<CharacterRegistry, Map<String, List<Character>>> indexedGroups = contactIndex(day, year);
+        Map<CharacterRegistry, Map<String, List<String>>> indexedGroups = contactIndex(day, year);
         if (indexedGroups == null) return 0; // Index construction is advanced incrementally by RelationsMod.
 
         List<CharacterRegistry> registries = PeopleMod.populationRegistriesSnapshot();
@@ -267,15 +269,15 @@ public final class NpcSocialSimulation {
         Map<String, Map<String, Integer>> ancestryCache = new HashMap<>();
         // Linked insertion order follows the stable canonical registry snapshot, keeping
         // travel interactions deterministic across server restarts.
-        Map<CharacterRegistry, List<Character>> travelCandidates = new LinkedHashMap<>();
+        Map<CharacterRegistry, List<String>> travelCandidates = new LinkedHashMap<>();
 
         for (int offset = 0; offset < visitCount; offset++) {
             CharacterRegistry registry = registries.get((start + offset) % registryCount);
-            Map<String, List<Character>> rawGroups = indexedGroups.getOrDefault(registry, Map.of());
+            Map<String, List<String>> rawGroups = indexedGroups.getOrDefault(registry, Map.of());
             if (!(rawGroups instanceof NavigableMap<?, ?>)) continue;
             @SuppressWarnings("unchecked")
-            NavigableMap<String, List<Character>> groups =
-                    (NavigableMap<String, List<Character>>) rawGroups;
+            NavigableMap<String, List<String>> groups =
+                    (NavigableMap<String, List<String>>) rawGroups;
             if (groups.isEmpty()) continue;
 
             int share = baseShare + (offset < extraShare ? 1 : 0);
@@ -283,19 +285,19 @@ public final class NpcSocialSimulation {
             String lastGroup;
             synchronized (GROUP_CURSORS) { lastGroup = GROUP_CURSORS.get(registry); }
             for (int groupOffset = 0; groupOffset < groupLimit; groupOffset++) {
-                Map.Entry<String, List<Character>> group =
+                Map.Entry<String, List<String>> group =
                         lastGroup == null ? groups.firstEntry() : groups.higherEntry(lastGroup);
                 if (group == null) group = groups.firstEntry();
                 if (group == null) break;
                 lastGroup = group.getKey();
-                List<Character> members = group.getValue();
+                List<String> members = group.getValue();
 
                 int travelSamples = Math.min(TRAVEL_SAMPLES_PER_GROUP_PER_DAY, members.size());
                 if (travelSamples > 0) {
                     long sampleHash = mix(seed ^ group.getKey().hashCode()
                             ^ ((long) day * 0x9E3779B97F4A7C15L));
                     int sampleStart = Math.floorMod((int) sampleHash, members.size());
-                    List<Character> registryTravelCandidates =
+                    List<String> registryTravelCandidates =
                             travelCandidates.computeIfAbsent(registry, ignored -> new ArrayList<>());
                     for (int sample = 0; sample < travelSamples; sample++)
                         registryTravelCandidates.add(members.get((sampleStart + sample) % members.size()));
@@ -313,86 +315,36 @@ public final class NpcSocialSimulation {
 
         // Cross-band travel is evaluated independently inside each canonical registry:
         // kinship checks and marriage writes must never cross registry ownership boundaries.
-        for (Map.Entry<CharacterRegistry, List<Character>> travelEntry : travelCandidates.entrySet()) {
-            CharacterRegistry registry = travelEntry.getKey();
-            List<Character> candidatesForRegistry = travelEntry.getValue();
-            Map<String, List<Character>> adultsByBand = new TreeMap<>();
-            for (Character adult : candidatesForRegistry) {
-                String band = String.valueOf(adult.props.getOrDefault("emergence.band_id", ""));
-                adultsByBand.computeIfAbsent(band, ignored -> new ArrayList<>()).add(adult);
-            }
-            List<String> travelBands = new ArrayList<>(adultsByBand.keySet());
-            if (travelBands.size() <= 1) continue;
-            long travelEpoch = Math.floorDiv(day, 30);
-            for (Character traveler : candidatesForRegistry) {
-                if (!traveler.alive || !hasTravelRole(traveler)) continue;
-                String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
-                long travelHash = mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch);
-                int startBand = Math.floorMod((int) travelHash, travelBands.size());
-                String targetBand = travelBands.get(startBand);
-                if (targetBand.equals(homeBand))
-                    targetBand = travelBands.get((startBand + 1) % travelBands.size());
-                List<Character> candidates = adultsByBand.get(targetBand);
-                if (candidates == null || candidates.isEmpty()) continue;
-                Character candidate = candidates.get(Math.floorMod((int) (travelHash >>> 32), candidates.size()));
-                if (candidate == traveler || !candidate.alive) continue;
-                interact(relations, registry, traveler, candidate,
-                        "travel:" + homeBand + ":" + targetBand, candidatesForRegistry,
-                        day, year, ancestryCache);
-                interactions++;
+        for (Map.Entry<CharacterRegistry,List<String>> entry:travelCandidates.entrySet()){
+            CharacterRegistry registry=entry.getKey();List<String> ids=entry.getValue();Map<String,String> bands=new LinkedHashMap<>();
+            for(String id:ids)try(dev.worldforge.people.CharacterAccessService.Lease l=registry.access().acquireGlobal(id)){if(l!=null){Character p=l.get();if(p.alive&&hasTravelRole(p))bands.put(id,String.valueOf(p.props.getOrDefault("emergence.band_id","")));}}
+            List<String> names=new ArrayList<>(new TreeSet<>(bands.values()));if(names.size()<2)continue;long epoch=Math.floorDiv(day,30);
+            for(String tid:ids)try(dev.worldforge.people.CharacterAccessService.Lease tl=registry.access().acquireGlobal(tid)){
+                if(tl==null)continue;Character traveler=tl.get();String home=bands.getOrDefault(tid,"");if(!traveler.alive||!hasTravelRole(traveler)||home.isBlank())continue;
+                long h=mix(seed^traveler.globalId.hashCode()^epoch);int ti=Math.floorMod((int)(h>>>32),names.size());String target=names.get(ti);if(target.equals(home))target=names.get((ti+1)%names.size());
+                String cid=null;for(Map.Entry<String,String> x:bands.entrySet())if(target.equals(x.getValue())&&!x.getKey().equals(tid)){cid=x.getKey();break;}if(cid==null)continue;
+                try(dev.worldforge.people.CharacterAccessService.Lease cl=registry.access().acquireGlobal(cid)){if(cl==null||!cl.get().alive)continue;interact(relations,registry,traveler,cl.get(),"travel:"+home+":"+target,ids,day,year,ancestryCache);interactions++;}
             }
         }
         return interactions;
     }
 
-    private static int processSocialGroup(Relations relations, CharacterRegistry registry, String groupId,
-                                          List<Character> members, int day, int year, long seed,
-                                          Map<String, Map<String, Integer>> ancestryCache) {
-        if (members.size() < 2) return 0;
-        // Canonical marriage is owned by CharacterRegistry, not by whether a random
-        // social pair happened to be sampled today. Project existing spouses into the
-        // Relations bond view once per visited group so UI, reports and social queries
-        // agree without inventing or changing marriages.
-        Map<String, Character> membersById = new HashMap<>(members.size() * 2);
-        for (Character member : members) if (member != null && member.alive)
-            membersById.put(member.id, member);
-        for (Character member : members) {
-            if (member == null || !member.alive || member.spouse == null || member.spouse.isBlank()) continue;
-            Character spouse = membersById.get(member.spouse);
-            if (spouse == null || !member.id.equals(spouse.spouse)) continue;
-            String memberKey = "npc:" + member.globalId;
-            String spouseKey = "npc:" + spouse.globalId;
-            Relations.Bond forward = relations.bond(memberKey, spouseKey);
-            Relations.Bond reverse = relations.bond(spouseKey, memberKey);
-            forward.married = reverse.married = true;
-            forward.dating = reverse.dating = false;
-        }
-        int interactions = 0;
-        long interactionEpoch = Math.floorDiv(day, 90);
-        for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
-            long hash = mix(seed ^ (interactionEpoch * 0xD6E8FEB86659FD93L)
-                    ^ groupId.hashCode() ^ slot * 0x9E3779B97F4A7C15L);
-            int first = Math.floorMod((int) hash, members.size());
-            int second = Math.floorMod((int) (hash >>> 32), members.size() - 1);
-            if (second >= first) second++;
-            Character a = members.get(first), b = members.get(second);
-            if (a.gender.equals(b.gender)) {
-                for (int candidateOffset = 1;
-                     candidateOffset < Math.min(members.size(), MAX_COMPATIBLE_PARTNER_PROBES);
-                     candidateOffset++) {
-                    Character candidate = members.get((second + candidateOffset) % members.size());
-                    if (!candidate.gender.equals(a.gender) && candidate.alive
-                            && year - candidate.birthYear >= 18) {
-                        b = candidate;
-                        break;
+    private static int processSocialGroup(Relations relations,CharacterRegistry registry,String groupId,List<String> members,int day,int year,long seed,Map<String,Map<String,Integer>> ancestryCache){
+        if(members.size()<2)return 0;int count=0;long epoch=Math.floorDiv(day,90);
+        for(int slot=0;slot<PAIRS_PER_GROUP_PER_DAY;slot++){
+            long h=mix(seed^(epoch*0xD6E8FEB86659FD93L)^groupId.hashCode()^slot*0x9E3779B97F4A7C15L);int i=Math.floorMod((int)h,members.size()),j=Math.floorMod((int)(h>>>32),members.size()-1);if(j>=i)j++;
+            String aid=members.get(i),bid=members.get(j);
+            try(dev.worldforge.people.CharacterAccessService.Lease al=registry.access().acquireGlobal(aid)){
+                if(al==null)continue;Character x=al.get();if(!x.alive)continue;
+                try(dev.worldforge.people.CharacterAccessService.Lease bp=registry.access().acquireGlobal(bid)){
+                    if(bp==null||!bp.get().alive)continue;
+                    if(x.gender.equals(bp.get().gender))for(int p=1;p<Math.min(members.size(),MAX_COMPATIBLE_PARTNER_PROBES);p++){
+                        String id=members.get((j+p)%members.size());try(dev.worldforge.people.CharacterAccessService.Lease cl=registry.access().acquireGlobal(id)){if(cl!=null){Character y=cl.get();if(!y.globalId.equals(x.globalId)&&y.alive&&!y.gender.equals(x.gender)&&year-y.birthYear>=18){bid=id;break;}}}
                     }
                 }
+                try(dev.worldforge.people.CharacterAccessService.Lease bl=registry.access().acquireGlobal(bid)){if(bl==null)continue;Character y=bl.get();if(x==y||!y.alive||!canMeetLocally(x,y))continue;interact(relations,registry,x,y,groupId,members,day,year,ancestryCache);count++;}
             }
-            if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
-            interact(relations, registry, a, b, groupId, members, day, year, ancestryCache);
-            interactions++;
-        }
-        return interactions;
+        }return count;
     }
 
     private static int rotationStride(int minimum, int size) {
@@ -468,8 +420,10 @@ public final class NpcSocialSimulation {
         while (!queue.isEmpty()) {
             Map.Entry<String, Integer> entry = queue.removeFirst();
             if (entry.getValue() > 6 || result.putIfAbsent(entry.getKey(), entry.getValue()) != null) continue;
-            Character parent = PeopleMod.authority().getGlobal(entry.getKey());
-            if (parent != null) addParents(queue, parent, registry, entry.getValue() + 1);
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(entry.getKey());
+            if (owner != null) try (dev.worldforge.people.CharacterAccessService.Lease lease = owner.access().acquireGlobal(entry.getKey())) {
+                if (lease != null) addParents(queue, lease.get(), owner, entry.getValue() + 1);
+            }
         }
         return result;
     }
@@ -487,9 +441,9 @@ public final class NpcSocialSimulation {
         }
         for (String id : List.of(person.father, person.mother)) {
             if (id == null || id.isBlank()) continue;
-            Character parent = registry.get(id);
-            if (parent == null) parent = PeopleMod.authority().getGlobal(id);
-            if (parent != null) queue.add(Map.entry(parent.globalId, distance));
+            String globalId = registry.globalIdForLocalId(id);
+            if (globalId == null && PeopleMod.authority().registryForGlobal(id) != null) globalId = id;
+            if (globalId != null) queue.add(Map.entry(globalId, distance));
         }
     }
 
@@ -511,7 +465,7 @@ public final class NpcSocialSimulation {
     }
 
     private static void interact(Relations relations, CharacterRegistry registry, Character a, Character b,
-                                 String groupId, List<Character> witnesses, int day, int year,
+                                 String groupId, List<String> witnesses, int day, int year,
                                  Map<String, Map<String, Integer>> ancestryCache) {
         String aKey = "npc:" + a.globalId, bKey = "npc:" + b.globalId;
         Relations.Bond ab = relations.bond(aKey, bKey);
@@ -629,9 +583,9 @@ public final class NpcSocialSimulation {
     }
 
     private static void reputation(Character subject, String polity, int delta, int day,
-                                    String reason, List<Character> group) {
-        String[] witnesses = group.stream().filter(person -> person.alive && person != subject)
-                .limit(8).map(person -> person.globalId).toArray(String[]::new);
+                                    String reason, List<String> group) {
+        String[] witnesses = group.stream().filter(id -> id != null && !id.equals(subject.globalId))
+                .limit(8).toArray(String[]::new);
         try {
             Class<?> bridge = Class.forName("dev.worldforge.reputation.mc.ReputationMod");
             Method method = bridge.getMethod("recordAutonomous", String.class, String.class,
@@ -645,35 +599,18 @@ public final class NpcSocialSimulation {
     }
 
     /** Trusted contacts used by wf-reputation's bounded rumor network. */
-    public static List<Contact> contactsOf(String witnessGlobalId, String polityId) {
-        Character witness = PeopleMod.authority().getGlobal(witnessGlobalId);
-        if (witness == null) return List.of();
-        CharacterRegistry registry = PeopleMod.authority().registryForGlobal(witnessGlobalId);
-        if (registry == null) return List.of();
-        String witnessPolity = polityOf(witness);
-        if (!Objects.equals(witnessPolity, polityId)) return List.of();
-        String bandId = String.valueOf(witness.props.getOrDefault("emergence.band_id", polityId));
-        if (bandId.isBlank()) bandId = polityId;
-        int day = RelationsMc.dayNumber();
-        int year = WorldForgeApi.clock().startYear + Math.floorDiv(day, 365);
-        Map<CharacterRegistry, Map<String, List<Character>>> index = contactIndex(day, year);
-        if (index == null) return List.of();
-        List<Character> members = index.getOrDefault(registry, Map.of()).getOrDefault(bandId, List.of());
-        if (members.isEmpty()) return List.of();
-        List<Contact> result = new ArrayList<>();
-        for (Character candidate : members) {
-            if (candidate == witness || !candidate.alive || !Objects.equals(polityOf(candidate), polityId)) continue;
-            Relations.Bond bond = RelationsMc.REL.peek("npc:" + witness.globalId, "npc:" + candidate.globalId);
-            if (bond == null) continue;
-            result.add(new Contact(candidate.globalId, bond.affinity, polityId, true, true));
+    public static List<Contact> contactsOf(String witnessGlobalId,String polityId){
+        CharacterRegistry registry=PeopleMod.authority().registryForGlobal(witnessGlobalId);if(registry==null)return List.of();
+        try(dev.worldforge.people.CharacterAccessService.Lease wl=registry.access().acquireGlobal(witnessGlobalId)){
+            if(wl==null)return List.of();Character witness=wl.get();if(!witness.alive||!Objects.equals(polityOf(witness),polityId))return List.of();
+            String band=String.valueOf(witness.props.getOrDefault("emergence.band_id",polityId));if(band.isBlank())band=polityId;
+            int day=RelationsMc.dayNumber(),year=WorldForgeApi.clock().startYear+Math.floorDiv(day,365);Map<CharacterRegistry,Map<String,List<String>>> idx=contactIndex(day,year);if(idx==null)return List.of();
+            List<String> ids=idx.getOrDefault(registry,Map.of()).getOrDefault(band,List.of());List<Contact> result=new ArrayList<>();
+            for(String id:ids){if(result.size()>=64)break;if(id.equals(witnessGlobalId))continue;try(dev.worldforge.people.CharacterAccessService.Lease cl=registry.access().acquireGlobal(id)){if(cl==null)continue;Character p=cl.get();if(!p.alive||!Objects.equals(polityOf(p),polityId))continue;Relations.Bond bond=RelationsMc.REL.peek("npc:"+witnessGlobalId,"npc:"+id);if(bond!=null)result.add(new Contact(id,bond.affinity,polityId,true,true));}}
+            return result;
         }
-        return result;
     }
-
-    public static boolean isMember(String globalId, String polityId) {
-        Character person = PeopleMod.authority().getGlobal(globalId);
-        return person != null && person.alive && Objects.equals(polityOf(person), polityId);
-    }
+    public static boolean isMember(String globalId,String polityId){CharacterRegistry registry=PeopleMod.authority().registryForGlobal(globalId);if(registry==null)return false;try(dev.worldforge.people.CharacterAccessService.Lease l=registry.access().acquireGlobal(globalId)){return l!=null&&l.get().alive&&Objects.equals(polityOf(l.get()),polityId);}}
 
     private static String polityOf(Character person) {
         Object value = person.props.get("emergence.polity_id");
