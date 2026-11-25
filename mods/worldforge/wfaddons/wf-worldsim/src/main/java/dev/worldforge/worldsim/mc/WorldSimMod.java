@@ -2649,11 +2649,20 @@ public final class WorldSimMod {
                 // Build canonical resident membership in bounded slices. Previously the
                 // whole population was collected in one tick after the creation budget ended.
                 while (bandProgress.residentIndexCursor < residents.size() && budget > 0) {
-                    dev.worldforge.people.Character resident = residents.get(bandProgress.residentIndexCursor++);
-                    if (resident.alive) {
-                        bandProgress.residentIds.add(resident.globalId);
-                        bandProgress.residentIdSet.add(resident.globalId);
+                    String residentGlobalId = residents.get(bandProgress.residentIndexCursor);
+                    try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
+                        if (lease == null) {
+                            LOGGER.warn("wf_worldsim: resident {} is temporarily unavailable while reconciling band {}; retrying next pass",
+                                    residentGlobalId, bandId);
+                            break;
+                        }
+                        dev.worldforge.people.Character resident = lease.get();
+                        if (resident.alive) {
+                            bandProgress.residentIds.add(resident.globalId);
+                            bandProgress.residentIdSet.add(resident.globalId);
+                        }
                     }
+                    bandProgress.residentIndexCursor++;
                     budget--;
                 }
                 if (bandProgress.residentIndexCursor < residents.size() || budget == 0) {
