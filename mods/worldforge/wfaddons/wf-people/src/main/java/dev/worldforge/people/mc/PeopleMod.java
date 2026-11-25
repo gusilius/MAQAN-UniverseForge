@@ -645,12 +645,14 @@ public class PeopleMod {
             CHARACTER_WAL_WRITERS.remove(registry, writer);
         }
         boolean restartWriter = writer != null;
+        CharacterPersistenceCoordinator persistence = registry.access().persistenceCoordinator();
+        long checkpointDirtyEpoch = -1L;
+        boolean checkpointPublished = false;
         try {
+            if (persistence != null) checkpointDirtyEpoch = persistence.beginCheckpoint();
             CharacterRecordStore records = CHARACTER_RECORD_STORES.get(registry);
             if (records == null) throw new java.io.IOException("Character record store is not open");
             long membership = registry.membershipGeneration();
-            CharacterPersistenceCoordinator persistence = registry.access().persistenceCoordinator();
-            long checkpointDirtyEpoch = persistence == null ? -1L : persistence.dirtyEpoch();
             boolean fullBootstrap = !Boolean.TRUE.equals(CHARACTER_RECORD_STORE_COMPLETE.get(registry))
                     || !Objects.equals(CHARACTER_RECORD_STORE_MEMBERSHIP.get(registry), membership);
             // Hold the WAL monitor across both record-store writes and shard truncation.
@@ -687,10 +689,14 @@ public class PeopleMod {
             });
             CHARACTER_RECORD_STORE_COMPLETE.put(registry, true);
             CHARACTER_RECORD_STORE_MEMBERSHIP.put(registry, registry.membershipGeneration());
-            if (persistence != null && checkpointDirtyEpoch >= 0L
-                    && !persistence.markCheckpointCompleted(checkpointDirtyEpoch))
-                LOGGER.debug("wf_people: checkpoint committed but eviction remains fenced by concurrent/new dirty work");
+            if (persistence != null && checkpointDirtyEpoch >= 0L) {
+                checkpointPublished = persistence.markCheckpointCompleted(checkpointDirtyEpoch);
+                if (!checkpointPublished)
+                    LOGGER.debug("wf_people: checkpoint committed but no matching checkpoint reservation was published");
+            }
         } finally {
+            if (persistence != null && checkpointDirtyEpoch >= 0L && !checkpointPublished)
+                persistence.abortCheckpoint();
             if (restartWriter) {
                 CharacterWalWriter replacement = new CharacterWalWriter(wal, 8192,
                         "wf-character-wal-checkpoint-" + Integer.toHexString(System.identityHashCode(registry)));

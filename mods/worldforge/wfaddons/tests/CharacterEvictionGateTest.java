@@ -23,8 +23,13 @@ public final class CharacterEvictionGateTest {
                 "identity recovered from an existing durable snapshot starts clean without a redundant rewrite");
 
         CharacterEvictionGate.PersistenceTicket first = gate.capture(id);
-        check(gate.markPersisted(first) && gate.canEvict(id),
-                "successful persistence receipt makes the exact generation clean");
+        check(gate.markPersisted(first)
+                        && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING
+                        && !gate.canEvict(id),
+                "WAL receipt cleans the exact generation but still requires checkpoint publication");
+        gate.beginCheckpoint();
+        gate.completeCheckpoint();
+        check(gate.canEvict(id), "checkpoint publication makes the clean generation evictable");
 
         CharacterEvictionGate.PersistenceTicket stale = gate.capture(id);
         gate.markDirty(id);
@@ -33,7 +38,27 @@ public final class CharacterEvictionGateTest {
                 "stale persistence receipt cannot clean a newer mutation");
 
         CharacterEvictionGate.PersistenceTicket second = gate.capture(id);
-        check(gate.markPersisted(second), "latest generation can be acknowledged as durable");
+        check(gate.markPersisted(second)
+                        && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
+                "latest generation can be acknowledged by WAL but remains checkpoint-pending");
+        gate.beginCheckpoint();
+        gate.completeCheckpoint();
+
+        String raceId = "00000000-0000-0000-0000-000000000088";
+        gate.register(raceId);
+        CharacterEvictionGate.PersistenceTicket raceInitial = gate.capture(raceId);
+        gate.markPersisted(raceInitial);
+        gate.beginCheckpoint();
+        gate.markDirty(raceId);
+        CharacterEvictionGate.PersistenceTicket raceUpdated = gate.capture(raceId);
+        check(gate.markPersisted(raceUpdated), "concurrent checkpoint mutation receives a durable WAL receipt");
+        gate.completeCheckpoint();
+        check(!gate.canEvict(raceId)
+                        && gate.decision(raceId) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
+                "checkpoint does not publish an identity mutated after its checkpoint cut");
+        gate.beginCheckpoint();
+        gate.completeCheckpoint();
+        check(gate.canEvict(raceId), "the next checkpoint publishes the latest unchanged generation");
 
         try (CharacterEvictionGate.Pin lease = gate.acquireLease(id)) {
             check(gate.decision(id) == CharacterEvictionGate.Decision.ACTIVE_LEASE,

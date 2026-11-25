@@ -91,12 +91,30 @@ public final class CharacterPersistenceCoordinatorTest {
             var firstFuture = coordinator.persist(id, firstPayload);
             CharacterWal.Record first = firstFuture.get(10, TimeUnit.SECONDS);
             check(writer.pending() == 0, "completed WAL receipt leaves no outstanding writer work");
-            check(first.globalId().equals(id) && gate.decision(id) == CharacterEvictionGate.Decision.ELIGIBLE
+            check(first.globalId().equals(id) && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING
                             && !coordinator.canEvict(id),
                     "forced WAL receipt cleans the captured generation but checkpoint is still required");
             coordinator.checkpointLatest();
             check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch()) && coordinator.canEvict(id),
                     "durable checkpoint publishes the eviction-eligible generation");
+
+            String unrelatedId = "00000000-0000-0000-0000-000000000078";
+            coordinator.register(unrelatedId);
+            coordinator.persist(unrelatedId, "{\"v\":1}".getBytes(StandardCharsets.UTF_8))
+                    .get(10, TimeUnit.SECONDS);
+            coordinator.checkpointLatest();
+            check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch())
+                            && coordinator.canEvict(id) && coordinator.canEvict(unrelatedId),
+                    "checkpoint publishes both independently clean identities");
+            coordinator.markDirty(unrelatedId);
+            check(coordinator.canEvict(id) && !coordinator.canEvict(unrelatedId),
+                    "one NPC's new dirty generation does not pin an unrelated checkpointed NPC");
+            coordinator.persist(unrelatedId, "{\"v\":2}".getBytes(StandardCharsets.UTF_8))
+                    .get(10, TimeUnit.SECONDS);
+            coordinator.checkpointLatest();
+            check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch())
+                            && coordinator.canEvict(id) && coordinator.canEvict(unrelatedId),
+                    "per-identity checkpoint eligibility recovers after the second NPC is saved");
 
             try (CharacterEvictionGate.Pin lease = coordinator.acquireLease(id)) {
                 check(!coordinator.canEvict(id), "coordinator lease pin prevents eviction");
@@ -106,7 +124,7 @@ public final class CharacterPersistenceCoordinatorTest {
             coordinator.markDirty(id);
             byte[] secondPayload = "{\"v\":2}".getBytes(StandardCharsets.UTF_8);
             coordinator.persist(id, secondPayload).get(10, TimeUnit.SECONDS);
-            check(!coordinator.canEvict(id) && gate.decision(id) == CharacterEvictionGate.Decision.ELIGIBLE,
+            check(!coordinator.canEvict(id) && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
                     "WAL receipt clears the generation but does not bypass checkpoint publication");
             coordinator.checkpointLatest();
             check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch()) && coordinator.canEvict(id),
@@ -128,7 +146,7 @@ public final class CharacterPersistenceCoordinatorTest {
 
             coordinator.persistMutation(id, () -> "{\"v\":\"2-final\"}".getBytes(StandardCharsets.UTF_8))
                     .get(10, TimeUnit.SECONDS);
-            check(!coordinator.canEvict(id) && gate.decision(id) == CharacterEvictionGate.Decision.ELIGIBLE,
+            check(!coordinator.canEvict(id) && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
                     "a fresh snapshot receipt acknowledges the current generation without bypassing checkpoint");
             coordinator.checkpointLatest();
             check(coordinator.markCheckpointCompleted(coordinator.dirtyEpoch()) && coordinator.canEvict(id),
@@ -164,8 +182,8 @@ public final class CharacterPersistenceCoordinatorTest {
             while (coordinator.dirtyQueue().pendingCount() != 0 && System.nanoTime() < batchDeadline)
                 Thread.sleep(5);
             check(batchAccepted == 2 && coordinator.dirtyQueue().pendingCount() == 0
-                            && gate.decision(id) == CharacterEvictionGate.Decision.ELIGIBLE
-                            && gate.decision(batchId) == CharacterEvictionGate.Decision.ELIGIBLE
+                            && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING
+                            && gate.decision(batchId) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING
                             && !coordinator.canEvict(id) && !coordinator.canEvict(batchId),
                     "bounded dirty service clears UUIDs only after durable WAL receipts");
             coordinator.checkpointLatest();

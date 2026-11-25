@@ -27,8 +27,11 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private final LongAdder dirtyServiceNanos = new LongAdder();
     /** Epoch invalidates checkpoint eligibility whenever any identity becomes dirty. */
     private final AtomicLong dirtyEpoch = new AtomicLong();
-    /** -1 until a complete checkpoint has incorporated the current dirty epoch. */
+    /** Dirty epoch captured when the current WAL checkpoint began. */
+    private volatile long checkpointStartEpoch = -1L;
+    /** Last completed checkpoint's starting dirty epoch, for diagnostics only. */
     private volatile long checkpointEpoch = -1L;
+    private final Object checkpointMonitor = new Object();
 
     public record DirtyMetrics(int pending, int ready, int inFlight, int critical,
                                long accepted, long failed, long serializedBytes, long serviceNanos) { }
@@ -232,8 +235,31 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
      * implementation; only one decoded record/payload is passed to the record store at a
      * time. The WAL monitor excludes appends until every checkpoint write has completed.
      */
+    public long beginCheckpoint() {
+        synchronized (checkpointMonitor) {
+            if (checkpointStartEpoch >= 0)
+                throw new IllegalStateException("A Character WAL checkpoint is already in progress");
+            checkpointStartEpoch = dirtyEpoch.get();
+            evictionGate.beginCheckpoint();
+            return checkpointStartEpoch;
+        }
+    }
+
+    public void abortCheckpoint() {
+        synchronized (checkpointMonitor) {
+            evictionGate.abortCheckpoint();
+            checkpointStartEpoch = -1L;
+        }
+    }
+
     public void checkpointLatest() throws IOException {
-        wal.checkpoint(() -> wal.replayLatestEach(records::put));
+        beginCheckpoint();
+        try {
+            wal.checkpoint(() -> wal.replayLatestEach(records::put));
+        } catch (IOException | RuntimeException failure) {
+            abortCheckpoint();
+            throw failure;
+        }
     }
 
     public CharacterRecordStore.Record load(String globalId) throws IOException {
@@ -255,28 +281,18 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
      * Any concurrent mutation or unacknowledged dirty UUID invalidates the checkpoint.
      */
     public boolean markCheckpointCompleted(long expectedDirtyEpoch) {
-        if (dirtyEpoch.get() != expectedDirtyEpoch
-                || dirtyQueue.pendingCount() != 0 || dirtyQueue.inFlightCount() != 0) return false;
-        checkpointEpoch = expectedDirtyEpoch;
-        // Close the race with a mutation between the first epoch read and publication.
-        if (dirtyEpoch.get() != expectedDirtyEpoch
-                || dirtyQueue.pendingCount() != 0 || dirtyQueue.inFlightCount() != 0) {
-            checkpointEpoch = -1L;
-            return false;
+        synchronized (checkpointMonitor) {
+            if (checkpointStartEpoch < 0) return false;
+            evictionGate.completeCheckpoint();
+            checkpointEpoch = checkpointStartEpoch;
+            checkpointStartEpoch = -1L;
+            return true;
         }
-        return true;
     }
 
     public boolean canEvict(String globalId) {
         evictionGate.registerPersistedIfAbsent(globalId);
-        // Eviction is identity-scoped. Another NPC's pending WAL/checkpoint work must
-        // not pin this identity once its own WAL frame and addressable record are durable.
-        long currentDirtyEpoch = dirtyEpoch.get();
-        // A forced WAL receipt alone is not an eviction boundary: the record must
-        // also be published by the completed checkpoint for the current global epoch.
-        return checkpointEpoch == currentDirtyEpoch
-                && !dirtyQueue.contains(globalId)
-                && evictionGate.canEvict(globalId);
+        return !dirtyQueue.contains(globalId) && evictionGate.canEvict(globalId);
     }
 
     @Override public void close() throws IOException {

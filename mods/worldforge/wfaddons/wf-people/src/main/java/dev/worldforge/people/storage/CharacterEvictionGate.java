@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * exact captured generation clean; a concurrent later write keeps the record dirty.
  *
  * New identities start dirty and therefore cannot be evicted before their first
- * successful durable checkpoint. State entries are intentionally retained: removing
- * one while a stale lease/receipt exists would permit an ABA-style unsafe eviction.
+ * successful durable checkpoint. Runtime fences are removed only after physical
+ * eviction has completed and every lease/transaction has been released.
  */
 public final class CharacterEvictionGate {
     public enum Decision {
@@ -22,6 +22,7 @@ public final class CharacterEvictionGate {
         UNKNOWN_IDENTITY,
         DIRTY,
         NEVER_PERSISTED,
+        CHECKPOINT_PENDING,
         ACTIVE_LEASE,
         ACTIVE_TRANSACTION
     }
@@ -37,6 +38,8 @@ public final class CharacterEvictionGate {
     private static final class State {
         long generation = 1;
         long persistedGeneration;
+        long checkpointedGeneration;
+        long checkpointCandidateGeneration = -1L;
         int leases;
         int transactions;
         boolean evictionInProgress;
@@ -56,6 +59,7 @@ public final class CharacterEvictionGate {
         String id = requireId(globalId);
         State state = new State();
         state.persistedGeneration = state.generation;
+        state.checkpointedGeneration = state.generation;
         states.putIfAbsent(id, state);
     }
 
@@ -64,6 +68,7 @@ public final class CharacterEvictionGate {
         State state = states.computeIfAbsent(id, ignored -> new State());
         synchronized (state) {
             state.persistedGeneration = state.generation;
+            state.checkpointedGeneration = state.generation;
         }
     }
 
@@ -110,6 +115,37 @@ public final class CharacterEvictionGate {
         }
     }
 
+    /** Capture the exact clean generations that exist at the start of a WAL checkpoint. */
+    public void beginCheckpoint() {
+        for (State state : states.values()) {
+            synchronized (state) {
+                state.checkpointCandidateGeneration =
+                        state.transactions == 0 && state.persistedGeneration == state.generation
+                                ? state.generation : -1L;
+            }
+        }
+    }
+
+    /** Publish only generations that remained unchanged and durable throughout the checkpoint. */
+    public void completeCheckpoint() {
+        for (State state : states.values()) {
+            synchronized (state) {
+                long candidate = state.checkpointCandidateGeneration;
+                if (candidate >= 0 && !state.evictionInProgress && state.transactions == 0
+                        && state.generation == candidate && state.persistedGeneration == candidate)
+                    state.checkpointedGeneration = candidate;
+                state.checkpointCandidateGeneration = -1L;
+            }
+        }
+    }
+
+    /** Abandon a checkpoint whose WAL compaction failed. */
+    public void abortCheckpoint() {
+        for (State state : states.values()) {
+            synchronized (state) { state.checkpointCandidateGeneration = -1L; }
+        }
+    }
+
     public Pin acquireLease(String globalId) {
         return acquire(globalId, true);
     }
@@ -143,6 +179,7 @@ public final class CharacterEvictionGate {
                     return Decision.NEVER_PERSISTED;
                 return Decision.DIRTY;
             }
+            if (state.checkpointedGeneration != state.generation) return Decision.CHECKPOINT_PENDING;
             return Decision.ELIGIBLE;
         }
     }
@@ -161,7 +198,8 @@ public final class CharacterEvictionGate {
         if (state == null) return null;
         synchronized (state) {
             if (state.evictionInProgress || state.leases != 0 || state.transactions != 0
-                    || state.persistedGeneration != state.generation) return null;
+                    || state.persistedGeneration != state.generation
+                    || state.checkpointedGeneration != state.generation) return null;
             state.evictionInProgress = true;
             return new Pin(state, false, true);
         }
@@ -175,7 +213,8 @@ public final class CharacterEvictionGate {
         synchronized (state) {
             if (states.get(globalId) != state || !state.evictionInProgress
                     || state.leases != 0 || state.transactions != 0
-                    || state.persistedGeneration != state.generation) return false;
+                    || state.persistedGeneration != state.generation
+                    || state.checkpointedGeneration != state.generation) return false;
             if (!states.remove(globalId, state)) return false;
             reservation.closed.set(true);
             state.evictionInProgress = false;
