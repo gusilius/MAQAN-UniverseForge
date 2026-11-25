@@ -127,6 +127,11 @@ public final class WorldSimMod {
         final EmergentPopulationIndex index;
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
         final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
+        // Durable Character writes are submitted in bounded windows and observed without
+        // blocking the Minecraft server thread. Cursor advances only after every receipt
+        // in the current window has completed successfully.
+        int durableCursor;
+        List<java.util.concurrent.CompletableFuture<Boolean>> durableWrites = List.of();
         EmergentMapProgress(CharacterRegistry registry) {
             this.index = new EmergentPopulationIndex(registry);
             List<String> reserved = new ArrayList<>(registry.houseNamesSnapshot());
@@ -2800,17 +2805,44 @@ public final class WorldSimMod {
             }
             if (sourceComplete) {
                 List<String> emergentResidents = sourceProgress.index.emergentResidents();
-                boolean peopleDurable = true;
-                for (String residentGlobalId : emergentResidents) {
-                    try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
-                        if (lease == null || !PeopleMod.persistCharacter(lease.get(), server)) {
-                            peopleDurable = false;
-                            break;
+                if (!sourceProgress.durableWrites.isEmpty()) {
+                    // Do not wait on WAL futures from the server thread. Let the writer
+                    // finish its forced batch and resume on a later tick.
+                    if (sourceProgress.durableWrites.stream().anyMatch(future -> !future.isDone()))
+                        return false;
+                    boolean durableWindowSucceeded = true;
+                    for (var receipt : sourceProgress.durableWrites) {
+                        try {
+                            if (!Boolean.TRUE.equals(receipt.join())) durableWindowSucceeded = false;
+                        } catch (java.util.concurrent.CompletionException failure) {
+                            durableWindowSucceeded = false;
+                            LOGGER.error("wf_worldsim: asynchronous Character WAL receipt failed for source {}",
+                                    source.id, failure);
                         }
                     }
+                    sourceProgress.durableCursor += sourceProgress.durableWrites.size();
+                    sourceProgress.durableWrites = List.of();
+                    if (!durableWindowSucceeded) {
+                        LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
+                        return false;
+                    }
                 }
-                if (!peopleDurable) {
-                    LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
+                if (sourceProgress.durableCursor < emergentResidents.size()) {
+                    int end = Math.min(emergentResidents.size(), sourceProgress.durableCursor + 64);
+                    List<java.util.concurrent.CompletableFuture<Boolean>> window = new ArrayList<>(end - sourceProgress.durableCursor);
+                    for (int i = sourceProgress.durableCursor; i < end; i++) {
+                        String residentGlobalId = emergentResidents.get(i);
+                        try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
+                            if (lease == null) {
+                                window.add(java.util.concurrent.CompletableFuture.completedFuture(false));
+                            } else {
+                                window.add(PeopleMod.persistCharacterAsync(lease.get(), server));
+                            }
+                        }
+                    }
+                    sourceProgress.durableWrites = List.copyOf(window);
+                    LOGGER.debug("wf_worldsim: queued durable Character window source={} range={}-{} total={}",
+                            source.id, sourceProgress.durableCursor, end, emergentResidents.size());
                     return false;
                 }
                 if (emergentPeopleProgress.dirtySettlementSources.contains(source.id)) {
