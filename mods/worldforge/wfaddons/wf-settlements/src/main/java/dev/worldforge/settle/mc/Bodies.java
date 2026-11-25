@@ -68,7 +68,7 @@ public final class Bodies {
 
     private static boolean hasLoadedVanillaVillagerBody(Worker worker, ServerLevel level) {
         if (worker == null || worker.person == null || worker.person.isBlank()) return false;
-        CharacterRegistry registry = PeopleMod.authority().registryForGlobal(worker.person);
+        dev.worldforge.people.CharacterRegistry registry = PeopleMod.authority().registryForGlobal(worker.person);
         if (registry == null) return false;
         String uuid = registry.entityBindingUuidForGlobal(worker.person, "villager");
         if (uuid == null || uuid.isBlank()) return false;
