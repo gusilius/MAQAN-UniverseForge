@@ -1463,14 +1463,18 @@ public class PeopleMod {
             evictionLastLogTick = ticks;
             int materialized = 0;
             int queued = 0;
+            int activeLeases = 0;
+            int identities = 0;
             for (CharacterRegistry registry : registries) {
                 if (registry == PLAYER_REGISTRY) continue;
                 materialized += registry.materializedSize();
                 queued += registry.evictionCandidateCount();
+                activeLeases += registry.activeAccessLeaseCount();
+                identities += registry.size();
             }
-            LOGGER.info("wf_people: eviction passes={} evictedTotal={} thisPass={} seeded={} inspected={} refused={} failures={} materialized={} candidates={} partitionsVisited={} cursor={} intervalTicks={} seedBudget={} evictionBudget={}",
+            LOGGER.info("wf_people: eviction passes={} evictedTotal={} thisPass={} seeded={} inspected={} refused={} failures={} identities={} materialized={} activeLeases={} candidates={} partitionsVisited={} cursor={} intervalTicks={} seedBudget={} evictionBudget={}",
                     evictionPasses, evictionCount, evicted, seeded, inspected, refused, failures,
-                    materialized, queued, visits, evictionPartitionCursor, EVICTION_INTERVAL_TICKS,
+                    identities, materialized, activeLeases, queued, visits, evictionPartitionCursor, EVICTION_INTERVAL_TICKS,
                     EVICTION_SEED_IDS_PER_PARTITION, EVICTION_CANDIDATES_PER_PARTITION);
         }
     }
