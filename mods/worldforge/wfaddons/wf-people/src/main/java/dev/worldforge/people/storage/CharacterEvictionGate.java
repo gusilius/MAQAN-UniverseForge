@@ -134,7 +134,7 @@ public final class CharacterEvictionGate {
         if (state == null) return Decision.UNKNOWN_IDENTITY;
         synchronized (state) {
             if (state.leases != 0) return Decision.ACTIVE_LEASE;
-            if (state.transactions != 0) return Decision.ACTIVE_TRANSACTION;
+            if (state.transactions != 0 || state.evictionInProgress) return Decision.ACTIVE_TRANSACTION;
             // A newly registered identity (generation 1) has never had a write.
             // Once any mutation advances it, it is explicitly DIRTY even before its
             // first durable receipt; callers must not confuse changed data with untouched data.
