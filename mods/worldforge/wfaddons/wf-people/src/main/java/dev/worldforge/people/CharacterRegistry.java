@@ -875,6 +875,7 @@ public final class CharacterRegistry {
         if (raw instanceof Map<?, ?> bindings)
             for (Object uuid : bindings.values()) if (uuid instanceof String value)
                 entityOwnerByUuid.remove(value, character.id);
+        entityBindingsByCharacterId.remove(character.id);
     }
 
     private void indexEntityBindings(Character character) {

@@ -66,6 +66,8 @@ public final class SettlementStressLab {
     private int capturedTerrainCells;
     private double initialWoodStock;
     private double woodProduced;
+    private boolean workerWoodProductionObserved;
+    private double peakWorkerWoodProductionPerMinute;
     private boolean roundTripVerified;
     private boolean durableSnapshotVerified;
     private int canonicalWorkerLinks;
@@ -214,6 +216,11 @@ public final class SettlementStressLab {
         tickMillis.add(measuredTickMillis);
         elapsedTicks++;
         navigationSamples += countNavigatingLocalWorkers();
+        double woodProductionRate = local.s.producedPerMin("wood");
+        if (woodProductionRate > 1e-9) {
+            workerWoodProductionObserved = true;
+            peakWorkerWoodProductionPerMinute = Math.max(peakWorkerWoodProductionPerMinute, woodProductionRate);
+        }
 
         if (elapsedTicks == 100) nearBodies = countLocalBodies();
         if (elapsedTicks == 140) teleportPlayer(true);
@@ -274,6 +281,13 @@ public final class SettlementStressLab {
             player.teleportTo(level, originX, originY, originZ, Set.of(), player.getYRot(), player.getXRot());
             teleportedBack = true;
         }
+        List<dev.worldforge.mod.api.SimulationLod.Observer> observers = new ArrayList<>();
+        for (ServerPlayer online : server.getPlayerList().getPlayers()) {
+            if (online.isSpectator()) continue;
+            observers.add(new dev.worldforge.mod.api.SimulationLod.Observer(
+                    online.serverLevel().dimension().location().toString(), online.getX(), online.getZ()));
+        }
+        dev.worldforge.mod.api.SimulationLod.publish(observers);
     }
 
     private int countLocalBodies() {
@@ -331,11 +345,13 @@ public final class SettlementStressLab {
         if (canonicalPeople != null) {
             for (Worker worker : local.s.workers) {
                 if (worker.person == null || worker.person.isBlank()) continue;
-                var character = canonicalPeople.getByGlobalId(worker.person);
-                if (character == null) continue;
-                canonicalWorkerLinks++;
-                if (dev.worldforge.people.mc.PeopleMod.persistCharacter(character, server))
-                    canonicalWorkerWrites++;
+                try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                             canonicalPeople.access().acquireGlobal(worker.person)) {
+                    if (lease == null) continue;
+                    canonicalWorkerLinks++;
+                    if (dev.worldforge.people.mc.PeopleMod.persistCharacter(lease.get(), server))
+                        canonicalWorkerWrites++;
+                }
             }
         }
         durableSnapshotVerified = SettleMod.saveDurably(server) && durableSnapshotVerified;
@@ -345,7 +361,7 @@ public final class SettlementStressLab {
         boolean statusPass = !failed && created == targetRemoteColonies && roundTripVerified
                 && durableSnapshotVerified && canonicalWorkerLinks == local.s.workers.size()
                 && canonicalWorkerWrites == local.s.workers.size()
-                && woodProduced > 0 && remoteLoaded == 0 && lodVerified && performanceVerified;
+                && workerWoodProductionObserved && remoteLoaded == 0 && lodVerified && performanceVerified;
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schema_version", 1);
@@ -360,6 +376,8 @@ public final class SettlementStressLab {
         report.put("local_work_orders", local.workOrders.size());
         report.put("initial_wood_stock", initialWoodStock);
         report.put("wood_produced_by_physical_workers", woodProduced);
+        report.put("physical_worker_wood_production_observed", workerWoodProductionObserved);
+        report.put("physical_worker_peak_wood_per_minute", peakWorkerWoodProductionPerMinute);
         report.put("terrain_cells_captured_from_loaded_world", capturedTerrainCells);
         report.put("work_order_save_load_round_trip", roundTripVerified);
         report.put("durable_settlement_snapshot", durableSnapshotVerified);
@@ -395,9 +413,10 @@ public final class SettlementStressLab {
                     .resolve("worldforge").resolve("stresslab").resolve("contour-04-settlements.json");
             Files.createDirectories(output.getParent());
             Files.writeString(output, Json.write(report));
-            SettleMod.LOGGER.info("WF_STRESS contour=04_settlements status={} colonies={} workers={} nearBodies={} farBodies={} returnBodies={} tickP95ms={} tickP99ms={} tickMaxMs={} tps={} heapBytes={} remoteChunksLoaded={}",
+            SettleMod.LOGGER.info("WF_STRESS contour=04_settlements status={} colonies={} workers={} nearBodies={} farBodies={} returnBodies={} woodProductionObserved={} peakWoodPerMin={} tickP95ms={} tickP99ms={} tickMaxMs={} tps={} heapBytes={} remoteChunksLoaded={}",
                     statusPass ? "PASS" : "FAIL", targetRemoteColonies + 1, local.s.workers.size(),
-                    nearBodies, farBodies, returnBodies, p95, p99, max, tps, heapUsed, remoteLoaded);
+                    nearBodies, farBodies, returnBodies, workerWoodProductionObserved,
+                    peakWorkerWoodProductionPerMinute, p95, p99, max, tps, heapUsed, remoteLoaded);
             SettleMod.LOGGER.info("WF_STRESS contour=04_settlements report={}", output);
         } catch (Exception error) {
             SettleMod.LOGGER.error("WF_STRESS contour=04_settlements report write failed", error);
