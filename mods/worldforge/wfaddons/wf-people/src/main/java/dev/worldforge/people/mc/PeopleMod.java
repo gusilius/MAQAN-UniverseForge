@@ -187,10 +187,8 @@ public class PeopleMod {
         for (MapData map : WorldForgeMod.loadedMaps().values()) registry(map);
         CharacterAccessService.Lease global = AUTHORITY.acquireGlobal(id);
         if (global != null) return global;
-        Character legacy = AUTHORITY.getLegacy(id);
-        if (legacy == null) return null;
-        CharacterIdentity identity = AUTHORITY.identityOf(legacy.globalId);
-        return AUTHORITY.acquire(identity);
+        CharacterIdentity legacy = AUTHORITY.identityOfLegacy(id);
+        return legacy == null ? null : AUTHORITY.acquire(legacy);
     }
 
     /**
