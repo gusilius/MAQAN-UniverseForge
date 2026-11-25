@@ -157,11 +157,11 @@ public final class NpcSocialSimulation {
                 if (processed > 0 && (processed & CONTACT_INDEX_DEADLINE_CHECK_MASK) == 0
                         && System.nanoTime() >= deadline) return false;
                 String localId = scan.registry.idAt(scan.cursor++);
-                try (dev.worldforge.people.CharacterAccessService.Lease lease = scan.registry.access().acquire(localId)) {
-                if (lease == null) continue;
-                Character person = lease.get();
                 processed++;
                 remaining--;
+                try (dev.worldforge.people.CharacterAccessService.Lease lease = scan.registry.access().acquire(localId)) {
+                    if (lease == null) continue;
+                    Character person = lease.get();
                 if (person == null || !person.alive || year - person.birthYear < 18
                         || !person.props.containsKey("emergence.polity_id")) continue;
                 String polity = polityOf(person);
