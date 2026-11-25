@@ -132,32 +132,15 @@ public final class PoliticalIdentitySynchronizer {
         return new Report(linked, already, problems);
     }
 
-    /** Bounded page + scoped lease bridge; reflection preserves compatibility with older compile-only wf-people jars. */
+    /** Bounded ID pages and canonical scoped leases; no population-sized Character snapshot. */
     private static void forEachCharacter(CharacterRegistry registry, Consumer<Character> visitor) {
-        try {
-            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
-            Object access = registry.getClass().getMethod("access").invoke(registry);
-            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
-            int count = registry.all().size();
-            for (int offset = 0; offset < count; offset += 256) {
-                Object rawPage = idPage.invoke(registry, offset, 256);
-                if (!(rawPage instanceof List<?> ids))
-                    throw new IllegalStateException("Character ID page API returned a non-list");
-                for (Object rawId : ids) {
-                    Object lease = acquire.invoke(access, String.valueOf(rawId));
-                    if (lease == null) throw new IllegalStateException("Could not lease canonical Character " + rawId);
-                    try {
-                        visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease));
-                    } finally {
-                        ((AutoCloseable) lease).close();
-                    }
+        final int pageSize = 256;
+        for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+            for (String id : registry.idPage(offset, pageSize)) {
+                try (dev.worldforge.people.CharacterAccessService.Lease lease = registry.acquire(id)) {
+                    if (lease != null) visitor.accept(lease.get());
                 }
             }
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-realms requires the bounded Character ID/lease API", error);
-        } catch (Exception error) {
-            if (error instanceof RuntimeException runtime) throw runtime;
-            throw new IllegalStateException("Could not close wf-realms Character lease", error);
         }
     }
 

@@ -119,8 +119,9 @@ public final class CharacterActions {
 
     private static boolean isCurrentlyMarried(CharacterRegistry reg, Character character) {
         if (character == null || character.spouse == null || character.spouse.isEmpty()) return false;
-        Character spouse = reg.get(character.spouse);
-        return spouse != null && spouse.alive;
+        try (CharacterAccessService.Lease lease = reg.acquire(character.spouse)) {
+            return lease != null && lease.get().alive;
+        }
     }
 
     /** Варианты назначения для подменю: роли государств, где actor вправе назначать. Занятые и неподходящие даны с причиной. */
@@ -134,7 +135,16 @@ public final class CharacterActions {
                 String why = null;
                 if (target.has(r.id, place)) why = target.name + " уже занимает эту должность";
                 else if (r.noble && target.house.isEmpty()) why = "Роль только для знати";
-                else if (reg.holders(r.id, place).size() >= r.count) { Character h = reg.holder(r.id, place); why = "Занято: " + (h == null ? "?" : h.name) + " (сначала снимите)"; }
+                else if (reg.holderCount(r.id, place) >= r.count) {
+                    List<String> holderIds = reg.holderIds(r.id, place);
+                    String holderName = "?";
+                    if (!holderIds.isEmpty()) {
+                        try (CharacterAccessService.Lease lease = reg.acquire(holderIds.get(0))) {
+                            if (lease != null) holderName = lease.get().name;
+                        }
+                    }
+                    why = "Занято: " + holderName + " (сначала снимите)";
+                }
                 out.add(new Slot(r, place, label, why == null, why));
             }
         }
@@ -150,14 +160,21 @@ public final class CharacterActions {
         if (to.id.equals(from.father)) return "отец";
         if (to.id.equals(from.mother)) return "мать";
         if (from.children.contains(to.id)) return m ? "сын" : "дочь";
-        Character f = reg.get(from.father), mo = reg.get(from.mother);
-        for (Character p : new Character[]{f, mo}) {
-            if (p == null) continue;
-            if (to.id.equals(p.father)) return m ? "дед" : "бабка";
-            if (to.id.equals(p.mother)) return m ? "дед" : "бабка";
-            if (p.children.contains(to.id)) return m ? "брат" : "сестра";
+        for (String parentId : new String[]{from.father, from.mother}) {
+            if (parentId == null || parentId.isBlank()) continue;
+            try (CharacterAccessService.Lease lease = reg.acquire(parentId)) {
+                if (lease == null) continue;
+                Character parent = lease.get();
+                if (to.id.equals(parent.father) || to.id.equals(parent.mother))
+                    return m ? "дед" : "бабка";
+                if (parent.children.contains(to.id)) return m ? "брат" : "сестра";
+            }
         }
-        for (String k : from.children) { Character kid = reg.get(k); if (kid != null && kid.children.contains(to.id)) return m ? "внук" : "внучка"; }
+        for (String childId : from.children) {
+            try (CharacterAccessService.Lease lease = reg.acquire(childId)) {
+                if (lease != null && lease.get().children.contains(to.id)) return m ? "внук" : "внучка";
+            }
+        }
         return "";
     }
 }

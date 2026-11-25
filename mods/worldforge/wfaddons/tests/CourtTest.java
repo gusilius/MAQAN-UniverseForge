@@ -212,9 +212,13 @@ public class CourtTest {
         minorCourt.reg.appoint(childHeir.id, rulerRole, rulerPlace);
         minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
         minorCourt.regencies.clear();
-        List<Character> expectedRegents = minorCourt.regencyCandidates(minorRealm);
-        ok(!expectedRegents.isEmpty(), "the test court has at least one eligible adult regent");
-        adultRegent = expectedRegents.isEmpty() ? adultRegent : expectedRegents.get(0);
+        List<String> expectedRegentIds = minorCourt.regencyCandidates(minorRealm);
+        ok(!expectedRegentIds.isEmpty(), "the test court has at least one eligible adult regent");
+        if (!expectedRegentIds.isEmpty()) {
+            try (var lease = minorCourt.reg.acquire(expectedRegentIds.get(0))) {
+                if (lease != null) adultRegent = lease.get();
+            }
+        }
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) != null
                         && minorCourt.regency(minorRealm).heir.equals(childHeir.id)

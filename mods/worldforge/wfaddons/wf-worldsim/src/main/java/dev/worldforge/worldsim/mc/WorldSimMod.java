@@ -4813,17 +4813,20 @@ public final class WorldSimMod {
         }
         if ("dynastic_marriage".equals(type)) {
             String first = action.get("first").getAsString(), second = action.get("second").getAsString();
-            for (MapData map : WorldForgeMod.loadedMaps().values()) {
-                if (map.titles == null) continue;
+            CharacterRegistry firstRegistry = PeopleMod.authority().registryForGlobal(first);
+            CharacterRegistry secondRegistry = PeopleMod.authority().registryForGlobal(second);
+            if (firstRegistry == null || secondRegistry == null || firstRegistry != secondRegistry) return false;
+            for (Map.Entry<MapData, CharacterRegistry> entry : PeopleMod.registries().entrySet()) {
+                if (entry.getValue() != firstRegistry || entry.getKey().titles == null) continue;
+                MapData map = entry.getKey();
                 var court = CourtMod.court(map);
-                if (court == null) continue;
-                var a = court.reg.all().stream().filter(person -> first.equals(person.globalId)).findFirst().orElse(null);
-                var b = court.reg.all().stream().filter(person -> second.equals(person.globalId)).findFirst().orElse(null);
-                if (a != null && b != null) {
-                    var result = Marriages.propose(court, a.id, b.id);
+                if (court == null) return false;
+                try (var firstLease = firstRegistry.acquireGlobal(first);
+                     var secondLease = secondRegistry.acquireGlobal(second)) {
+                    if (firstLease == null || secondLease == null) return false;
+                    var result = Marriages.propose(court, firstLease.localId(), secondLease.localId());
                     if (!result.ok) return false;
-                    // Use the court addon's canonical crash-recoverable persistence path.
-                    // The in-memory marriage is not reported as committed unless its state is durable.
+                    // The marriage is acknowledged only after the court WAL/checkpoint path is durable.
                     return CourtMod.persistNow(server, map);
                 }
             }
