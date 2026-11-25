@@ -113,14 +113,15 @@ public final class EconomyScaleStressTest {
                     tradeNetwork.add(marketSettlements, source.id, destination.id, "wood", 2.0);
                 }
                 if (stage.settlements() >= 2) {
+                    int deliveryEventsBefore = tradeNetwork.events.size();
                     for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
                     tradeNetwork.tick(marketSettlements, 30.0);
                     for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
                     tradeNetwork.tick(marketSettlements, 30.0);
                     for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
                     tradeNetwork.tick(marketSettlements, 30.0);
-                    deliveredShipments += tradeNetwork.shipments.values().stream()
-                            .filter(shipment -> "доставлен".equals(shipment.status)).count();
+                    deliveredShipments += tradeNetwork.events.subList(deliveryEventsBefore, tradeNetwork.events.size())
+                            .stream().filter(event -> event.startsWith("Доставка #")).count();
                     TradeNetwork restoredNetwork = TradeNetwork.fromJson(tradeNetwork.toJson());
                     require(restoredNetwork.routes.size() == tradeNetwork.routes.size()
                                     && restoredNetwork.shipments.size() == tradeNetwork.shipments.size(),
