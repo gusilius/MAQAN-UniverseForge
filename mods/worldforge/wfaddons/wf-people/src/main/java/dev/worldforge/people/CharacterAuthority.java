@@ -214,12 +214,20 @@ public final class CharacterAuthority {
         // snapshot; incremental WAL replacement validates against its current UUID index.
         for (Map.Entry<String, CharacterRegistry> entry : changed) {
             String mapId = entry.getKey();
-            for (Character character : entry.getValue().all()) {
-                CharacterIdentity owner = byGlobalId.get(character.globalId);
-                if (owner != null && !owner.mapId().equals(mapId))
-                    throw new IllegalStateException("Global Character UUID collision " + character.globalId
-                            + " between " + owner.mapId() + "/" + owner.characterId()
-                            + " and " + mapId + "/" + character.id);
+            CharacterRegistry registry = entry.getValue();
+            for (int offset = 0; offset < registry.size(); offset += 256) {
+                for (String localId : registry.idPage(offset, 256)) {
+                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                        if (lease == null) throw new IllegalStateException(
+                                "Could not lease Character while validating identity partition " + mapId + "/" + localId);
+                        Character character = lease.get();
+                        CharacterIdentity owner = byGlobalId.get(character.globalId);
+                        if (owner != null && !owner.mapId().equals(mapId))
+                            throw new IllegalStateException("Global Character UUID collision " + character.globalId
+                                    + " between " + owner.mapId() + "/" + owner.characterId()
+                                    + " and " + mapId + "/" + character.id);
+                    }
+                }
             }
         }
 
@@ -242,15 +250,22 @@ public final class CharacterAuthority {
             }
 
             CharacterRegistry registry = entry.getValue();
-            for (Character character : registry.all()) {
-                CharacterIdentity identity = new CharacterIdentity(
-                        currentWorld, mapId, character.id, character.globalId);
-                CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
-                if (collision != null && !collision.equals(identity))
-                    throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
-                byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
-                indexEstateIncoming(character);
-                indexInventoryTransferMarkers(character);
+            for (int offset = 0; offset < registry.size(); offset += 256) {
+                for (String localId : registry.idPage(offset, 256)) {
+                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                        if (lease == null) throw new IllegalStateException(
+                                "Could not lease Character while publishing identity partition " + mapId + "/" + localId);
+                        Character character = lease.get();
+                        CharacterIdentity identity = new CharacterIdentity(
+                                currentWorld, mapId, character.id, character.globalId);
+                        CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
+                        if (collision != null && !collision.equals(identity))
+                            throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
+                        byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
+                        indexEstateIncoming(character);
+                        indexInventoryTransferMarkers(character);
+                    }
+                }
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
         }
@@ -303,12 +318,12 @@ public final class CharacterAuthority {
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
         if (identity != null) {
             CharacterRegistry owner = registries.get(identity.mapId());
-            if (owner != null && owner.getByGlobalId(globalCharacterId) != null) return owner;
+            if (owner != null && owner.localIdForGlobalId(globalCharacterId) != null) return owner;
         }
-        // Do not force a global index rebuild for an ID that may have been appended
-        // moments ago by the same bounded Genesis materialization batch.
+        // Resolve through compact UUID directories only. Owner lookup must never hydrate
+        // a Character merely to discover which partition owns it.
         for (CharacterRegistry registry : registries.values()) {
-            if (registry.getByGlobalId(globalCharacterId) != null) return registry;
+            if (registry.localIdForGlobalId(globalCharacterId) != null) return registry;
         }
         return null;
     }
@@ -482,29 +497,32 @@ public final class CharacterAuthority {
 
         for (CharacterIdentity identity : byGlobalId.values()) {
             CharacterRegistry owner = registries.get(identity.mapId());
-            Character person = owner == null ? null : owner.get(identity.characterId());
-            if (person == null) continue;
-            String mapId = identity.mapId();
-            String fatherGlobal = familyId(person, "family.father_global_id");
-            String motherGlobal = familyId(person, "family.mother_global_id");
-            String spouseGlobalId = familyId(person, "family.spouse_global_id");
+            if (owner == null) continue;
+            try (CharacterAccessService.Lease lease = owner.access().acquire(identity.characterId())) {
+                if (lease == null) continue;
+                Character person = lease.get();
+                String mapId = identity.mapId();
+                String fatherGlobal = familyId(person, "family.father_global_id");
+                String motherGlobal = familyId(person, "family.mother_global_id");
+                String spouseGlobalId = familyId(person, "family.spouse_global_id");
 
-            // Upgrade map-local legacy pointers to canonical UUID edges while the owning
-            // partition is known. Ambiguous cN IDs in other maps are never consulted.
-            if (fatherGlobal.isBlank()) fatherGlobal = legacyGlobalId(person.father, mapId);
-            if (motherGlobal.isBlank()) motherGlobal = legacyGlobalId(person.mother, mapId);
-            if (spouseGlobalId.isBlank()) spouseGlobalId = legacyGlobalId(person.spouse, mapId);
-            addFamilyEdge(parentChildGlobal, fatherGlobal, person.globalId);
-            addFamilyEdge(parentChildGlobal, motherGlobal, person.globalId);
+                // Upgrade map-local legacy pointers to canonical UUID edges while the owning
+                // partition is known. Ambiguous cN IDs in other maps are never consulted.
+                if (fatherGlobal.isBlank()) fatherGlobal = legacyGlobalId(person.father, mapId);
+                if (motherGlobal.isBlank()) motherGlobal = legacyGlobalId(person.mother, mapId);
+                if (spouseGlobalId.isBlank()) spouseGlobalId = legacyGlobalId(person.spouse, mapId);
+                addFamilyEdge(parentChildGlobal, fatherGlobal, person.globalId);
+                addFamilyEdge(parentChildGlobal, motherGlobal, person.globalId);
 
-            for (String childId : person.children)
-                addFamilyEdge(parentChildGlobal, person.globalId, legacyGlobalId(childId, mapId));
-            Object globalChildren = person.props.get("family.children_global_ids");
-            if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
-                if (rawId instanceof String childId && !childId.isBlank())
-                    addFamilyEdge(parentChildGlobal, person.globalId, childId);
+                for (String childId : person.children)
+                    addFamilyEdge(parentChildGlobal, person.globalId, legacyGlobalId(childId, mapId));
+                Object globalChildren = person.props.get("family.children_global_ids");
+                if (globalChildren instanceof List<?> ids) for (Object rawId : ids) {
+                    if (rawId instanceof String childId && !childId.isBlank())
+                        addFamilyEdge(parentChildGlobal, person.globalId, childId);
+                }
+                addFamilyIndex(spouseGlobal, spouseGlobalId, identity);
             }
-            addFamilyIndex(spouseGlobal, spouseGlobalId, identity);
         }
         familyGlobal = parentChildGlobal;
         familyBySpouseGlobal = spouseGlobal;
