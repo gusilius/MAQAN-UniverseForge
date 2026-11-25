@@ -72,6 +72,8 @@ public final class CharacterRegistry {
     private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
+    /** Character-local body-kind lookup used without hydrating an evicted Character. */
+    private final Map<String, Map<String, String>> entityBindingsByCharacterId = new HashMap<>();
     /** Reverse post index: succession and office queries must not scan the population. */
     private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
     /** Exact role/place projection for bounded office-holder queries. */
@@ -812,8 +814,13 @@ public final class CharacterRegistry {
         if (Objects.equals(bindings.get(kind), uuid)) return true;
         Object previousUuid = bindings.put(kind, uuid);
         if (previousUuid instanceof String oldUuid && !oldUuid.equals(uuid)
-                && !bindings.containsValue(oldUuid)) entityOwnerByUuid.remove(oldUuid, c.id);
+                && !bindings.containsValue(oldUuid)) {
+            entityOwnerByUuid.remove(oldUuid, c.id);
+            Map<String, String> indexed = entityBindingsByCharacterId.get(c.id);
+            if (indexed != null) indexed.remove(kind, oldUuid);
+        }
         entityOwnerByUuid.put(uuid, c.id);
+        entityBindingsByCharacterId.computeIfAbsent(c.id, ignored -> new HashMap<>()).put(kind, uuid);
         c.props.put("population.entity_bindings", bindings);
         markCharacterDirty(c);
         recordDomainMutation();
@@ -838,6 +845,11 @@ public final class CharacterRegistry {
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
         if (!bindings.containsValue(uuid)) entityOwnerByUuid.remove(uuid, c.id);
+        Map<String, String> indexed = entityBindingsByCharacterId.get(c.id);
+        if (indexed != null) {
+            indexed.remove(kind, uuid);
+            if (indexed.isEmpty()) entityBindingsByCharacterId.remove(c.id);
+        }
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
         markCharacterDirty(c);
@@ -850,6 +862,14 @@ public final class CharacterRegistry {
         return characterId == null ? null : globalIdByLocalId.get(characterId);
     }
 
+    /** Returns a body UUID by canonical Character identity without materializing the Character. */
+    public synchronized String entityBindingUuidForGlobal(String globalId, String bodyKind) {
+        String localId = globalId == null ? null : localIdForGlobalId(globalId);
+        if (localId == null || bodyKind == null) return null;
+        Map<String, String> bindings = entityBindingsByCharacterId.get(localId);
+        return bindings == null ? null : bindings.get(bodyKind.toLowerCase(Locale.ROOT));
+    }
+
     private void removeEntityBindings(Character character) {
         Object raw = character.props.get("population.entity_bindings");
         if (raw instanceof Map<?, ?> bindings)
@@ -859,13 +879,21 @@ public final class CharacterRegistry {
 
     private void indexEntityBindings(Character character) {
         Object raw = character.props.get("population.entity_bindings");
-        if (raw instanceof Map<?, ?> bindings)
-            for (Object uuid : bindings.values()) if (uuid instanceof String value) {
-                String owner = entityOwnerByUuid.putIfAbsent(value, character.id);
-                if (owner != null && !owner.equals(character.id))
-                    throw new IllegalArgumentException("Minecraft Entity UUID " + value
-                            + " is bound to multiple Characters: " + owner + " and " + character.id);
-            }
+        if (!(raw instanceof Map<?, ?> bindings)) {
+            entityBindingsByCharacterId.remove(character.id);
+            return;
+        }
+        Map<String, String> indexed = new HashMap<>();
+        for (Map.Entry<?, ?> entry : bindings.entrySet()) {
+            if (!(entry.getKey() instanceof String kind) || !(entry.getValue() instanceof String uuid)) continue;
+            String owner = entityOwnerByUuid.putIfAbsent(uuid, character.id);
+            if (owner != null && !owner.equals(character.id))
+                throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                        + " is bound to multiple Characters: " + owner + " and " + character.id);
+            indexed.put(kind.toLowerCase(Locale.ROOT), uuid);
+        }
+        if (indexed.isEmpty()) entityBindingsByCharacterId.remove(character.id);
+        else entityBindingsByCharacterId.put(character.id, indexed);
     }
 
     private static boolean addGlobalChild(Character parent, String childGlobalId) {
@@ -1832,6 +1860,8 @@ public final class CharacterRegistry {
         }
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
+        entityBindingsByCharacterId.clear();
+        for (Character character : loaded.values()) indexEntityBindings(character);
         membershipGeneration++;
         next = safeNext;
         markMembershipMutation();

@@ -2,7 +2,6 @@ package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.Worker;
 import dev.worldforge.mod.api.SimulationLod;
-import dev.worldforge.people.Character;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -69,10 +68,10 @@ public final class Bodies {
 
     private static boolean hasLoadedVanillaVillagerBody(Worker worker, ServerLevel level) {
         if (worker == null || worker.person == null || worker.person.isBlank()) return false;
-        Character person = PeopleMod.authority().getGlobal(worker.person);
-        if (person == null) return false;
-        Object raw = person.props.get("population.entity_bindings");
-        if (!(raw instanceof Map<?, ?> bindings) || !(bindings.get("villager") instanceof String uuid)) return false;
+        CharacterRegistry registry = PeopleMod.authority().registryForGlobal(worker.person);
+        if (registry == null) return false;
+        String uuid = registry.entityBindingUuidForGlobal(worker.person, "villager");
+        if (uuid == null || uuid.isBlank()) return false;
         try {
             Entity body = level.getEntity(UUID.fromString(uuid));
             return body instanceof net.minecraft.world.entity.npc.Villager villager && villager.isAlive();
