@@ -537,6 +537,13 @@ public final class CharacterRegistry {
         if (byRolePlace != null) { byRolePlace.remove(character.id); if (byRolePlace.isEmpty()) characterIdsByRolePlace.remove(postIndexKey(post.role, post.place)); }
     }
 
+    /** Compact UUID/local-ID view for callers that must resolve holders through scoped leases. */
+    public synchronized List<String> holderIds(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
+    }
+
     /** Returns living holders of one exact role/place pair without a population scan. */
     public List<Character> holders(String role, String place) {
         if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
@@ -813,10 +820,9 @@ public final class CharacterRegistry {
     }
 
     /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
-    public String entityBindingOwner(String entityUuid) {
+    public synchronized String entityBindingOwner(String entityUuid) {
         String characterId = entityOwnerByUuid.get(entityUuid);
-        Character character = characterId == null ? null : resolveMaterialized(characterId);
-        return character == null ? null : character.globalId;
+        return characterId == null ? null : globalIdByLocalId.get(characterId);
     }
 
     private void removeEntityBindings(Character character) {
