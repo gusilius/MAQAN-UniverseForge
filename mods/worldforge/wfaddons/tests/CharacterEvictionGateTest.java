@@ -93,7 +93,7 @@ public final class CharacterEvictionGateTest {
         check(evictionCompleted
                         && postEvictionDecision == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY
                         && trackedAfterEviction == 1
-                        && gate.decision(recovered) == CharacterEvictionGate.Decision.CLEAN,
+                        && gate.decision(recovered) == CharacterEvictionGate.Decision.ELIGIBLE,
                 "successful physical eviction releases only its own runtime fence (completed="
                         + evictionCompleted + ", decision=" + postEvictionDecision
                         + ", remaining recovered identities=" + trackedAfterEviction + ")");
