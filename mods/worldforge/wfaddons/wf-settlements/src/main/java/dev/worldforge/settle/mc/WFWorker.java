@@ -64,7 +64,7 @@ public class WFWorker extends PathfinderMob {
         if (globalId == null || globalId.isBlank()) return false;
         CharacterRegistry registry = PeopleMod.authority().registryForGlobal(globalId);
         if (registry == null) return false;
-        CharacterAccessService.Lease lease = registry.access().acquireGlobal(globalId);
+        CharacterAccessService.Lease lease = registry.access().acquirePresenceGlobal(globalId);
         if (lease == null || !globalId.equals(lease.get().globalId)) {
             if (lease != null) lease.close();
             return false;

@@ -385,6 +385,18 @@ public final class CharacterRegistry {
         return new CharacterAccessService.Lease(this, localId, character);
     }
 
+    /** Pins a live physical representation without registering it as a mutation scope on the server thread. */
+    synchronized CharacterAccessService.Lease acquirePresenceGlobal(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        if (localId == null) return null;
+        Character character = resolveMaterialized(localId);
+        if (character == null) return null;
+        removeEvictionCandidate(localId);
+        activeAccessLeases.merge(localId, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, localId, character, false);
+    }
+
     public CharacterAccessService access() { return accessService; }
 
     synchronized void releaseAccess(String id) {

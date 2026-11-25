@@ -109,6 +109,8 @@ public final class CharacterAccessService {
 
     public Lease acquire(String localId) { return registry.acquire(localId); }
     public Lease acquireGlobal(String globalId) { return registry.acquireGlobal(globalId); }
+    /** A long-lived physical-body pin; deliberately excluded from mutation ThreadLocal scopes. */
+    public Lease acquirePresenceGlobal(String globalId) { return registry.acquirePresenceGlobal(globalId); }
 
     /** Conservatively marks every Character currently leased by this thread as dirty. */
     static void markCurrentLeasesDirty() {
@@ -378,14 +380,20 @@ public final class CharacterAccessService {
         private final String localId;
         private final Character character;
         private final CharacterEvictionGate.Pin persistencePin;
+        private final boolean mutationScope;
         private final AtomicBoolean closed = new AtomicBoolean();
 
         Lease(CharacterRegistry registry, String localId, Character character) {
+            this(registry, localId, character, true);
+        }
+
+        Lease(CharacterRegistry registry, String localId, Character character, boolean mutationScope) {
             this.registry = Objects.requireNonNull(registry, "registry");
             this.localId = Objects.requireNonNull(localId, "localId");
             this.character = Objects.requireNonNull(character, "character");
             this.persistencePin = registry.access().pin(character);
-            ACTIVE_LEASES.get().add(this);
+            this.mutationScope = mutationScope;
+            if (mutationScope) ACTIVE_LEASES.get().add(this);
         }
 
         public Character get() {
@@ -407,9 +415,11 @@ public final class CharacterAccessService {
 
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
-            Set<Lease> active = ACTIVE_LEASES.get();
-            active.remove(this);
-            if (active.isEmpty()) ACTIVE_LEASES.remove();
+            if (mutationScope) {
+                Set<Lease> active = ACTIVE_LEASES.get();
+                active.remove(this);
+                if (active.isEmpty()) ACTIVE_LEASES.remove();
+            }
             try { registry.releaseAccess(localId); }
             finally { if (persistencePin != null) persistencePin.close(); }
         }
