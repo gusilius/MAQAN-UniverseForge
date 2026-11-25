@@ -258,6 +258,13 @@ public final class CharacterAuthority {
                     if (collision != null && !collision.equals(identity))
                         throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
                     byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
+                    // Sparse recovery markers are read only from objects already resident
+                    // in memory. Never hydrate an evicted Character merely to rebuild an index.
+                    Character materialized = registry.peekMaterialized(localId);
+                    if (materialized != null) {
+                        indexEstateIncoming(materialized);
+                        indexInventoryTransferMarkers(materialized);
+                    }
                 }
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
