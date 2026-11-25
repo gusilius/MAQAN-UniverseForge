@@ -2775,10 +2775,13 @@ public final class WorldSimMod {
             }
             if (sourceComplete) {
                 List<String> emergentResidents = sourceProgress.index.emergentResidents();
-                boolean peopleDurable = emergentResidents.isEmpty();
-                if (!peopleDurable) {
-                    try (var lease = registry.access().acquireGlobal(emergentResidents.get(0))) {
-                        peopleDurable = lease != null && PeopleMod.persistCharacter(lease.get(), server);
+                boolean peopleDurable = true;
+                for (String residentGlobalId : emergentResidents) {
+                    try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
+                        if (lease == null || !PeopleMod.persistCharacter(lease.get(), server)) {
+                            peopleDurable = false;
+                            break;
+                        }
                     }
                 }
                 if (!peopleDurable) {
