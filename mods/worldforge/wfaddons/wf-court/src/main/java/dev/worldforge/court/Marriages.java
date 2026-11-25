@@ -278,7 +278,7 @@ public final class Marriages {
             java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
             Object access = registry.getClass().getMethod("access").invoke(registry);
             java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
-            int count = registry.all().size();
+            int count = registry.size();
             for (int offset = 0; offset < count; offset += 256) {
                 Object raw = idPage.invoke(registry, offset, 256);
                 if (!(raw instanceof List<?> ids)) throw new IllegalStateException("Character ID page is not a list");
