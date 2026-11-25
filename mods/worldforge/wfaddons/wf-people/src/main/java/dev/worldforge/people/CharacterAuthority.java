@@ -217,16 +217,14 @@ public final class CharacterAuthority {
             CharacterRegistry registry = entry.getValue();
             for (int offset = 0; offset < registry.size(); offset += 256) {
                 for (String localId : registry.idPage(offset, 256)) {
-                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
-                        if (lease == null) throw new IllegalStateException(
-                                "Could not lease Character while validating identity partition " + mapId + "/" + localId);
-                        Character character = lease.get();
-                        CharacterIdentity owner = byGlobalId.get(character.globalId);
-                        if (owner != null && !owner.mapId().equals(mapId))
-                            throw new IllegalStateException("Global Character UUID collision " + character.globalId
-                                    + " between " + owner.mapId() + "/" + owner.characterId()
-                                    + " and " + mapId + "/" + character.id);
-                    }
+                    String globalId = registry.globalIdForLocalId(localId);
+                    if (globalId == null || globalId.isBlank())
+                        throw new IllegalStateException("Missing canonical UUID in identity directory: " + mapId + "/" + localId);
+                    CharacterIdentity owner = byGlobalId.get(globalId);
+                    if (owner != null && !owner.mapId().equals(mapId))
+                        throw new IllegalStateException("Global Character UUID collision " + globalId
+                                + " between " + owner.mapId() + "/" + owner.characterId()
+                                + " and " + mapId + "/" + localId);
                 }
             }
         }
@@ -252,19 +250,14 @@ public final class CharacterAuthority {
             CharacterRegistry registry = entry.getValue();
             for (int offset = 0; offset < registry.size(); offset += 256) {
                 for (String localId : registry.idPage(offset, 256)) {
-                    try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
-                        if (lease == null) throw new IllegalStateException(
-                                "Could not lease Character while publishing identity partition " + mapId + "/" + localId);
-                        Character character = lease.get();
-                        CharacterIdentity identity = new CharacterIdentity(
-                                currentWorld, mapId, character.id, character.globalId);
-                        CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
-                        if (collision != null && !collision.equals(identity))
-                            throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
-                        byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
-                        indexEstateIncoming(character);
-                        indexInventoryTransferMarkers(character);
-                    }
+                    String globalId = registry.globalIdForLocalId(localId);
+                    if (globalId == null || globalId.isBlank())
+                        throw new IllegalStateException("Missing canonical UUID while publishing identity: " + mapId + "/" + localId);
+                    CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, localId, globalId);
+                    CharacterIdentity collision = byGlobalId.putIfAbsent(identity.globalCharacterId(), identity);
+                    if (collision != null && !collision.equals(identity))
+                        throw new IllegalStateException("Global Character UUID collision " + identity.globalCharacterId());
+                    byLegacyId.computeIfAbsent(identity.characterId(), ignored -> new LinkedHashSet<>()).add(identity);
                 }
             }
             indexedMembershipGenerations.put(mapId, registry.membershipGeneration());
