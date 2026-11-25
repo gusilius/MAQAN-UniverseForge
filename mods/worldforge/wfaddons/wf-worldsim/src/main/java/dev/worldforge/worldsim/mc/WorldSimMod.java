@@ -232,6 +232,7 @@ public final class WorldSimMod {
         final JsonObject state;
         final Set<String> completedBands = new HashSet<>();
         boolean dirty;
+        java.util.concurrent.CompletableFuture<Boolean> durableSave;
         EmergentStructureProgress(JsonObject state) { this.state = state; }
     }
 
@@ -243,6 +244,7 @@ public final class WorldSimMod {
         final Map<String, Integer> settlementNameCounts = new HashMap<>();
         final Set<String> dirtySettlementSources = new HashSet<>();
         final Set<String> dirtyBindingSources = new HashSet<>();
+        final Map<String, java.util.concurrent.CompletableFuture<Boolean>> settlementSaves = new HashMap<>();
         dev.worldforge.mod.api.DomainMutationRevisions.Snapshot settlementRevision;
         boolean settlementProjectionBuilt;
         EmergentPeopleProgress(JsonObject state, int year) { this.state = state; this.year = year; }
@@ -2504,10 +2506,23 @@ public final class WorldSimMod {
             PROFILER.setGauge("worldsim.genesis.structures.pending", 1);
             return false;
         }
-        // Save once after the complete staged batch. A failed save leaves the cursor
-        // intact, so the next tick retries the durable commit without recreating sites.
-        if (progress.dirty && !SettleMod.saveDurably(server)) {
-            LOGGER.error("wf_worldsim: canonical settlement structures could not be persisted; population phase remains blocked");
+        // Save once after the complete staged batch. Capture on the server thread,
+        // but encode and publish the JSON snapshot on the bounded settlement writer.
+        // Keep this genesis cursor pending until its durable receipt completes.
+        if (progress.durableSave != null) {
+            if (!progress.durableSave.isDone()) return false;
+            boolean saved;
+            try { saved = Boolean.TRUE.equals(progress.durableSave.join()); }
+            catch (java.util.concurrent.CompletionException failure) { saved = false; }
+            progress.durableSave = null;
+            if (!saved) {
+                LOGGER.error("wf_worldsim: canonical settlement structures could not be persisted; population phase remains blocked");
+                return false;
+            }
+            progress.dirty = false;
+        }
+        if (progress.dirty) {
+            progress.durableSave = SettleMod.saveDurablyAsync(server);
             return false;
         }
         emergentStructureProgress = null;
@@ -2846,7 +2861,18 @@ public final class WorldSimMod {
                     return false;
                 }
                 if (emergentPeopleProgress.dirtySettlementSources.contains(source.id)) {
-                    if (!SettleMod.saveDurably(server)) {
+                    java.util.concurrent.CompletableFuture<Boolean> settlementSave =
+                            emergentPeopleProgress.settlementSaves.get(source.id);
+                    if (settlementSave == null) {
+                        emergentPeopleProgress.settlementSaves.put(source.id, SettleMod.saveDurablyAsync(server));
+                        return false;
+                    }
+                    if (!settlementSave.isDone()) return false;
+                    boolean saved;
+                    try { saved = Boolean.TRUE.equals(settlementSave.join()); }
+                    catch (java.util.concurrent.CompletionException failure) { saved = false; }
+                    emergentPeopleProgress.settlementSaves.remove(source.id);
+                    if (!saved) {
                         LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
                         return false;
                     }
