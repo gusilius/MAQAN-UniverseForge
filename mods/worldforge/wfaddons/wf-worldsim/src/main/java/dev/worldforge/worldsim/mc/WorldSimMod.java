@@ -743,13 +743,19 @@ public final class WorldSimMod {
                     .map(realm -> String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")))
                     .filter(id -> !id.isBlank())
                     .collect(java.util.stream.Collectors.toSet());
-            Collection<dev.worldforge.people.Character> sourcePeople =
-                    source.registry == null ? List.of() : source.registry.all();
             Set<String> raceIds = new TreeSet<>();
-            if (source.registry != null) for (dev.worldforge.people.Character person : sourcePeople) {
-                Object race = person.props.get("origin.race");
-                if (person.alive && race != null && !String.valueOf(race).isBlank())
-                    raceIds.add(String.valueOf(race));
+            if (source.registry != null) {
+                for (int offset = 0, count = source.registry.size(); offset < count; offset += 256) {
+                    for (String localId : source.registry.idPage(offset, 256)) {
+                        try (var lease = source.registry.access().acquire(localId)) {
+                            if (lease == null) continue;
+                            dev.worldforge.people.Character person = lease.get();
+                            Object race = person.props.get("origin.race");
+                            if (person.alive && race != null && !String.valueOf(race).isBlank())
+                                raceIds.add(String.valueOf(race));
+                        }
+                    }
+                }
             }
             List<Colony> sourceColonies = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
@@ -1725,16 +1731,22 @@ public final class WorldSimMod {
         // which state a person belongs to from a physical chunk or legacy local ID.
         for (EmergenceSource source : sources) {
             if (source.registry == null) continue;
-            for (dev.worldforge.people.Character person : source.registry.all()) {
-                if (person == null || !person.alive) continue;
-                Object rawBand = person.props.get("emergence.band_id");
-                String polityId = rawBand == null ? "" : polityByBand.getOrDefault(String.valueOf(rawBand), "");
-                if (polityId.isBlank()) {
-                    person.props.remove("emergence.polity_id");
-                    person.props.remove("emergence.realm_id");
-                } else {
-                    person.props.put("emergence.polity_id", polityId);
-                    person.props.put("emergence.realm_id", "emergent-" + polityId);
+            for (int offset = 0, count = source.registry.size(); offset < count; offset += 256) {
+                for (String localId : source.registry.idPage(offset, 256)) {
+                    try (var lease = source.registry.access().acquire(localId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
+                        if (!person.alive) continue;
+                        Object rawBand = person.props.get("emergence.band_id");
+                        String polityId = rawBand == null ? "" : polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                        if (polityId.isBlank()) {
+                            person.props.remove("emergence.polity_id");
+                            person.props.remove("emergence.realm_id");
+                        } else {
+                            person.props.put("emergence.polity_id", polityId);
+                            person.props.put("emergence.realm_id", "emergent-" + polityId);
+                        }
+                    }
                 }
             }
         }
@@ -1743,7 +1755,11 @@ public final class WorldSimMod {
         for (EmergenceSource source : sources) {
             CharacterRegistry registry = source.registry;
             if (registry == null || !snapshotRegistries.add(registry)) continue;
-            for (dev.worldforge.people.Character person : registry.all()) {
+            for (int offset = 0, count = registry.size(); offset < count; offset += 128) {
+                for (String localId : registry.idPage(offset, 128)) {
+                    try (var lease = registry.access().acquire(localId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
                 if (person == null || person.globalId == null || person.globalId.isBlank()) continue;
                 String realmId = "";
                 // Realm office holders (rulers, stewards, marshals, councillors) are canonical
@@ -1914,6 +1930,8 @@ public final class WorldSimMod {
                 item.add("attributes", attributes);
                 item.add("needs", needs);
                 characters.add(item);
+                    }
+                }
             }
         }
         // Canonical JSON ordering is part of the native simulation contract:
@@ -3785,12 +3803,22 @@ public final class WorldSimMod {
             // The same realm-level court materializer runs for image and vanilla worlds.
             // Do not backfill offices from pre-authored political overlays on an image map.
             if (changed) {
-                dev.worldforge.people.Character durable = registry.all().stream()
-                        .filter(person -> person.alive && (person.props.containsKey("emergence.polity_id")
-                                || person.posts.stream().anyMatch(post -> post.place.startsWith("realm:"))))
-                        .findFirst().orElse(null);
-                if (durable != null && !PeopleMod.persistCharacter(durable, server))
-                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", source.id);
+                boolean durable = false;
+                for (int offset = 0, count = registry.size(); offset < count && !durable; offset += 128) {
+                    for (String localId : registry.idPage(offset, 128)) {
+                        try (var lease = registry.access().acquire(localId)) {
+                            if (lease == null) continue;
+                            dev.worldforge.people.Character person = lease.get();
+                            if (!person.alive || (!person.props.containsKey("emergence.polity_id")
+                                    && person.posts.stream().noneMatch(post -> post.place != null && post.place.startsWith("realm:"))))
+                                continue;
+                            durable = PeopleMod.persistCharacter(person, server);
+                            break;
+                        }
+                    }
+                }
+                if (!durable)
+                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be durably persisted", source.id);
             }
             if (settlementMapMarkersChanged && source.map != null)
                 dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(source.map);
@@ -3895,7 +3923,7 @@ public final class WorldSimMod {
             if (map == null || map.titles == null) continue;
             CharacterRegistry mapRegistry = PeopleMod.registry(map);
             EmergentPopulationIndex populationIndex = mapRegistry == null
-                    ? null : new EmergentPopulationIndex(mapRegistry.all());
+                    ? null : new EmergentPopulationIndex(mapRegistry);
             boolean namesChanged = ensureImagePoliticalNames(map);
             Map<String, List<int[]>> seedsByRealm = new TreeMap<>();
             Map<String, List<String>> bandsByRealm = new TreeMap<>();
@@ -4875,8 +4903,9 @@ public final class WorldSimMod {
                 scopes.add("character:" + characterId);
                 for (EmergenceSource source : emergenceSources()) {
                     if (source.registry == null) continue;
-                    for (dev.worldforge.people.Character person : source.registry.all()) {
-                        if (!characterId.equals(person.globalId)) continue;
+                    try (var lease = source.registry.access().acquireGlobal(characterId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
                         if (person.house != null && !person.house.isBlank())
                             scopes.add("dynasty:" + person.house);
                         Object planet = person.props.get("emergence.world_space_id");
