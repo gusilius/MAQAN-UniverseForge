@@ -151,6 +151,9 @@ public final class CharacterEvictionGate {
         return decision(globalId) == Decision.ELIGIBLE;
     }
 
+    /** Number of runtime identity fences currently retained; durable records live elsewhere. */
+    public int trackedIdentityCount() { return states.size(); }
+
     /** Atomically reserves a clean, unpinned identity for physical object removal. */
     public Pin tryBeginEviction(String globalId) {
         if (globalId == null || globalId.isBlank()) return null;
