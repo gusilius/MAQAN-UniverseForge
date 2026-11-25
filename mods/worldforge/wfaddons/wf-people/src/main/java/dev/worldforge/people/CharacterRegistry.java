@@ -333,8 +333,10 @@ public final class CharacterRegistry {
         Character current = byId.get(localId);
         if (current == null) return false;
         if (!accessService.canEvict(globalId)) return false;
-        CharacterRecordStore.Record checkpoint = accessService.loadCheckpoint(globalId);
-        if (checkpoint == null || !globalId.equals(checkpoint.globalId())) return false;
+        // Avoid decoding large JSON payloads on the server thread for every eviction.
+        // The record is force-written before this generation becomes clean; its checksum
+        // and UUID are validated when it is actually rehydrated.
+        if (!accessService.hasAddressableCheckpoint(globalId)) return false;
         if (!globalId.equals(current.globalId)) throw new java.io.IOException("Canonical Character UUID mismatch");
         return byId.remove(localId, current);
     }

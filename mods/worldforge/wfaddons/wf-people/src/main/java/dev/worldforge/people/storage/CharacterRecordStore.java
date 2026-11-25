@@ -107,7 +107,18 @@ public final class CharacterRecordStore implements AutoCloseable {
         put(record.globalId(), record.payloadView());
     }
 
-    /** Checks addressability and validates the record checksum/key before treating it as durable. */
+    /**
+     * Checks whether the atomically published addressable record exists without decoding
+     * its payload. A successful put follows a forced file write and atomic replacement;
+     * checksum and UUID are validated when the record is read during hydration/recovery.
+     */
+    public synchronized boolean exists(String globalId) throws IOException {
+        ensureOpen();
+        encodeId(globalId);
+        return Files.isRegularFile(pathFor(globalId));
+    }
+
+    /** Full integrity check for callers that need the record contents. */
     public synchronized boolean contains(String globalId) throws IOException {
         return get(globalId) != null;
     }

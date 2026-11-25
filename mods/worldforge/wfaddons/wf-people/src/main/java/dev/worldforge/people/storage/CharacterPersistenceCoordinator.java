@@ -224,6 +224,10 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         return records.get(globalId);
     }
 
+    public boolean hasAddressableRecord(String globalId) throws IOException {
+        return records.exists(globalId);
+    }
+
     public CharacterEvictionGate.Decision evictionDecision(String globalId) {
         return evictionGate.decision(globalId);
     }

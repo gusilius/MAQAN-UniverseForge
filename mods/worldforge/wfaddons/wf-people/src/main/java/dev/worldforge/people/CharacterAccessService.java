@@ -123,6 +123,11 @@ public final class CharacterAccessService {
         return persistence != null && persistence.canEvict(globalId);
     }
 
+    boolean hasAddressableCheckpoint(String globalId) throws java.io.IOException {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        return persistence != null && persistence.hasAddressableRecord(globalId);
+    }
+
     dev.worldforge.people.storage.CharacterRecordStore.Record loadCheckpoint(String globalId)
             throws java.io.IOException {
         CharacterPersistenceCoordinator persistence = coordinator();
