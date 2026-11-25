@@ -66,12 +66,14 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
         evictionGate.registerPersisted(globalId);
     }
     public long markDirty(String globalId) {
+        evictionGate.registerPersistedIfAbsent(globalId);
         long generation = evictionGate.markDirty(globalId);
         dirtyEpoch.incrementAndGet();
         dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.BACKGROUND);
         return generation;
     }
     public long markDirtyCritical(String globalId) {
+        evictionGate.registerPersistedIfAbsent(globalId);
         long generation = evictionGate.markDirty(globalId);
         dirtyEpoch.incrementAndGet();
         dirtyQueue.enqueue(globalId, generation, CharacterDirtyQueue.Priority.CRITICAL);
@@ -164,6 +166,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     private CompletableFuture<CharacterWal.Record> persistScoped(
             String globalId, Supplier<byte[]> snapshot, boolean markDirtyFirst) {
         Objects.requireNonNull(snapshot, "snapshot");
+        evictionGate.registerPersistedIfAbsent(globalId);
         CharacterEvictionGate.Pin transaction = evictionGate.beginTransaction(globalId);
         final CharacterEvictionGate.PersistenceTicket ticket;
         try {
