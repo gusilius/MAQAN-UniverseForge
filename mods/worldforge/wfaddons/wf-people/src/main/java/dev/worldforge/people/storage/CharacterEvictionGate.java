@@ -39,6 +39,7 @@ public final class CharacterEvictionGate {
         long persistedGeneration;
         int leases;
         int transactions;
+        boolean evictionInProgress;
     }
 
     private final ConcurrentHashMap<String, State> states = new ConcurrentHashMap<>();
@@ -50,6 +51,14 @@ public final class CharacterEvictionGate {
     }
 
     /** Registers an identity whose current snapshot was already recovered from durable storage. */
+    /** Registers a durable identity only when it has no prior runtime state. */
+    public void registerPersistedIfAbsent(String globalId) {
+        String id = requireId(globalId);
+        State state = new State();
+        state.persistedGeneration = state.generation;
+        states.putIfAbsent(id, state);
+    }
+
     public void registerPersisted(String globalId) {
         String id = requireId(globalId);
         State state = states.computeIfAbsent(id, ignored -> new State());
@@ -62,6 +71,7 @@ public final class CharacterEvictionGate {
     public long markDirty(String globalId) {
         State state = state(globalId);
         synchronized (state) {
+            if (state.evictionInProgress) throw new IllegalStateException("Character is being evicted: " + globalId);
             if (state.generation == Long.MAX_VALUE)
                 throw new IllegalStateException("Character persistence generation exhausted: " + globalId);
             return ++state.generation;
@@ -111,6 +121,7 @@ public final class CharacterEvictionGate {
     private Pin acquire(String globalId, boolean lease) {
         State state = state(globalId);
         synchronized (state) {
+            if (state.evictionInProgress) throw new IllegalStateException("Character is being evicted: " + globalId);
             if (lease) state.leases++;
             else state.transactions++;
         }
@@ -140,6 +151,35 @@ public final class CharacterEvictionGate {
         return decision(globalId) == Decision.ELIGIBLE;
     }
 
+    /** Atomically reserves a clean, unpinned identity for physical object removal. */
+    public Pin tryBeginEviction(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        State state = states.get(globalId);
+        if (state == null) return null;
+        synchronized (state) {
+            if (state.evictionInProgress || state.leases != 0 || state.transactions != 0
+                    || state.persistedGeneration != state.generation) return null;
+            state.evictionInProgress = true;
+            return new Pin(state, false, true);
+        }
+    }
+
+    /** Forgets the runtime fence only after the registry removed the materialized object. */
+    public boolean completeEviction(String globalId, Pin reservation) {
+        if (globalId == null || reservation == null || !reservation.eviction
+                || reservation.closed.get()) return false;
+        State state = reservation.state;
+        synchronized (state) {
+            if (states.get(globalId) != state || !state.evictionInProgress
+                    || state.leases != 0 || state.transactions != 0
+                    || state.persistedGeneration != state.generation) return false;
+            if (!states.remove(globalId, state)) return false;
+            reservation.closed.set(true);
+            state.evictionInProgress = false;
+            return true;
+        }
+    }
+
     private State state(String globalId) {
         String id = requireId(globalId);
         State state = states.get(id);
@@ -156,17 +196,23 @@ public final class CharacterEvictionGate {
     public static final class Pin implements AutoCloseable {
         private final State state;
         private final boolean lease;
+        private final boolean eviction;
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        private Pin(State state, boolean lease) {
+        private Pin(State state, boolean lease) { this(state, lease, false); }
+
+        private Pin(State state, boolean lease, boolean eviction) {
             this.state = state;
             this.lease = lease;
+            this.eviction = eviction;
         }
 
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
             synchronized (state) {
-                if (lease) {
+                if (eviction) {
+                    state.evictionInProgress = false;
+                } else if (lease) {
                     if (state.leases <= 0) throw new IllegalStateException("Character lease underflow");
                     state.leases--;
                 } else {
