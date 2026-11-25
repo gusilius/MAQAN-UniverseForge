@@ -53,6 +53,25 @@ public final class CharacterEvictionGateTest {
         }
         check(gate.canEvict(id), "all leases release without leaking a pin");
 
+        CharacterEvictionGate.Pin reservation = gate.tryBeginEviction(id);
+        check(reservation != null
+                        && gate.decision(id) == CharacterEvictionGate.Decision.ACTIVE_TRANSACTION
+                        && !gate.canEvict(id),
+                "eviction reservation atomically blocks new access and competing eviction");
+        boolean acquisitionRejected = false;
+        try { gate.acquireLease(id); }
+        catch (IllegalStateException expected) { acquisitionRejected = true; }
+        check(acquisitionRejected, "new leases cannot race an in-progress physical eviction");
+        check(gate.completeEviction(id, reservation)
+                        && gate.decision(id) == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY,
+                "successful physical eviction releases its per-identity runtime fence");
+        gate.registerPersistedIfAbsent(id);
+        check(gate.canEvict(id), "lazy identity re-registration restores the durable clean state");
+        try (CharacterEvictionGate.Pin lease = gate.acquireLease(id)) {
+            check(lease != null && !gate.canEvict(id),
+                    "a rehydrated identity is pinned again before it is exposed");
+        }
+
         if (failures != 0) throw new AssertionError(failures + " CharacterEvictionGate checks failed");
     }
 }
