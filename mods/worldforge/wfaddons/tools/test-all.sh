@@ -12,14 +12,15 @@ trap 'rm -rf "$OUT"' EXIT
 
 ACTUAL_PACK="${2:-}"
 GROUP="${3:-all}"
-case "$GROUP" in all|suite|npc|worldgen|politics|life|integration) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
+case "$GROUP" in all|suite|npc|worldgen|politics|life|integration|economy) ;; *) echo "ERROR: unknown test group '$GROUP'"; exit 2 ;; esac
 
 test_group() {
   local name="$1"
   case "$name" in
     Character*|PeopleTest|PlayerTest|NameBankTest|MarriageTest|FamilyPlanningTest|EmergentHouseholdPlanTest|EmergentPopulationIndexTest|NpcSpawn*|MilitaryDeathLedgerTest) echo npc ;;
     Genesis*|ImageWorldIdentityTest|MapGeographyTest|MapSyncSafetyTest|PlanetActivationStateTest|ProceduralPlanetGenerationTest|ProvinceContourTest|RasterTileLayerTest|SettlementMapTest) echo worldgen ;;
-    Army*|CityTaxTest|CourtTest|EconomyTest|EconomyScaleStressTest|HistoricalChronicleTest|LedgerTest|OperationalSupplyPersistenceTest|OrdersTest|PoliticalIdentitySynchronizerTest|RealmEconomyTest|RealmsTest|StatecraftTest|ThreatTest|Trade*|Treasury*|TroopsTest|WarTest) echo politics ;;
+    EconomyScaleStressTest) echo economy ;;
+    Army*|CityTaxTest|CourtTest|EconomyTest|HistoricalChronicleTest|LedgerTest|OperationalSupplyPersistenceTest|OrdersTest|PoliticalIdentitySynchronizerTest|RealmEconomyTest|RealmsTest|StatecraftTest|ThreatTest|Trade*|Treasury*|TroopsTest|WarTest) echo politics ;;
     PopulationSimulationTest|RelationsTest|ReputationTest|Resident*|SeasonTest|Settle*|ColonySimulationCadenceTest|ShopsTest) echo life ;;
     *) echo integration ;;
   esac
