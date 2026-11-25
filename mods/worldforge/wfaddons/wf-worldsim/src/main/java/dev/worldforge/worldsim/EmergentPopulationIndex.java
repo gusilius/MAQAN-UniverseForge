@@ -11,7 +11,11 @@ import java.util.*;
  * Resolve an ID through CharacterAccessService.acquireGlobal() at the point of use.
  */
 public final class EmergentPopulationIndex {
+    public record Resident(String globalId, String localId, boolean alive, int birthYear,
+                           String gender, int familyGroupIndex, String house,
+                           String race, String culture, String father, String mother) {}
     private final Map<String, List<String>> livingByBand = new HashMap<>();
+    private final Map<String, Resident> residentByGlobalId = new HashMap<>();
     private final Set<String> knownGlobalIds = new HashSet<>();
     private final List<String> emergent = new ArrayList<>();
 
@@ -64,11 +68,34 @@ public final class EmergentPopulationIndex {
             throw new IllegalArgumentException("Emergent Character must have a canonical global UUID");
         if (!knownGlobalIds.add(globalId)) return;
         Object rawBand = character.props.get("emergence.band_id");
+        Object rawFamily = character.props.get("emergence.family_group_index");
+        int familyIndex = rawFamily instanceof Number number ? number.intValue() : -1;
+        Object rawRace = character.props.get("origin.race");
+        residentByGlobalId.put(globalId, new Resident(globalId, character.id, character.alive,
+                character.birthYear, character.gender == null ? "" : character.gender, familyIndex,
+                character.house == null ? "" : character.house,
+                rawRace == null ? "" : String.valueOf(rawRace),
+                character.culture == null ? "" : character.culture,
+                character.father == null ? "" : character.father,
+                character.mother == null ? "" : character.mother));
         if (rawBand instanceof String bandId && !bandId.isBlank()) {
             emergent.add(globalId);
             if (character.alive)
                 livingByBand.computeIfAbsent(bandId, ignored -> new ArrayList<>()).add(globalId);
         }
+    }
+
+    /** Compact immutable metadata captured while a short lease is held. */
+    public Resident resident(String globalId) { return residentByGlobalId.get(globalId); }
+
+    public List<Resident> residentMetadata(String bandId) {
+        List<String> ids = livingByBand.getOrDefault(Objects.requireNonNull(bandId), List.of());
+        List<Resident> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Resident resident = residentByGlobalId.get(id);
+            if (resident != null) result.add(resident);
+        }
+        return List.copyOf(result);
     }
 
     public int retainedIdentityCount() { return knownGlobalIds.size(); }
