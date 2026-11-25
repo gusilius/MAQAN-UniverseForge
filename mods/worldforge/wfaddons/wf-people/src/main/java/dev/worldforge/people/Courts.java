@@ -92,7 +92,7 @@ public final class Courts {
             }
             for (String[] pl : places) {
                 String key = holderKey(role.id, pl[0]);
-                int have = reg.holders(role.id, pl[0]).size();
+                int have = reg.holderCount(role.id, pl[0]);
                 for (int i = have; i < role.count; i++) {
                     create(d, ed, reg, defs, names, role, pl[0], pl[1], pl[2], pl[3],
                             new Random(mix(seed, pl[0], role.id, i)), year, usedHouses);
