@@ -178,7 +178,27 @@ public class PeopleMod {
         if (dialogueLoaded()) e.enqueueWork(DialogueHook::register);
     }
 
-    /** Персонаж по id в любой загруженной карте (аддоны поверх людей ищут собеседников по нему). */
+    /**
+     * Preferred cross-addon lookup. The caller owns the returned lease and must close it.
+     * The lease pins the Character only for the duration of the actual interaction.
+     */
+    public static CharacterAccessService.Lease findNpcLease(String id) {
+        if (id == null || id.isBlank()) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) registry(map);
+        CharacterAccessService.Lease global = AUTHORITY.acquireGlobal(id);
+        if (global != null) return global;
+        Character legacy = AUTHORITY.getLegacy(id);
+        if (legacy == null) return null;
+        CharacterIdentity identity = AUTHORITY.identityOf(legacy.globalId);
+        return AUTHORITY.acquire(identity);
+    }
+
+    /**
+     * @deprecated Raw unpinned compatibility reference. Migrate callers to findNpcLease().
+     * Keeping this method preserves binary/source compatibility but does not protect a
+     * retained reference from eviction.
+     */
+    @Deprecated
     public static Character findNpc(String id) {
         if (id == null || id.isBlank()) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) registry(map);
@@ -466,7 +486,15 @@ public class PeopleMod {
         return populationFallbackRegistries(populationRegistryGeneration);
     }
 
-    /** Resolve the canonical player Character by account UUID without retaining the object. */
+    /** Preferred player access; caller must close the lease after the interaction. */
+    public static CharacterAccessService.Lease playerCharacterLease(UUID playerUuid) {
+        if (playerUuid == null) return null;
+        String globalId = PLAYER_CHARACTERS.get(playerUuid.toString());
+        return globalId == null ? null : AUTHORITY.acquireGlobal(globalId);
+    }
+
+    /** @deprecated Raw unpinned compatibility reference; use playerCharacterLease(). */
+    @Deprecated
     public static Character playerCharacter(UUID playerUuid) {
         if (playerUuid == null) return null;
         String globalId = PLAYER_CHARACTERS.get(playerUuid.toString());
