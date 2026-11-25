@@ -2590,6 +2590,18 @@ public class SettleMod {
         }
     }
 
+    private static void publishSimulationObservers(MinecraftServer server) {
+        List<SimulationLod.Observer> observers = new ArrayList<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            String dimension = level.dimension().location().toString();
+            for (var player : level.players()) {
+                if (player.isSpectator()) continue;
+                observers.add(new SimulationLod.Observer(dimension, player.getX(), player.getZ()));
+            }
+        }
+        SimulationLod.publish(observers);
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
@@ -2597,6 +2609,7 @@ public class SettleMod {
         if (DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        publishSimulationObservers(server);
         ticks++;
         if (!professionsSynced) {
             syncCanonicalProfessions();
