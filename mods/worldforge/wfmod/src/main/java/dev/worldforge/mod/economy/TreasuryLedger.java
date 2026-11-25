@@ -37,6 +37,8 @@ public final class TreasuryLedger {
     private final Map<String, Double> debitTotals = new HashMap<>();
     private final Map<String, Long> journalCountsByKindCategory = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
+    /** O(1) idempotency lookup for the unarchived tail; archived history uses the disk index. */
+    private final Map<String, List<Entry>> pendingEntriesByReference = new HashMap<>();
     private long sequence=1, transactionSequence=1;
     private long mutationVersion;
     private String lastError="";
@@ -384,8 +386,10 @@ public final class TreasuryLedger {
             throw new IllegalStateException("Cannot acknowledge an incomplete treasury archive boundary");
         int acknowledged = Math.toIntExact(exclusiveNextSequence - firstPending);
         for (int i = 0; i < acknowledged; i++) {
-            if (journal.get(i).sequence() != firstPending + i)
+            Entry entry = journal.get(i);
+            if (entry.sequence() != firstPending + i)
                 throw new IllegalStateException("Treasury journal prefix is not contiguous at acknowledgement");
+            removePendingReference(entry);
         }
         historyArchive = archive;
         archivedThroughSequence = exclusiveNextSequence - 1;
@@ -420,22 +424,38 @@ public final class TreasuryLedger {
     }
 
     /**
-     * Returns postings for one idempotency key. The compact posted-reference sets remain
-     * the O(1) duplicate guard; full Entry objects are not duplicated in a reference index.
+     * Returns postings for one idempotency key. Archived history is resolved through its
+     * persistent reference index; the unarchived tail uses this bounded in-memory index.
+     * This path must never scan the entire pending journal for every retry.
      */
     public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
         String key = referenceKey(accountId, kind, reference);
-        List<Entry> result = new ArrayList<>(2);
+        List<Entry> archived = List.of();
         if (historyArchive != null) {
             try {
-                result.addAll(historyArchive.readReferenceEntries(accountId, kind.name(), clean(reference)));
+                archived = historyArchive.readReferenceEntries(accountId, kind.name(), clean(reference));
             } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
         }
-        for (Entry entry : journal) {
-            if (key.equals(referenceKey(entry.accountId(), entry.kind(), entry.reference())))
-                result.add(entry);
-        }
+        List<Entry> pending = pendingEntriesByReference.get(key);
+        if (archived.isEmpty()) return pending == null ? List.of() : List.copyOf(pending);
+        if (pending == null || pending.isEmpty()) return List.copyOf(archived);
+        List<Entry> result = new ArrayList<>(archived.size() + pending.size());
+        result.addAll(archived);
+        result.addAll(pending);
         return List.copyOf(result);
+    }
+
+    private void indexPendingReference(Entry entry) {
+        String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+        pendingEntriesByReference.computeIfAbsent(key, ignored -> new ArrayList<>(2)).add(entry);
+    }
+
+    private void removePendingReference(Entry entry) {
+        String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+        List<Entry> entries = pendingEntriesByReference.get(key);
+        if (entries == null) throw new IllegalStateException("Missing pending treasury reference index for " + key);
+        if (!entries.remove(entry)) throw new IllegalStateException("Pending treasury reference index lost journal entry " + entry.sequence());
+        if (entries.isEmpty()) pendingEntriesByReference.remove(key);
     }
 
     public synchronized boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
@@ -680,6 +700,7 @@ public final class TreasuryLedger {
         Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
         journal.add(entry);
         indexEntry(entry);
+        indexPendingReference(entry);
         if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
             armyFieldRationDebitAccounts.add(account);
     }
@@ -828,6 +849,7 @@ public final class TreasuryLedger {
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
             ledger.indexEntry(entry);
+            ledger.indexPendingReference(entry);
             if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
                 ledger.armyFieldRationDebitAccounts.add(accountId);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
