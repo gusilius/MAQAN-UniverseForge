@@ -102,7 +102,7 @@ public final class WorldSimMod {
     private static EmergentStructureProgress emergentStructureProgress;
 
     private static final class EmergentBandProgress {
-        final List<dev.worldforge.people.Character> residents;
+        final List<String> residents;
         final EmergentParents parents;
         int originCursor;
         int residentIndexCursor;
@@ -113,10 +113,13 @@ public final class WorldSimMod {
         int workerCleanupCursor;
         int residentWorkerCursor;
         boolean settlementReconciled;
-        EmergentBandProgress(List<dev.worldforge.people.Character> residents, int year) {
-            this.residents = residents;
-            this.residents.sort(Comparator.comparingInt(person -> person.birthYear));
-            this.parents = EmergentParents.from(this.residents, year);
+        EmergentBandProgress(List<EmergentPopulationIndex.Resident> residents, int year) {
+            List<EmergentPopulationIndex.Resident> ordered = new ArrayList<>(residents);
+            ordered.sort(Comparator.comparingInt(EmergentPopulationIndex.Resident::birthYear)
+                    .thenComparing(EmergentPopulationIndex.Resident::globalId));
+            this.residents = ordered.stream().map(EmergentPopulationIndex.Resident::globalId)
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+            this.parents = EmergentParents.from(ordered, year);
         }
     }
 
@@ -125,11 +128,16 @@ public final class WorldSimMod {
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
         final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
         EmergentMapProgress(CharacterRegistry registry) {
-            List<dev.worldforge.people.Character> existing = new ArrayList<>(registry.all());
-            this.index = new EmergentPopulationIndex(existing);
+            this.index = new EmergentPopulationIndex(registry);
             List<String> reserved = new ArrayList<>();
-            for (dev.worldforge.people.Character person : existing)
-                if (person.house != null && !person.house.isBlank()) reserved.add(person.house);
+            for (int offset = 0, count = registry.size(); offset < count; offset += 256) {
+                for (String localId : registry.idPage(offset, 256)) {
+                    try (var lease = registry.access().acquire(localId)) {
+                        if (lease != null && lease.get().house != null && !lease.get().house.isBlank())
+                            reserved.add(lease.get().house);
+                    }
+                }
+            }
             RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
                     .filter(value -> value != null && !value.isBlank()).forEach(reserved::add);
             this.reservedHouseNames = PeopleMod.NAMES.reservations(reserved);
@@ -2578,12 +2586,15 @@ public final class WorldSimMod {
                 String bandId = band.get("id").getAsString();
                 int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
                 EmergentBandProgress bandProgress = sourceProgress.bands.computeIfAbsent(bandId,
-                        ignored -> new EmergentBandProgress(sourceProgress.index.livingResidents(bandId), year));
-                List<dev.worldforge.people.Character> residents = bandProgress.residents;
+                        ignored -> new EmergentBandProgress(sourceProgress.index.residentMetadata(bandId), year));
+                List<String> residents = bandProgress.residents;
 
                 while (bandProgress.originCursor < residents.size() && budget > 0) {
                     int ordinal = bandProgress.originCursor++;
-                    ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
+                    try (var lease = registry.access().acquireGlobal(residents.get(ordinal))) {
+                        if (lease != null) ensureEmergentOrigin(lease.get(), source, year, ordinal,
+                                realmByBand.getOrDefault(bandId, ""));
+                    }
                     budget--;
                 }
                 try (CharacterRegistry.MutationBatch membershipBatch = CharacterRegistry.beginMutationBatch()) {
@@ -2594,6 +2605,7 @@ public final class WorldSimMod {
                             sourceProgress.reservedHouseNames);
                     if (created == null) break;
                     sourceProgress.index.add(created);
+                    residents.add(created.globalId);
                     ensureEmergentOrigin(created, source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     bandProgress.originCursor = residents.size();
                     budget--;
@@ -2721,7 +2733,9 @@ public final class WorldSimMod {
 
                     while (bandProgress.residentWorkerCursor < bandProgress.residentIds.size() && budget > 0) {
                         String residentId = bandProgress.residentIds.get(bandProgress.residentWorkerCursor);
-                        dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
+                        EmergentPopulationIndex.Resident metadata = sourceProgress.index.resident(residentId);
+                        try (var residentLease = registry.access().acquireGlobal(residentId)) {
+                        dev.worldforge.people.Character resident = residentLease == null ? null : residentLease.get();
                         if (resident != null && !resident.alive) {
                             colony.s.removeWorkerByPerson(residentId, "death:emergence");
                             workerColonyByPerson.remove(residentId, colony.s.id);
@@ -2735,6 +2749,7 @@ public final class WorldSimMod {
                                 throw new IllegalStateException("Canonical resident " + residentId
                                         + " could not be attached to settlement " + settlementId);
                             }
+                        }
                         }
                         bandProgress.residentWorkerCursor++;
                         budget--;
@@ -2759,9 +2774,13 @@ public final class WorldSimMod {
                 complete = false;
             }
             if (sourceComplete) {
-                List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
-                boolean peopleDurable = emergentResidents.isEmpty()
-                        || PeopleMod.persistCharacter(emergentResidents.get(0), server);
+                List<String> emergentResidents = sourceProgress.index.emergentResidents();
+                boolean peopleDurable = emergentResidents.isEmpty();
+                if (!peopleDurable) {
+                    try (var lease = registry.access().acquireGlobal(emergentResidents.get(0))) {
+                        peopleDurable = lease != null && PeopleMod.persistCharacter(lease.get(), server);
+                    }
+                }
                 if (!peopleDurable) {
                     LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
                     return false;
@@ -3057,7 +3076,7 @@ public final class WorldSimMod {
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
         Map<String, Long> cultures = residents.stream()
-                .map(person -> person.culture == null ? "" : person.culture)
+                .map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -3125,11 +3144,10 @@ public final class WorldSimMod {
 
     /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
     private static Map<String, Double> emergentRaceShares(
-            List<dev.worldforge.people.Character> members) {
+            List<EmergentPopulationIndex.Resident> members) {
         Map<String, Double> counts = new TreeMap<>();
-        for (dev.worldforge.people.Character person : members) {
-            Object rawRace = person.props.get("origin.race");
-            String race = rawRace == null ? "" : String.valueOf(rawRace).trim();
+        for (EmergentPopulationIndex.Resident person : members) {
+            String race = person.race() == null ? "" : person.race().trim();
             if (race.isEmpty()) continue;
             // Count every subrace toward its full ancestry. Government and settlement
             // requirements target base races (elf/dwarf/orc), while names and traits
@@ -3223,10 +3241,10 @@ public final class WorldSimMod {
                     .replaceAll("\\s+", " ").equalsIgnoreCase(normalized));
             if (available) return existing.name;
         }
-        List<dev.worldforge.people.Character> residents = bandId == null || bandId.isBlank()
-                ? List.of() : populationIndex.livingResidents(bandId);
+        List<EmergentPopulationIndex.Resident> residents = bandId == null || bandId.isBlank()
+                ? List.of() : populationIndex.residentMetadata(bandId);
         Map<String, Long> races = residents.stream()
-                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -3268,15 +3286,15 @@ public final class WorldSimMod {
                 .map(title -> title.holderCharacterId)
                 .filter(holder -> holder != null && !holder.isBlank())
                 .collect(java.util.stream.Collectors.toSet());
-        var residents = populationIndex.livingResidents(bandId).stream()
-                .filter(person -> person.alive && PopulationSimulation.age(person, year) >= 18)
+        var residents = populationIndex.residentMetadata(bandId).stream()
+                .filter(person -> person.alive() && Math.max(0, year - person.birthYear()) >= 18)
                 // Prefer a distinct local notable for each county/duchy/kingdom.
                 // Reuse an existing holder only when the local adult population is exhausted.
-                .sorted(Comparator.comparing((dev.worldforge.people.Character person) ->
-                                alreadyHoldingRealmTitles.contains(person.globalId))
-                        .thenComparingInt(person -> person.birthYear)
-                        .thenComparing(person -> person.globalId)).toList();
-        String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId;
+                .sorted(Comparator.comparing((EmergentPopulationIndex.Resident person) ->
+                                alreadyHoldingRealmTitles.contains(person.globalId()))
+                        .thenComparingInt(EmergentPopulationIndex.Resident::birthYear)
+                        .thenComparing(EmergentPopulationIndex.Resident::globalId)).toList();
+        String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId();
         if (holder != null && !holder.isBlank()
                 && !RealmsMod.POLITICS.grantTitle(titleId, holder))
             LOGGER.warn("wf_worldsim: could not grant territorial title {} to Character {}: {}",
@@ -3446,13 +3464,13 @@ public final class WorldSimMod {
     }
 
     /** A deterministic culture/race-aware name is stored in the canonical emergence state once. */
-    private static String emergentRealmName(String polityId, List<dev.worldforge.people.Character> members,
+    private static String emergentRealmName(String polityId, List<EmergentPopulationIndex.Resident> members,
             Set<String> reservedNames) {
         if (members == null || members.isEmpty())
             throw new IllegalStateException("Cannot name a polity without canonical population: " + polityId);
-        Map<String, Long> races = members.stream().map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+        Map<String, Long> races = members.stream().map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
-        Map<String, Long> cultures = members.stream().map(person -> person.culture == null ? "" : person.culture)
+        Map<String, Long> cultures = members.stream().map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
         String race = races.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
@@ -3499,7 +3517,7 @@ public final class WorldSimMod {
             boolean changed = false;
             boolean settlementMapMarkersChanged = false;
             EmergentPopulationIndex populationIndex = populationIndexes.computeIfAbsent(
-                    registry, ignored -> new EmergentPopulationIndex(registry.all()));
+                    registry, ignored -> new EmergentPopulationIndex(registry));
             EmergentGeographyIndex geographyIndex = new EmergentGeographyIndex(state, source);
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
