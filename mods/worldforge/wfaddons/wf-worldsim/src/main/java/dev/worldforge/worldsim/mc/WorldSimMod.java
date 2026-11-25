@@ -129,15 +129,7 @@ public final class WorldSimMod {
         final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
         EmergentMapProgress(CharacterRegistry registry) {
             this.index = new EmergentPopulationIndex(registry);
-            List<String> reserved = new ArrayList<>();
-            for (int offset = 0, count = registry.size(); offset < count; offset += 256) {
-                for (String localId : registry.idPage(offset, 256)) {
-                    try (var lease = registry.access().acquire(localId)) {
-                        if (lease != null && lease.get().house != null && !lease.get().house.isBlank())
-                            reserved.add(lease.get().house);
-                    }
-                }
-            }
+            List<String> reserved = new ArrayList<>(registry.houseNamesSnapshot());
             RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
                     .filter(value -> value != null && !value.isBlank()).forEach(reserved::add);
             this.reservedHouseNames = PeopleMod.NAMES.reservations(reserved);
