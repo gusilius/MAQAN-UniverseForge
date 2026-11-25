@@ -1495,7 +1495,8 @@ public class SettleMod {
                         settlementId, foundingPopulation, households, settlement.count("house", false),
                         settlement.count("farm", false), settlement.count("lumber_camp", false));
             }
-            return changed || !newlyPostedStock.isEmpty();\n        } catch (Settlement.OrderException | IllegalStateException failure) {
+            return changed || !newlyPostedStock.isEmpty();
+        } catch (Settlement.OrderException | IllegalStateException failure) {
             LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
                     settlementId, failure.getMessage());
             return false;
