@@ -48,21 +48,10 @@ public final class CharacterAccessService {
             // create is either in the bootstrap snapshot or sees the attached coordinator.
             PERSISTENCE.put(registry, coordinator);
             synchronized (pendingRegistrationIds) {
-                // Seed persistence from the compact identity directory, never from all().
-                // CharacterRegistry.all() is a compatibility view whose iterator hydrates
-                // every evicted Character; using it here would undo the entire memory LOD
-                // immediately when a world attaches its coordinator.
-                final int pageSize = 1024;
-                for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
-                    for (String localId : registry.idPage(offset, pageSize)) {
-                        String globalId = registry.globalIdForLocalId(localId);
-                        if (globalId == null || globalId.isBlank())
-                            throw new IllegalStateException(
-                                    "Character identity directory is missing its global UUID: " + localId);
-                        if (pendingRegistrationIds.contains(globalId)) coordinator.register(globalId);
-                        else coordinator.registerPersisted(globalId);
-                    }
-                }
+                // Only identities created before attachment need eager dirty admission.
+                // Snapshot-loaded identities are registered as already durable on first
+                // lease/transaction, avoiding one runtime fence object per NPC at startup.
+                for (String globalId : pendingRegistrationIds) coordinator.register(globalId);
                 pendingRegistrationIds.clear();
             }
         }
@@ -114,7 +103,6 @@ public final class CharacterAccessService {
     private CharacterEvictionGate.Pin pin(Character character) {
         CharacterPersistenceCoordinator coordinator = coordinator();
         if (coordinator == null) return null;
-        coordinator.register(character.globalId);
         return coordinator.acquireLease(character.globalId);
     }
 
@@ -155,6 +143,16 @@ public final class CharacterAccessService {
                 throw new IllegalStateException("Could not hydrate Character " + globalId, failure);
             }
         }
+    }
+
+    CharacterEvictionGate.Pin beginEviction(String globalId) {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        return persistence == null ? null : persistence.beginEviction(globalId);
+    }
+
+    boolean completeEviction(String globalId, CharacterEvictionGate.Pin reservation) {
+        CharacterPersistenceCoordinator persistence = coordinator();
+        return persistence != null && persistence.completeEviction(globalId, reservation);
     }
 
     boolean canEvict(String globalId) {
