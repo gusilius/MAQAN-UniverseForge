@@ -1133,36 +1133,16 @@ public final class CourtSim {
     }
     /** Bounded ID pages and short leases keep CourtSim's long-running passes UUID-only. */
     private static List<String> characterIdPage(CharacterRegistry registry, int offset, int limit) {
-        if (limit <= 0) return List.of();
-        try {
-            Object raw = registry.getClass().getMethod("idPage", int.class, int.class)
-                    .invoke(registry, offset, limit);
-            if (!(raw instanceof List<?> values)) throw new IllegalStateException("Character ID page is not a list");
-            List<String> ids = new ArrayList<>(values.size());
-            for (Object value : values) ids.add(String.valueOf(value));
-            return ids;
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-court requires the bounded Character ID page API", error);
-        }
+        return limit <= 0 ? List.of() : registry.idPage(offset, limit);
     }
 
     private static boolean withCharacterLease(CharacterRegistry registry, String localId,
                                                java.util.function.Consumer<Character> visitor) {
         if (localId == null || localId.isBlank()) { visitor.accept(null); return true; }
-        Object lease = null;
-        try {
-            Object access = registry.getClass().getMethod("access").invoke(registry);
-            lease = access.getClass().getMethod("acquire", String.class).invoke(access, localId);
+        try (dev.worldforge.people.CharacterAccessService.Lease lease = registry.acquire(localId)) {
             if (lease == null) { visitor.accept(null); return false; }
-            visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease));
+            visitor.accept(lease.get());
             return true;
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-court could not acquire canonical Character lease " + localId, error);
-        } finally {
-            if (lease instanceof AutoCloseable closeable) {
-                try { closeable.close(); }
-                catch (Exception error) { throw new IllegalStateException("wf-court could not release Character lease " + localId, error); }
-            }
         }
     }
 
