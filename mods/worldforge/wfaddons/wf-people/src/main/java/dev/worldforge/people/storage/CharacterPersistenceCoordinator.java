@@ -268,6 +268,7 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     }
 
     public boolean canEvict(String globalId) {
+        evictionGate.registerPersistedIfAbsent(globalId);
         // Eviction is identity-scoped. Another NPC's pending WAL/checkpoint work must
         // not pin this identity once its own WAL frame and addressable record are durable.
         return !dirtyQueue.contains(globalId) && evictionGate.canEvict(globalId);
