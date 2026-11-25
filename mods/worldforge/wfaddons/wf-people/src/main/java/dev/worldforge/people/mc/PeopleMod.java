@@ -108,7 +108,7 @@ public class PeopleMod {
     private static final Map<String, CharacterRegistry> DIMENSION_REGISTRIES = new ConcurrentHashMap<>();
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
     private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
-    private static final Map<String, Character> PLAYER_CHARACTERS = new ConcurrentHashMap<>();
+    private static final Map<String, String> PLAYER_CHARACTERS = new ConcurrentHashMap<>();
     private static volatile boolean playerRegistryAvailable = true;
     /** True only after all world Character partitions are indexed and pending transfers recover cleanly. */
     private static volatile boolean identityPartitionsReady;
@@ -466,8 +466,14 @@ public class PeopleMod {
         return populationFallbackRegistries(populationRegistryGeneration);
     }
 
-    /** Resolve the canonical player Character by the stable Minecraft account UUID. */
+    /** Resolve the canonical player Character by account UUID without retaining the object. */
     public static Character playerCharacter(UUID playerUuid) {
+        if (playerUuid == null) return null;
+        String globalId = PLAYER_CHARACTERS.get(playerUuid.toString());
+        return globalId == null ? null : AUTHORITY.getGlobal(globalId);
+    }
+
+    public static String playerCharacterGlobalId(UUID playerUuid) {
         return playerUuid == null ? null : PLAYER_CHARACTERS.get(playerUuid.toString());
     }
 
@@ -477,22 +483,28 @@ public class PeopleMod {
         String account = playerUuid.toString();
         Object saved = character.props.get("genesis.player_uuid");
         if (!account.equals(saved)) throw new IllegalStateException("Player account and Character binding disagree");
-        Character previous = PLAYER_CHARACTERS.putIfAbsent(account, character);
-        if (previous != null && previous != character)
+        String previous = PLAYER_CHARACTERS.putIfAbsent(account, character.globalId);
+        if (previous != null && !previous.equals(character.globalId))
             throw new IllegalStateException("Minecraft player UUID is already bound to another Character");
     }
 
     private static void indexPlayerCharacters(CharacterRegistry registry) {
-        for (Character character : registry.all()) {
-            Object raw = character.props.get("genesis.player_uuid");
-            if (!(raw instanceof String account) || account.isBlank()) continue;
-            try {
-                String canonical = UUID.fromString(account).toString();
-                Character previous = PLAYER_CHARACTERS.putIfAbsent(canonical, character);
-                if (previous != null && previous != character)
-                    throw new IllegalStateException("Minecraft player UUID is bound to multiple Characters: " + canonical);
-            } catch (IllegalArgumentException ex) {
-                LOGGER.error("wf_people: invalid player UUID on Character {}: {}", character.globalId, account);
+        for (int offset = 0; offset < registry.size(); offset += 128) {
+            for (String localId : registry.idPage(offset, 128)) {
+                try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                    if (lease == null) continue;
+                    Character character = lease.get();
+                    Object raw = character.props.get("genesis.player_uuid");
+                    if (!(raw instanceof String account) || account.isBlank()) continue;
+                    try {
+                        String canonical = UUID.fromString(account).toString();
+                        String previous = PLAYER_CHARACTERS.putIfAbsent(canonical, character.globalId);
+                        if (previous != null && !previous.equals(character.globalId))
+                            throw new IllegalStateException("Minecraft player UUID is bound to multiple Characters: " + canonical);
+                    } catch (IllegalArgumentException ex) {
+                        LOGGER.error("wf_people: invalid player UUID on Character {}: {}", character.globalId, account);
+                    }
+                }
             }
         }
     }
