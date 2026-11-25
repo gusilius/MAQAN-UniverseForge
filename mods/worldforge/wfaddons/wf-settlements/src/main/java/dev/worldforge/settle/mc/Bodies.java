@@ -212,12 +212,18 @@ public final class Bodies {
                 entity.workerId = worker.id;
                 entity.moveTo(x + 0.5, y, z + 0.5, level.random.nextFloat() * 360f, 0f);
                 entity.refreshName();
+                // A physical worker is an active representation of its canonical Character.
+                // Hold a scoped lease until this entity is removed so eviction cannot invalidate
+                // equipment, dialogue, work and social operations while the player is nearby.
+                if (!entity.retainCanonicalCharacter()) continue;
 
                 if (level.addFreshEntity(entity)) {
                     trackLive(liveKey, entity.getUUID());
                     dev.worldforge.mod.MaqanPerformanceTelemetry.workerSpawned();
                     spawned++;
                     colonyBodyCount++;
+                } else {
+                    entity.releaseCanonicalCharacter();
                 }
             }
             if (inspected > 0)

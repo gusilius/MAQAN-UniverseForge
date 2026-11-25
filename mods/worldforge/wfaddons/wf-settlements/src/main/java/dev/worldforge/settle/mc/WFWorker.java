@@ -2,6 +2,9 @@ package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.people.CharacterAccessService;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -52,6 +55,35 @@ public class WFWorker extends PathfinderMob {
     public String colonyId = "";
     public int workerId;
     private int age;
+    /** Pins the canonical resident for exactly the lifetime of this physical body. */
+    private CharacterAccessService.Lease canonicalCharacterLease;
+
+    public boolean retainCanonicalCharacter() {
+        if (canonicalCharacterLease != null && !canonicalCharacterLease.isClosed()) return true;
+        String globalId = characterId();
+        if (globalId == null || globalId.isBlank()) return false;
+        CharacterRegistry registry = PeopleMod.authority().registryForGlobal(globalId);
+        if (registry == null) return false;
+        CharacterAccessService.Lease lease = registry.access().acquireGlobal(globalId);
+        if (lease == null || !globalId.equals(lease.get().globalId)) {
+            if (lease != null) lease.close();
+            return false;
+        }
+        canonicalCharacterLease = lease;
+        return true;
+    }
+
+    public void releaseCanonicalCharacter() {
+        CharacterAccessService.Lease lease = canonicalCharacterLease;
+        canonicalCharacterLease = null;
+        if (lease != null) lease.close();
+    }
+
+    @Override
+    public void remove(RemovalReason reason) {
+        releaseCanonicalCharacter();
+        super.remove(reason);
+    }
 
     public WFWorker(EntityType<? extends WFWorker> type, Level level) {
         super(type, level);
