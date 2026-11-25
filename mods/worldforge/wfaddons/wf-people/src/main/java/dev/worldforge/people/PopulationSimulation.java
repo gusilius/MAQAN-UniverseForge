@@ -519,16 +519,27 @@ public final class PopulationSimulation {
         }
     }
 
+    /** Applies a completed action and marks the canonical Character dirty within its lease. */
+    public static void completeIntent(CharacterAccessService.Lease lease, Intent intent) {
+        Objects.requireNonNull(lease, "lease");
+        completeIntent(lease.get(), intent);
+        lease.markDirty();
+    }
+
     /** Stores a death cause and year while preserving the Character and family graph. */
     public static List<Character.Post> die(CharacterRegistry registry, String characterId, int year, String cause) {
-        Character character = registry.get(characterId);
-        if (character == null) throw new IllegalArgumentException("No character " + characterId);
-        if (!character.alive) return List.of();
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-            character.props.put("population.death_year", year);
-            character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
-            CharacterRegistry.recordCharacterMutation();
-            return registry.kill(characterId);
+        try (CharacterAccessService.Lease lease = registry.access().acquire(characterId)) {
+            if (lease == null) throw new IllegalArgumentException("No character " + characterId);
+            Character character = lease.get();
+            if (!character.alive) return List.of();
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+                character.props.put("population.death_year", year);
+                character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
+                CharacterRegistry.recordCharacterMutation();
+                List<Character.Post> dismissed = registry.kill(characterId);
+                lease.markDirty();
+                return dismissed;
+            }
         }
     }
 
@@ -611,12 +622,16 @@ public final class PopulationSimulation {
                         Character character = lease.get();
                         if (!character.alive) continue;
                         int currentAge = age(character, year);
-                        registry.applyLifeStageResult(character, currentAge,
-                                lifeStage(character, year).name().toLowerCase(Locale.ROOT), year);
+                        String nextStage = lifeStage(character, year).name().toLowerCase(Locale.ROOT);
+                        boolean stageChanged = !Objects.equals(character.props.get("population.age_years"), currentAge)
+                                || !Objects.equals(character.props.get("population.life_stage"), nextStage);
+                        registry.applyLifeStageResult(character, currentAge, nextStage, year);
                         Object raw = character.props.get("population.last_simulated_world_day");
                         long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
-                        if (previous >= targetWorldDay) continue;
-                        advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                        if (previous < targetWorldDay) {
+                            advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                            lease.markDirty();
+                        } else if (stageChanged) lease.markDirty();
                     }
                 }
             }
@@ -645,13 +660,24 @@ public final class PopulationSimulation {
         if(targetWorldDay<0||fallbackStartDay<0)throw new IllegalArgumentException("world days cannot be negative");
         if(targetWorldDay<fallbackStartDay)throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
         try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
-            registry.refreshLifeStages(year);
-            for(Character character:registry.all()){
-                if(!character.alive)continue;
-                Object raw=character.props.get("population.last_simulated_world_day");
-                long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
-                if(previous>=targetWorldDay)continue;
-                advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+            for(int offset=0;offset<registry.size();offset+=128){
+                for(String characterId:registry.idPage(offset,128)){
+                    try(CharacterAccessService.Lease lease=registry.access().acquire(characterId)){
+                        if(lease==null)continue;
+                        Character character=lease.get();if(!character.alive)continue;
+                        int currentAge=age(character,year);
+                        String nextStage=lifeStage(character,year).name().toLowerCase(Locale.ROOT);
+                        boolean stageChanged=!Objects.equals(character.props.get("population.age_years"),currentAge)
+                                ||!Objects.equals(character.props.get("population.life_stage"),nextStage);
+                        registry.applyLifeStageResult(character,currentAge,nextStage,year);
+                        Object raw=character.props.get("population.last_simulated_world_day");
+                        long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
+                        if(previous<targetWorldDay){
+                            advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+                            lease.markDirty();
+                        }else if(stageChanged)lease.markDirty();
+                    }
+                }
             }
         }
     }
@@ -659,9 +685,21 @@ public final class PopulationSimulation {
     private static void advanceBatched(CharacterRegistry registry,long elapsedDays,int year,long worldDay) {
         if(elapsedDays<0)throw new IllegalArgumentException("elapsedDays cannot be negative");
         if(elapsedDays==0)return;
-        registry.refreshLifeStages(year);
-        for(Character character:registry.all())if(character.alive)
-            advanceCharacterBatched(character,elapsedDays,year,worldDay);
+        for(int offset=0;offset<registry.size();offset+=128){
+            for(String characterId:registry.idPage(offset,128)){
+                try(CharacterAccessService.Lease lease=registry.access().acquire(characterId)){
+                    if(lease==null)continue;
+                    Character character=lease.get();if(!character.alive)continue;
+                    int currentAge=age(character,year);
+                    String nextStage=lifeStage(character,year).name().toLowerCase(Locale.ROOT);
+                    boolean stageChanged=!Objects.equals(character.props.get("population.age_years"),currentAge)
+                            ||!Objects.equals(character.props.get("population.life_stage"),nextStage);
+                    registry.applyLifeStageResult(character,currentAge,nextStage,year);
+                    advanceCharacterBatched(character,elapsedDays,year,worldDay);
+                    if(stageChanged||elapsedDays>0)lease.markDirty();
+                }
+            }
+        }
     }
 
     private static void advanceCharacterBatched(Character character,long elapsedDays,int year,long worldDay){

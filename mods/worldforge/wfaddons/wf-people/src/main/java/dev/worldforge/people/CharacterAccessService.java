@@ -369,6 +369,16 @@ public final class CharacterAccessService {
         public String globalId() { return character.globalId; }
         public boolean isClosed() { return closed.get(); }
 
+        /**
+         * Marks a mutation performed inside this lease for the bounded durable-save queue.
+         * The lease itself remains the active pin until close; dirty state then prevents eviction.
+         */
+        public void markDirty() {
+            if (closed.get()) throw new IllegalStateException("Character access lease is closed");
+            CharacterPersistenceCoordinator persistence = registry.access().coordinator();
+            if (persistence != null) persistence.markDirty(character.globalId);
+        }
+
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
             try { registry.releaseAccess(localId); }
