@@ -342,12 +342,31 @@ public final class CharacterStats {
 
     /** Закрепляет выведенные характеристики и черты в данных персонажей (чтобы они попали в сохранение). */
     public static void ensure(CharacterRegistry reg) {
-        for (Character c : reg.all()) {
-            for (String a : ATTRS) if (!(c.props.get("stat." + a) instanceof Number)) c.props.put("stat." + a, base(c, a));
-            List<String> normalizedTraits = traits(c);
-            if (!c.traits.equals(new TreeSet<>(normalizedTraits))) {
-                c.traits.clear();
-                c.traits.addAll(normalizedTraits);
+        // Walk the compact identity directory and pin one bounded page at a time.
+        // Never call all(): that legacy view would rehydrate the entire evicted population.
+        final int pageSize = 128;
+        for (int offset = 0; offset < reg.size(); offset += pageSize) {
+            for (String localId : reg.idPage(offset, pageSize)) {
+                try (CharacterAccessService.Lease lease = reg.access().acquire(localId)) {
+                    if (lease == null) continue;
+                    Character character = lease.get();
+                    boolean changed = false;
+                    for (String attribute : ATTRS) {
+                        String key = "stat." + attribute;
+                        if (!(character.props.get(key) instanceof Number)) {
+                            character.props.put(key, base(character, attribute));
+                            changed = true;
+                        }
+                    }
+                    List<String> normalizedTraits = traits(character);
+                    TreeSet<String> normalized = new TreeSet<>(normalizedTraits);
+                    if (!character.traits.equals(normalized)) {
+                        character.traits.clear();
+                        character.traits.addAll(normalized);
+                        changed = true;
+                    }
+                    if (changed) CharacterRegistry.recordCharacterMutation();
+                }
             }
         }
     }

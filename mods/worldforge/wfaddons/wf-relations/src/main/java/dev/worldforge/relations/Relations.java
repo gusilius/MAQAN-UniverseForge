@@ -2,6 +2,7 @@ package dev.worldforge.relations;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.people.CharacterRegistry;
 
 import dev.worldforge.mod.Json;
 
@@ -217,6 +218,7 @@ public final class Relations {
         b.married = true; b.dating = false; b.employed = false; b.lastContact = day;
         b.affinity = Math.max(b.affinity, 70);
         npc.props.put("people.spouse_player", player);
+        CharacterRegistry.recordCharacterMutation(npc);
         history.add(player + " женился(ась) на " + npc.name);
         return true;
     }
@@ -227,6 +229,7 @@ public final class Relations {
         b.married = b.dating = false;
         b.love = 0; b.affinity = Math.min(b.affinity, -20);
         npc.props.remove("people.spouse_player");
+        CharacterRegistry.recordCharacterMutation(npc);
         history.add(player + " расстался(ась) с " + npc.name);
     }
 
@@ -256,6 +259,7 @@ public final class Relations {
         Bond b = bond(player, npc.id);
         b.employed = true; b.wage = wageFor(npc); b.lastContact = day;
         npc.props.put("employer", player);
+        CharacterRegistry.recordCharacterMutation(npc);
         return true;
     }
 
@@ -264,6 +268,7 @@ public final class Relations {
         if (!b.employed) return;
         b.employed = false;
         npc.props.remove("employer");
+        CharacterRegistry.recordCharacterMutation(npc);
     }
 
     // ---------- просьбы жителей ----------

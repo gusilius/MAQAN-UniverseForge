@@ -591,9 +591,9 @@ public class PeopleMod {
             String writerToken = UUID.nameUUIDFromBytes(partition.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 8);
             CharacterWalWriter writer = new CharacterWalWriter(wal, 8192, "wf-character-wal-" + writerToken);
             CHARACTER_WAL_WRITERS.put(registry, writer);
-            // Attach the existing WAL/record-store pipeline to the registry access service.
-            // This activates lease/transaction dirty tracking for real server partitions;
-            // physical eviction remains deliberately disabled.
+            // Attach the WAL/record-store pipeline before the partition can become eligible
+            // for eviction. The bounded eviction service starts only after every canonical
+            // partition has completed identity reconciliation and addressable-store recovery.
             registry.access().attachPersistenceCoordinator(new CharacterPersistenceCoordinator(
                     new CharacterEvictionGate(), wal, writer, records));
             LOGGER.info("wf_people: recovered Character partition={} checkpointRecords={} walRecords={} addressableLatest={} characters={}",
