@@ -202,6 +202,9 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     /** Per-colony retry gate: expensive founding reconciliation runs at most once per minute. */
     private static final Map<String, Long> AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK = new ConcurrentHashMap<>();
+    private static final int AUTONOMOUS_INFRASTRUCTURE_QUEUE_LIMIT = 2048;
+    private static final ArrayDeque<String> AUTONOMOUS_INFRASTRUCTURE_QUEUE = new ArrayDeque<>();
+    private static final Set<String> AUTONOMOUS_INFRASTRUCTURE_QUEUED = ConcurrentHashMap.newKeySet();
     private static final long AUTONOMOUS_INFRASTRUCTURE_RETRY_TICKS = 1200L;
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
@@ -1517,6 +1520,37 @@ public class SettleMod {
         }
     }
 
+    private static void enqueueAutonomousInfrastructure(String settlementId) {
+        if (settlementId == null || settlementId.isBlank()) return;
+        long lastAttempt = AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.getOrDefault(
+                settlementId, Long.MIN_VALUE);
+        if (lastAttempt != Long.MIN_VALUE && ticks - lastAttempt < AUTONOMOUS_INFRASTRUCTURE_RETRY_TICKS) return;
+        synchronized (AUTONOMOUS_INFRASTRUCTURE_QUEUE) {
+            if (AUTONOMOUS_INFRASTRUCTURE_QUEUED.contains(settlementId)
+                    || AUTONOMOUS_INFRASTRUCTURE_QUEUE.size() >= AUTONOMOUS_INFRASTRUCTURE_QUEUE_LIMIT) return;
+            AUTONOMOUS_INFRASTRUCTURE_QUEUED.add(settlementId);
+            AUTONOMOUS_INFRASTRUCTURE_QUEUE.addLast(settlementId);
+        }
+    }
+
+    /** One physical founding transaction per server tick; snapshot I/O cannot fan out across a 128-colony batch. */
+    private static void drainAutonomousInfrastructureQueue(MinecraftServer server, int budget) {
+        for (int i = 0; i < budget; i++) {
+            String settlementId;
+            synchronized (AUTONOMOUS_INFRASTRUCTURE_QUEUE) {
+                settlementId = AUTONOMOUS_INFRASTRUCTURE_QUEUE.pollFirst();
+                if (settlementId == null) return;
+                AUTONOMOUS_INFRASTRUCTURE_QUEUED.remove(settlementId);
+            }
+            try {
+                ensureAutonomousInfrastructure(server, settlementId);
+            } catch (RuntimeException failure) {
+                LOGGER.error("wf_settle: deferred autonomous infrastructure failed for {}: {}",
+                        settlementId, failure.toString(), failure);
+            }
+        }
+    }
+
     /** Map title changes do not mutate settlement sovereignty; only canonical realm grants may do that. */
 
     /** In-memory owner binding used by WorldSim's per-map batch commit. */
@@ -1650,6 +1684,9 @@ public class SettleMod {
     static void load(MinecraftServer server) {
         resetWorkerIndexes();
         VERIFIED_FOUNDING_STOCK_REFERENCES.clear();
+        AUTONOMOUS_INFRASTRUCTURE_QUEUE.clear();
+        AUTONOMOUS_INFRASTRUCTURE_QUEUED.clear();
+        AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.clear();
         COLONIES.clear();
         resetColonyRegistryIndex();
         NETWORK = new dev.worldforge.settle.TradeNetwork();
@@ -2663,7 +2700,7 @@ public class SettleMod {
                         remitCrownTaxes(c);
                         syncPeople(c, server);
                         if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
-                            ensureAutonomousInfrastructure(server, c.s.id);
+                            enqueueAutonomousInfrastructure(c.s.id);
                         long colonyStep = ColonySimulationCadence.stepNumber(c.s.id, ticks, simulationInterval);
                         if (c.s.raidIncoming || colonyStep
                                 % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
@@ -2681,6 +2718,9 @@ public class SettleMod {
                     }
                 }
             }
+            // Keep terrain capture, founding orders and their durable snapshot outside the
+            // colony batch: at most one potentially expensive infrastructure commit per tick.
+            drainAutonomousInfrastructureQueue(server, 1);
             // The shared trade network remains a world-level transaction on its existing cadence.
             if (ticks % simulationInterval == 0) try {
                 TradeViews views = tradeViews();
