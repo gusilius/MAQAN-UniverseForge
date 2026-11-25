@@ -139,6 +139,16 @@ public class PeopleMod {
     private static final long DIRTY_SAVE_MAX_BYTES_PER_PARTITION = 256L << 10;
     private static int dirtySavePartitionCursor;
     private static long dirtySaveRegistryGeneration = Long.MIN_VALUE;
+    /** Physical eviction is bounded, round-robin and runs only on the Minecraft server thread. */
+    private static final int EVICTION_INTERVAL_TICKS = 20;
+    private static final int EVICTION_PARTITIONS_PER_PASS = 8;
+    private static final int EVICTION_SEED_IDS_PER_PARTITION = 64;
+    private static final int EVICTION_CANDIDATES_PER_PARTITION = 16;
+    private static final long EVICTION_MIN_IDLE_NANOS = 30_000_000_000L;
+    private static int evictionPartitionCursor;
+    private static long evictionPasses;
+    private static long evictionCount;
+    private static long evictionLastLogTick;
     private static long dirtySavePasses;
     private static long dirtySaveLastLogTick;
     /** Last observed cumulative async failure count per visited partition (not a population scan). */
@@ -201,6 +211,10 @@ public class PeopleMod {
         dirtySavePasses = 0L;
         dirtySaveLastLogTick = 0L;
         dirtySaveFailureObserved.clear();
+        evictionPartitionCursor = 0;
+        evictionPasses = 0L;
+        evictionCount = 0L;
+        evictionLastLogTick = 0L;
         populationProcessedDay = Long.MIN_VALUE;
         populationBaselineDay = Long.MIN_VALUE;
         populationRegistryGeneration = 0L;
@@ -1240,6 +1254,8 @@ public class PeopleMod {
                 serviceDirtyPersistence(e.getServer());
                 servicePendingBereavement();
             }
+            if (identityPartitionsReady && ticks % EVICTION_INTERVAL_TICKS == 0)
+                serviceCharacterEviction(e.getServer());
             // Routine Character mutations are already committed to the per-partition WAL
             // by persistCharacter(). A population-wide JSON checkpoint here serialized every
             // Character on the server thread and stalled the tick loop at scale. Keep full
@@ -1347,6 +1363,89 @@ public class PeopleMod {
                     dirtySavePasses, partitionVisits, submittedThisPass, failedThisPass, pendingObserved,
                     bytesUsed, DIRTY_SAVE_MAX_CHARACTERS_PER_PASS, DIRTY_SAVE_MAX_BYTES_PER_PASS,
                     dirtySavePartitionCursor);
+        }
+    }
+
+    /**
+     * Releases idle Character objects only after their own WAL generation and addressable
+     * checkpoint are durable. Physical NPCs inside the player retention radius are protected;
+     * leases, transaction pins and dirty-queue entries are checked again by evictMaterialized.
+     * Every pass has fixed inspection/eviction budgets and never walks the full population.
+     */
+    private static void serviceCharacterEviction(MinecraftServer server) {
+        if (server == null || !identityPartitionsReady) return;
+        long generation = populationRegistryGeneration;
+        List<CharacterRegistry> registries = populationFallbackRegistries(generation);
+        if (registries.isEmpty()) return;
+
+        Map<CharacterRegistry, Set<String>> playerProtected = new java.util.IdentityHashMap<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            CharacterRegistry registry = peek(level);
+            if (registry == null || registry == PLAYER_REGISTRY) continue;
+            for (ServerPlayer player : level.players()) {
+                AABB area = player.getBoundingBox().inflate(NpcSpawner.FAR + 2.0);
+                for (WFNpc body : level.getEntitiesOfClass(WFNpc.class, area)) {
+                    String localId = body.characterId();
+                    if (localId != null && !localId.isBlank())
+                        playerProtected.computeIfAbsent(registry, ignored -> new HashSet<>()).add(localId);
+                }
+            }
+        }
+
+        int visits = Math.min(EVICTION_PARTITIONS_PER_PASS, registries.size());
+        int inspected = 0;
+        int evicted = 0;
+        int refused = 0;
+        int failures = 0;
+        for (int visit = 0; visit < visits; visit++) {
+            int index = Math.floorMod(evictionPartitionCursor + visit, registries.size());
+            CharacterRegistry registry = registries.get(index);
+            if (registry == PLAYER_REGISTRY) continue;
+            registry.seedEvictionCandidates(EVICTION_SEED_IDS_PER_PARTITION);
+            List<String> candidates = registry.pollEvictionCandidates(
+                    EVICTION_CANDIDATES_PER_PARTITION, EVICTION_MIN_IDLE_NANOS);
+            Set<String> protectedIds = playerProtected.getOrDefault(registry, Set.of());
+            for (String localId : candidates) {
+                inspected++;
+                if (protectedIds.contains(localId)) {
+                    registry.requeueEvictionCandidate(localId);
+                    refused++;
+                    continue;
+                }
+                String globalId = registry.globalIdForLocalId(localId);
+                if (globalId == null) {
+                    refused++;
+                    continue;
+                }
+                try {
+                    if (registry.evictMaterialized(globalId)) evicted++;
+                    else {
+                        registry.requeueEvictionCandidate(localId);
+                        refused++;
+                    }
+                } catch (java.io.IOException failure) {
+                    registry.requeueEvictionCandidate(localId);
+                    failures++;
+                    LOGGER.error("wf_people: physical Character eviction failed; identity retained globalId={}",
+                            globalId, failure);
+                }
+            }
+        }
+        evictionPartitionCursor = (evictionPartitionCursor + visits) % registries.size();
+        evictionPasses++;
+        evictionCount += evicted;
+        if (ticks - evictionLastLogTick >= 1200) {
+            evictionLastLogTick = ticks;
+            int materialized = 0;
+            int queued = 0;
+            for (CharacterRegistry registry : registries) {
+                if (registry == PLAYER_REGISTRY) continue;
+                materialized += registry.materializedSize();
+                queued += registry.evictionCandidateCount();
+            }
+            LOGGER.info("wf_people: eviction passes={} evictedTotal={} thisPass={} inspected={} refused={} failures={} materialized={} candidates={} partitionsVisited={}",
+                    evictionPasses, evictionCount, evicted, inspected, refused, failures,
+                    materialized, queued, visits);
         }
     }
 
