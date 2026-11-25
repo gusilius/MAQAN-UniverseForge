@@ -177,14 +177,20 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                 // the addressable record store. Publish that exact forced WAL payload first.
                 // WAL remains intact until the normal coordinated compaction succeeds, so a
                 // crash between these two durable writes is replay-safe.
-                records.put(record);
-                if (!evictionGate.markPersisted(ticket)) {
-                    result.completeExceptionally(new StalePersistenceException(
-                            "Character changed while its WAL frame was being published: " + globalId));
-                    return;
+                try {
+                    records.put(record);
+                    if (!evictionGate.markPersisted(ticket)) {
+                        result.completeExceptionally(new StalePersistenceException(
+                                "Character changed while its WAL frame was being published: " + globalId));
+                        return;
+                    }
+                    dirtyQueue.acknowledge(globalId, ticket.generation());
+                    result.complete(record);
+                } catch (IOException | RuntimeException publicationFailure) {
+                    result.completeExceptionally(new IOException(
+                            "Could not publish durable Character WAL frame to its addressable checkpoint: " + globalId,
+                            publicationFailure));
                 }
-                dirtyQueue.acknowledge(globalId, ticket.generation());
-                result.complete(record);
             } finally {
                 transaction.close();
             }
