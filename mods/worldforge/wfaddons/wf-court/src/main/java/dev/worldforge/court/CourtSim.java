@@ -389,15 +389,7 @@ public final class CourtSim {
 
     /** Adult members of the realm court who can legally serve as regent. */
     private static List<String> characterIdsAtPlace(CharacterRegistry registry, String place) {
-        try {
-            Object raw = registry.getClass().getMethod("idsAtPlace", String.class).invoke(registry, place);
-            if (!(raw instanceof List<?> values)) throw new IllegalStateException("Character post ID index is not a list");
-            List<String> ids = new ArrayList<>(values.size());
-            for (Object value : values) ids.add(String.valueOf(value));
-            return ids;
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-court requires the UUID-only post index", error);
-        }
+        return registry.idsAtPlace(place);
     }
 
     private record RegentCandidate(String id, int score) {}

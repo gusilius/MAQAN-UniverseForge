@@ -1,6 +1,7 @@
 package dev.worldforge.court;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterRegistry;
 import java.util.*;
 
@@ -78,14 +79,23 @@ public final class Marriages {
 
     /** Candidate UI projection returns local IDs, never Character references. */
     public static List<String> candidates(CourtSim sim, String realm) {
-        List<CandidateRef> pool = new ArrayList<>();
+        final int capacity = 64;
+        Comparator<CandidateRef> order = Comparator.comparingInt(CandidateRef::birthYear)
+                .thenComparing(CandidateRef::id);
+        PriorityQueue<CandidateRef> bounded = new PriorityQueue<>(capacity, order.reversed());
         String sovereignId = rulerId(sim, realm);
         forEachCharacter(sim.reg, character -> {
             if (!single(sim, character) || character.id.equals(sovereignId)
                     || !family(sim, character.id).equals(realm)) return;
-            pool.add(candidate(character));
+            CandidateRef ref = candidate(character);
+            if (bounded.size() < capacity) bounded.add(ref);
+            else if (order.compare(ref, bounded.peek()) < 0) {
+                bounded.poll();
+                bounded.add(ref);
+            }
         });
-        pool.sort(Comparator.comparingInt(CandidateRef::birthYear).thenComparing(CandidateRef::id));
+        List<CandidateRef> pool = new ArrayList<>(bounded);
+        pool.sort(order);
         return pool.stream().map(CandidateRef::id).toList();
     }
 
@@ -256,44 +266,21 @@ public final class Marriages {
     private static void withCharacterLease(CharacterRegistry registry, String localId,
                                            java.util.function.Consumer<Character> visitor) {
         if (localId == null || localId.isBlank()) { visitor.accept(null); return; }
-        Object lease = null;
-        try {
-            Object access = registry.getClass().getMethod("access").invoke(registry);
-            lease = access.getClass().getMethod("acquire", String.class).invoke(access, localId);
-            if (lease == null) { visitor.accept(null); return; }
-            visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease));
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-court could not acquire Character lease " + localId, error);
-        } finally {
-            if (lease instanceof AutoCloseable closeable) {
-                try { closeable.close(); }
-                catch (Exception error) { throw new IllegalStateException("wf-court could not release Character lease " + localId, error); }
-            }
+        try (CharacterAccessService.Lease lease = registry.acquire(localId)) {
+            if (lease != null) visitor.accept(lease.get());
         }
     }
 
     private static void forEachCharacter(CharacterRegistry registry,
                                          java.util.function.Consumer<Character> visitor) {
-        try {
-            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
-            Object access = registry.getClass().getMethod("access").invoke(registry);
-            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
-            int count = registry.size();
-            for (int offset = 0; offset < count; offset += 256) {
-                Object raw = idPage.invoke(registry, offset, 256);
-                if (!(raw instanceof List<?> ids)) throw new IllegalStateException("Character ID page is not a list");
-                for (Object rawId : ids) {
-                    Object lease = acquire.invoke(access, String.valueOf(rawId));
-                    if (lease == null) throw new IllegalStateException("Could not lease Character " + rawId);
-                    try { visitor.accept((Character) lease.getClass().getMethod("get").invoke(lease)); }
-                    finally { ((AutoCloseable) lease).close(); }
+        final int pageSize = 256;
+        for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+            List<String> ids = registry.idPage(offset, pageSize);
+            for (String id : ids) {
+                try (CharacterAccessService.Lease lease = registry.acquire(id)) {
+                    if (lease != null) visitor.accept(lease.get());
                 }
             }
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("wf-court requires bounded Character ID pages", error);
-        } catch (Exception error) {
-            if (error instanceof RuntimeException runtime) throw runtime;
-            throw new IllegalStateException("Could not release wf-court Character lease", error);
         }
     }
 }

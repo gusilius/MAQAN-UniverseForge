@@ -96,35 +96,54 @@ public class CourtScreen extends Screen {
 
     private void publishWorkspaceSelection() {
         Character ruler = s.ruler(realm);
-        Character selected = ruler;
+        String selectedId = ruler == null ? "" : ruler.id;
+        String selectedName = ruler == null ? "" : ruler.name;
+        String selectedRealm = realm;
+        int selectedAge = ruler == null ? 0 : CharacterStats.age(ruler, s.year());
+        boolean selectedAlive = ruler != null && ruler.alive;
         String context = "Ruler · " + realmName(realm);
         if (tab == 2) {
             List<Character> candidates = targets(ruler);
             if (!candidates.isEmpty()) {
-                selected = candidates.get(Math.min(selTarget, candidates.size() - 1));
-                context = "Scheme target · " + realmName(s.realmOf(selected));
+                Character selected = candidates.get(Math.min(selTarget, candidates.size() - 1));
+                selectedId = selected.id; selectedName = selected.name; selectedRealm = s.realmOf(selected);
+                selectedAge = CharacterStats.age(selected, s.year()); selectedAlive = selected.alive;
+                context = "Scheme target · " + realmName(selectedRealm);
             }
         } else if (tab == 4) {
             if (!partners.isEmpty()) {
-                selected = (Character) partners.get(Math.min(selPartner, partners.size() - 1))[0];
-                context = "Marriage candidate · " + realmName(Marriages.family(s, selected));
+                selectedId = (String) partners.get(Math.min(selPartner, partners.size() - 1))[0];
+                try (var lease = s.reg.acquire(selectedId)) {
+                    if (lease != null) {
+                        Character selected = lease.get();
+                        selectedName = selected.name; selectedRealm = Marriages.family(s, selected.id);
+                        selectedAge = CharacterStats.age(selected, s.year()); selectedAlive = selected.alive;
+                    }
+                }
+                context = "Marriage candidate · " + realmName(selectedRealm);
             } else {
-                List<Character> own = Marriages.candidates(s, realm);
+                List<String> own = Marriages.candidates(s, realm);
                 if (!own.isEmpty()) {
-                    selected = own.get(Math.min(selMine, own.size() - 1));
+                    selectedId = own.get(Math.min(selMine, own.size() - 1));
+                    try (var lease = s.reg.acquire(selectedId)) {
+                        if (lease != null) {
+                            Character selected = lease.get();
+                            selectedName = selected.name; selectedAge = CharacterStats.age(selected, s.year());
+                            selectedAlive = selected.alive;
+                        }
+                    }
                     context = "Dynasty candidate · " + realmName(realm);
                 }
             }
         }
-        if (selected == null) {
+        if (selectedId.isBlank()) {
             dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
                     "realm:" + realm, "realm", realmName(realm), "Realm court · year " + s.year());
             return;
         }
         dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
-                selected.id, "character", selected.name,
-                context + " · age " + CharacterStats.age(selected, s.year())
-                        + (selected.alive ? " · alive" : " · deceased"));
+                selectedId, "character", selectedName,
+                context + " · age " + selectedAge + (selectedAlive ? " · alive" : " · deceased"));
     }
 
     @Override
@@ -631,20 +650,29 @@ public class CourtScreen extends Screen {
     private int selMine, selPartner;
     private CourtSim marrySrc;
     private String marryKey = "";
-    private final List<Object[]> partners = new ArrayList<>();       // {Character, Marriages.Offer}
+    private final List<Object[]> partners = new ArrayList<>();       // {local UUID, Offer}
 
-    private void rebuildPartners(List<Character> own) {
+    private void rebuildPartners(List<String> own) {
         String key = selMine + "|" + own.size() + "|" + s.year();
         if (marrySrc == s && key.equals(marryKey)) return;
         marrySrc = s; marryKey = key; partners.clear();
         if (own.isEmpty()) return;
-        Character mine = own.get(Math.min(selMine, own.size() - 1));
+        String mineId = own.get(Math.min(selMine, own.size() - 1));
+        final String[] mineGender = {""};
+        try (var lease = s.reg.acquire(mineId)) {
+            if (lease != null) mineGender[0] = lease.get().gender;
+        }
+        if (mineGender[0].isEmpty()) return;
         for (TitleData.Realm r : d().realmList()) {
             if (r.id.equals(realm)) continue;
-            for (Character c : Marriages.candidates(s, r.id)) {
-                if (c.gender.equals(mine.gender)) continue;
-                Marriages.Offer o = Marriages.evaluate(s, mine.id, c.id);
-                partners.add(new Object[]{c, o});
+            for (String candidateId : Marriages.candidates(s, r.id)) {
+                boolean oppositeGender = false;
+                try (var lease = s.reg.acquire(candidateId)) {
+                    if (lease != null) oppositeGender = !lease.get().gender.equals(mineGender[0]);
+                }
+                if (!oppositeGender) continue;
+                Marriages.Offer offer = Marriages.evaluate(s, mineId, candidateId);
+                partners.add(new Object[]{candidateId, offer});
             }
         }
         partners.sort((a, b) -> {
@@ -658,7 +686,7 @@ public class CourtScreen extends Screen {
     private void marriages(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
         int lw = 230, rx = x + lw + 8, rw = cw - lw - 8;
         int rgb = d().realms.get(realm) == null ? 0x888888 : d().realms.get(realm).rgb;
-        List<Character> own = Marriages.candidates(s, realm);
+        List<String> own = Marriages.candidates(s, realm);
         if (own.size() > 8) own = own.subList(0, 8);
         selMine = Math.min(selMine, Math.max(0, own.size() - 1));
         rebuildPartners(own);
@@ -667,13 +695,17 @@ public class CourtScreen extends Screen {
         int ry = top + 20;
         if (own.isEmpty()) g.drawString(font, "Нет подходящих.", x + 8, ry, WFUi.MUTED);
         for (int i = 0; i < own.size(); i++) {
-            Character c = own.get(i);
-            WFUi.rowBg(g, x + 3, ry - 1, lw - 6, 28, i, i == selMine, WFUi.over(mx, my, x + 3, ry - 1, lw - 6, 28));
-            WFArt.bust(g, x + 6, ry, 20, 26, rgb, c.id, !"f".equals(c.gender), s.year() - c.birthYear, false);
-            g.drawString(font, font.plainSubstrByWidth(c.name, lw - 44), x + 32, ry + 3, i == selMine ? WFUi.GOLD : WFUi.TX);
-            g.drawString(font, (s.year() - c.birthYear) + " лет, " + ("f".equals(c.gender) ? "жен." : "муж."), x + 32, ry + 15, WFUi.MUTED);
-            final int idx = i;
-            hit(x + 3, ry - 1, lw - 6, 28, () -> { selMine = idx; selPartner = 0; }, c.name, traitTip(c));
+            String id = own.get(i);
+            try (var lease = s.reg.acquire(id)) {
+                if (lease == null) continue;
+                Character c = lease.get();
+                WFUi.rowBg(g, x + 3, ry - 1, lw - 6, 28, i, i == selMine, WFUi.over(mx, my, x + 3, ry - 1, lw - 6, 28));
+                WFArt.bust(g, x + 6, ry, 20, 26, rgb, c.id, !"f".equals(c.gender), s.year() - c.birthYear, false);
+                g.drawString(font, font.plainSubstrByWidth(c.name, lw - 44), x + 32, ry + 3, i == selMine ? WFUi.GOLD : WFUi.TX);
+                g.drawString(font, (s.year() - c.birthYear) + " лет, " + ("f".equals(c.gender) ? "жен." : "муж."), x + 32, ry + 15, WFUi.MUTED);
+                final int idx = i;
+                hit(x + 3, ry - 1, lw - 6, 28, () -> { selMine = idx; selPartner = 0; }, c.name, traitTip(c));
+            }
             ry += 29;
         }
         WFUi.bevel(g, rx, top, rw, h, true);
@@ -682,18 +714,22 @@ public class CourtScreen extends Screen {
         selPartner = Math.min(selPartner, Math.max(0, partners.size() - 1));
         scroll = Math.max(0, Math.min(Math.max(0, partners.size() - room), scroll));
         for (int i = scroll; i < partners.size() && i < scroll + room; i++) {
-            Character c = (Character) partners.get(i)[0];
-            Marriages.Offer o = (Marriages.Offer) partners.get(i)[1];
-            String pr = Marriages.family(s, c);
-            TitleData.Realm prr = d().realms.get(pr);
-            WFUi.rowBg(g, rx + 3, py - 1, rw - 6, 14, i, i == selPartner, WFUi.over(mx, my, rx + 3, py - 1, rw - 6, 14));
-            WFArt.shield(g, rx + 6, py, 9, 11, prr == null ? 0x888888 : prr.rgb, pr);
-            g.drawString(font, font.plainSubstrByWidth(c.name + "  ·  " + realmName(pr), rw - 90), rx + 20, py + 2, i == selPartner ? WFUi.GOLD : WFUi.TX);
-            String sc = !o.problems.isEmpty() ? "-" : (o.score >= 0 ? "+" : "") + o.score;
-            g.drawString(font, (s.year() - c.birthYear) + "л", rx + rw - 62, py + 2, WFUi.MUTED);
-            g.drawString(font, sc, rx + rw - 14 - font.width(sc), py + 2, !o.problems.isEmpty() ? WFUi.OFF : o.ok ? WFUi.GOOD : WFUi.BAD);
-            final int idx = i;
-            hit(rx + 3, py - 1, rw - 6, 14, () -> selPartner = idx, c.name, traitTip(c));
+            String candidateId = (String) partners.get(i)[0];
+            Marriages.Offer offer = (Marriages.Offer) partners.get(i)[1];
+            try (var lease = s.reg.acquire(candidateId)) {
+                if (lease == null) continue;
+                Character c = lease.get();
+                String candidateRealm = Marriages.family(s, candidateId);
+                TitleData.Realm candidateRealmData = d().realms.get(candidateRealm);
+                WFUi.rowBg(g, rx + 3, py - 1, rw - 6, 14, i, i == selPartner, WFUi.over(mx, my, rx + 3, py - 1, rw - 6, 14));
+                WFArt.shield(g, rx + 6, py, 9, 11, candidateRealmData == null ? 0x888888 : candidateRealmData.rgb, candidateRealm);
+                g.drawString(font, font.plainSubstrByWidth(c.name + "  ·  " + realmName(candidateRealm), rw - 90), rx + 20, py + 2, i == selPartner ? WFUi.GOLD : WFUi.TX);
+                String score = !offer.problems.isEmpty() ? "-" : (offer.score >= 0 ? "+" : "") + offer.score;
+                g.drawString(font, (s.year() - c.birthYear) + "л", rx + rw - 62, py + 2, WFUi.MUTED);
+                g.drawString(font, score, rx + rw - 14 - font.width(score), py + 2, !offer.problems.isEmpty() ? WFUi.OFF : offer.ok ? WFUi.GOOD : WFUi.BAD);
+                final int idx = i;
+                hit(rx + 3, py - 1, rw - 6, 14, () -> selPartner = idx, c.name, traitTip(c));
+            }
             py += 14;
         }
         if (partners.isEmpty()) g.drawString(font, "Партий не найдено.", rx + 8, top + 22, WFUi.MUTED);
@@ -701,15 +737,27 @@ public class CourtScreen extends Screen {
         int dy = top + h - 80;
         g.fill(rx + 4, dy - 4, rx + rw - 4, dy - 3, WFUi.EDGE);
         if (!partners.isEmpty() && !own.isEmpty()) {
-            Marriages.Offer o = (Marriages.Offer) partners.get(selPartner)[1];
-            Character c = (Character) partners.get(selPartner)[0], mine = own.get(selMine);
-            List<String> lines = o.problems.isEmpty() ? o.reasons : o.problems;
-            for (int i = 0; i < lines.size() && i < 4; i++) {
-                String ln = lines.get(i);
-                g.drawString(font, font.plainSubstrByWidth(ln, rw - 16), rx + 8, dy + i * 11, !o.problems.isEmpty() ? WFUi.BAD : ln.startsWith("-") ? WFUi.BAD : WFUi.GOOD);
+            Marriages.Offer offer = (Marriages.Offer) partners.get(selPartner)[1];
+            String candidateId = (String) partners.get(selPartner)[0];
+            String mineId = own.get(selMine);
+            String[] names = {"", ""};
+            try (var mineLease = s.reg.acquire(mineId);
+                 var candidateLease = s.reg.acquire(candidateId)) {
+                if (mineLease != null && candidateLease != null) {
+                    Character mine = mineLease.get(), candidate = candidateLease.get();
+                    List<String> lines = offer.problems.isEmpty() ? offer.reasons : offer.problems;
+                    for (int i = 0; i < lines.size() && i < 4; i++) {
+                        String line = lines.get(i);
+                        g.drawString(font, font.plainSubstrByWidth(line, rw - 16), rx + 8, dy + i * 11,
+                                !offer.problems.isEmpty() ? WFUi.BAD : line.startsWith("-") ? WFUi.BAD : WFUi.GOOD);
+                    }
+                    names[0] = mine.name; names[1] = candidate.name;
+                    btn(g, rx + 8, top + h - 22, rw - 16,
+                            "Предложить брак: " + names[0] + " и " + names[1], offer.ok, mx, my,
+                            () -> cmd.accept("wfaction run marriage_propose " + realm + " " + mineId + "|" + candidateId),
+                            "Правитель партии решает по мнению о вас, вашему канцлеру и разнице в возрасте");
+                }
             }
-            btn(g, rx + 8, top + h - 22, rw - 16, "Предложить брак: " + mine.name + " и " + c.name, o.ok, mx, my,
-                    () -> cmd.accept("wfaction run marriage_propose " + realm + " " + mine.id + "|" + c.id), "Правитель партии решает по мнению о вас, вашему канцлеру и разнице в возрасте");
         }
     }
 
@@ -804,22 +852,26 @@ public class CourtScreen extends Screen {
                         "Совет может подтвердить регента или поддержать другого кандидата");
         }
         g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 145, WFUi.GOLD_DIM);
-        List<Character> candidates = s.regencyCandidates(realm);
+        List<String> candidates = s.regencyCandidates(realm);
         int y = top + 161, row = 0;
-        for (Character candidate : candidates) {
+        for (String candidateId : candidates) {
             if (y > top + h - 22) break;
-            boolean selected = current != null && current.regent.equals(candidate.id);
-            WFUi.rowBg(g, x + 8, y - 2, cw - 16, 20, row++, selected, WFUi.over(mx, my, x + 8, y - 2, cw - 16, 20));
-            g.drawString(font, candidate.name + (candidate.house.isEmpty() ? "" : " · " + candidate.house),
-                    x + 16, y + 3, selected ? WFUi.GOLD : WFUi.TX);
-            g.drawString(font, (s.year() - candidate.birthYear) + " лет", x + cw - 145, y + 3, WFUi.MUTED);
-            int candidateSupport = s.regencyCouncilSupport(realm, candidate);
-            g.drawString(font, candidateSupport + "/4", x + cw - 112, y + 3,
-                    candidateSupport >= 3 ? WFUi.GOOD : candidateSupport <= 1 ? WFUi.BAD : WFUi.MUTED);
-            final String id = candidate.id;
-            btn(g, x + cw - 92, y, 78, selected ? "Назначен" : "Назначить",
-                    !selected, mx, my, () -> cmd.accept("wfaction run regency_appoint " + realm + " " + id),
-                    "Назначить этого придворного регентом");
+            try (var lease = s.reg.acquire(candidateId)) {
+                if (lease == null) continue;
+                Character candidate = lease.get();
+                boolean selected = current != null && current.regent.equals(candidate.id);
+                WFUi.rowBg(g, x + 8, y - 2, cw - 16, 20, row++, selected, WFUi.over(mx, my, x + 8, y - 2, cw - 16, 20));
+                g.drawString(font, candidate.name + (candidate.house.isEmpty() ? "" : " · " + candidate.house),
+                        x + 16, y + 3, selected ? WFUi.GOLD : WFUi.TX);
+                g.drawString(font, (s.year() - candidate.birthYear) + " лет", x + cw - 145, y + 3, WFUi.MUTED);
+                int candidateSupport = s.regencyCouncilSupport(realm, candidate);
+                g.drawString(font, candidateSupport + "/4", x + cw - 112, y + 3,
+                        candidateSupport >= 3 ? WFUi.GOOD : candidateSupport <= 1 ? WFUi.BAD : WFUi.MUTED);
+                final String id = candidate.id;
+                btn(g, x + cw - 92, y, 78, selected ? "Назначен" : "Назначить",
+                        !selected, mx, my, () -> cmd.accept("wfaction run regency_appoint " + realm + " " + id),
+                        "Назначить этого придворного регентом");
+            }
             y += 22;
         }
         if (candidates.isEmpty()) g.drawString(font, "Нет подходящих совершеннолетних придворных.", x + 16, y + 4, WFUi.MUTED);
