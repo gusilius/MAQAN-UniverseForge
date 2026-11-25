@@ -4,6 +4,7 @@ import dev.worldforge.mod.api.ActionExecutionService;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterInventory;
+import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterInventoryActions;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -28,6 +29,7 @@ import java.util.UUID;
 /** Server-authoritative vanilla chest screen backed by a Character-owned inventory container. */
 public final class SharedCharacterContainerMenu extends ChestMenu {
     private final ServerPlayer opener;
+    private final CharacterAccessService.Lease ownerLease;
     private final Character owner;
     private final String containerId;
     private final BlockPos position;
@@ -40,7 +42,13 @@ public final class SharedCharacterContainerMenu extends ChestMenu {
                                         BlockPos partnerPosition, SimpleContainer view) {
         super(MenuType.GENERIC_9x6, id, playerInventory, view, 6);
         this.opener = opener;
-        this.owner = owner;
+        var ownerRegistry = PeopleMod.authority().registryForGlobal(owner.globalId);
+        this.ownerLease = ownerRegistry == null ? null : ownerRegistry.access().acquireGlobal(owner.globalId);
+        if (this.ownerLease == null || this.ownerLease.get() != owner) {
+            if (this.ownerLease != null) this.ownerLease.close();
+            throw new IllegalStateException("Could not pin canonical Character for the lifetime of its shared inventory menu");
+        }
+        this.owner = this.ownerLease.get();
         this.containerId = containerId;
         this.position = position.immutable();
         this.partnerPosition = partnerPosition == null ? null : partnerPosition.immutable();
@@ -50,6 +58,13 @@ public final class SharedCharacterContainerMenu extends ChestMenu {
 
     public String ownerGlobalId() { return owner.globalId; }
     public String containerId() { return containerId; }
+
+    /** The open menu is an active inventory operation and pins its owner until it closes. */
+    @Override
+    public void removed(Player player) {
+        try { super.removed(player); }
+        finally { ownerLease.close(); }
+    }
 
     @Override
     public boolean stillValid(Player player) {
