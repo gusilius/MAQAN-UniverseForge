@@ -55,6 +55,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Склейка wf-settlements с Minecraft. Поселения хранятся по id; тик симуляции раз в секунду (20 тиков),
@@ -68,6 +72,14 @@ public class SettleMod {
     private static final int COLONY_SIMULATION_BATCH_BUDGET = 128;
     /** Runtime cache for idempotent founding receipts; cleared on every world load. */
     private static final Set<String> VERIFIED_FOUNDING_STOCK_REFERENCES = ConcurrentHashMap.newKeySet();
+    // Snapshot JSON encoding and disk publication are kept off the server thread.
+    // A bounded single writer preserves snapshot order and prevents unbounded save tasks.
+    private static final ThreadPoolExecutor SNAPSHOT_WRITER = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(2), task -> {
+                Thread thread = new Thread(task, "wf-settlement-snapshot");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
@@ -1601,6 +1613,60 @@ public class SettleMod {
         colony.residentCharacterIds.clear();
         colony.residentCharacterIds.addAll(before);
         return false;
+    }
+
+    /**
+     * Tick-safe snapshot persistence. Domain maps are projected on the server thread,
+     * then JSON encoding, file force and atomic publication run on a bounded writer.
+     * The returned future must be retained by the caller; do not block a server tick on it.
+     */
+    public static CompletableFuture<Boolean> saveDurablyAsync(MinecraftServer server) {
+        if (server == null) return CompletableFuture.completedFuture(false);
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null
+                && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
+            LOGGER.error("wf_settle: async durable save blocked by uncommitted settlement mutations");
+            return CompletableFuture.completedFuture(false);
+        }
+        final Path target = file(server);
+        final List<Map<String, Object>> snapshot = new ArrayList<>(COLONIES.size());
+        final String tradeJson;
+        try {
+            for (Colony colony : COLONIES.values())
+                if (colony != null) snapshot.add(colony.toMap());
+            tradeJson = NETWORK.toJson();
+        } catch (RuntimeException captureFailure) {
+            LOGGER.error("wf_settle: could not capture immutable settlement snapshot", captureFailure);
+            return CompletableFuture.completedFuture(false);
+        }
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        try {
+            SNAPSHOT_WRITER.execute(() -> {
+                Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+                try {
+                    Files.createDirectories(target.getParent());
+                    try (java.io.BufferedWriter writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8,
+                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                            java.nio.file.StandardOpenOption.WRITE)) {
+                        dev.worldforge.settle.SettlementSnapshotWriter.write(writer, snapshot.iterator(), tradeJson);
+                    }
+                    try {
+                        Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                        Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    result.complete(true);
+                } catch (Exception failure) {
+                    LOGGER.error("wf_settle: asynchronous durable settlement snapshot failed", failure);
+                    try { Files.deleteIfExists(temporary); } catch (Exception ignored) { }
+                    result.complete(false);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException saturated) {
+            LOGGER.warn("wf_settle: bounded snapshot writer is busy; caller must retry on a later tick");
+            result.complete(false);
+        }
+        return result;
     }
 
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
