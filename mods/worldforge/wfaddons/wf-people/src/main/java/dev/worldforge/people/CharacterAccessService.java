@@ -48,9 +48,20 @@ public final class CharacterAccessService {
             // create is either in the bootstrap snapshot or sees the attached coordinator.
             PERSISTENCE.put(registry, coordinator);
             synchronized (pendingRegistrationIds) {
-                for (Character character : registry.all()) {
-                    if (pendingRegistrationIds.contains(character.globalId)) coordinator.register(character.globalId);
-                    else coordinator.registerPersisted(character.globalId);
+                // Seed persistence from the compact identity directory, never from all().
+                // CharacterRegistry.all() is a compatibility view whose iterator hydrates
+                // every evicted Character; using it here would undo the entire memory LOD
+                // immediately when a world attaches its coordinator.
+                final int pageSize = 1024;
+                for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+                    for (String localId : registry.idPage(offset, pageSize)) {
+                        String globalId = registry.globalIdForLocalId(localId);
+                        if (globalId == null || globalId.isBlank())
+                            throw new IllegalStateException(
+                                    "Character identity directory is missing its global UUID: " + localId);
+                        if (pendingRegistrationIds.contains(globalId)) coordinator.register(globalId);
+                        else coordinator.registerPersisted(globalId);
+                    }
                 }
                 pendingRegistrationIds.clear();
             }
