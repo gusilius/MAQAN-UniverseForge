@@ -63,7 +63,8 @@ public final class CharacterEvictionGateTest {
         catch (IllegalStateException expected) { acquisitionRejected = true; }
         check(acquisitionRejected, "new leases cannot race an in-progress physical eviction");
         check(gate.completeEviction(id, reservation)
-                        && gate.decision(id) == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY,
+                        && gate.decision(id) == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY
+                        && gate.trackedIdentityCount() == 0,
                 "successful physical eviction releases its per-identity runtime fence");
         gate.registerPersistedIfAbsent(id);
         check(gate.canEvict(id), "lazy identity re-registration restores the durable clean state");
