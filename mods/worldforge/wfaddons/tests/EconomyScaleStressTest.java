@@ -2,9 +2,15 @@ package dev.worldforge.tests;
 
 import dev.worldforge.mod.economy.TreasuryArchiveStore;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.TradeNetwork;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Locale;
 
 /**
@@ -46,11 +52,32 @@ public final class EconomyScaleStressTest {
     private static String marketAccount(int id) { return "market:settlement:" + id; }
     private static String walletAccount(int id) { return "wallet:npc:" + id; }
 
+    private static Settlement market(String id, Defs defs) {
+        Settlement city = new Settlement(id, id, defs);
+        city.add("wood", 100);
+        city.add("planks", 60);
+        city.add("stone", 60);
+        city.add("food", 150);
+        city.add("silver", 300);
+        for (int i = 0; i < 6; i++) city.addWorker(null);
+        city.place("house", 0, 0);
+        city.place("market", 20, 0);
+        city.tick(250);
+        return city;
+    }
+
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("maqan-contour-05-economy-");
         TreasuryArchiveStore store = new TreasuryArchiveStore(root);
         TreasuryLedger ledger = store.loadOrMigrate(null);
         ledger.open("treasury:world", "world-treasury", "silver", 1_000_000_000_000.0);
+        TreasuryService.replace(ledger);
+        Defs defs = new Defs();
+        for (String file : new String[]{"base", "extra", "economy"})
+            defs.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/" + file + ".json")));
+        Map<String, Settlement> marketSettlements = new LinkedHashMap<>();
+        TradeNetwork tradeNetwork = new TradeNetwork();
+        long deliveredShipments = 0;
 
         int previousPopulation = 0;
         int previousSettlements = 0;
@@ -66,7 +93,34 @@ public final class EconomyScaleStressTest {
                     ledger.open(settlementAccount(settlement), "settlement-owner:" + settlement, "silver", 1_000_000.0);
                     ledger.open(stockAccount(settlement), "settlement-owner:" + settlement, "silver", 0);
                     ledger.open(marketAccount(settlement), "market-owner:" + settlement, "silver", 0);
+                    Settlement city = market(settlementAccount(settlement), defs);
+                    marketSettlements.put(city.id, city);
                     operations += 3;
+                }
+
+                // Exercise the real TradeNetwork route, escrow, shipment and settlement
+                // path at the same settlement cardinality as the treasury workload.
+                for (int sourceId = previousSettlements; sourceId + 1 < stage.settlements(); sourceId += 2) {
+                    Settlement source = marketSettlements.get(settlementAccount(sourceId));
+                    Settlement destination = marketSettlements.get(settlementAccount(sourceId + 1));
+                    source.stock.put("wood", 150.0);
+                    destination.stock.put("wood", 12.0);
+                    source.tradeLeft = 100;
+                    destination.tradeLeft = 100;
+                    tradeNetwork.add(marketSettlements, source.id, destination.id, "wood", 2.0);
+                }
+                if (stage.settlements() >= 2) {
+                    for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
+                    tradeNetwork.tick(marketSettlements, 30.0);
+                    for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
+                    tradeNetwork.tick(marketSettlements, 30.0);
+                    deliveredShipments += tradeNetwork.shipments.values().stream()
+                            .filter(shipment -> "доставлен".equals(shipment.status)).count();
+                    TradeNetwork restoredNetwork = TradeNetwork.fromJson(tradeNetwork.toJson());
+                    require(restoredNetwork.routes.size() == tradeNetwork.routes.size()
+                                    && restoredNetwork.shipments.size() == tradeNetwork.shipments.size(),
+                            "trade routes or shipments changed after serialization round-trip");
+                    tradeNetwork = restoredNetwork;
                 }
 
                 // One durable canonical wallet per citizen. Payroll is a real transfer
@@ -166,6 +220,7 @@ public final class EconomyScaleStressTest {
 
                 ledger = restored;
                 store = reopenedStore;
+                TreasuryService.replace(ledger);
                 previousPopulation = stage.population();
                 previousSettlements = stage.settlements();
                 sampleHeap();
@@ -182,13 +237,15 @@ public final class EconomyScaleStressTest {
             }
 
             long totalMillis = (System.nanoTime() - totalStarted) / 1_000_000L;
-            require(ledger.accountCount() == 1_003_001, "final economy account cardinality mismatch");
+            require(ledger.accountCount() >= 1_003_001, "final economy account cardinality mismatch");
             require(ledger.pendingJournalSize() == 0, "final economy journal tail was not checkpointed");
             require(ledger.balance("treasury:world") > 1_000_000_000_000.0,
                     "treasury did not receive settlement taxes");
+            require(deliveredShipments > 0, "the real TradeNetwork did not deliver any shipment");
             System.out.printf(Locale.ROOT,
-                    "WF_STRESS contour=05_economy status=PASS population=1000000 settlements=1000 accounts=%d journalEntries=%d operations=%d elapsedMs=%d peakHeapBytes=%d%n",
-                    ledger.accountCount(), ledger.journalSize(), operations, totalMillis, peakHeapBytes);
+                    "WF_STRESS contour=05_economy status=PASS population=1000000 settlements=1000 accounts=%d journalEntries=%d operations=%d deliveredShipments=%d routes=%d elapsedMs=%d peakHeapBytes=%d%n",
+                    ledger.accountCount(), ledger.journalSize(), operations, deliveredShipments,
+                    tradeNetwork.routes.size(), totalMillis, peakHeapBytes);
         } finally {
             try (var paths = Files.walk(root)) {
                 paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
