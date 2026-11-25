@@ -88,6 +88,7 @@ public final class SocialLifeStressLab {
         long familyIntegrityErrors = -1L;
         long restoredFamilyIntegrityErrors = -1L;
         long familyLinks = -1L;
+        long familySourceFingerprint;
         String phase = "CREATING";
         String status = "RUNNING";
         String failure = "";
@@ -371,6 +372,7 @@ public final class SocialLifeStressLab {
     private static void verifyFamilySource(Run run) {
         run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
         run.familyLinks = familyLinkCount(run.registry);
+        run.familySourceFingerprint = familyGraphFingerprint(run.registry);
         run.restoredRegistry = new CharacterRegistry();
         run.familyCodecCursor = 0;
         run.familyCodecTarget = run.registry.size();
@@ -415,6 +417,7 @@ public final class SocialLifeStressLab {
             throw new IllegalStateException("Canonical Character membership kept changing during family codec verification");
         run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
         run.familyLinks = familyLinkCount(run.registry);
+        run.familySourceFingerprint = familyGraphFingerprint(run.registry);
         run.familyCodecTarget = run.registry.size();
         run.familyCodecMembershipGeneration = run.registry.membershipAppendGeneration();
         run.familyCodecCursor = 0;
@@ -433,6 +436,12 @@ public final class SocialLifeStressLab {
         run.restoredFamilyIntegrityErrors = familyIntegrityErrors(run.restoredRegistry);
         long restoredLinks = familyLinkCount(run.restoredRegistry);
         long currentSourceLinks = familyLinkCount(run.registry);
+        long currentSourceFingerprint = familyGraphFingerprint(run.registry);
+        if (currentSourceFingerprint != run.familySourceFingerprint) {
+            restartFamilyCodecAtStableBoundary(run);
+            run.phase = "VERIFYING_FAMILY_CODEC";
+            return;
+        }
         run.familySaveLoadVerified = currentSourceLinks == run.familyLinks
                 && run.restoredRegistry.size() == run.registry.size()
                 && run.restoredFamilyIntegrityErrors == 0L
@@ -475,6 +484,20 @@ public final class SocialLifeStressLab {
             }
         }
         return errors;
+    }
+
+    /** Compact O(1)-memory fence for source family state across multi-tick codec batches. */
+    private static long familyGraphFingerprint(CharacterRegistry registry) {
+        long hash = 0xcbf29ce484222325L;
+        for (Character person : registry.all()) {
+            hash = (hash ^ person.id.hashCode()) * 0x100000001b3L;
+            hash = (hash ^ String.valueOf(person.spouse).hashCode()) * 0x100000001b3L;
+            hash = (hash ^ String.valueOf(person.father).hashCode()) * 0x100000001b3L;
+            hash = (hash ^ String.valueOf(person.mother).hashCode()) * 0x100000001b3L;
+            for (String child : person.children)
+                hash = (hash ^ child.hashCode()) * 0x100000001b3L;
+        }
+        return hash;
     }
 
     private static long familyLinkCount(CharacterRegistry registry) {
