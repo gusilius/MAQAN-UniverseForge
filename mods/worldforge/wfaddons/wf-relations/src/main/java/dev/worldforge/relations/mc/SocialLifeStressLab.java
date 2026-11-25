@@ -83,6 +83,8 @@ public final class SocialLifeStressLab {
         CharacterRegistry restoredRegistry;
         int familyCodecCursor;
         int familyCodecTarget;
+        long familyCodecMembershipGeneration;
+        int familyCodecRestarts;
         long familyIntegrityErrors = -1L;
         long restoredFamilyIntegrityErrors = -1L;
         long familyLinks = -1L;
@@ -372,6 +374,8 @@ public final class SocialLifeStressLab {
         run.restoredRegistry = new CharacterRegistry();
         run.familyCodecCursor = 0;
         run.familyCodecTarget = run.registry.size();
+        run.familyCodecMembershipGeneration = run.registry.membershipAppendGeneration();
+        run.familyCodecRestarts = 0;
         run.phase = "VERIFYING_FAMILY_CODEC";
         RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_begin characters={} batch={}",
                 run.familyCodecTarget, 128);
@@ -379,12 +383,19 @@ public final class SocialLifeStressLab {
 
     /** Bounded canonical record round-trip; never build a second full-registry JSON tree/string. */
     private static void verifyFamilyCodecBatch(Run run) {
-        int liveSize = run.registry.size();
-        if (liveSize > run.familyCodecTarget) run.familyCodecTarget = liveSize;
+        // The production world continues to advance between bounded codec batches. Never
+        // compare a source graph captured at one membership generation with a restored
+        // graph assembled from a later, growing registry: restart from a fresh boundary.
+        if (run.registry.size() != run.familyCodecTarget
+                || run.registry.membershipAppendGeneration() != run.familyCodecMembershipGeneration) {
+            restartFamilyCodecAtStableBoundary(run);
+            return;
+        }
         int end = Math.min(run.familyCodecTarget, run.familyCodecCursor + 128);
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for (int i = run.familyCodecCursor; i < end; i++) {
-                Character person = run.population.get(i);
+                Character person = run.registry.get(run.registry.idAt(i));
+                if (person == null) throw new IllegalStateException("Missing source Character at family codec index " + i);
                 run.restoredRegistry.applyJsonRecord(
                         run.registry.toJsonRecord(person), "contour-03-social-roundtrip");
             }
@@ -399,10 +410,31 @@ public final class SocialLifeStressLab {
         }
     }
 
+    private static void restartFamilyCodecAtStableBoundary(Run run) {
+        if (++run.familyCodecRestarts > 5)
+            throw new IllegalStateException("Canonical Character membership kept changing during family codec verification");
+        run.familyIntegrityErrors = familyIntegrityErrors(run.registry);
+        run.familyLinks = familyLinkCount(run.registry);
+        run.familyCodecTarget = run.registry.size();
+        run.familyCodecMembershipGeneration = run.registry.membershipAppendGeneration();
+        run.familyCodecCursor = 0;
+        run.restoredRegistry = new CharacterRegistry();
+        RelationsMod.LOGGER.warn("WF_STRESS contour=03_social family_codec_restart={} stableCharacters={} membershipGeneration={}",
+                run.familyCodecRestarts, run.familyCodecTarget, run.familyCodecMembershipGeneration);
+    }
+
     private static void verifyFamilyResult(Run run) {
+        if (run.registry.size() != run.familyCodecTarget
+                || run.registry.membershipAppendGeneration() != run.familyCodecMembershipGeneration) {
+            restartFamilyCodecAtStableBoundary(run);
+            run.phase = "VERIFYING_FAMILY_CODEC";
+            return;
+        }
         run.restoredFamilyIntegrityErrors = familyIntegrityErrors(run.restoredRegistry);
         long restoredLinks = familyLinkCount(run.restoredRegistry);
-        run.familySaveLoadVerified = run.restoredRegistry.size() == run.registry.size()
+        long currentSourceLinks = familyLinkCount(run.registry);
+        run.familySaveLoadVerified = currentSourceLinks == run.familyLinks
+                && run.restoredRegistry.size() == run.registry.size()
                 && run.restoredFamilyIntegrityErrors == 0L
                 && run.familyIntegrityErrors == 0L
                 && restoredLinks == run.familyLinks;
