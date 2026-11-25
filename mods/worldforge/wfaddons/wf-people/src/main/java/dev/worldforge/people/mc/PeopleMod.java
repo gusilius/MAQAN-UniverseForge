@@ -142,8 +142,8 @@ public class PeopleMod {
     /** Physical eviction is bounded, round-robin and runs only on the Minecraft server thread. */
     private static final int EVICTION_INTERVAL_TICKS = 5;
     private static final int EVICTION_PARTITIONS_PER_PASS = 8;
-    private static final int EVICTION_SEED_IDS_PER_PARTITION = 512;
-    private static final int EVICTION_CANDIDATES_PER_PARTITION = 256;
+    private static final int EVICTION_SEED_IDS_PER_PARTITION = 1024;
+    private static final int EVICTION_CANDIDATES_PER_PARTITION = 512;
     private static final long EVICTION_MIN_IDLE_NANOS = 30_000_000_000L;
     private static int evictionPartitionCursor;
     private static long evictionPasses;
