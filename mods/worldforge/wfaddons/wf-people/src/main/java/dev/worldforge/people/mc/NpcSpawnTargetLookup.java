@@ -26,7 +26,9 @@ public final class NpcSpawnTargetLookup {
         for (RolePlace key : eligibleLocations.keySet())
             candidates.addAll(registry.holderIds(key.roleId(), key.place()));
         List<Candidate> result = new ArrayList<>();
-        for (String characterId : candidates) {
+        List<String> orderedCandidates = new ArrayList<>(candidates);
+        orderedCandidates.sort(String::compareTo);
+        for (String characterId : orderedCandidates) {
             try (CharacterAccessService.Lease lease = registry.access().acquire(characterId)) {
                 if (lease == null) continue;
                 Character character = lease.get();

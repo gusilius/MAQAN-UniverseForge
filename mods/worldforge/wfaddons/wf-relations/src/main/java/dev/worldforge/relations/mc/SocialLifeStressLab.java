@@ -49,7 +49,6 @@ public final class SocialLifeStressLab {
     private static final class Run {
         final MinecraftServer server;
         final CharacterRegistry registry;
-        final List<Character> population;
         final List<String> stressCharacterIds = new java.util.ArrayList<>();
         final Relations relations = new Relations();
         final int target;
@@ -99,7 +98,6 @@ public final class SocialLifeStressLab {
             this.peopleModLoaded = ModList.get().isLoaded("wf_people");
             this.relationsModLoaded = ModList.get().isLoaded("wf_relations");
             this.registry = registry;
-            this.population = registry.all();
             this.relations.hooks = RelationsMc.REL.hooks;
             this.target = target;
             this.daysTarget = days;
@@ -198,27 +196,30 @@ public final class SocialLifeStressLab {
                 int pair = ordinal / 2;
                 int group = ordinal / GROUP_SIZE;
                 int age = (pair % 20 == 19) ? 82 : 25;
-                Character person = run.registry.create("Social Stress Citizen " + ordinal,
+                String personId = run.registry.create("Social Stress Citizen " + ordinal,
                         "social-stress-house-" + group, "social-stress-culture",
-                        (ordinal & 1) == 0 ? "f" : "m", year - age);
-                run.stressCharacterIds.add(person.id);
-                String polity = "social-stress-polity-" + group;
-                String band = "social-stress-band-" + group;
-                person.props.put("emergence.polity_id", polity);
-                person.props.put("emergence.band_id", band);
-                person.props.put("identity.language", "common");
-                person.props.put("identity.faith", "stress-faith");
-                person.props.put("social.class", (ordinal % 4 == 0) ? "noble" : "commoner");
-                if ((ordinal & 1) == 1) {
-                    Character wife = run.population.get(run.initialSize + ordinal - 1);
-                    run.registry.marry(wife.id, person.id, year);
-                    // Keep the demographic fixture representative: only one in ten
-                    // adult couples actively plans children; the production fertility
-                    // and conception modifiers remain at their normal defaults.
-                    boolean plansChildren = age < 80 && pair % 10 == 0;
-                    wife.props.put("family.wants_children", plansChildren);
-                    person.props.put("family.wants_children", plansChildren);
-                    run.marriedCouples++;
+                        (ordinal & 1) == 0 ? "f" : "m", year - age).id;
+                run.stressCharacterIds.add(personId);
+                try (var personLease = run.registry.acquire(personId)) {
+                    if (personLease == null) throw new IllegalStateException("New stress Character could not be leased: " + personId);
+                    Character person = personLease.get();
+                    person.props.put("emergence.polity_id", "social-stress-polity-" + group);
+                    person.props.put("emergence.band_id", "social-stress-band-" + group);
+                    person.props.put("identity.language", "common");
+                    person.props.put("identity.faith", "stress-faith");
+                    person.props.put("social.class", (ordinal % 4 == 0) ? "noble" : "commoner");
+                    if ((ordinal & 1) == 1) {
+                        String wifeId = run.stressCharacterIds.get(ordinal - 1);
+                        try (var wifeLease = run.registry.acquire(wifeId)) {
+                            if (wifeLease == null) throw new IllegalStateException("Stress spouse could not be leased: " + wifeId);
+                            Character wife = wifeLease.get();
+                            run.registry.marry(wife.id, person.id, year);
+                            boolean plansChildren = age < 80 && pair % 10 == 0;
+                            wife.props.put("family.wants_children", plansChildren);
+                            person.props.put("family.wants_children", plansChildren);
+                        }
+                        run.marriedCouples++;
+                    }
                 }
                 run.created++;
             }
@@ -259,24 +260,33 @@ public final class SocialLifeStressLab {
         while (processed < BIRTH_BATCH && !run.pregnancies.isEmpty()
                 && run.pregnancies.peek().dueDay <= day) {
             Pregnancy pregnancy = run.pregnancies.remove();
-            Character mother = run.registry.get(pregnancy.motherId);
-            Character father = run.registry.get(pregnancy.fatherId);
-            if (mother == null || father == null || !mother.alive || !father.alive
-                    || !father.id.equals(FamilyPlanning.dueFatherId(mother, day))) {
-                if (mother != null) FamilyPlanning.cancel(mother, father, "stress_lifecycle_parent_unavailable", year);
-                processed++;
-                continue;
+            try (var motherLease = run.registry.acquire(pregnancy.motherId)) {
+                Character mother = motherLease == null ? null : motherLease.get();
+                if (mother == null) { processed++; continue; }
+                try (var fatherLease = run.registry.acquire(pregnancy.fatherId)) {
+                    Character father = fatherLease == null ? null : fatherLease.get();
+                    if (father == null || !mother.alive || !father.alive
+                            || !father.id.equals(FamilyPlanning.dueFatherId(mother, day))) {
+                        FamilyPlanning.cancel(mother, father, "stress_lifecycle_parent_unavailable", year);
+                        processed++;
+                        continue;
+                    }
+                    String childId = run.registry.addChild(father, mother, "Social Stress Child " + run.births,
+                            (run.births & 1) == 0 ? "f" : "m", year).id;
+                    run.stressCharacterIds.add(childId);
+                    try (var childLease = run.registry.acquire(childId)) {
+                        if (childLease == null) throw new IllegalStateException("Newborn could not be leased: " + childId);
+                        Character child = childLease.get();
+                        child.props.put("population.last_simulated_world_day", Long.toString(day));
+                        if (!mother.children.contains(child.id) || !father.children.contains(child.id)
+                                || !father.id.equals(child.father) || !mother.id.equals(child.mother))
+                            throw new IllegalStateException("Canonical family links failed for " + child.globalId);
+                    }
+                    FamilyPlanning.complete(mother, father, year, childId);
+                    run.births++;
+                    processed++;
+                }
             }
-            Character child = run.registry.addChild(father, mother, "Social Stress Child " + run.births,
-                    (run.births & 1) == 0 ? "f" : "m", year);
-            run.stressCharacterIds.add(child.id);
-            child.props.put("population.last_simulated_world_day", Long.toString(day));
-            FamilyPlanning.complete(mother, father, year, child.id);
-            if (!mother.children.contains(child.id) || !father.children.contains(child.id)
-                    || !father.id.equals(child.father) || !mother.id.equals(child.mother))
-                throw new IllegalStateException("Canonical family links failed for " + child.globalId);
-            run.births++;
-            processed++;
         }
         run.lifecycleWorkNanos += System.nanoTime() - started;
         if (run.pregnancies.isEmpty() || run.pregnancies.peek().dueDay > day) {
@@ -292,18 +302,26 @@ public final class SocialLifeStressLab {
         int year = run.startYear + Math.floorDiv((int) Math.min(Integer.MAX_VALUE, day), 365);
         // Do not create pregnancies whose due date lies beyond this test horizon.
         for (int i = run.conceptionIndex; i < end; i++) {
-            Character mother = run.population.get(run.initialSize + i);
-            if (!mother.alive || !"f".equalsIgnoreCase(mother.gender) || mother.spouse == null || mother.spouse.isBlank()) continue;
-            Character father = run.registry.get(mother.spouse);
-            if (father == null || !father.alive || !mother.id.equals(father.spouse)) continue;
-            if (run.daysTarget - run.daysCompleted < 270) continue;
-            if (FamilyPlanning.tryConceive(mother, father, year, day,
-                    0x4D4151414E5F3033L + mother.globalId.hashCode())) {
-                long due = FamilyPlanning.dueDay(mother);
-                if (due < day || due > run.startDay + run.daysTarget)
-                    throw new IllegalStateException("Pregnancy due day outside the simulated life horizon");
-                run.pregnancies.add(new Pregnancy(due, mother.id, father.id));
-                run.conceptions++;
+            String motherId = run.stressCharacterIds.get(i);
+            try (var motherLease = run.registry.acquire(motherId)) {
+                if (motherLease == null) continue;
+                Character mother = motherLease.get();
+                if (!mother.alive || !"f".equalsIgnoreCase(mother.gender)
+                        || mother.spouse == null || mother.spouse.isBlank()) continue;
+                try (var fatherLease = run.registry.acquire(mother.spouse)) {
+                    if (fatherLease == null) continue;
+                    Character father = fatherLease.get();
+                    if (!father.alive || !mother.id.equals(father.spouse)) continue;
+                    if (run.daysTarget - run.daysCompleted < 270) continue;
+                    if (FamilyPlanning.tryConceive(mother, father, year, day,
+                            0x4D4151414E5F3033L + mother.globalId.hashCode())) {
+                        long due = FamilyPlanning.dueDay(mother);
+                        if (due < day || due > run.startDay + run.daysTarget)
+                            throw new IllegalStateException("Pregnancy due day outside the simulated life horizon");
+                        run.pregnancies.add(new Pregnancy(due, mother.id, father.id));
+                        run.conceptions++;
+                    }
+                }
             }
         }
         run.lifecycleWorkNanos += System.nanoTime() - started;
@@ -319,10 +337,15 @@ public final class SocialLifeStressLab {
         int end = Math.min(run.target, run.deathIndex + LIFE_SCAN_BATCH);
         int year = run.startYear + Math.floorDiv(run.startDay + run.daysCompleted, 365);
         for (int i = run.deathIndex; i < end; i++) {
-            Character person = run.population.get(run.initialSize + i);
-            if (person.alive && year - person.birthYear >= 80) {
-                PopulationSimulation.die(run.registry, person.id, year, "stress_lifecycle_old_age");
-                run.deaths++;
+            String personId = run.stressCharacterIds.get(i);
+            try (var personLease = run.registry.acquire(personId)) {
+                if (personLease != null) {
+                    Character person = personLease.get();
+                    if (person.alive && year - person.birthYear >= 80) {
+                        PopulationSimulation.die(run.registry, person.id, year, "stress_lifecycle_old_age");
+                        run.deaths++;
+                    }
+                }
             }
         }
         run.lifecycleWorkNanos += System.nanoTime() - started;
@@ -392,9 +415,10 @@ public final class SocialLifeStressLab {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             for (int i = run.familyCodecCursor; i < end; i++) {
                 String id = run.stressCharacterIds.get(i);
-                Character person = run.registry.get(id);
-                if (person == null) throw new IllegalStateException("Missing source Character " + id);
-                run.restoredRegistry.applyJsonRecord(run.registry.toJsonRecord(person), "contour-03-social-roundtrip");
+                try (var lease = run.registry.acquire(id)) {
+                    if (lease == null) throw new IllegalStateException("Missing source Character " + id);
+                    run.restoredRegistry.applyJsonRecord(run.registry.toJsonRecord(lease.get()), "contour-03-social-roundtrip");
+                }
             }
         }
         run.familyCodecCursor = end;
@@ -445,27 +469,42 @@ public final class SocialLifeStressLab {
         run.phase = "COMPLETE";
     }
 
+    private record FamilySnapshot(String id, String globalId, String spouse, String father,
+                                  String mother, List<String> children) {}
+
+    private static FamilySnapshot familySnapshot(CharacterRegistry registry, String id) {
+        try (var lease = registry.acquire(id)) {
+            if (lease == null) return null;
+            Character person = lease.get();
+            return new FamilySnapshot(person.id, person.globalId,
+                    person.spouse == null ? "" : person.spouse,
+                    person.father == null ? "" : person.father,
+                    person.mother == null ? "" : person.mother,
+                    List.copyOf(person.children));
+        }
+    }
+
     private static long familyIntegrityErrors(CharacterRegistry registry, List<String> ids) {
         long errors = 0L;
         for (String id : ids) {
-            Character person = registry.get(id);
-            if (person == null || person.id == null || person.id.isBlank()
-                    || person.globalId == null || person.globalId.isBlank()) { errors++; continue; }
-            if (person.spouse != null && !person.spouse.isBlank()) {
-                Character spouse = registry.get(person.spouse);
-                if (spouse == null || !person.id.equals(spouse.spouse)) errors++;
+            FamilySnapshot person = familySnapshot(registry, id);
+            if (person == null || person.id() == null || person.id().isBlank()
+                    || person.globalId() == null || person.globalId().isBlank()) { errors++; continue; }
+            if (!person.spouse().isBlank()) {
+                FamilySnapshot spouse = familySnapshot(registry, person.spouse());
+                if (spouse == null || !person.id().equals(spouse.spouse())) errors++;
             }
-            if (person.father != null && !person.father.isBlank()) {
-                Character father = registry.get(person.father);
-                if (father == null || !father.children.contains(person.id)) errors++;
+            if (!person.father().isBlank()) {
+                FamilySnapshot father = familySnapshot(registry, person.father());
+                if (father == null || !father.children().contains(person.id())) errors++;
             }
-            if (person.mother != null && !person.mother.isBlank()) {
-                Character mother = registry.get(person.mother);
-                if (mother == null || !mother.children.contains(person.id)) errors++;
+            if (!person.mother().isBlank()) {
+                FamilySnapshot mother = familySnapshot(registry, person.mother());
+                if (mother == null || !mother.children().contains(person.id())) errors++;
             }
-            for (String childId : person.children) {
-                Character child = registry.get(childId);
-                if (child == null || !(person.id.equals(child.father) || person.id.equals(child.mother))) errors++;
+            for (String childId : person.children()) {
+                FamilySnapshot child = familySnapshot(registry, childId);
+                if (child == null || !(person.id().equals(child.father()) || person.id().equals(child.mother()))) errors++;
             }
         }
         return errors;
@@ -475,13 +514,13 @@ public final class SocialLifeStressLab {
     private static long familyGraphFingerprint(CharacterRegistry registry, List<String> ids) {
         long hash = 0xcbf29ce484222325L;
         for (String id : ids) {
-            Character person = registry.get(id);
+            FamilySnapshot person = familySnapshot(registry, id);
             if (person == null) throw new IllegalStateException("Missing stress Character while fingerprinting: " + id);
-            hash = (hash ^ person.id.hashCode()) * 0x100000001b3L;
-            hash = (hash ^ String.valueOf(person.spouse).hashCode()) * 0x100000001b3L;
-            hash = (hash ^ String.valueOf(person.father).hashCode()) * 0x100000001b3L;
-            hash = (hash ^ String.valueOf(person.mother).hashCode()) * 0x100000001b3L;
-            for (String child : person.children) hash = (hash ^ child.hashCode()) * 0x100000001b3L;
+            hash = (hash ^ person.id().hashCode()) * 0x100000001b3L;
+            hash = (hash ^ person.spouse().hashCode()) * 0x100000001b3L;
+            hash = (hash ^ person.father().hashCode()) * 0x100000001b3L;
+            hash = (hash ^ person.mother().hashCode()) * 0x100000001b3L;
+            for (String child : person.children()) hash = (hash ^ child.hashCode()) * 0x100000001b3L;
         }
         return hash;
     }
@@ -489,12 +528,12 @@ public final class SocialLifeStressLab {
     private static long familyLinkCount(CharacterRegistry registry, List<String> ids) {
         long links = 0L;
         for (String id : ids) {
-            Character person = registry.get(id);
+            FamilySnapshot person = familySnapshot(registry, id);
             if (person == null) throw new IllegalStateException("Missing stress Character while counting family links: " + id);
-            if (person.spouse != null && !person.spouse.isBlank()) links++;
-            if (person.father != null && !person.father.isBlank()) links++;
-            if (person.mother != null && !person.mother.isBlank()) links++;
-            links += person.children.size();
+            if (!person.spouse().isBlank()) links++;
+            if (!person.father().isBlank()) links++;
+            if (!person.mother().isBlank()) links++;
+            links += person.children().size();
         }
         return links;
     }

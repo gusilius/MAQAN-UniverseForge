@@ -2548,7 +2548,7 @@ public class SettleMod {
                 int colonyCountAfterFirstImport = COLONIES.size();
                 CharacterRegistry people = net.minecraftforge.fml.ModList.get().isLoaded("wf_people")
                         ? PeopleMod.registry(map) : null;
-                int characterCount = people == null ? -1 : people.all().size();
+                int characterCount = people == null ? -1 : people.size();
                 Set<String> houseNames = people == null ? Set.of() : houseNamesSnapshot(people);
                 int houseCount = houseNames.size();
                 int titleCount = map.titles == null ? 0 : map.titles.allTitles().size();

@@ -163,7 +163,7 @@ public final class CharacterAccessServiceTest {
             }, 32, 1L << 20);
             check(acceptedDirty > 0, "dirty Characters are submitted through the canonical WAL before checkpoint");
             writer.close();
-            wal.checkpoint(() -> wal.replayLatestEach(store::put));
+            coordinator.checkpointLatest();
             long checkpointEpoch = coordinator.dirtyEpoch();
             check(coordinator.markCheckpointCompleted(checkpointEpoch),
                     "eviction becomes eligible only after all dirty UUIDs are durably checkpointed");

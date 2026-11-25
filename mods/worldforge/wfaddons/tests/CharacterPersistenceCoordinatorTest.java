@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+import java.lang.ref.WeakReference;
 
 /** Exercises the existing WAL -> streaming checkpoint store -> eviction eligibility boundary. */
 public final class CharacterPersistenceCoordinatorTest {
@@ -29,6 +30,8 @@ public final class CharacterPersistenceCoordinatorTest {
             check(registry.bindEntity(original.id, "villager", entityUuid),
                     "canonical Character accepts a durable physical entity binding");
             String globalId = original.globalId;
+            String localId = original.id;
+            WeakReference<Character> evictedObject = new WeakReference<>(original);
             try (var lease = registry.access().acquireGlobal(globalId)) {
                 coordinator.persistMutation(globalId,
                         () -> registry.toJsonRecord(lease.get()).getBytes(StandardCharsets.UTF_8))
@@ -41,10 +44,18 @@ public final class CharacterPersistenceCoordinatorTest {
                     "registry physically removes a clean, unleased canonical Character object");
             check(registry.materializedSize() == 0 && registry.size() == 1,
                     "eviction removes only the materialized object while retaining UUID directory identity");
-            check(registry.idsAtPlace("realm:eviction-test").contains(original.id)
+            check(registry.idsAtPlace("realm:eviction-test").contains(localId)
                             && globalId.equals(registry.entityBindingOwner(entityUuid))
                             && registry.materializedSize() == 0,
                     "reverse office and entity indexes resolve UUIDs without hydrating evicted NPCs");
+            original = null;
+            long gcDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (evictedObject.get() != null && System.nanoTime() < gcDeadline) {
+                System.gc();
+                Thread.sleep(25);
+            }
+            check(evictedObject.get() == null,
+                    "evicted Character object becomes unreachable after the final lease closes");
             java.io.StringWriter partitionSnapshot = new java.io.StringWriter();
             registry.writeJson(partitionSnapshot);
             check(registry.materializedSize() == 0 && partitionSnapshot.toString().contains(globalId)
@@ -53,7 +64,7 @@ public final class CharacterPersistenceCoordinatorTest {
             try (var lease = registry.access().acquireGlobal(globalId)) {
                 check(lease != null, "UUID lookup lazily rehydrates an evicted Character");
                 Character restored = lease.get();
-                check(restored != original && globalId.equals(restored.globalId)
+                check(restored != null && globalId.equals(restored.globalId)
                                 && "House Durable".equals(restored.house)
                                 && "culture-durable".equals(restored.culture)
                                 && "preserved".equals(restored.props.get("eviction.round_trip.marker")),

@@ -584,7 +584,8 @@ public final class CharacterRegistry {
         return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
     }
 
-    /** Returns living office holders at one place using the reverse post index. */
+    /** @deprecated Unpinned compatibility references; use idsAtPlace(place) and acquire(id). */
+    @Deprecated
     public List<Character> holdersAtPlace(String place) {
         if (place == null || place.isBlank()) return List.of();
         Set<String> ids = characterIdsByPostPlace.get(place);
@@ -629,7 +630,8 @@ public final class CharacterRegistry {
         return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
     }
 
-    /** Returns living holders of one exact role/place pair without a population scan. */
+    /** @deprecated Unpinned compatibility references; use holderIds(role, place) and acquire(id). */
+    @Deprecated
     public List<Character> holders(String role, String place) {
         if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
         Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
@@ -1444,6 +1446,8 @@ public final class CharacterRegistry {
         return value instanceof Number n?Math.max(-100,Math.min(100,n.intValue())):0;
     }
 
+    /** @deprecated Unpinned compatibility reference; use holderIds(role, place) and acquire(id). */
+    @Deprecated
     public Character holder(String role, String place) {
         List<Character> l = holders(role, place);
         return l.isEmpty() ? null : l.get(0);

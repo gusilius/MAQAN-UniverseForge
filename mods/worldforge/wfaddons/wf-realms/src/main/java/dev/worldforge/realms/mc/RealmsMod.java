@@ -359,6 +359,25 @@ public class RealmsMod {
         realm.props.put("politics.doctrine_options", String.join(";", doctrineOptions));
     }
 
+    private static String characterName(CharacterRegistry registry, String globalId) {
+        if (registry == null || globalId == null || globalId.isBlank()) return "";
+        try (var lease = registry.acquireGlobal(globalId)) {
+            return lease == null ? "" : lease.get().name;
+        }
+    }
+
+    private static String characterDynastyId(CharacterRegistry registry, String mapId, String globalId) {
+        if (registry == null || globalId == null || globalId.isBlank()) return "";
+        try (var lease = registry.acquireGlobal(globalId)) {
+            if (lease == null) return "";
+            Character character = lease.get();
+            Object explicit = character.props.get("emergence.dynasty_id");
+            String houseName = explicit instanceof String value && !value.isBlank()
+                    ? value : character.house;
+            return Statecraft.stableDynastyId(mapId, character.culture, houseName);
+        }
+    }
+
     private static String dynastyDisplayName(String race, String culture, String house, String mapId, String dynastyId) {
         long seed = 0x44594E415354594CL ^ ((long) mapId.hashCode() << 32) ^ dynastyId.hashCode();
         try {
@@ -382,7 +401,6 @@ public class RealmsMod {
             if (editor == null) continue;
             boolean changed = false;
             CharacterRegistry people = PeopleMod.registry(map);
-            Map<String, String> characterNames = new HashMap<>();
             if (people != null) {
                 // The registry scan is page-bounded and every Character is read under a short lease.
                 // Only compact dynasty/name metadata is retained after the callback returns.
@@ -392,10 +410,8 @@ public class RealmsMod {
                 Map<String, String> founderCultures = new LinkedHashMap<>();
                 Map<String, String> founderHouses = new LinkedHashMap<>();
                 Map<String, String> dynastyNames = new LinkedHashMap<>();
-                Map<String, String> characterHouses = new LinkedHashMap<>();
                 forEachCanonicalCharacter(people, character -> {
                     String globalId = character.globalId;
-                    if (!globalId.isBlank()) characterNames.put(globalId, character.name);
                     Object explicitDynasty = character.props.get("emergence.dynasty_id");
                     String houseName = explicitDynasty instanceof String value && !value.isBlank()
                             ? value : character.house;
@@ -410,10 +426,7 @@ public class RealmsMod {
                         founderCultures.put(house, character.culture);
                         founderHouses.put(house, character.house);
                     }
-                    if (!globalId.isBlank()) {
-                        characterHouses.put(globalId, house);
-                        POLITICS.addDynastyMember(house, globalId);
-                    }
+                    if (!globalId.isBlank()) POLITICS.addDynastyMember(house, globalId);
                 });
                 for (Map.Entry<String, String> entry : founders.entrySet()) {
                     String house = entry.getKey();
@@ -438,8 +451,8 @@ public class RealmsMod {
                 // Keep the ruler's dynasty label on the realm projection as well as in Statecraft.
                 for (TitleData.Realm realm : map.titles.realmList()) {
                     String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", ""));
-                    String house = characterHouses.get(rulerId);
-                    String dynastyName = house == null ? "" : dynastyNames.getOrDefault(house, "");
+                    String house = characterDynastyId(people, map.name, rulerId);
+                    String dynastyName = house.isBlank() ? "" : dynastyNames.getOrDefault(house, "");
                     if (!dynastyName.isBlank()
                             && !dynastyName.equals(String.valueOf(realm.props.getOrDefault("identity.dynasty_name", "")))) {
                         editor.setRealmProp(realm.id, "identity.dynasty_name", dynastyName);
@@ -450,7 +463,7 @@ public class RealmsMod {
             for (TitleData.Title title : map.titles.allTitles()) {
                 Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
                 String holder = political == null ? "" : political.holderCharacterId;
-                String holderName = characterNames.getOrDefault(holder, "");
+                String holderName = characterName(people, holder);
                 String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
                 int count = political == null ? 0 : political.claims.size();
                 changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);

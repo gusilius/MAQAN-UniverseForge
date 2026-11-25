@@ -92,10 +92,11 @@ public final class CharacterEvictionGateTest {
         int trackedAfterEviction = gate.trackedIdentityCount();
         check(evictionCompleted
                         && postEvictionDecision == CharacterEvictionGate.Decision.UNKNOWN_IDENTITY
-                        && trackedAfterEviction == 0,
-                "successful physical eviction releases its per-identity runtime fence (completed="
+                        && trackedAfterEviction == 1
+                        && gate.decision(recovered) == CharacterEvictionGate.Decision.CLEAN,
+                "successful physical eviction releases only its own runtime fence (completed="
                         + evictionCompleted + ", decision=" + postEvictionDecision
-                        + ", tracked=" + trackedAfterEviction + ")");
+                        + ", remaining recovered identities=" + trackedAfterEviction + ")");
         gate.registerPersistedIfAbsent(id);
         check(gate.canEvict(id), "lazy identity re-registration restores the durable clean state");
         try (CharacterEvictionGate.Pin lease = gate.acquireLease(id)) {
