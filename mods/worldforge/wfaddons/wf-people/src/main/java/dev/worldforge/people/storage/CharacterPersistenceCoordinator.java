@@ -135,8 +135,21 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public static final class DirtyBatchBudgetExceededException extends RuntimeException {
         public DirtyBatchBudgetExceededException(String message) { super(message); }
     }
-    public CharacterEvictionGate.Pin acquireLease(String globalId) { return evictionGate.acquireLease(globalId); }
-    public CharacterEvictionGate.Pin beginTransaction(String globalId) { return evictionGate.beginTransaction(globalId); }
+    /** Existing snapshot identities are admitted lazily; newly created identities are explicitly registered dirty. */
+    public CharacterEvictionGate.Pin acquireLease(String globalId) {
+        evictionGate.registerPersistedIfAbsent(globalId);
+        return evictionGate.acquireLease(globalId);
+    }
+    public CharacterEvictionGate.Pin beginTransaction(String globalId) {
+        evictionGate.registerPersistedIfAbsent(globalId);
+        return evictionGate.beginTransaction(globalId);
+    }
+    public CharacterEvictionGate.Pin beginEviction(String globalId) {
+        return evictionGate.tryBeginEviction(globalId);
+    }
+    public boolean completeEviction(String globalId, CharacterEvictionGate.Pin reservation) {
+        return evictionGate.completeEviction(globalId, reservation);
+    }
 
     /** Persist a mutation result while pinning the identity before advancing its generation. */
     public CompletableFuture<CharacterWal.Record> persistMutation(String globalId, Supplier<byte[]> snapshot) {
