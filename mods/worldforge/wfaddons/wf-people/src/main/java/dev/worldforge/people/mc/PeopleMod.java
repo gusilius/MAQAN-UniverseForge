@@ -140,10 +140,10 @@ public class PeopleMod {
     private static int dirtySavePartitionCursor;
     private static long dirtySaveRegistryGeneration = Long.MIN_VALUE;
     /** Physical eviction is bounded, round-robin and runs only on the Minecraft server thread. */
-    private static final int EVICTION_INTERVAL_TICKS = 20;
+    private static final int EVICTION_INTERVAL_TICKS = 5;
     private static final int EVICTION_PARTITIONS_PER_PASS = 8;
-    private static final int EVICTION_SEED_IDS_PER_PARTITION = 64;
-    private static final int EVICTION_CANDIDATES_PER_PARTITION = 16;
+    private static final int EVICTION_SEED_IDS_PER_PARTITION = 512;
+    private static final int EVICTION_CANDIDATES_PER_PARTITION = 256;
     private static final long EVICTION_MIN_IDLE_NANOS = 30_000_000_000L;
     private static int evictionPartitionCursor;
     private static long evictionPasses;
@@ -1417,6 +1417,7 @@ public class PeopleMod {
         }
 
         int visits = Math.min(EVICTION_PARTITIONS_PER_PASS, registries.size());
+        int seeded = 0;
         int inspected = 0;
         int evicted = 0;
         int refused = 0;
@@ -1425,7 +1426,7 @@ public class PeopleMod {
             int index = Math.floorMod(evictionPartitionCursor + visit, registries.size());
             CharacterRegistry registry = registries.get(index);
             if (registry == PLAYER_REGISTRY) continue;
-            registry.seedEvictionCandidates(EVICTION_SEED_IDS_PER_PARTITION);
+            seeded += registry.seedEvictionCandidates(EVICTION_SEED_IDS_PER_PARTITION);
             List<String> candidates = registry.pollEvictionCandidates(
                     EVICTION_CANDIDATES_PER_PARTITION, EVICTION_MIN_IDLE_NANOS);
             Set<String> protectedIds = playerProtected.getOrDefault(registry, Set.of());
@@ -1455,7 +1456,7 @@ public class PeopleMod {
                 }
             }
         }
-        evictionPartitionCursor = (evictionPartitionCursor + visits) % registries.size();
+        evictionPartitionCursor = (evictionPartitionCursor + rotationStride(visits, registries.size())) % registries.size();
         evictionPasses++;
         evictionCount += evicted;
         if (ticks - evictionLastLogTick >= 1200) {
@@ -1467,9 +1468,10 @@ public class PeopleMod {
                 materialized += registry.materializedSize();
                 queued += registry.evictionCandidateCount();
             }
-            LOGGER.info("wf_people: eviction passes={} evictedTotal={} thisPass={} inspected={} refused={} failures={} materialized={} candidates={} partitionsVisited={}",
-                    evictionPasses, evictionCount, evicted, inspected, refused, failures,
-                    materialized, queued, visits);
+            LOGGER.info("wf_people: eviction passes={} evictedTotal={} thisPass={} seeded={} inspected={} refused={} failures={} materialized={} candidates={} partitionsVisited={} cursor={} intervalTicks={} seedBudget={} evictionBudget={}",
+                    evictionPasses, evictionCount, evicted, seeded, inspected, refused, failures,
+                    materialized, queued, visits, evictionPartitionCursor, EVICTION_INTERVAL_TICKS,
+                    EVICTION_SEED_IDS_PER_PARTITION, EVICTION_CANDIDATES_PER_PARTITION);
         }
     }
 
