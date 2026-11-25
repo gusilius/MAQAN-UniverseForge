@@ -282,10 +282,24 @@ public final class SettlementStressLab {
             teleportedBack = true;
         }
         List<dev.worldforge.mod.api.SimulationLod.Observer> observers = new ArrayList<>();
-        for (ServerPlayer online : server.getPlayerList().getPlayers()) {
-            if (online.isSpectator()) continue;
+        boolean fakePlayerPublished = false;
+        // Use the same per-dimension player view as SettleMod's production observer
+        // publisher. FakePlayerFactory players are attached to ServerLevel but are not
+        // guaranteed to appear in PlayerList#getPlayers(); omitting this bot made the
+        // acceptance LOD snapshot empty after teleport, so returning workers could never
+        // be rematerialized even though the bot had returned to the settlement.
+        for (ServerLevel observerLevel : server.getAllLevels()) {
+            for (ServerPlayer online : observerLevel.players()) {
+                if (online.isSpectator()) continue;
+                observers.add(new dev.worldforge.mod.api.SimulationLod.Observer(
+                        observerLevel.dimension().location().toString(), online.getX(), online.getZ()));
+                if (online == player) fakePlayerPublished = true;
+            }
+        }
+        // Fail-safe for Forge builds whose ServerLevel player collection excludes FakePlayer.
+        if (!fakePlayerPublished) {
             observers.add(new dev.worldforge.mod.api.SimulationLod.Observer(
-                    online.serverLevel().dimension().location().toString(), online.getX(), online.getZ()));
+                    player.serverLevel().dimension().location().toString(), player.getX(), player.getZ()));
         }
         dev.worldforge.mod.api.SimulationLod.publish(observers);
     }
