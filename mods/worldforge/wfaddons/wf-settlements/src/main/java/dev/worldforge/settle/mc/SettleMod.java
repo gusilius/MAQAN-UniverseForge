@@ -66,6 +66,8 @@ public class SettleMod {
     public static final Logger LOGGER = LogUtils.getLogger();
     public static final int STEP_TICKS = 20, SITE_TICKS = 10, SAVE_EVERY = 6000;
     private static final int COLONY_SIMULATION_BATCH_BUDGET = 128;
+    /** Runtime cache for idempotent founding receipts; cleared on every world load. */
+    private static final Set<String> VERIFIED_FOUNDING_STOCK_REFERENCES = ConcurrentHashMap.newKeySet();
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
@@ -1202,10 +1204,14 @@ public class SettleMod {
     private static boolean ensureFoundingStock(Colony colony, String resource, double amount, String operationId,
                                                 TreasuryLedger.Kind kind, Set<String> newlyPosted) {
         String reference = "worldgen:" + colony.s.id + ":" + operationId + ":" + resource;
+        if (VERIFIED_FOUNDING_STOCK_REFERENCES.contains(reference)) return true;
         TreasuryLedger ledger = TreasuryService.current();
-        boolean alreadyPosted = ledger.hasTransaction(colony.s.ledgerAccountId(resource), kind, reference);
+        long beforeVersion = ledger.mutationVersion();
         boolean accepted = colony.s.addOnce(resource, amount, operationId);
-        if (accepted && !alreadyPosted) newlyPosted.add(reference);
+        if (accepted) {
+            VERIFIED_FOUNDING_STOCK_REFERENCES.add(reference);
+            if (ledger.mutationVersion() != beforeVersion) newlyPosted.add(reference);
+        }
         return accepted;
     }
 
@@ -1635,6 +1641,7 @@ public class SettleMod {
     @SuppressWarnings("unchecked")
     static void load(MinecraftServer server) {
         resetWorkerIndexes();
+        VERIFIED_FOUNDING_STOCK_REFERENCES.clear();
         COLONIES.clear();
         resetColonyRegistryIndex();
         NETWORK = new dev.worldforge.settle.TradeNetwork();

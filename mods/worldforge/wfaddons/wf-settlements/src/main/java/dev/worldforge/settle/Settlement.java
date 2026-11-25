@@ -495,16 +495,18 @@ public final class Settlement {
             String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
             TreasuryLedger ledger = TreasuryService.current();
             long beforeVersion = ledger.mutationVersion();
-            boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
-                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
             boolean accepted = ledger.depositOnce(accountId(resource), quantity,
                     Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
                     "autonomous-settlement-founding", reference, worldMinute(),
                     "one-time founding endowment for " + id);
             if (!accepted) return false;
             syncResourceMirror(resource);
-            if (!alreadyPosted) flow.record(time, resource, quantity, true);
-            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            // depositOnce's idempotency check already distinguishes an existing receipt;
+            // mutationVersion tells us whether this invocation actually appended a posting.
+            if (ledger.mutationVersion() != beforeVersion) {
+                flow.record(time, resource, quantity, true);
+                markMutation();
+            }
             return true;
         });
     }
