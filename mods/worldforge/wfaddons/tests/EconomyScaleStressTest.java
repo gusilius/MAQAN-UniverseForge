@@ -104,6 +104,14 @@ public final class EconomyScaleStressTest {
                     Settlement source = marketSettlements.get(settlementAccount(sourceId));
                     Settlement destination = marketSettlements.get(settlementAccount(sourceId + 1));
                     source.add("wood", 50);
+                    // House/market construction and the setup tick consume initial stock.
+                    // Replenish only the missing amount to keep the low-stock fixture deterministic.
+                    double woodBeforeDemand = destination.amount("wood");
+                    if (woodBeforeDemand < 88.0) {
+                        double replenished = destination.add("wood", 88.0 - woodBeforeDemand);
+                        require(woodBeforeDemand + replenished >= 88.0 - 1e-8,
+                                "could not replenish the destination's trade-demand fixture");
+                    }
                     require(destination.spend(Map.of("wood", 88)),
                             "could not prepare the destination's low-stock trade demand");
                     source.amount("wood");

@@ -45,6 +45,13 @@ public final class TreasuryJournalArchive {
             return size() > 8;
         }
     };
+    /** Bounded hot-reference cache avoids reopening immutable archive segments on every retry. */
+    private final Map<String, List<TreasuryLedger.Entry>> referenceEntriesCache =
+            new LinkedHashMap<>(64, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, List<TreasuryLedger.Entry>> eldest) {
+                    return size() > 2048;
+                }
+            };
     private final TreasuryReferenceIndex referenceIndex;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
@@ -170,6 +177,7 @@ public final class TreasuryJournalArchive {
                 referenceIndex.rebuild(this);
             else
                 referenceIndex.append(decoded.entries(), nextSequence);
+            referenceEntriesCache.clear();
             return true;
         } finally {
             if (!published) Files.deleteIfExists(temporary);
@@ -226,18 +234,25 @@ public final class TreasuryJournalArchive {
                                                                           String reference) throws IOException {
         if (accountId == null || accountId.isBlank() || kind == null || kind.isBlank())
             throw new IllegalArgumentException("Treasury reference lookup requires account and kind");
+        String normalizedReference = reference == null ? "" : reference.trim();
+        String cacheKey = accountId.length() + ":" + accountId + kind.length() + ":" + kind
+                + normalizedReference.length() + ":" + normalizedReference;
+        List<TreasuryLedger.Entry> cached = referenceEntriesCache.get(cacheKey);
+        if (cached != null) return cached;
         if (!referenceIndex.isCurrent(nextSequence)) referenceIndex.rebuild(this);
         List<TreasuryLedger.Entry> matches = new ArrayList<>();
-        for (long sequence : referenceIndex.find(accountId, kind, reference)) {
+        for (long sequence : referenceIndex.find(accountId, kind, normalizedReference)) {
             List<TreasuryLedger.Entry> page = readPage(sequence, 1);
             if (page.isEmpty()) continue;
             TreasuryLedger.Entry entry = page.get(0);
             if (accountId.equals(entry.accountId()) && kind.equals(entry.kind().name())
-                    && (reference == null ? "" : reference.trim()).equals(entry.reference()))
+                    && normalizedReference.equals(entry.reference()))
                 matches.add(entry);
         }
         matches.sort(Comparator.comparingLong(TreasuryLedger.Entry::sequence));
-        return List.copyOf(matches);
+        List<TreasuryLedger.Entry> result = List.copyOf(matches);
+        referenceEntriesCache.put(cacheKey, result);
+        return result;
     }
 
     /** A bounded account-history page; nextSequence is the exclusive resume cursor. */
