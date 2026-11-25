@@ -222,6 +222,12 @@ public class SettleMod {
     private static final long AUTONOMOUS_INFRASTRUCTURE_RETRY_TICKS = 1200L;
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    // A global server-tick budget prevents 100s of colonies from each consuming a
+    // full per-colony resident allowance in the same tick. Cursors preserve fairness.
+    private static long lifeAiBudgetTick = Long.MIN_VALUE;
+    private static int lifeAiBudgetRemaining; 
+    private static final int LIFE_AI_GLOBAL_RESIDENTS_PER_TICK = 512;
+    private static final int LIFE_AI_GLOBAL_URGENT_RESIDENTS_PER_TICK = 1024;
     private static int lifeOperationLaneCursor;
     private static final Map<Integer, String> COLONY_SIMULATION_CURSORS = new HashMap<>();
 
@@ -2140,10 +2146,17 @@ public class SettleMod {
         }
         ResidentLifeIndex residentIndex = residentLifeIndex(colony, ticks);
         int previousCursor = LIFE_AI_CURSORS.getOrDefault(settlement.id, 0);
-        int batchLimit = settlement.raidIncoming
+        if (lifeAiBudgetTick != ticks) {
+            lifeAiBudgetTick = ticks;
+            lifeAiBudgetRemaining = LIFE_AI_GLOBAL_RESIDENTS_PER_TICK;
+        }
+        int configuredBatchLimit = settlement.raidIncoming
                 ? dev.worldforge.mod.MaqanPerformanceConfig.lifeAiUrgentResidentsPerPass()
                 : dev.worldforge.mod.MaqanPerformanceConfig.lifeAiResidentsPerPass();
+        int batchLimit = Math.min(configuredBatchLimit, lifeAiBudgetRemaining);
+        if (batchLimit <= 0) return;
         ResidentLifeBatch.Window window = ResidentLifeBatch.next(workerCount, previousCursor, batchLimit);
+        lifeAiBudgetRemaining -= window.count();
         LIFE_AI_CURSORS.put(settlement.id, window.nextCursor());
         for (int offset = 0; offset < window.count(); offset++) {
             dev.worldforge.settle.Worker worker = workers.get((window.start() + offset) % workerCount);
