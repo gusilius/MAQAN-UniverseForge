@@ -255,7 +255,10 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     public void checkpointLatest() throws IOException {
         beginCheckpoint();
         try {
-            wal.checkpoint(() -> wal.replayLatestEach(records::put));
+            wal.checkpoint(() -> {
+                wal.replayLatestEach(records::put);
+                records.forceDirectories();
+            });
         } catch (IOException | RuntimeException failure) {
             abortCheckpoint();
             throw failure;
