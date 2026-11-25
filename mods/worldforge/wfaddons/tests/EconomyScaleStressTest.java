@@ -112,7 +112,8 @@ public final class EconomyScaleStressTest {
                         require(woodBeforeDemand + replenished >= 88.0 - 1e-8,
                                 "could not replenish the destination's trade-demand fixture");
                     }
-                    require(destination.spend(Map.of("wood", 88)),
+                    require(destination.spendOnce(Map.of("wood", 88),
+                                    "trade-demand-stage-" + stageIndex + "-route-" + sourceId),
                             "could not prepare the destination's low-stock trade demand");
                     source.amount("wood");
                     destination.amount("wood");

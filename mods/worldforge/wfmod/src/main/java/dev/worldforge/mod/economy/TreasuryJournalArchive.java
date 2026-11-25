@@ -52,6 +52,9 @@ public final class TreasuryJournalArchive {
                     return size() > 2048;
                 }
             };
+    /** One immutable decoded segment serves repeated exact-reference lookups without retaining the whole archive. */
+    private Path hotSegmentPath;
+    private TreasuryJournalSegment.Decoded hotSegment;
     private final TreasuryReferenceIndex referenceIndex;
 
     public TreasuryJournalArchive(Path directory, long firstExpectedSequence) throws IOException {
@@ -63,6 +66,19 @@ public final class TreasuryJournalArchive {
         this.nextSequence = verifyExisting(firstExpectedSequence);
         this.referenceIndex = new TreasuryReferenceIndex(directory.resolve("reference-index"));
         if (!referenceIndex.isCurrent(this.nextSequence)) referenceIndex.rebuild(this);
+    }
+
+    private TreasuryJournalSegment.Decoded decodeSegment(Path path) throws IOException {
+        if (path.equals(hotSegmentPath) && hotSegment != null) return hotSegment;
+        try {
+            TreasuryJournalSegment.Decoded decoded =
+                    TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+            hotSegmentPath = path;
+            hotSegment = decoded;
+            return decoded;
+        } catch (RuntimeException invalid) {
+            throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
+        }
     }
 
     public synchronized long nextSequence() { return nextSequence; }
@@ -94,8 +110,7 @@ public final class TreasuryJournalArchive {
                 long prefixLast = segment.lastSequence();
                 if (segment.lastSequence() >= checkpointNextSequence) {
                     // Only arbitrary mid-segment checkpoints need a partial-prefix decode.
-                    TreasuryJournalSegment.Decoded decoded = TreasuryJournalSegment.decode(
-                            Files.readString(segment.path(), StandardCharsets.UTF_8));
+                    TreasuryJournalSegment.Decoded decoded = decodeSegment(segment.path());
                     List<TreasuryLedger.Entry> prefix = decoded.entries().stream()
                             .takeWhile(entry -> entry.sequence() < checkpointNextSequence).toList();
                     if (prefix.isEmpty()) break;
@@ -132,7 +147,7 @@ public final class TreasuryJournalArchive {
         Path destination = segmentPath(decoded.firstSequence(), decoded.lastSequence());
         if (Files.exists(destination)) {
             String existing = Files.readString(destination, StandardCharsets.UTF_8);
-            TreasuryJournalSegment.decode(existing);
+            decodeSegment(destination);
             if (existing.equals(encoded)) return true;
             throw new IOException("Conflicting treasury archive segment already exists: " + destination.getFileName());
         }
@@ -170,6 +185,8 @@ public final class TreasuryJournalArchive {
                 segmentMetadataCache = List.copyOf(updatedMetadata);
             }
             nextSequence = decoded.lastSequence() + 1;
+            hotSegmentPath = destination;
+            hotSegment = decoded;
             // A previous crash may have published a segment but failed before advancing
             // the index cursor. Rebuild from the now-canonical archive before appending,
             // otherwise the stale cursor would permanently reject the next segment.
@@ -208,7 +225,7 @@ public final class TreasuryJournalArchive {
             if (segmentLastSequence(path) < requestedFirstSequence) continue;
             TreasuryJournalSegment.Decoded decoded;
             try {
-                decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+                decoded = decodeSegment(path);
             } catch (RuntimeException invalid) {
                 throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
             }
@@ -287,7 +304,7 @@ public final class TreasuryJournalArchive {
                 if (segmentLastSequence(path) < cursor[0]) continue;
                 TreasuryJournalSegment.Decoded decoded;
                 try {
-                    decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+                    decoded = decodeSegment(path);
                 } catch (RuntimeException invalid) {
                     throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), invalid);
                 }
@@ -383,7 +400,7 @@ public final class TreasuryJournalArchive {
             long namedLast = parseSequence(matcher.group(2));
             TreasuryJournalSegment.Decoded decoded;
             try {
-                decoded = TreasuryJournalSegment.decode(Files.readString(path, StandardCharsets.UTF_8));
+                decoded = decodeSegment(path);
             } catch (RuntimeException ex) {
                 throw new IOException("Treasury archive segment failed validation: " + path.getFileName(), ex);
             }
