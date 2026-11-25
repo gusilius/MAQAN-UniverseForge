@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.TreeSet;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,6 +26,9 @@ import java.util.function.Function;
 public final class CharacterAccessService {
     private static final Map<CharacterRegistry, CharacterPersistenceCoordinator> PERSISTENCE =
             new WeakHashMap<>();
+    /** Thread-scoped active leases let legacy mutation helpers dirty their exact participants. */
+    private static final ThreadLocal<Set<Lease>> ACTIVE_LEASES =
+            ThreadLocal.withInitial(() -> Collections.newSetFromMap(new IdentityHashMap<>()));
     private final CharacterRegistry registry;
     /** IDs created before persistence attaches (bootstrap); never retains Character objects. */
     private final Set<String> pendingRegistrationIds = new HashSet<>();
@@ -100,6 +104,13 @@ public final class CharacterAccessService {
 
     public Lease acquire(String localId) { return registry.acquire(localId); }
     public Lease acquireGlobal(String globalId) { return registry.acquireGlobal(globalId); }
+
+    /** Conservatively marks every Character currently leased by this thread as dirty. */
+    static void markCurrentLeasesDirty() {
+        Set<Lease> active = ACTIVE_LEASES.get();
+        if (active.isEmpty()) return;
+        for (Lease lease : List.copyOf(active)) if (!lease.isClosed()) lease.markDirty();
+    }
 
     /**
      * Synchronous lazy hydration under the registry monitor. The checkpoint store is
@@ -369,6 +380,7 @@ public final class CharacterAccessService {
             this.localId = Objects.requireNonNull(localId, "localId");
             this.character = Objects.requireNonNull(character, "character");
             this.persistencePin = registry.access().pin(character);
+            ACTIVE_LEASES.get().add(this);
         }
 
         public Character get() {
@@ -390,6 +402,9 @@ public final class CharacterAccessService {
 
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
+            Set<Lease> active = ACTIVE_LEASES.get();
+            active.remove(this);
+            if (active.isEmpty()) ACTIVE_LEASES.remove();
             try { registry.releaseAccess(localId); }
             finally { if (persistencePin != null) persistencePin.close(); }
         }

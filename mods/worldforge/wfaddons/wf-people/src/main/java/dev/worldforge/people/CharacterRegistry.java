@@ -288,7 +288,12 @@ public final class CharacterRegistry {
     }
 
     /** Records one authoritative Character write, coalescing it inside an owning operation. */
-    public static void recordCharacterMutation() { recordDomainMutation(); }
+    public static void recordCharacterMutation() {
+        // Most domain mutators are called inside a scoped lease. Dirty all active
+        // participants conservatively so no raw helper can silently bypass WAL admission.
+        CharacterAccessService.markCurrentLeasesDirty();
+        recordDomainMutation();
+    }
 
     /** Marks the owning identity dirty for WAL persistence; no Character reference is retained. */
     private void markCharacterDirty(Character character) {
