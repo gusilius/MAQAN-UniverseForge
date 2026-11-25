@@ -80,6 +80,14 @@ public final class CharacterAuthorityTest {
                 "qualified identity resolves colliding legacy IDs");
         check(authority.getGlobal(a.globalId) == a && authority.registryForGlobal(b.globalId) == south,
                 "global UUID resolves person and owning map registry");
+        try (var lease = authority.acquireGlobal(a.globalId)) {
+            check(lease != null && lease.get() == a && north.isAccessPinned(a.id),
+                    "preferred global authority lookup returns a lease that pins the canonical Character");
+        }
+        check(!north.isAccessPinned(a.id),
+                "closing the authority lease releases the registry pin");
+        check(authority.identityOfLegacy("c1") == null,
+                "ambiguous legacy ID cannot resolve identity metadata");
         check(authority.getLegacy("c1") == null, "ambiguous bare legacy ID fails closed");
         check(authority.bindEntity(a.globalId, "npc", "shared-physical-entity"),
                 "global authority binds a body to its canonical Character");
