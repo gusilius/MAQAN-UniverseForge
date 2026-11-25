@@ -117,6 +117,8 @@ public final class EconomyScaleStressTest {
                     tradeNetwork.tick(marketSettlements, 30.0);
                     for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
                     tradeNetwork.tick(marketSettlements, 30.0);
+                    for (Settlement city : marketSettlements.values()) city.tradeLeft = 100;
+                    tradeNetwork.tick(marketSettlements, 30.0);
                     deliveredShipments += tradeNetwork.shipments.values().stream()
                             .filter(shipment -> "доставлен".equals(shipment.status)).count();
                     TradeNetwork restoredNetwork = TradeNetwork.fromJson(tradeNetwork.toJson());
