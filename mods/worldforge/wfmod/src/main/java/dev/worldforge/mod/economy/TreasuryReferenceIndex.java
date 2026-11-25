@@ -19,7 +19,15 @@ import java.io.ByteArrayOutputStream;
 final class TreasuryReferenceIndex {
     private static final int BUCKETS = 256;
     private static final int RECORD_BYTES = 16;
+    // A 16M-bit Bloom filter is only 2 MiB, independent of journal cardinality.
+    // It lets the common "new idempotency key" path reject absent archive keys
+    // without scanning a growing disk bucket for every new citizen transaction.
+    private static final int BLOOM_BITS = 1 << 24;
+    private static final int BLOOM_MASK = BLOOM_BITS - 1;
+    private static final int BLOOM_HASHES = 7;
     private final Path directory;
+    private long[] bloomWords = new long[BLOOM_BITS >>> 6];
+    private boolean bloomLoaded;
     private final Path cursorFile;
     // Bucket completeness is validated once per archive generation, not on every lookup.
     // All mutations go through this synchronized instance and publish a new cursor last.
@@ -74,6 +82,7 @@ final class TreasuryReferenceIndex {
     }
 
     synchronized void append(List<TreasuryLedger.Entry> entries, long exclusiveNextSequence) throws IOException {
+        ensureBloomLoaded();
         long indexedNext = Files.isRegularFile(cursorFile)
                 ? Long.parseLong(Files.readString(cursorFile, StandardCharsets.US_ASCII).trim()) : 1L;
         if (exclusiveNextSequence < indexedNext)
@@ -114,6 +123,78 @@ final class TreasuryReferenceIndex {
                 channel.force(false);
             }
         }
+        // Publish Bloom bits only after the corresponding bucket writes succeeded.
+        for (TreasuryLedger.Entry entry : entries) addFingerprint(fingerprint(referenceKey(
+                entry.accountId(), entry.kind().name(), entry.reference())));
+    }
+
+    private static String referenceKey(String accountId, String kind, String reference) {
+        return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000"
+                + (reference == null ? "" : reference.trim());
+    }
+
+    private static long mix64(long value) {
+        value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
+        value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
+        return value ^ (value >>> 31);
+    }
+
+    private void addFingerprint(long fingerprint) {
+        long first = fingerprint;
+        long step = mix64(fingerprint ^ 0x9e3779b97f4a7c15L) | 1L;
+        for (int i = 0; i < BLOOM_HASHES; i++) {
+            int bit = (int) (first + i * step) & BLOOM_MASK;
+            bloomWords[bit >>> 6] |= 1L << (bit & 63);
+        }
+    }
+
+    private boolean mightContain(long fingerprint) {
+        long first = fingerprint;
+        long step = mix64(fingerprint ^ 0x9e3779b97f4a7c15L) | 1L;
+        for (int i = 0; i < BLOOM_HASHES; i++) {
+            int bit = (int) (first + i * step) & BLOOM_MASK;
+            if ((bloomWords[bit >>> 6] & (1L << (bit & 63))) == 0) return false;
+        }
+        return true;
+    }
+
+    /** Loads the compact filter once; never keeps decoded journal entries in memory. */
+    private void ensureBloomLoaded() throws IOException {
+        if (bloomLoaded) return;
+        long[] rebuilt = new long[BLOOM_BITS >>> 6];
+        for (int bucket = 0; bucket < BUCKETS; bucket++) {
+            Path path = bucketPath(bucket);
+            if (!Files.isRegularFile(path)) continue;
+            try (FileChannel channel = FileChannel.open(path, StandardOpenOption.READ)) {
+                ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
+                int pending = 0;
+                while (true) {
+                    int read = channel.read(buffer);
+                    if (read < 0) break;
+                    if (read == 0) continue;
+                    buffer.flip();
+                    while (buffer.remaining() >= RECORD_BYTES) {
+                        long fingerprint = buffer.getLong();
+                        buffer.getLong(); // global journal sequence
+                        long first = fingerprint;
+                        long step = mix64(fingerprint ^ 0x9e3779b97f4a7c15L) | 1L;
+                        for (int i = 0; i < BLOOM_HASHES; i++) {
+                            int bit = (int) (first + i * step) & BLOOM_MASK;
+                            rebuilt[bit >>> 6] |= 1L << (bit & 63);
+                        }
+                    }
+                    pending = buffer.remaining();
+                    if (pending > 0) {
+                        buffer.compact();
+                    } else {
+                        buffer.clear();
+                    }
+                }
+                if (pending != 0) throw new IOException("Treasury reference-index bucket ends with a partial record");
+            }
+        }
+        bloomWords = rebuilt;
+        bloomLoaded = true;
     }
 
     private static final class IndexWriteFailure extends RuntimeException {
@@ -122,9 +203,9 @@ final class TreasuryReferenceIndex {
     }
 
     synchronized List<Long> find(String accountId, String kind, String reference) throws IOException {
-        String key = String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000"
-                + (reference == null ? "" : reference.trim());
-        long fingerprint = fingerprint(key);
+        long fingerprint = fingerprint(referenceKey(accountId, kind, reference));
+        ensureBloomLoaded();
+        if (!mightContain(fingerprint)) return List.of();
         Path bucket = bucketPath((int) fingerprint & 0xff);
         if (!Files.isRegularFile(bucket)) return List.of();
         List<Long> sequences = new ArrayList<>();
@@ -166,6 +247,8 @@ final class TreasuryReferenceIndex {
 
     private void clearBuckets() throws IOException {
         validatedArchiveNext = Long.MIN_VALUE;
+        bloomWords = new long[BLOOM_BITS >>> 6];
+        bloomLoaded = true;
         for (int bucket = 0; bucket < BUCKETS; bucket++) Files.deleteIfExists(bucketPath(bucket));
         Files.deleteIfExists(cursorFile);
     }
