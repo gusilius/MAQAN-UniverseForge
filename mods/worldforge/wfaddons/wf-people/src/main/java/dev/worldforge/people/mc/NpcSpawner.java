@@ -41,15 +41,15 @@ final class NpcSpawner {
         private final NpcSpawnSpatialIndex<SpawnAnchor> cells = new NpcSpawnSpatialIndex<>();
         private final Map<String, SpawnAnchor> anchors = new LinkedHashMap<>();
 
-        void add(Character character, Role role, double x, double z) {
-            if (character == null || !character.alive) return;
+        void add(String characterId, Role role, double x, double z) {
+            if (characterId == null || characterId.isBlank()) return;
             String key = Math.round(x) + ":" + Math.round(z);
             SpawnAnchor anchor = anchors.computeIfAbsent(key, ignored -> {
                 SpawnAnchor created = new SpawnAnchor(x, z, new ArrayList<>());
                 cells.add(created, x, z);
                 return created;
             });
-            anchor.targets().add(new Target(character.id(), role, role.id, x, z, 0));
+            anchor.targets().add(new Target(characterId, role, role.id, x, z, 0));
         }
 
         List<Target> nearby(double x, double z, double radius) {
@@ -140,11 +140,10 @@ final class NpcSpawner {
                 locations.putIfAbsent(new NpcSpawnTargetLookup.RolePlace(role.id, place),
                         new NpcSpawnTargetLookup.Location(role, title.capX, title.capZ));
         }
-        // One canonical-registry traversal: O(population + eligible titles), not
-        // O(population * eligible titles * roles).
+        // Resolve only indexed holders for the eligible role/place pairs.
         TargetIndex index = new TargetIndex();
         for (NpcSpawnTargetLookup.Candidate candidate : NpcSpawnTargetLookup.collect(registry, locations))
-            index.add(candidate.character(), candidate.role(), candidate.x(), candidate.z());
+            index.add(candidate.characterId(), candidate.role(), candidate.x(), candidate.z());
         return index;
     }
 
