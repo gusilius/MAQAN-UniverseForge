@@ -73,6 +73,9 @@ public final class CharacterRegistry {
     private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
     /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
     private final Map<String, String> entityOwnerByUuid = new HashMap<>();
+    /** Legacy villager UUID bindings are indexed separately so village reconciliation never scans the population. */
+    private final Map<String, String> legacyVillagerOwnerByUuid = new HashMap<>();
+    private final Map<String, String> legacyVillagerUuidByCharacterId = new HashMap<>();
     /** Character-local body-kind lookup used without hydrating an evicted Character. */
     private final Map<String, Map<String, String>> entityBindingsByCharacterId = new HashMap<>();
     /** Sparse account-to-Character UUID index; it stores no Character references. */
@@ -921,7 +924,9 @@ public final class CharacterRegistry {
 
     /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
     public synchronized String entityBindingOwner(String entityUuid) {
+        if (entityUuid == null || entityUuid.isBlank()) return null;
         String characterId = entityOwnerByUuid.get(entityUuid);
+        if (characterId == null) characterId = legacyVillagerOwnerByUuid.get(entityUuid);
         return characterId == null ? null : globalIdByLocalId.get(characterId);
     }
 
@@ -955,9 +960,26 @@ public final class CharacterRegistry {
             for (Object uuid : bindings.values()) if (uuid instanceof String value)
                 entityOwnerByUuid.remove(value, character.id);
         entityBindingsByCharacterId.remove(character.id);
+        String legacyUuid = legacyVillagerUuidByCharacterId.remove(character.id);
+        if (legacyUuid != null) legacyVillagerOwnerByUuid.remove(legacyUuid, character.id);
     }
 
     private void indexEntityBindings(Character character) {
+        String previousLegacy = legacyVillagerUuidByCharacterId.get(character.id);
+        Object legacyRaw = character.props.get("minecraft.villager_uuid");
+        String legacyUuid = legacyRaw instanceof String value && !value.isBlank() ? value : null;
+        if (previousLegacy != null && !previousLegacy.equals(legacyUuid)) {
+            legacyVillagerOwnerByUuid.remove(previousLegacy, character.id);
+            legacyVillagerUuidByCharacterId.remove(character.id, previousLegacy);
+        }
+        if (legacyUuid != null) {
+            String legacyOwner = legacyVillagerOwnerByUuid.putIfAbsent(legacyUuid, character.id);
+            if (legacyOwner != null && !legacyOwner.equals(character.id))
+                throw new IllegalArgumentException("Legacy villager UUID " + legacyUuid
+                        + " is bound to multiple Characters: " + legacyOwner + " and " + character.id);
+            legacyVillagerUuidByCharacterId.put(character.id, legacyUuid);
+        }
+
         Object raw = character.props.get("population.entity_bindings");
         if (!(raw instanceof Map<?, ?> bindings)) {
             entityBindingsByCharacterId.remove(character.id);
@@ -1967,6 +1989,8 @@ public final class CharacterRegistry {
         }
         entityOwnerByUuid.clear();
         entityOwnerByUuid.putAll(entityOwners);
+        legacyVillagerOwnerByUuid.clear();
+        legacyVillagerUuidByCharacterId.clear();
         entityBindingsByCharacterId.clear();
         for (Character character : loaded.values()) indexEntityBindings(character);
         playerGlobalIdByAccount.clear();

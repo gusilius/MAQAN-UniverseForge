@@ -25,6 +25,9 @@ public final class CharacterPersistenceCoordinatorTest {
             Character original = registry.create("Eviction Test", "House Durable", "culture-durable", "f", 1200);
             original.props.put("eviction.round_trip.marker", "preserved");
             registry.appoint(original.id, "test_regent", "realm:eviction-test", 1200);
+            String entityUuid = "00000000-0000-0000-0000-000000000123";
+            check(registry.bindEntity(original.id, "villager", entityUuid),
+                    "canonical Character accepts a durable physical entity binding");
             String globalId = original.globalId;
             try (var lease = registry.access().acquireGlobal(globalId)) {
                 coordinator.persistMutation(globalId,
@@ -39,8 +42,9 @@ public final class CharacterPersistenceCoordinatorTest {
             check(registry.materializedSize() == 0 && registry.size() == 1,
                     "eviction removes only the materialized object while retaining UUID directory identity");
             check(registry.idsAtPlace("realm:eviction-test").contains(original.id)
+                            && globalId.equals(registry.entityBindingOwner(entityUuid))
                             && registry.materializedSize() == 0,
-                    "reverse court-office index resolves local UUIDs without hydrating evicted NPCs");
+                    "reverse office and entity indexes resolve UUIDs without hydrating evicted NPCs");
             java.io.StringWriter partitionSnapshot = new java.io.StringWriter();
             registry.writeJson(partitionSnapshot);
             check(registry.materializedSize() == 0 && partitionSnapshot.toString().contains(globalId)

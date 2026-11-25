@@ -26,10 +26,13 @@ public final class SettleViews {
         if (net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) {
             int year = dev.worldforge.people.mc.PeopleMod.YEAR;
             for (String id : c.residentCharacterIds) {
-                dev.worldforge.people.Character person = dev.worldforge.people.mc.PeopleMod.authority().getGlobal(id);
-                if (person == null || !person.alive) continue;
-                boolean working = c.s.workers.stream().anyMatch(worker -> id.equals(worker.person));
-                residents.add(dev.worldforge.settle.ResidentRow.of(person, year, working));
+                try (var lease = dev.worldforge.people.mc.PeopleMod.findNpcLease(id)) {
+                    if (lease == null) continue;
+                    dev.worldforge.people.Character person = lease.get();
+                    if (person == null || !person.alive) continue;
+                    boolean working = c.s.workers.stream().anyMatch(worker -> id.equals(worker.person));
+                    residents.add(dev.worldforge.settle.ResidentRow.of(person, year, working));
+                }
             }
             residents.sort(java.util.Comparator.comparingInt((dev.worldforge.settle.ResidentRow row) -> row.age)
                     .thenComparing(row -> row.name, String.CASE_INSENSITIVE_ORDER));

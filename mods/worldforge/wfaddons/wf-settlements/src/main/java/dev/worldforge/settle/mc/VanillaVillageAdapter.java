@@ -268,63 +268,71 @@ public final class VanillaVillageAdapter {
                 colony.cz - RECONCILE_RADIUS, colony.cx + RECONCILE_RADIUS + 1,
                 level.getMaxBuildHeight(), colony.cz + RECONCILE_RADIUS + 1);
         List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
-        Map<String, Character> byEntity = new LinkedHashMap<>();
-        for (Character person : registry.all()) {
-            Object raw = person.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings) {
-                Object uuid = bindings.get("villager");
-                if (uuid instanceof String value) byEntity.put(value, person);
-            }
-            Object legacy = person.props.get("minecraft.villager_uuid");
-            if (legacy instanceof String value) byEntity.putIfAbsent(value, person);
-        }
-
         Set<String> residentIds = new LinkedHashSet<>();
         for (String existingId : colony.residentCharacterIds) {
-            Character existing = PeopleMod.authority().getGlobal(existingId);
-            if (existing != null && existing.alive) residentIds.add(existingId);
+            try (var lease = registry.access().acquireGlobal(existingId)) {
+                if (lease != null && lease.get() != null && lease.get().alive) residentIds.add(existingId);
+            }
         }
-        List<Character> changed = new ArrayList<>();
+        Set<String> changedIds = new LinkedHashSet<>();
         int year = WorldForgeApi.clock().year();
         for (Villager villager : villagers) {
             String uuid = villager.getUUID().toString();
-            Character person = byEntity.get(uuid);
-            if (person == null) {
-                person = registry.create(villager.getName().getString(), "", "", "m", year - 25);
-                person.props.put("minecraft.villager_uuid", uuid);
-                person.props.put("population.location", colony.s.id);
-                person.props.put("population.employer", "settlement:" + colony.s.id);
+            String globalId = registry.entityBindingOwner(uuid);
+            boolean created = globalId == null || globalId.isBlank();
+            if (created) globalId = registry.create(villager.getName().getString(), "", "", "m", year - 25).globalId;
+            try (var lease = registry.access().acquireGlobal(globalId)) {
+                if (lease == null) continue;
+                Character person = lease.get();
+                if (person == null || !person.alive) continue;
+                boolean changed = created;
+                if (!uuid.equals(person.props.get("minecraft.villager_uuid"))) {
+                    person.props.put("minecraft.villager_uuid", uuid);
+                    changed = true;
+                }
+                if (!(person.props.get("origin.race") instanceof String race) || race.isBlank()) {
+                    person.props.put("origin.race", "human");
+                    person.props.put("origin.source", "minecraft-village");
+                    changed = true;
+                }
+                if (person.culture == null || person.culture.isBlank()) {
+                    person.culture = PeopleMod.NAMES.culture("northern");
+                    changed = true;
+                }
+                if (!colony.s.id.equals(person.props.get("population.location"))) {
+                    person.props.put("population.location", colony.s.id);
+                    changed = true;
+                }
+                String employer = "settlement:" + colony.s.id;
+                if (!employer.equals(person.props.get("population.employer"))) {
+                    person.props.put("population.employer", employer);
+                    changed = true;
+                }
+                boolean bindingChanged = !uuid.equals(registry.entityBindingUuidForGlobal(globalId, "villager"));
                 if (!registry.bindEntity(person.id, "villager", uuid)) continue;
-                changed.add(person);
-                byEntity.put(uuid, person);
+                if (changed || bindingChanged) {
+                    CharacterRegistry.recordCharacterMutation();
+                    changedIds.add(globalId);
+                }
+                residentIds.add(globalId);
             }
-            // Vanilla villagers are native human inhabitants, not unclassified placeholders.
-            // Keep their identity in the same origin/culture schema used by emergent Characters.
-            boolean identityChanged = false;
-            if (!(person.props.get("origin.race") instanceof String race) || race.isBlank()) {
-                person.props.put("origin.race", "human");
-                person.props.put("origin.source", "minecraft-village");
-                identityChanged = true;
+        }
+
+        // Persist every changed canonical resident before publishing the settlement projection.
+        for (String changedId : changedIds) {
+            try (var lease = registry.access().acquireGlobal(changedId)) {
+                if (lease == null || !PeopleMod.persistCharacter(lease.get(), level.getServer())) {
+                    SettleMod.LOGGER.error("wf_settle: canonical villager {} for {} could not be persisted; adoption will retry",
+                            changedId, colony.s.id);
+                    return;
+                }
             }
-            if (person.culture == null || person.culture.isBlank()) {
-                person.culture = PeopleMod.NAMES.culture("northern");
-                identityChanged = true;
-            }
-            if (identityChanged) CharacterRegistry.recordCharacterMutation();
-            person.props.put("population.location", colony.s.id);
-            person.props.put("population.employer", "settlement:" + colony.s.id);
-            residentIds.add(person.globalId);
         }
 
         if (!residentIds.equals(colony.residentCharacterIds)) {
             SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds);
             colony.s.setCanonicalPopulation(residentIds.size());
             for (String id : residentIds) SettleMod.attachExistingCharacter(colony.s.id, id);
-            if (!changed.isEmpty() && !PeopleMod.persistCharacter(changed.get(0), level.getServer())) {
-                SettleMod.LOGGER.error("wf_settle: canonical villagers for {} could not be persisted; village adoption will retry",
-                        colony.s.id);
-                return;
-            }
             if (!SettleMod.saveDurably(level.getServer()))
                 SettleMod.LOGGER.error("wf_settle: adopted village {} could not be durably saved", colony.s.id);
         } else if (!colony.s.hasCanonicalPopulation()) {
