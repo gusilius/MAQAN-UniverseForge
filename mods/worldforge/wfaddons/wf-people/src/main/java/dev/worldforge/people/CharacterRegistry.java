@@ -868,7 +868,7 @@ public final class CharacterRegistry {
             }
     }
 
-    private static void addGlobalChild(Character parent, String childGlobalId) {
+    private static boolean addGlobalChild(Character parent, String childGlobalId) {
         Object raw = parent.props.get("family.children_global_ids");
         List<String> children = new ArrayList<>();
         if (raw instanceof List<?> list)
@@ -876,8 +876,10 @@ public final class CharacterRegistry {
                 try { children.add(java.util.UUID.fromString(id).toString()); }
                 catch (IllegalArgumentException ignored) { /* discard malformed legacy extension entry */ }
             }
-        if (!children.contains(childGlobalId)) children.add(childGlobalId);
+        if (children.contains(childGlobalId)) return false;
+        children.add(childGlobalId);
         parent.props.put("family.children_global_ids", children);
+        return true;
     }
 
     /**
@@ -887,29 +889,55 @@ public final class CharacterRegistry {
      * Run once after the complete checkpoint/WAL stream has been applied.
      */
     public void reconcileFamilyLinksAfterRecordRestore() {
+        boolean anyChanged = false;
         for (Character child : orderedView) {
             Character father = child.father == null || child.father.isBlank() ? null : byId.get(child.father);
             Character mother = child.mother == null || child.mother.isBlank() ? null : byId.get(child.mother);
             Character spouse = child.spouse == null || child.spouse.isBlank() ? null : byId.get(child.spouse);
+            boolean childChanged = false;
             if (father != null) {
-                child.props.put("family.father_global_id", father.globalId);
-                if (!father.children.contains(child.id)) father.children.add(child.id);
-                addGlobalChild(father, child.globalId);
+                if (!Objects.equals(child.props.put("family.father_global_id", father.globalId), father.globalId))
+                    childChanged = true;
+                if (!father.children.contains(child.id)) {
+                    father.children.add(child.id);
+                    markCharacterDirty(father);
+                    anyChanged = true;
+                }
+                if (addGlobalChild(father, child.globalId)) {
+                    markCharacterDirty(father);
+                    anyChanged = true;
+                }
             }
             if (mother != null) {
-                child.props.put("family.mother_global_id", mother.globalId);
-                if (!mother.children.contains(child.id)) mother.children.add(child.id);
-                addGlobalChild(mother, child.globalId);
+                if (!Objects.equals(child.props.put("family.mother_global_id", mother.globalId), mother.globalId))
+                    childChanged = true;
+                if (!mother.children.contains(child.id)) {
+                    mother.children.add(child.id);
+                    markCharacterDirty(mother);
+                    anyChanged = true;
+                }
+                if (addGlobalChild(mother, child.globalId)) {
+                    markCharacterDirty(mother);
+                    anyChanged = true;
+                }
             }
             if (spouse != null) {
-                child.props.put("family.spouse_global_id", spouse.globalId);
-                if (spouse.spouse == null || spouse.spouse.isBlank()) spouse.spouse = child.id;
-                else if (!child.id.equals(spouse.spouse))
+                if (!Objects.equals(child.props.put("family.spouse_global_id", spouse.globalId), spouse.globalId))
+                    childChanged = true;
+                if (spouse.spouse == null || spouse.spouse.isBlank()) {
+                    spouse.spouse = child.id;
+                    markCharacterDirty(spouse);
+                    anyChanged = true;
+                } else if (!child.id.equals(spouse.spouse))
                     throw new IllegalStateException("Conflicting spouse links after Character record replay: "
                             + child.globalId + " -> " + spouse.globalId + " but reverse link points to " + spouse.spouse);
             }
+            if (childChanged) {
+                markCharacterDirty(child);
+                anyChanged = true;
+            }
         }
-        recordDomainMutation();
+        if (anyChanged) recordDomainMutation();
     }
 
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
