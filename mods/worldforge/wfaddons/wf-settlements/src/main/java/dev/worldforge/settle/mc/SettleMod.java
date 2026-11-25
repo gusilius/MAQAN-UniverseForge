@@ -225,9 +225,8 @@ public class SettleMod {
     // A global server-tick budget prevents 100s of colonies from each consuming a
     // full per-colony resident allowance in the same tick. Cursors preserve fairness.
     private static long lifeAiBudgetTick = Long.MIN_VALUE;
-    private static int lifeAiBudgetRemaining; 
+    private static int lifeAiBudgetRemaining;
     private static final int LIFE_AI_GLOBAL_RESIDENTS_PER_TICK = 512;
-    private static final int LIFE_AI_GLOBAL_URGENT_RESIDENTS_PER_TICK = 1024;
     private static int lifeOperationLaneCursor;
     private static final Map<Integer, String> COLONY_SIMULATION_CURSORS = new HashMap<>();
 
