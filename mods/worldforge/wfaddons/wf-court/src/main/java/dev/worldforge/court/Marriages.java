@@ -29,7 +29,7 @@ public final class Marriages {
         return family(sim, character == null ? "" : character.id);
     }
 
-    private static String family(CourtSim sim, String localId) {
+    public static String family(CourtSim sim, String localId) {
         Set<String> visited = new HashSet<>();
         ArrayDeque<String> pending = new ArrayDeque<>();
         if (localId != null && !localId.isBlank()) pending.add(localId);
