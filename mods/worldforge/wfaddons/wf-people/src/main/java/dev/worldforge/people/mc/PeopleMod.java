@@ -10,6 +10,7 @@ import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterAccessService;
+import dev.worldforge.people.CharacterIdentity;
 import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.people.CharacterInventoryTransactions;
 import dev.worldforge.people.CharacterRegistry;
