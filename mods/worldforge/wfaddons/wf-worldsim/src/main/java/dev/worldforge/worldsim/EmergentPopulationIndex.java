@@ -1,6 +1,8 @@
 package dev.worldforge.worldsim;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterAccessService;
 import java.util.*;
 
 /**
@@ -16,6 +18,24 @@ public final class EmergentPopulationIndex {
     public EmergentPopulationIndex(Collection<Character> characters) {
         Objects.requireNonNull(characters, "characters");
         for (Character character : characters) add(character);
+    }
+
+    /**
+     * Builds the projection through bounded UUID pages and one short lease at a time.
+     * Unlike registry.all(), this never constructs a population-sized Character list.
+     */
+    public EmergentPopulationIndex(CharacterRegistry registry) {
+        Objects.requireNonNull(registry, "registry");
+        final int pageSize = 512;
+        for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+            for (String localId : registry.idPage(offset, pageSize)) {
+                try (CharacterAccessService.Lease lease = registry.access().acquire(localId)) {
+                    if (lease == null)
+                        throw new IllegalStateException("Emergent identity could not be leased: " + localId);
+                    add(lease.get());
+                }
+            }
+        }
     }
 
     /** Returns an immutable UUID snapshot for this band, not live Character objects. */
