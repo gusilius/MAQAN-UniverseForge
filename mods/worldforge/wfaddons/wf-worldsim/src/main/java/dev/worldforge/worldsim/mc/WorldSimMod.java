@@ -3593,10 +3593,10 @@ public final class WorldSimMod {
                             && (previous.localId().equals(ruler.father())
                                 || previous.localId().equals(ruler.mother()));
                     boolean sameHouse = previous != null && previous.house() != null
-                            && !previous.house().isBlank() && previous.house().equals(rulerHouse());
+                            && !previous.house().isBlank() && previous.house().equals(ruler.house());
                     if (previous != null && !directHeir && !sameHouse) {
                         dynastyId = "house_" + UUID.nameUUIDFromBytes(
-                                (polityId + "|" + year + "|" + ruler.globalId()()).getBytes(StandardCharsets.UTF_8))
+                                (polityId + "|" + year + "|" + ruler.globalId()).getBytes(StandardCharsets.UTF_8))
                                 .toString().replace("-", "");
                         polity.addProperty("dynasty_id", dynastyId);
                         foundedNewDynasty = true;
@@ -3604,13 +3604,13 @@ public final class WorldSimMod {
                 }
                 String rulerName;
                 String rulerHouse;
-                try (var rulerLease = registry.access().acquireGlobal(ruler.globalId()())) {
+                try (var rulerLease = registry.access().acquireGlobal(ruler.globalId())) {
                     if (rulerLease == null) continue;
                     dev.worldforge.people.Character canonicalRuler = rulerLease.get();
                     canonicalRuler.props.put("emergence.polity_id", polityId);
                     canonicalRuler.props.put("emergence.dynasty_id", dynastyId);
                     canonicalRuler.props.put("emergence.polity_role", "ruler");
-                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId()()))
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId()))
                         registry.appoint(canonicalRuler.id, "emergent_ruler", polityId, year);
                     if (!ensureEmergentCourtOffice(registry, canonicalRuler, realmId, year)) continue;
                     if (!PeopleMod.persistCharacter(canonicalRuler, server)) {
@@ -3620,21 +3620,21 @@ public final class WorldSimMod {
                     }
                     rulerName = canonicalRuler.name;
                     rulerHouse = canonicalRuler.house == null ? "" : canonicalRuler.house;
-                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId()())) {
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId())) {
                         JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
                                 ? polity.getAsJsonArray("ruler_history") : new JsonArray();
                         if (foundedNewDynasty) rulerHistory = new JsonArray();
                         boolean alreadyRecorded = false;
-                        for (var recorded : rulerHistory) if (ruler.globalId()().equals(recorded.getAsString())) {
+                        for (var recorded : rulerHistory) if (ruler.globalId().equals(recorded.getAsString())) {
                             alreadyRecorded = true;
                             break;
                         }
-                        if (!alreadyRecorded) rulerHistory.add(ruler.globalId()());
+                        if (!alreadyRecorded) rulerHistory.add(ruler.globalId());
                         polity.add("ruler_history", rulerHistory);
-                        binding.addProperty("ruler_global_id", ruler.globalId()());
+                        binding.addProperty("ruler_global_id", ruler.globalId());
                         int generation = rulerHistory.size();
                         binding.addProperty("generation", generation);
-                        polity.addProperty("ruler_global_id", ruler.globalId()());
+                        polity.addProperty("ruler_global_id", ruler.globalId());
                         polity.addProperty("dynasty_generations", generation);
                         polity.addProperty("last_succession_year", year);
                         polity.addProperty("years_in_generation", 0);
