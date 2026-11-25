@@ -173,9 +173,14 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                     result.completeExceptionally(new IOException("WAL receipt identity mismatch"));
                     return;
                 }
+                // The WAL receipt alone is not enough for eviction: lazy hydration reads
+                // the addressable record store. Publish that exact forced WAL payload first.
+                // WAL remains intact until the normal coordinated compaction succeeds, so a
+                // crash between these two durable writes is replay-safe.
+                records.put(record);
                 if (!evictionGate.markPersisted(ticket)) {
                     result.completeExceptionally(new StalePersistenceException(
-                            "Character changed while its WAL frame was being written: " + globalId));
+                            "Character changed while its WAL frame was being published: " + globalId));
                     return;
                 }
                 dirtyQueue.acknowledge(globalId, ticket.generation());
@@ -237,10 +242,9 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
     }
 
     public boolean canEvict(String globalId) {
-        long currentEpoch = dirtyEpoch.get();
-        return checkpointEpoch == currentEpoch
-                && dirtyQueue.pendingCount() == 0 && dirtyQueue.inFlightCount() == 0
-                && evictionGate.canEvict(globalId);
+        // Eviction is identity-scoped. Another NPC's pending WAL/checkpoint work must
+        // not pin this identity once its own WAL frame and addressable record are durable.
+        return !dirtyQueue.contains(globalId) && evictionGate.canEvict(globalId);
     }
 
     @Override public void close() throws IOException {
