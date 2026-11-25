@@ -41,14 +41,12 @@ public final class Courts {
             if (race.isBlank()) race = dominantRace(realm.props.get("races"));
             String culture = text(realm.props.get("culture"));
             if (culture.isBlank()) culture = names.culture(race);
-            Set<String> usedHouses = new HashSet<>();
-            for (Character character : reg.all())
-                if (!character.house.isEmpty()) usedHouses.add(character.house);
+            Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
             int created = 0;
             for (Role role : defs.all()) {
                 if (!"realm".equals(role.per)) continue;
                 String key = holderKey(role.id, place);
-                int have = reg.holders(role.id, place).size();
+                int have = reg.holderCount(role.id, place);
                 for (int i = have; i < role.count; i++) {
                     create(null, null, reg, defs, names, role, place, culture, realm.id, race,
                             new Random(mix(seed, place, role.id, i)), year, usedHouses);
@@ -70,9 +68,7 @@ public final class Courts {
         // House uniqueness still needs the currently used house names, but office counts
         // are served by the registry's role/place reverse index rather than a full-population
         // aggregation pass.
-        Set<String> usedHouses = new HashSet<>();
-        for (Character character : reg.all())
-            if (!character.house.isEmpty()) usedHouses.add(character.house);
+        Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
         for (Role role : defs.all()) {
             List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
             if (role.per.equals("realm")) {
