@@ -44,7 +44,7 @@ import net.minecraft.world.level.ChunkPos;
  */
 public final class VanillaVillageAdapter {
     private static final int RECONCILE_RADIUS = 64;
-    private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 2;
+    private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 1;
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING_INFRASTRUCTURE = new LinkedHashMap<>();
     private static final Set<String> PENDING_INFRASTRUCTURE_KEYS = new HashSet<>();
     private static final Set<Colony> DIRTY_INFRASTRUCTURE_COLONIES = new LinkedHashSet<>();
@@ -66,7 +66,9 @@ public final class VanillaVillageAdapter {
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
             adopt(level, x, z, typeKey.toString());
         }
-        enqueueInfrastructureChunk(level, chunk.getPos());
+        // Only chunks near an already-known vanilla village can contain adoptable
+        // infrastructure. Synthetic/strategic colonies must not trigger this scan.
+        if (hasNearbyVillage(level, chunk.getPos())) enqueueInfrastructureChunk(level, chunk.getPos());
     }
 
     /**
@@ -113,6 +115,18 @@ public final class VanillaVillageAdapter {
                 lastInfrastructureSaveTick = tick;
             }
         }
+    }
+
+    private static boolean hasNearbyVillage(ServerLevel level, ChunkPos position) {
+        String dimension = level.dimension().location().toString();
+        double centerX = position.getMinBlockX() + 8.0;
+        double centerZ = position.getMinBlockZ() + 8.0;
+        for (Colony colony : ColonyInterestIndex.nearbyAt(
+                dimension, centerX, centerZ, RECONCILE_RADIUS + 12.0)) {
+            if (colony != null && colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("minecraft:village:")) return true;
+        }
+        return false;
     }
 
     private static void enqueueInfrastructureChunk(ServerLevel level, ChunkPos position) {
@@ -337,8 +351,13 @@ public final class VanillaVillageAdapter {
     private static void reconcileInfrastructureChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunkPos) {
         int minX = chunkPos.getMinBlockX(), minZ = chunkPos.getMinBlockZ();
         String dimension = level.dimension().location().toString();
-        for (Colony colony : SettleMod.COLONIES.values()) {
+        // Restrict this block/heightmap scan to village colonies in the spatial
+        // neighborhood; never walk the complete strategic settlement registry per chunk.
+        for (Colony colony : ColonyInterestIndex.nearbyAt(
+                dimension, minX + 8.0, minZ + 8.0, RECONCILE_RADIUS + 12.0)) {
             if (colony == null || colony.s == null || !dimension.equals(colony.dim)
+                    || colony.genesisOperationId == null
+                    || !colony.genesisOperationId.startsWith("minecraft:village:")
                     || Math.abs(minX + 8 - colony.cx) > RECONCILE_RADIUS
                     || Math.abs(minZ + 8 - colony.cz) > RECONCILE_RADIUS) continue;
             String chunkKey = chunkPos.x + ":" + chunkPos.z;
