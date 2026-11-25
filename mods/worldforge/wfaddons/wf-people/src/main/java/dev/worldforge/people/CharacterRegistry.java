@@ -4,6 +4,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.storage.CharacterRecordStore;
+import dev.worldforge.people.storage.CharacterEvictionGate;
 
 import java.util.*;
 import java.io.IOException;
@@ -353,12 +354,26 @@ public final class CharacterRegistry {
         Character current = byId.get(localId);
         if (current == null) return false;
         if (!accessService.canEvict(globalId)) return false;
-        // Avoid decoding large JSON payloads on the server thread for every eviction.
-        // The record is force-written before this generation becomes clean; its checksum
-        // and UUID are validated when it is actually rehydrated.
-        if (!accessService.hasAddressableCheckpoint(globalId)) return false;
-        if (!globalId.equals(current.globalId)) throw new java.io.IOException("Canonical Character UUID mismatch");
-        return byId.remove(localId, current);
+        CharacterEvictionGate.Pin reservation = accessService.beginEviction(globalId);
+        if (reservation == null) return false;
+        boolean completed = false;
+        try {
+            // Avoid decoding large JSON payloads on the server thread for every eviction.
+            // The record is force-written before this generation becomes clean; its checksum
+            // and UUID are validated when it is actually rehydrated.
+            if (!accessService.hasAddressableCheckpoint(globalId)) return false;
+            if (!globalId.equals(current.globalId))
+                throw new java.io.IOException("Canonical Character UUID mismatch");
+            if (!byId.remove(localId, current)) return false;
+            if (!accessService.completeEviction(globalId, reservation)) {
+                byId.put(localId, current);
+                return false;
+            }
+            completed = true;
+            return true;
+        } finally {
+            if (!completed) reservation.close();
+        }
     }
 
     /**
