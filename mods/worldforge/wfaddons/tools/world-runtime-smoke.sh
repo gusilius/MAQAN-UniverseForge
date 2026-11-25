@@ -370,9 +370,9 @@ if not all(checks.values()):
 print("SETTLEMENT_STRESS_EVIDENCE=PASS")
 print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 PY
-  printf '%s\n' "save-all flush" >> in.txt
-  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
-  grep -Fq 'Saved the game' server.log || { echo "ERROR: contour 04 save-all flush was not acknowledged"; exit 53; }
+  # The EXIT trap performs the authoritative graceful save once; avoid
+  # a second forced full-world chunk/entity serialization pass.
+  echo "SETTLEMENT_STRESS_SAVE_VERIFICATION=GRACEFUL_SHUTDOWN_REQUIRED"
   echo "SETTLEMENT_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
   CURRENT_STAGE="settlement_labor_stress_complete"
   exit 0
@@ -452,9 +452,9 @@ if not all(checks.values()):
 print("SOCIAL_STRESS_EVIDENCE=PASS")
 print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 PY
-  printf '%s\n' "save-all flush" >> in.txt
-  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
-  grep -Fq 'Saved the game' server.log || { echo "ERROR: contour 03 save-all flush was not acknowledged"; exit 44; }
+  # The EXIT trap performs the authoritative graceful save once; avoid
+  # a second forced full-world chunk/entity serialization pass.
+  echo "SOCIAL_STRESS_SAVE_VERIFICATION=GRACEFUL_SHUTDOWN_REQUIRED"
   echo "SOCIAL_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
   CURRENT_STAGE="social_life_stress_complete"
   exit 0
@@ -522,9 +522,9 @@ print("POPULATION_STRESS_EVIDENCE=PASS")
 print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 PY
   if [ "$?" -ne 0 ]; then exit 34; fi
-  printf '%s\n' "save-all flush" >> in.txt
-  for _ in $(seq 1 30); do grep -Fq 'Saved the game' server.log && break; sleep 1; done
-  grep -Fq 'Saved the game' server.log || { echo "ERROR: population stress save-all flush was not acknowledged"; exit 35; }
+  # The EXIT trap performs the authoritative graceful save once; avoid
+  # a second forced full-world chunk/entity serialization pass.
+  echo "POPULATION_STRESS_SAVE_VERIFICATION=GRACEFUL_SHUTDOWN_REQUIRED"
   echo "POPULATION_STRESS_CONTOUR_RESULT=PASS_PENDING_GRACEFUL_SHUTDOWN"
   CURRENT_STAGE="population_stress_complete"
   exit 0
@@ -536,7 +536,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   echo "SERVER_CORE_PHASE=first_start"
   # Exercise the ordinary server lifecycle without loading an image dimension,
   # forcing chunks, or invoking population/worldgen acceptance scenarios.
-  printf '%s\n' "list" "save-all flush" >> in.txt
+  printf '%s\n' "list" >> in.txt
   for second in $(seq 1 "${WF_CORE_OBSERVE_SECONDS:-120}"); do
     if (( second == 1 || second % 15 == 0 )); then
       capture_server_threads
