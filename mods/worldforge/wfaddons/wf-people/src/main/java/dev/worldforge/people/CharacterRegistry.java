@@ -295,6 +295,12 @@ public final class CharacterRegistry {
         recordDomainMutation();
     }
 
+    /** Exact-identity mutation signal for APIs that receive a Character directly. */
+    public static void recordCharacterMutation(Character character) {
+        if (character != null) character.markDirty();
+        recordCharacterMutation();
+    }
+
     /** Marks the owning identity dirty for WAL persistence; no Character reference is retained. */
     private void markCharacterDirty(Character character) {
         if (character != null) accessService.markDirty(character.globalId);
@@ -1510,6 +1516,7 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
+        accessService.attachCharacter(restored);
         if (!globalIdByLocalId.containsKey(restored.id)) orderedIds.add(restored.id);
         globalIdByLocalId.put(restored.id, restored.globalId);
         indexPosts(restored);
@@ -1780,6 +1787,7 @@ public final class CharacterRegistry {
         // Publish only after every record, identity and entity binding has passed validation.
         byId = loaded;
         orderedIds = loadedIds;
+        for (Character character : loaded.values()) accessService.attachCharacter(character);
         globalIdByLocalId.clear();
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();

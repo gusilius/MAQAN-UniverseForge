@@ -63,7 +63,7 @@ public final class CharacterDevelopment {
         if(mood!=Mood.NEUTRAL&&until instanceof Number n&&worldMinute>=n.longValue()){
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
                 c.props.put(MOOD,Mood.NEUTRAL.name());c.props.remove(MOOD_UNTIL);c.props.remove(MOOD_CAUSE);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
             return Mood.NEUTRAL;
         }
@@ -84,7 +84,7 @@ public final class CharacterDevelopment {
         if (!Objects.equals(before.get(MOOD),c.props.get(MOOD))
                 || !Objects.equals(before.get(MOOD_UNTIL),c.props.get(MOOD_UNTIL))
                 || !Objects.equals(before.get(MOOD_CAUSE),c.props.get(MOOD_CAUSE)))
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(c);
         }
     }
     public static String moodCause(Character c){return string(c,MOOD_CAUSE,"");}
@@ -183,7 +183,7 @@ public final class CharacterDevelopment {
             }
             // Stable defaults become persisted Character state; publish one revision for the
             // complete initialization, but do not churn revisions on subsequent idempotent calls.
-            if (changed) CharacterRegistry.recordCharacterMutation();
+            if (changed) CharacterRegistry.recordCharacterMutation(c);
         }
     }
 
@@ -200,7 +200,7 @@ public final class CharacterDevelopment {
 
     private static int changeStressBatched(Character c, int delta) {
         int next = clamp(stress(c) + delta, 0, 100);
-        if (stress(c) != next) { c.props.put("psychology.stress", next); CharacterRegistry.recordCharacterMutation(); }
+        if (stress(c) != next) { c.props.put("psychology.stress", next); CharacterRegistry.recordCharacterMutation(c); }
         return next;
     }
 
@@ -243,7 +243,7 @@ public final class CharacterDevelopment {
         while (history.size() > 96) history.remove(0);
         observer.props.put("character.memory.events", history);
         observer.props.put("character.memory.last_minute", worldMinute);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(observer);
         return true;
         }
     }
@@ -313,7 +313,7 @@ public final class CharacterDevelopment {
                 subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute)) {
             receipts.put(operationId, payload);
             actor.props.put(receiptKey, receipts);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(actor);
             return 0;
         }
         changeStress(actor, stressDelta);
@@ -543,7 +543,7 @@ public final class CharacterDevelopment {
         history.add(event);
         while(history.size()>24)history.remove(0);
         c.props.put("military.injury.history",history);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(c);
         return next;
     }
 
@@ -594,7 +594,7 @@ public final class CharacterDevelopment {
             c.props.remove("military.injury.cause");
             c.props.remove("military.injury.last_minute");
         } else c.props.put("military.injury.severity",next);
-        if (next != previous) CharacterRegistry.recordCharacterMutation();
+        if (next != previous) CharacterRegistry.recordCharacterMutation(c);
         return next;
     }
 
@@ -642,7 +642,7 @@ public final class CharacterDevelopment {
         String id=id(abilityId,"ability");
         List<String> values=new ArrayList<>(abilities(c));
         if(values.contains(id))return false;
-        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();return true;
+        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation(c);return true;
     }
     public static boolean forgetAbility(Character c,String abilityId) {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
@@ -653,14 +653,14 @@ public final class CharacterDevelopment {
     private static boolean forgetAbilityBatched(Character c,String abilityId){
         List<String> values=new ArrayList<>(abilities(c));
         boolean changed=values.remove(id(abilityId,"ability"));
-        if(changed){c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();}
+        if(changed){c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation(c);}
         return changed;
     }
     private static void setSocialValue(Character c,String key,Object value){
         Objects.requireNonNull(c,"character");
         if(!Objects.equals(c.props.get(key),value)){
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
-                c.props.put(key,value); CharacterRegistry.recordCharacterMutation();
+                c.props.put(key,value); CharacterRegistry.recordCharacterMutation(c);
             }
         }
     }
@@ -670,7 +670,7 @@ public final class CharacterDevelopment {
         if(!Objects.equals(c.props.get(key),value)){
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 c.props.put(key,value);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
         }
     }

@@ -35,7 +35,7 @@ public final class CharacterHealth {
             person.props.put(INJURY_SEVERITY, Math.max(old, severity));
             person.props.put(HEALTH, Math.max(1, health(person) - Math.max(1, severity / 3)));
             schedule(person, worldDay);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(person);
         }
         return true;
     }
@@ -49,7 +49,7 @@ public final class CharacterHealth {
             person.props.put(ILLNESS, diseaseId);
             person.props.put(ILLNESS_SEVERITY, Math.max(old, severity));
             schedule(person, worldDay);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(person);
         }
         return true;
     }
@@ -70,7 +70,7 @@ public final class CharacterHealth {
             person.props.put(HEALTH, Math.min(100, health(person) + Math.max(1, strength / 20)));
             if (illness == 0 && injury == 0 && health(person) == 100) person.props.remove(NEXT_DAY);
             else schedule(person, worldDay);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(person);
         }
         return true;
     }
@@ -103,7 +103,7 @@ public final class CharacterHealth {
             person.props.put(LAST_DAY, worldDay);
             if (healedIllness == 0 && healedInjury == 0 && nextHealth == 100) person.props.remove(NEXT_DAY);
             else schedule(person, worldDay);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(person);
         }
         return true;
     }
@@ -124,7 +124,7 @@ public final class CharacterHealth {
         receipts.add(eventId);
         while (receipts.size() > 64) receipts.remove(0);
         person.props.put(RECEIPTS, receipts);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(person);
         return true;
     }
 

@@ -234,7 +234,7 @@ public final class CharacterStats {
             c.traits.clear();
             c.traits.addAll(next);
             c.props.remove("people.derived_traits");
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(c);
         }
         return true;
     }
@@ -244,7 +244,7 @@ public final class CharacterStats {
             boolean changed = c.traits.remove(id);
             if (changed) {
                 c.props.remove("people.derived_traits");
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
             return changed;
         }

@@ -22,6 +22,17 @@ public final class Character {
     public final List<Post> posts = new ArrayList<>();
     public final Set<String> traits = new TreeSet<>();
     public final Map<String, Object> props = new LinkedHashMap<>();
+    /** Runtime-only back-reference used to route direct domain mutations to the owning WAL queue. */
+    private transient CharacterAccessService accessService;
+
+    void attachAccessService(CharacterAccessService accessService) {
+        this.accessService = Objects.requireNonNull(accessService, "accessService");
+    }
+
+    void markDirty() {
+        CharacterAccessService owner = accessService;
+        if (owner != null) owner.markDirty(globalId);
+    }
 
     Character(String id, String name) { this(id, java.util.UUID.randomUUID().toString(), name); }
 

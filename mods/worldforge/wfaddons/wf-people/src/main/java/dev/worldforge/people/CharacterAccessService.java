@@ -58,8 +58,13 @@ public final class CharacterAccessService {
     }
 
     /** Registers newly-created canonical identities without scanning the registry. */
+    void attachCharacter(Character character) {
+        Objects.requireNonNull(character, "character").attachAccessService(this);
+    }
+
     public void registerCreated(Character character) {
         Objects.requireNonNull(character, "character");
+        attachCharacter(character);
         synchronized (PERSISTENCE) {
             CharacterPersistenceCoordinator persistence = PERSISTENCE.get(registry);
             if (persistence != null) persistence.register(character.globalId);

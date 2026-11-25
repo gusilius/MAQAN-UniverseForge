@@ -118,7 +118,7 @@ public final class PopulationSimulation {
         if (target.equals(next)) return;
         target.clear();
         target.putAll(next);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static int age(Character character, int year) {
@@ -187,7 +187,7 @@ public final class PopulationSimulation {
         if (previous.equals(next) && Objects.equals(character.props.get("population.profession_started_year"), year)) return;
         character.props.put(PROFESSION, next);
         character.props.put("population.profession_started_year", year);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static List<String> professionHistory(Character character) {
@@ -211,7 +211,7 @@ public final class PopulationSimulation {
         List<Object> duties = listProp(character, DUTIES);
         if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) {
             duties.add(duty.name().toLowerCase(Locale.ROOT));
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -223,7 +223,7 @@ public final class PopulationSimulation {
 
     private static void removeDutyBatched(Character character, Duty duty) {
         if (listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT)))
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static boolean hasDuty(Character character, Duty duty) {
@@ -243,12 +243,12 @@ public final class PopulationSimulation {
         requireAlive(character);
         Object previous = character.props.get("population.command");
         if (commandId == null || commandId.isBlank()) {
-            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation();
+            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation(character);
         } else {
             String next = normalizeId(commandId, "command");
             if (!Objects.equals(previous, next)) {
                 character.props.put("population.command", next);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(character);
             }
         }
     }
@@ -277,7 +277,7 @@ public final class PopulationSimulation {
         int next = clamp(deficit, 0, MAX_NEED);
         if (need(needs, need) != next) {
             setNeed(needs, need, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -295,7 +295,7 @@ public final class PopulationSimulation {
         int next = clamp(previous + delta, 0, MAX_NEED);
         if (previous == next) return;
         setNeed(needs, need, next);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     private static int need(Map<String, Object> needs, Need need) {
@@ -333,7 +333,7 @@ public final class PopulationSimulation {
         String id = normalizeId(skillId, "skill");
         if (!Objects.equals(training.get(id), xp)) {
             training.put(id, xp);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -350,7 +350,7 @@ public final class PopulationSimulation {
         int next = clamp(rank, 0, MAX_SKILL_RANK);
         if (!Objects.equals(skills.get(id), next)) {
             skills.put(id, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -381,7 +381,7 @@ public final class PopulationSimulation {
         if (nextRank != rank || !Objects.equals(training.get(id), remaining)) {
             skills.put(id, nextRank);
             training.put(id, remaining);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
         return nextRank - rank;
     }
@@ -397,7 +397,7 @@ public final class PopulationSimulation {
         String next = normalizeId(skillId, "skill");
         if (!Objects.equals(character.props.get(TRAINING_TARGET), next)) {
             character.props.put(TRAINING_TARGET, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -466,7 +466,7 @@ public final class PopulationSimulation {
         if (persistedNonNegativeLong(rawWorldDay) != lastWorldDay || !(rawWorldDay instanceof String)) {
             character.props.put("population.last_simulated_world_day", Long.toString(lastWorldDay)); changed = true;
         }
-        if (changed) CharacterRegistry.recordCharacterMutation();
+        if (changed) CharacterRegistry.recordCharacterMutation(character);
     }
 
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
@@ -489,7 +489,7 @@ public final class PopulationSimulation {
             character.props.put(LAST_INTENT, intent.key);
             character.props.put("population.age_years", nextAge);
             character.props.put("population.life_stage", nextStage);
-            if (changed) CharacterRegistry.recordCharacterMutation();
+            if (changed) CharacterRegistry.recordCharacterMutation(character);
         }
         return intent;
     }
@@ -535,7 +535,7 @@ public final class PopulationSimulation {
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 character.props.put("population.death_year", year);
                 character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(character);
                 List<Character.Post> dismissed = registry.kill(characterId);
                 lease.markDirty();
                 return dismissed;
@@ -723,7 +723,7 @@ public final class PopulationSimulation {
         character.props.put("population.simulated_days",Long.toString(nextSimulated));
         character.props.put("population.last_simulated_year",year);
         if(worldDay>=0)character.props.put("population.last_simulated_world_day",Long.toString(worldDay));
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     /** Exact non-negative long reader for durable decimal-string counters; accepts legacy JSON numbers. */
