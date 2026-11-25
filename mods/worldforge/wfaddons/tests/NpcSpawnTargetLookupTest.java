@@ -29,9 +29,9 @@ public final class NpcSpawnTargetLookupTest {
             new NpcSpawnTargetLookup.RolePlace("steward", "title:t1"), new NpcSpawnTargetLookup.Location(stewardRole, 300, 400));
         List<NpcSpawnTargetLookup.Candidate> found = NpcSpawnTargetLookup.collect(registry, eligible);
         check(found.size() == 2, "only living holders at eligible locations are returned");
-        check(found.get(0).character() == ruler && found.get(0).role() == king
+        check(found.get(0).characterId().equals(ruler.id) && found.get(0).role() == king
             && found.get(0).x() == 100 && found.get(0).z() == 200, "realm anchor is preserved");
-        check(found.get(1).character() == steward && found.get(1).role() == stewardRole,
+        check(found.get(1).characterId().equals(steward.id) && found.get(1).role() == stewardRole,
             "title anchor is preserved");
         check(NpcSpawnTargetLookup.collect(registry, Map.of()).isEmpty(), "empty local anchors return no candidates");
         System.out.println("NpcSpawnTargetLookupTest: OK");
