@@ -81,6 +81,8 @@ public final class CharacterRegistry {
     private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
     /** Exact role/place projection for bounded office-holder queries. */
     private final Map<String, LinkedHashSet<String>> characterIdsByRolePlace = new HashMap<>();
+    /** Compact uniqueness projection; never requires hydrating every Character for court generation. */
+    private final Set<String> knownHouseNames = new HashSet<>();
 
     /**
      * Copies only the requested insertion-order window by indexed ID lookup.
@@ -308,7 +310,20 @@ public final class CharacterRegistry {
 
     /** Marks the owning identity dirty for WAL persistence; no Character reference is retained. */
     private void markCharacterDirty(Character character) {
-        if (character != null) accessService.markDirty(character.globalId);
+        if (character != null) {
+            indexHouseName(character);
+            accessService.markDirty(character.globalId);
+        }
+    }
+
+    private void indexHouseName(Character character) {
+        if (character != null && character.house != null && !character.house.isBlank())
+            knownHouseNames.add(character.house);
+    }
+
+    /** Snapshot of compact house-name metadata; does not resolve or hydrate Character objects. */
+    public synchronized Set<String> houseNamesSnapshot() {
+        return Set.copyOf(knownHouseNames);
     }
 
     /** Changes only when registry membership or identity records are replaced. */
@@ -549,6 +564,13 @@ public final class CharacterRegistry {
 
     public int size() { return orderedIds.size(); }
 
+    /** Exact indexed count; death and dismissal remove the corresponding post-index entries. */
+    public synchronized int holderCount(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return 0;
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        return ids == null ? 0 : ids.size();
+    }
+
     /** Number of full Character objects currently resident in this registry. */
     public int materializedSize() { return byId.size(); }
 
@@ -624,6 +646,7 @@ public final class CharacterRegistry {
         if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
         Character c = new Character("c" + next++, name);
         c.house = house == null ? "" : house;
+        indexHouseName(c);
         c.culture = culture == null ? "" : culture;
         c.gender = gender;
         c.birthYear = birthYear;
@@ -1622,6 +1645,7 @@ public final class CharacterRegistry {
             }
         }
         byId.put(restored.id, restored);
+        indexHouseName(restored);
         accessService.attachCharacter(restored);
         if (!globalIdByLocalId.containsKey(restored.id)) orderedIds.add(restored.id);
         globalIdByLocalId.put(restored.id, restored.globalId);
@@ -1898,7 +1922,8 @@ public final class CharacterRegistry {
         membershipResetGeneration++;
         characterIdsByPostPlace.clear();
         characterIdsByRolePlace.clear();
-        for (Character character : loaded.values()) indexPosts(character);
+        knownHouseNames.clear();
+        for (Character character : loaded.values()) { indexPosts(character); indexHouseName(character); }
         byGlobalId.clear();
         pendingBereavement.clear();
         for (Character character : loaded.values()) {
