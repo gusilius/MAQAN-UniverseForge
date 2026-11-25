@@ -198,8 +198,9 @@ public class SettleMod {
     private static boolean militaryDepartureIndexBuilt;
     /** A map blueprint is imported once per dimension/map after the durable settlement snapshot succeeds. */
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
-    /** One-shot local-LOD founding guard. Prevents archived Treasury lookups and snapshot work every simulation pass. */
-    private static final Set<String> AUTONOMOUS_INFRASTRUCTURE_READY = ConcurrentHashMap.newKeySet();
+    /** Per-colony retry gate: expensive founding reconciliation runs at most once per minute. */
+    private static final Map<String, Long> AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK = new ConcurrentHashMap<>();
+    private static final long AUTONOMOUS_INFRASTRUCTURE_RETRY_TICKS = 1200L;
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
     private static int lifeOperationLaneCursor;
@@ -1384,7 +1385,9 @@ public class SettleMod {
      * systems remain the only owners of stock, buildings and people.
      */
     public static boolean ensureAutonomousInfrastructure(MinecraftServer server, String settlementId) {
-        if (settlementId == null || AUTONOMOUS_INFRASTRUCTURE_READY.contains(settlementId)) return false;
+        if (settlementId == null) return false;
+        long lastAttempt = AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.getOrDefault(settlementId, Long.MIN_VALUE);
+        if (lastAttempt != Long.MIN_VALUE && ticks - lastAttempt < AUTONOMOUS_INFRASTRUCTURE_RETRY_TICKS) return false;
         Colony colony = COLONIES.get(settlementId);
         if (server == null || colony == null || colony.s == null
                 || colony.genesisOperationId == null
@@ -1394,6 +1397,7 @@ public class SettleMod {
         if (level == null) return false;
         BlockPos probe = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
         if (!level.hasChunkAt(probe)) return false;
+        AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.put(settlementId, ticks);
 
         Settlement settlement = colony.s;
         if (colony.autonomousFoundingPopulation <= 0) {
@@ -1491,7 +1495,7 @@ public class SettleMod {
                         settlementId, foundingPopulation, households, settlement.count("house", false),
                         settlement.count("farm", false), settlement.count("lumber_camp", false));
             }
-            // The genesis plan is a one-time transition. Re-running it every colony cadence\n            // repeatedly searched the archived Treasury journal for the same idempotency keys\n            // and could re-enter a full settlement snapshot on the server thread.\n            AUTONOMOUS_INFRASTRUCTURE_READY.add(settlementId);\n            return changed || !newlyPostedStock.isEmpty();\n        } catch (Settlement.OrderException | IllegalStateException failure) {
+            return changed || !newlyPostedStock.isEmpty();\n        } catch (Settlement.OrderException | IllegalStateException failure) {
             LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
                     settlementId, failure.getMessage());
             return false;
@@ -1701,7 +1705,7 @@ public class SettleMod {
         professionsSynced = false;
         ColonyInterestIndex.clear();
         IMPORTED_BLUEPRINTS.clear();
-        AUTONOMOUS_INFRASTRUCTURE_READY.clear();
+        AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.clear();
         lastResidentAuditTick = Long.MIN_VALUE;
         REPORTED_RESIDENT_LINK_ERRORS.clear();
         Blueprints.clearCache();
