@@ -9,7 +9,7 @@ public final class EmergentPopulationIndexTest {
   Character second=registry.create("B","House B","culture-a","f",102); second.props.put("emergence.band_id","band-a");
   Character other=registry.create("C","House C","culture-b","m",99); other.props.put("emergence.band_id","band-b");
   Character deceased=registry.create("D","House D","culture-a","f",80); deceased.props.put("emergence.band_id","band-a"); deceased.alive=false;
-  EmergentPopulationIndex index=new EmergentPopulationIndex(registry.all());
+  EmergentPopulationIndex index=new EmergentPopulationIndex(registry);
   check(index.livingResidents("band-a").size()==2,"living residents grouped by band");
   check(index.livingResidents("band-b").size()==1,"different bands isolated");
   check(first.globalId.equals(index.byGlobalId(first.globalId)),"UUID index resolves identity without retaining Character");
