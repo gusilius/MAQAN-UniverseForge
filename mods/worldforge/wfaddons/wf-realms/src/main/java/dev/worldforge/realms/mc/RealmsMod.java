@@ -325,9 +325,19 @@ public class RealmsMod {
 
         int today = REALMS.hooks.today();
         int governmentCooldown = Math.max(0, Realms.GOV_COOLDOWN - (today - state.govChanged));
+        // Build expensive demographic snapshots once per realm projection, not once per government option.
+        boolean needsRaceSnapshot = DEFS.govs.values().stream()
+                .anyMatch(option -> !option.reqRaces().isEmpty() || !option.forbidRaces().isEmpty());
+        boolean needsTerrainSnapshot = DEFS.govs.values().stream()
+                .anyMatch(option -> !option.reqTerrain().isEmpty());
+        Map<String, Double> raceSnapshot = needsRaceSnapshot
+                ? REALMS.hooks.races(realm.id) : Map.of();
+        Map<String, Double> terrainSnapshot = needsTerrainSnapshot
+                ? REALMS.hooks.terrain(realm.id) : Map.of();
         List<String> governmentOptions = new ArrayList<>();
         for (RealmDefs.Gov option : DEFS.govs.values()) {
-            String reason = option.id().equals(state.gov) ? "Уже действует" : REALMS.why(realm.id, option);
+            String reason = option.id().equals(state.gov) ? "Уже действует"
+                    : REALMS.why(realm.id, option, raceSnapshot, terrainSnapshot);
             if (reason.isEmpty() && governmentCooldown > 0)
                 reason = "Смена строя через " + governmentCooldown + " дн.";
             governmentOptions.add(option.id() + "|" + option.name() + "|" + reason);
