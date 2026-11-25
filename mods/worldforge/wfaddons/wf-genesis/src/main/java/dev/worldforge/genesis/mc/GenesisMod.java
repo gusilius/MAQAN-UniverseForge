@@ -485,6 +485,9 @@ public class GenesisMod {
                 name, draft.race, "m", PeopleMod.YEAR - 20);
         boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
         person.props.put("genesis.player_uuid", playerUuid);
+        CharacterRegistry personRegistry = PeopleMod.authority().registryForGlobal(person.globalId);
+        if (personRegistry == null) throw new IllegalStateException("Canonical player Character registry disappeared");
+        personRegistry.indexPlayerBinding(person.id, playerUuid);
         person.props.put("genesis.profile_owner", owner(sp));
         person.props.put("genesis.race", draft.race);
         person.props.put("genesis.start", draft.start);

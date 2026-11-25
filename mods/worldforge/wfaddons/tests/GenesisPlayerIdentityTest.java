@@ -32,6 +32,7 @@ public final class GenesisPlayerIdentityTest {
         String playerUuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         Character player = map.create("PlayerOne", "", "human", "m", 80);
         player.props.put("genesis.player_uuid", playerUuid);
+        map.indexPlayerBinding(player.id, playerUuid);
         player.props.put("genesis.initialized", true);
         check(PlayerCharacterBinding.resolveExisting(playerUuid, "", authority, List.of(map), players) == player,
                 "Genesis resolves the existing player Character in a map partition");
@@ -69,12 +70,16 @@ public final class GenesisPlayerIdentityTest {
 
         Character duplicate = restoredMap.create("Duplicate", "", "human", "m", 50);
         duplicate.props.put("genesis.player_uuid", playerUuid);
-        check(rejects(() -> PlayerCharacterBinding.resolveExisting(playerUuid, player.globalId,
-                        restoredAuthority, List.of(restoredMap), restoredPlayers)),
-                "duplicate player UUID across Characters is rejected");
+        check(rejects(() -> {
+                    restoredMap.indexPlayerBinding(duplicate.id, playerUuid);
+                    PlayerCharacterBinding.resolveExisting(playerUuid, player.globalId,
+                            restoredAuthority, List.of(restoredMap), restoredPlayers);
+                }),
+                "duplicate player UUID across Characters is rejected by the compact identity index");
 
         Character other = restoredPlayers.create("OtherPlayer", "", "human", "m", 70);
         other.props.put("genesis.player_uuid", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+        restoredPlayers.indexPlayerBinding(other.id, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
         check(rejects(() -> PlayerCharacterBinding.resolveExisting(persistentUuid, other.globalId,
                         restoredAuthority, List.of(restoredMap), restoredPlayers)),
                 "conflicting saved Character UUID cannot hijack another player's identity");

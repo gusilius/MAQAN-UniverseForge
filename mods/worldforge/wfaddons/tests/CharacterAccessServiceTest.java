@@ -141,6 +141,17 @@ public final class CharacterAccessServiceTest {
             Character evictable = registry.create("Eviction Subject", "", "test", "f", 12);
             evictableLocalId = evictable.id;
             String evictableGlobalId = evictable.globalId;
+            evictable.name = "Persisted Eviction Subject";
+            evictable.house = "House of Eviction";
+            evictable.spouse = "family-spouse-local";
+            evictable.father = "family-father-local";
+            evictable.mother = "family-mother-local";
+            evictable.children.add("family-child-local");
+            evictable.props.put("profession.id", "lumberjack");
+            evictable.props.put("estate.transfer_receipt", "estate-receipt-eviction-test");
+            evictable.props.put("family.last_event", "inheritance:eviction-test");
+            CharacterInventory.add(evictable, "minecraft:bread", 3);
+            CharacterRegistry.recordCharacterMutation(evictable);
             check(!registry.evictMaterialized(evictableGlobalId),
                     "dirty identity cannot be evicted before its WAL frame and checkpoint are durable");
             int acceptedDirty = coordinator.persistDirtyBatch(globalId -> {
@@ -159,14 +170,43 @@ public final class CharacterAccessServiceTest {
                             && registry.materializedSize() == registry.size() - 1,
                     "durably checkpointed unleased Character can leave the materialized object map");
             try (CharacterAccessService.Lease hydratedLease = access.acquireGlobal(evictableGlobalId)) {
-                check(hydratedLease != null && evictableGlobalId.equals(hydratedLease.get().globalId)
+                Character hydrated = hydratedLease.get();
+                check(hydratedLease != null && evictableGlobalId.equals(hydrated.globalId)
                                 && registry.materializedSize() == registry.size(),
                         "global UUID acquisition lazily hydrates the canonical identity from checkpoint");
-                check(registry.get(evictableLocalId) == hydratedLease.get()
-                                && registry.getByGlobalId(evictableGlobalId) == hydratedLease.get(),
+                check(registry.get(evictableLocalId) == hydrated
+                                && registry.getByGlobalId(evictableGlobalId) == hydrated,
                         "local/global lookups reuse the one hydrated canonical object");
+                check("Persisted Eviction Subject".equals(hydrated.name)
+                                && "House of Eviction".equals(hydrated.house)
+                                && "family-spouse-local".equals(hydrated.spouse)
+                                && "family-father-local".equals(hydrated.father)
+                                && "family-mother-local".equals(hydrated.mother)
+                                && hydrated.children.contains("family-child-local")
+                                && "lumberjack".equals(hydrated.props.get("profession.id"))
+                                && "estate-receipt-eviction-test".equals(hydrated.props.get("estate.transfer_receipt"))
+                                && CharacterInventory.count(hydrated, "minecraft:bread") == 3,
+                        "rehydration preserves family, profession, estate receipt and canonical inventory");
                 check(!registry.evictMaterialized(evictableGlobalId),
                         "active scoped lease prevents concurrent physical eviction");
+            }
+            try (CharacterAccessService.Lease presence = access.acquirePresenceGlobal(evictableGlobalId)) {
+                check(presence != null && !coordinator.canEvict(evictableGlobalId),
+                        "physical presence lease blocks eviction while its body is active");
+                try (CharacterAccessService.Lease unrelated = access.acquireGlobal(original.globalId)) {
+                    unrelated.get().name = "Unrelated mutation while body is present";
+                    CharacterRegistry.recordCharacterMutation(unrelated.get());
+                }
+            }
+            check(coordinator.canEvict(evictableGlobalId),
+                    "presence lease is not a thread-local mutation scope and does not dirty unrelated NPCs");
+            check(registry.evictMaterialized(evictableGlobalId),
+                    "presence pin release returns the unchanged Character to the bounded eviction path");
+            try (CharacterAccessService.Lease rehydratedAgain = access.acquireGlobal(evictableGlobalId)) {
+                check(rehydratedAgain != null
+                                && "Persisted Eviction Subject".equals(rehydratedAgain.get().name)
+                                && CharacterInventory.count(rehydratedAgain.get(), "minecraft:bread") == 3,
+                        "second eviction/rehydration cycle preserves the durable record");
             }
         } finally {
             coordinator.close();
