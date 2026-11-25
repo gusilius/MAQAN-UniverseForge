@@ -97,7 +97,7 @@ public final class CharacterEvictionGateTest {
                         && gate.decision(raceId) == CharacterEvictionGate.Decision.ELIGIBLE,
                 "successful physical eviction releases only its own runtime fence (completed="
                         + evictionCompleted + ", decision=" + postEvictionDecision
-                        + ", remaining recovered identities=" + trackedAfterEviction + ")");
+                        + ", remaining tracked identities=" + trackedAfterEviction + ")");
         gate.registerPersistedIfAbsent(id);
         check(gate.canEvict(id), "lazy identity re-registration restores the durable clean state");
         try (CharacterEvictionGate.Pin lease = gate.acquireLease(id)) {
