@@ -80,6 +80,8 @@ public class SettleMod {
                 thread.setDaemon(true);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
+    private static final java.util.concurrent.atomic.AtomicLong SETTLEMENT_SNAPSHOT_GENERATION =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
@@ -1638,16 +1640,22 @@ public class SettleMod {
             LOGGER.error("wf_settle: could not capture immutable settlement snapshot", captureFailure);
             return CompletableFuture.completedFuture(false);
         }
+        long generation = SETTLEMENT_SNAPSHOT_GENERATION.incrementAndGet();
         CompletableFuture<Boolean> result = new CompletableFuture<>();
         try {
             SNAPSHOT_WRITER.execute(() -> {
-                Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+                Path temporary = target.resolveSibling(target.getFileName() + ".async-" + generation + ".tmp");
                 try {
                     Files.createDirectories(target.getParent());
                     try (java.io.BufferedWriter writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8,
                             java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
                             java.nio.file.StandardOpenOption.WRITE)) {
                         dev.worldforge.settle.SettlementSnapshotWriter.write(writer, snapshot.iterator(), tradeJson);
+                    }
+                    if (SETTLEMENT_SNAPSHOT_GENERATION.get() != generation) {
+                        Files.deleteIfExists(temporary);
+                        result.complete(false);
+                        return;
                     }
                     try {
                         Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
@@ -1671,6 +1679,7 @@ public class SettleMod {
 
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
     public static boolean saveDurably(MinecraftServer server) {
+        SETTLEMENT_SNAPSHOT_GENERATION.incrementAndGet();
         if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
             LOGGER.error("wf_settle: durable save blocked because a settlement operation has uncommitted in-memory mutations");
             return false;
