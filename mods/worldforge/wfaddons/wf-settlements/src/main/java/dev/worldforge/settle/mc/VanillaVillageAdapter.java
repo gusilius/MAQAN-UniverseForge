@@ -446,13 +446,16 @@ public final class VanillaVillageAdapter {
         CharacterRegistry registry = PeopleMod.registryFor(level);
         if (registry == null) return;
         String uuid = villager.getUUID().toString();
-        for (Character person : registry.all()) {
-            Object raw = person.props.get("population.entity_bindings");
-            if (!(raw instanceof Map<?, ?> bindings) || !uuid.equals(bindings.get("villager"))) continue;
+        String globalId = registry.entityBindingOwner(uuid);
+        if (globalId == null || globalId.isBlank()) return;
+        try (var lease = registry.access().acquireGlobal(globalId)) {
+            if (lease == null) return;
+            Character person = lease.get();
+            if (person == null) return;
             if (person.alive) PopulationSimulation.die(registry, person.id,
                     WorldForgeApi.clock().year(), "vanilla-villager-death");
-            PeopleMod.persistCharacter(person, level.getServer());
-            break;
+            if (!PeopleMod.persistCharacter(person, level.getServer()))
+                SettleMod.LOGGER.error("wf_settle: deceased vanilla villager {} could not be durably persisted", globalId);
         }
     }
 }
