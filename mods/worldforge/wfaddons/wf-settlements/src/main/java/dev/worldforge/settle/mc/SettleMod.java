@@ -1406,17 +1406,10 @@ public class SettleMod {
         AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.put(settlementId, ticks);
 
         Settlement settlement = colony.s;
-        if (colony.autonomousFoundingPopulation <= 0) {
-            colony.autonomousFoundingPopulation = Math.max(1, settlement.population());
-            if (!saveDurably(server)) {
-                colony.autonomousFoundingPopulation = 0;
-                colony.actionPersistenceBlocked = true;
-                LOGGER.error("wf_settle: founding population snapshot for {} could not be persisted; settlement frozen for recovery",
-                        settlementId);
-                return false;
-            }
-        }
-        int foundingPopulation = colony.autonomousFoundingPopulation;
+        int previousFoundingPopulation = colony.autonomousFoundingPopulation;
+        boolean foundingPopulationChanged = previousFoundingPopulation <= 0;
+        int foundingPopulation = foundingPopulationChanged
+                ? Math.max(1, settlement.population()) : previousFoundingPopulation;
         int households = Math.max(1, Math.min(12, (foundingPopulation + 3) / 4));
         Set<String> newlyPostedStock = new LinkedHashSet<>();
         try {
@@ -1431,12 +1424,22 @@ public class SettleMod {
             validStock &= ensureFoundingStock(colony, "stone", 20, "founding-stone",
                     TreasuryLedger.Kind.IMPORT, newlyPostedStock);
             if (!validStock) {
-                // Earlier resource postings may already have succeeded; persist them before
-                // returning so a later retry cannot leave an in-memory-only ledger mutation.
+                // Earlier resource postings may already have succeeded; persist the treasury
+                // first, then commit the founding population and settlement projection once.
                 if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
                     colony.actionPersistenceBlocked = true;
                     LOGGER.error("wf_settle: partial founding stock for {} could not be persisted; settlement frozen for recovery",
                             settlementId);
+                    return false;
+                }
+                if (foundingPopulationChanged || !newlyPostedStock.isEmpty()) {
+                    colony.autonomousFoundingPopulation = foundingPopulation;
+                    if (!saveDurably(server)) {
+                        colony.autonomousFoundingPopulation = previousFoundingPopulation;
+                        colony.actionPersistenceBlocked = true;
+                        LOGGER.error("wf_settle: partial founding projection for {} could not be persisted; settlement frozen for recovery",
+                                settlementId);
+                    }
                 }
                 return false;
             }
@@ -1485,13 +1488,18 @@ public class SettleMod {
                         settlementId);
                 return false;
             }
-            if (changed) {
+            boolean projectionChanged = changed || foundingPopulationChanged || !newlyPostedStock.isEmpty();
+            if (projectionChanged) {
+                colony.autonomousFoundingPopulation = foundingPopulation;
                 if (!saveDurably(server)) {
+                    colony.autonomousFoundingPopulation = previousFoundingPopulation;
                     colony.actionPersistenceBlocked = true;
-                    LOGGER.error("wf_settle: autonomous building plan for {} could not be persisted; settlement frozen for recovery",
+                    LOGGER.error("wf_settle: autonomous founding projection for {} could not be persisted; settlement frozen for recovery",
                             settlementId);
                     return false;
                 }
+            }
+            if (changed) {
                 List<String> realms = colony.realmId == null || colony.realmId.isBlank()
                         ? List.of() : List.of(colony.realmId);
                 dev.worldforge.mod.api.WorldForgeApi.postEvent("settlement",
@@ -1501,7 +1509,7 @@ public class SettleMod {
                         settlementId, foundingPopulation, households, settlement.count("house", false),
                         settlement.count("farm", false), settlement.count("lumber_camp", false));
             }
-            return changed || !newlyPostedStock.isEmpty();
+            return projectionChanged;
         } catch (Settlement.OrderException | IllegalStateException failure) {
             LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
                     settlementId, failure.getMessage());
