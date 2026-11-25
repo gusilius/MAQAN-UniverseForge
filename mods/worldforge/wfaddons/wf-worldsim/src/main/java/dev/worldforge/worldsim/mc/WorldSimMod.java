@@ -2695,7 +2695,7 @@ public final class WorldSimMod {
                             if (!normalizedSettlementName.isBlank())
                                 settlementNameCounts.computeIfPresent(normalizedSettlementName,
                                         (ignored, count) -> count <= 1 ? null : count - 1);
-                            colony.s.name = emergentSettlementName(source, bandId, residents);
+                            colony.s.name = emergentSettlementName(source, bandId, sourceProgress.index.residentMetadata(bandId));
                             String replacementName = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
                             if (!replacementName.isBlank()) settlementNameCounts.merge(replacementName, 1, Integer::sum);
                         }
@@ -3566,94 +3566,87 @@ public final class WorldSimMod {
                         ? polity.get("ruler_global_id").getAsString()
                         : (binding.has("ruler_global_id") && !binding.get("ruler_global_id").isJsonNull()
                             ? binding.get("ruler_global_id").getAsString() : "");
-                dev.worldforge.people.Character ruler = members.stream()
-                        .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                EmergentPopulationIndex.Resident previous = populationIndex.resident(previousRulerId);
+                EmergentPopulationIndex.Resident ruler = members.stream()
+                        .filter(person -> person.globalId().equals(previousRulerId)).findFirst().orElse(null);
                 boolean foundedNewDynasty = false;
                 if (ruler == null) {
-                    dev.worldforge.people.Character previous = populationIndex.byGlobalId(previousRulerId);
                     ruler = members.stream()
-                            .filter(person -> dev.worldforge.people.PopulationSimulation.age(person, year) >= 18)
+                            .filter(person -> person.alive() && Math.max(0, year - person.birthYear()) >= 18)
                             .sorted(Comparator
-                                    .comparingInt((dev.worldforge.people.Character person) -> {
+                                    .comparingInt((EmergentPopulationIndex.Resident person) -> {
                                         if (previous == null) return 0;
-                                        if (person.father.equals(previous.id) || person.mother.equals(previous.id)) return 0;
-                                        if (previous.house != null && !previous.house.isBlank()
-                                                && previous.house.equals(person.house)) return 1;
+                                        if (previous.localId().equals(person.father())
+                                                || previous.localId().equals(person.mother())) return 0;
+                                        if (previous.house() != null && !previous.house().isBlank()
+                                                && previous.house().equals(person.house())) return 1;
                                         return 2;
                                     })
-                                    .thenComparingInt(person -> person.birthYear)
-                                    .thenComparing(person -> person.globalId))
+                                    .thenComparingInt(EmergentPopulationIndex.Resident::birthYear)
+                                    .thenComparing(EmergentPopulationIndex.Resident::globalId))
                             .findFirst().orElse(null);
                     if (ruler == null) continue;
                     boolean directHeir = previous != null
-                            && (ruler.father.equals(previous.id) || ruler.mother.equals(previous.id));
-                    boolean sameHouse = previous != null && previous.house != null
-                            && !previous.house.isBlank() && previous.house.equals(ruler.house);
+                            && (previous.localId().equals(ruler.father())
+                                || previous.localId().equals(ruler.mother()));
+                    boolean sameHouse = previous != null && previous.house() != null
+                            && !previous.house().isBlank() && previous.house().equals(ruler.house());
                     if (previous != null && !directHeir && !sameHouse) {
                         dynastyId = "house_" + UUID.nameUUIDFromBytes(
-                                (polityId + "|" + year + "|" + ruler.globalId).getBytes(StandardCharsets.UTF_8))
+                                (polityId + "|" + year + "|" + ruler.globalId()).getBytes(StandardCharsets.UTF_8))
                                 .toString().replace("-", "");
                         polity.addProperty("dynasty_id", dynastyId);
                         foundedNewDynasty = true;
                     }
-                    // Character.house is the unique family display name; dynastyId is stored separately.
-                    // Descendants inherit the family name through CharacterRegistry.addChild().
-                    ruler.props.put("emergence.polity_id", polityId);
-                    ruler.props.put("emergence.dynasty_id", dynastyId);
-                    ruler.props.put("emergence.polity_role", "ruler");
-                    registry.appoint(ruler.id, "emergent_ruler", polityId, year);
-                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
-                    // Political succession is committed only after the canonical Character is durable.
-                    if (!PeopleMod.persistCharacter(ruler, server)) {
+                }
+                String rulerName;
+                String rulerHouse;
+                try (var rulerLease = registry.access().acquireGlobal(ruler.globalId())) {
+                    if (rulerLease == null) continue;
+                    dev.worldforge.people.Character canonicalRuler = rulerLease.get();
+                    canonicalRuler.props.put("emergence.polity_id", polityId);
+                    canonicalRuler.props.put("emergence.dynasty_id", dynastyId);
+                    canonicalRuler.props.put("emergence.polity_role", "ruler");
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId()))
+                        registry.appoint(canonicalRuler.id, "emergent_ruler", polityId, year);
+                    if (!ensureEmergentCourtOffice(registry, canonicalRuler, realmId, year)) continue;
+                    if (!PeopleMod.persistCharacter(canonicalRuler, server)) {
                         LOGGER.error("wf_worldsim: canonical ruler {} for polity {} could not be persisted; succession remains pending",
-                                ruler.globalId, polityId);
+                                canonicalRuler.globalId, polityId);
                         continue;
                     }
-                    JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
-                            ? polity.getAsJsonArray("ruler_history") : new JsonArray();
-                    if (foundedNewDynasty) rulerHistory = new JsonArray();
-                    boolean alreadyRecorded = false;
-                    for (var recorded : rulerHistory) if (ruler.globalId.equals(recorded.getAsString())) {
-                        alreadyRecorded = true;
-                        break;
-                    }
-                    if (!alreadyRecorded) rulerHistory.add(ruler.globalId);
-                    polity.add("ruler_history", rulerHistory);
-                    binding.addProperty("ruler_global_id", ruler.globalId);
-                    int generation = rulerHistory.size();
-                    binding.addProperty("generation", generation);
-                    polity.addProperty("ruler_global_id", ruler.globalId);
-                    polity.addProperty("dynasty_generations", generation);
-                    polity.addProperty("last_succession_year", year);
-                    polity.addProperty("years_in_generation", 0);
-                    if (previousRulerId.isBlank()) {
-                        WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    } else if (foundedNewDynasty) {
-                        WorldForgeApi.postEvent("people", ruler.name + " founds a new ruling house in " + polity.get("name").getAsString(),
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    } else {
-                        WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
-                                        + ": " + ruler.name + " succeeds the previous ruler (dynastic generation " + generation + ")",
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    }
-                    changed = true;
-                } else {
-                    ruler.props.put("emergence.polity_id", polityId);
-                    ruler.props.put("emergence.dynasty_id", dynastyId);
-                    ruler.props.put("emergence.polity_role", "ruler");
-                    var canonicalRulerRole = PeopleMod.ROLES.ruler();
-                    if (canonicalRulerRole == null) continue;
-                    boolean missingEmergenceOffice = !ruler.has("emergent_ruler", polityId);
-                    boolean missingCourtOffice = !ruler.has(canonicalRulerRole.id,
-                            dev.worldforge.people.Courts.realmPlace(realmId));
-                    if (missingEmergenceOffice) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
-                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
-                    if (missingEmergenceOffice || missingCourtOffice) {
-                        if (!PeopleMod.persistCharacter(ruler, server)) {
-                            LOGGER.error("wf_worldsim: existing canonical ruler {} could not be persisted", ruler.globalId);
-                            continue;
+                    rulerName = canonicalRuler.name;
+                    rulerHouse = canonicalRuler.house == null ? "" : canonicalRuler.house;
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId())) {
+                        JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
+                                ? polity.getAsJsonArray("ruler_history") : new JsonArray();
+                        if (foundedNewDynasty) rulerHistory = new JsonArray();
+                        boolean alreadyRecorded = false;
+                        for (var recorded : rulerHistory) if (ruler.globalId().equals(recorded.getAsString())) {
+                            alreadyRecorded = true;
+                            break;
                         }
+                        if (!alreadyRecorded) rulerHistory.add(ruler.globalId());
+                        polity.add("ruler_history", rulerHistory);
+                        binding.addProperty("ruler_global_id", ruler.globalId());
+                        int generation = rulerHistory.size();
+                        binding.addProperty("generation", generation);
+                        polity.addProperty("ruler_global_id", ruler.globalId());
+                        polity.addProperty("dynasty_generations", generation);
+                        polity.addProperty("last_succession_year", year);
+                        polity.addProperty("years_in_generation", 0);
+                        if (previousRulerId.isBlank()) {
+                            WorldForgeApi.postEvent("people", rulerName + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        } else if (foundedNewDynasty) {
+                            WorldForgeApi.postEvent("people", rulerName + " founds a new ruling house in " + polity.get("name").getAsString(),
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        } else {
+                            WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
+                                            + ": " + rulerName + " succeeds the previous ruler (dynastic generation " + generation + ")",
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        }
+                        changed = true;
                     }
                 }
                 // Reconcile Statecraft every pass, not only when a ruler changes. This also
@@ -3698,10 +3691,10 @@ public final class WorldSimMod {
                 } else {
                     RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
                 }
-                for (dev.worldforge.people.Character member : members) {
-                    if (member.house != null && !member.house.isBlank()
-                            && member.house.equals(ruler.house))
-                        RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId);
+                for (EmergentPopulationIndex.Resident member : members) {
+                    if (member.house() != null && !member.house().isBlank()
+                            && member.house().equals(rulerHouse))
+                        RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId());
                 }
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
                         polityName, source.id, ruler.globalId,
