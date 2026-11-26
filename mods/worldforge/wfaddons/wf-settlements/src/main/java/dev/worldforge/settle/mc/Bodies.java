@@ -135,7 +135,11 @@ public final class Bodies {
 
             boolean discoveredVillage = colony.genesisOperationId != null
                     && colony.genesisOperationId.startsWith("minecraft:village:");
-            boolean retained = discoveredVillage && nearbyById.containsKey(colonyId)
+            boolean generatedSettlement = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("worldsim:settlement:")
+                    && colony.s.count("village_hall", true) > 0;
+            boolean physicalSettlementReady = discoveredVillage || generatedSettlement;
+            boolean retained = physicalSettlementReady && nearbyById.containsKey(colonyId)
                     && SimulationLod.shouldRetainWorkers(colony.dim, colony.cx, colony.cz);
             int workerId;
             try {
@@ -175,10 +179,10 @@ public final class Bodies {
             if (spawned >= spawnBudget || scanBudget <= 0) break;
             if (colony == null || colony.s == null || colony.s.id == null) continue;
             String colonyId = colony.s.id;
-            // No physical worker entities in generated/strategic settlement projections.
-            // Only a village explicitly adopted from a Minecraft structure may materialize workers.
-            if (colony.genesisOperationId == null
-                    || !colony.genesisOperationId.startsWith("minecraft:village:")) continue;
+            // Physical workers are allowed only after a real vanilla village was adopted
+            // or the generated settlement's civic hall is fully built. The canonical
+            // Character/Worker remains independent of this nearby LOD representation.
+            if (!physicalSettlementReady) continue;
             ServerLevel level = colony.level(server);
             if (level == null || !SimulationLod.shouldSpawnWorkers(
                     colony.dim, colony.cx, colony.cz)) continue;
@@ -210,8 +214,18 @@ public final class Bodies {
                     continue;
                 }
 
-                int x = colony.cx + level.random.nextInt(9) - 4;
-                int z = colony.cz + level.random.nextInt(9) - 4;
+                // Materialize at the worker's persisted settlement-local position.
+                // A never-moved worker gets a stable home-ring slot derived from its ID;
+                // player coordinates and per-attempt randomness never affect placement.
+                double localX = worker.x, localZ = worker.z;
+                if (Math.abs(localX) < 0.001 && Math.abs(localZ) < 0.001) {
+                    double angle = worker.id * 2.399963229728653;
+                    double radius = 3.0 + Math.sqrt(Math.floorMod(worker.id, 16)) * 0.65;
+                    localX = Math.cos(angle) * radius;
+                    localZ = Math.sin(angle) * radius;
+                }
+                int x = colony.cx + (int)Math.floor(localX);
+                int z = colony.cz + (int)Math.floor(localZ);
                 if (!level.hasChunkAt(new BlockPos(x, level.getMinBuildHeight(), z))) continue;
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 WFWorker entity = SettleMod.WORKER.get().create(level);

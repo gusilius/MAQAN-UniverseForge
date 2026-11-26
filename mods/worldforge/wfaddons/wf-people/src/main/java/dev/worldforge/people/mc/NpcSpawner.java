@@ -71,32 +71,11 @@ final class NpcSpawner {
     private NpcSpawner() {}
 
     static void pass(MinecraftServer server) {
-        if (server == null) return;
-        for (ServerLevel level : server.getAllLevels()) {
-            List<ServerPlayer> players = new ArrayList<>();
-            for (ServerPlayer player : level.players()) if (!player.isSpectator()) players.add(player);
-            if (players.isEmpty()) continue;
-            CharacterRegistry registry = PeopleMod.peek(level);
-            if (registry == null) continue;
-
-            // Remove legacy physical WFNpc bodies near active players. Canonical Character
-            // records are retained; only their obsolete physical entity projection is unbound.
-            for (ServerPlayer player : players) {
-                for (WFNpc body : level.getEntitiesOfClass(WFNpc.class,
-                        player.getBoundingBox().inflate(FAR + 40))) {
-                    String characterId = body.characterId();
-                    if (characterId != null && !characterId.isBlank()) {
-                        try {
-                            registry.unbindEntity(characterId, "npc", body.getUUID().toString());
-                        } catch (RuntimeException staleBinding) {
-                            PeopleMod.LOGGER.warn("wf_people: could not clear stale NPC binding for {}; removing physical body only",
-                                    characterId);
-                        }
-                    }
-                    body.discard();
-                }
-            }
-        }
+        // Deliberately do not materialize court/title NPCs from player proximity.
+        // Their canonical Character records remain available to dialogue, court and
+        // strategic simulation. Physical residents are represented by settlement-owned
+        // bodies only after the corresponding settlement has a real generated structure.
+        // Existing saved WFNpc entities are preserved; proximity is never a cleanup rule.
     }
 
     private static TargetIndex buildTargetIndex(ServerLevel level, MapData map, CharacterRegistry registry) {
