@@ -212,6 +212,11 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private boolean compactViewport() { return width < 900 || height < 520; }
+    private boolean compactTopbar() { return width < 720; }
+    private int profileStartX() { return compactTopbar() ? 48 : Math.max(178,width/2-112); }
+    private int profileButtonWidth() { return compactTopbar() ? 28 : 48; }
+    private int profileButtonStep() { return compactTopbar() ? 32 : 52; }
+    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+8 : width-252; }
     private boolean strategicCameraWorkspace() { return profile == Profile.RTS || profile == Profile.POLITICS; }
     private WorkspaceDockTree.Node layoutRoot() {
         return strategicCameraWorkspace() && workspaceRoot != null
@@ -633,24 +638,24 @@ public final class PlatformShellScreen extends Screen {
     private void drawTopBar(GuiGraphics g, int mx, int my) {
         g.drawString(font, "M", 15, 12, CYAN, false);
         g.fill(34, 9, 35, 25, EDGE);
-        int x = Math.max(178, width / 2 - 112);
+        int x = profileStartX(), buttonWidth = profileButtonWidth(), buttonStep = profileButtonStep();
         for (Profile p : Profile.values()) {
             if (!profileAvailable(p)) continue;
             boolean active = p == profile;
-            g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
-            if (active) g.fill(x, 28, x + 48, 30, CYAN);
-            g.drawCenteredString(font, p.icon, x + 24, 8, active ? CYAN : MUTED);
-            if (mx >= x && mx < x + 48 && my >= 5 && my < 30)
+            g.fill(x, 5, x + buttonWidth, 29, active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, 28, x + buttonWidth, 30, CYAN);
+            g.drawCenteredString(font, p.icon, x + buttonWidth/2, 8, active ? CYAN : MUTED);
+            if (mx >= x && mx < x + buttonWidth && my >= 5 && my < 30)
                 g.renderTooltip(font, Component.literal(p.label), mx, my);
-            x += 52;
+            x += buttonStep;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
         if (commandCameraActive()) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE"};
             String[] labels = {"STR", "ISO", "FREE"};
-            int cameraX = width - 252;
-            g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
+            int cameraX = cameraControlX();
+            if (!compactTopbar()) g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
             for (int i = 0; i < ids.length; i++) {
                 int x = cameraX + i * 36;
                 boolean activeCamera = ids[i].equals(current);
@@ -1100,7 +1105,7 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             if (commandCameraActive()) {
-                int cameraX = width - 252;
+                int cameraX = cameraControlX();
                 if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
                     int index = (int) ((mx - cameraX) / 36);
                     if (index >= 0 && index < 3) {
@@ -1109,11 +1114,11 @@ public final class PlatformShellScreen extends Screen {
                     }
                 }
             }
-            int x=Math.max(178,width/2-112);
+            int x=profileStartX(),buttonWidth=profileButtonWidth(),step=profileButtonStep();
             for(Profile p:Profile.values()) {
                 if (!profileAvailable(p)) continue;
-                if(mx>=x&&mx<x+48) { openProfile(p); return true; }
-                x+=52;
+                if(mx>=x&&mx<x+buttonWidth) { openProfile(p); return true; }
+                x+=step;
             }
             return true;
         }
