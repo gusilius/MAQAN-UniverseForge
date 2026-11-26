@@ -182,7 +182,12 @@ public final class Bodies {
             // Physical workers are allowed only after a real vanilla village was adopted
             // or the generated settlement's civic hall is fully built. The canonical
             // Character/Worker remains independent of this nearby LOD representation.
-            if (!physicalSettlementReady) continue;
+            boolean discoveredVillage = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("minecraft:village:");
+            boolean generatedSettlement = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("worldsim:settlement:")
+                    && colony.s.count("village_hall", true) > 0;
+            if (!discoveredVillage && !generatedSettlement) continue;
             ServerLevel level = colony.level(server);
             if (level == null || !SimulationLod.shouldSpawnWorkers(
                     colony.dim, colony.cx, colony.cz)) continue;
