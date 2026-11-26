@@ -37,6 +37,18 @@ public final class CharacterEvictionGateTest {
                         && gate.decision(id) == CharacterEvictionGate.Decision.DIRTY,
                 "stale persistence receipt cannot clean a newer mutation");
 
+        final String[] addressablePayload = {"newer-generation"};
+        boolean stalePublished = gate.publishIfCurrent(stale,
+                () -> addressablePayload[0] = "stale-generation");
+        check(!stalePublished && "newer-generation".equals(addressablePayload[0]),
+                "stale WAL receipt cannot overwrite the addressable checkpoint payload");
+        CharacterEvictionGate.PersistenceTicket currentPublication = gate.capture(id);
+        boolean currentPublished = gate.publishIfCurrent(currentPublication,
+                () -> addressablePayload[0] = "current-generation");
+        check(currentPublished && "current-generation".equals(addressablePayload[0])
+                        && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
+                "current generation is published atomically with its persistence acknowledgement");
+
         CharacterEvictionGate.PersistenceTicket second = gate.capture(id);
         check(gate.markPersisted(second)
                         && gate.decision(id) == CharacterEvictionGate.Decision.CHECKPOINT_PENDING,
