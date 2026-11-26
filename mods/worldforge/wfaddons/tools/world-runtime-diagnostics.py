@@ -17,8 +17,6 @@ if installer.is_file(): (out/"forge-install.log").write_bytes(installer.read_byt
 crash_dir=work/"crash-reports"
 if crash_dir.is_dir(): shutil.copytree(crash_dir,out/"crash-reports",dirs_exist_ok=True)
 for dump in work.glob("thread-dump-*.txt"): shutil.copy2(dump,out/dump.name)
-process_samples=work/"process-metrics.jsonl"
-if process_samples.is_file(): shutil.copy2(process_samples,out/"process-metrics.jsonl")
 for listing in work.glob("jcmd-processes-*.txt"): shutil.copy2(listing,out/listing.name)
 for pattern in ("core-jcmd-*.txt", "core-heap-*.txt", "core-process-*.json"):
     for metric_file in work.glob(pattern): shutil.copy2(metric_file, out/metric_file.name)
