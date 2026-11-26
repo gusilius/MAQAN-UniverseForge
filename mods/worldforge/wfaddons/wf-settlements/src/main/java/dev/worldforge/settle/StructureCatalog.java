@@ -80,6 +80,24 @@ public final class StructureCatalog {
     public int schemaVersion() { return schemaVersion; }
     public String registryId() { return registryId; }
     public Set<String> structureClasses() { return structuresByClass.keySet(); }
+
+    /** Matches a registered Minecraft structure ID to this data-driven class catalogue. */
+    public boolean matchesStructureClass(String classId, String registryId) {
+        if (classId == null || registryId == null || registryId.isBlank()) return false;
+        Set<String> members = structuresByClass.get(classId);
+        if (members == null) return false;
+        String path = registryId.toLowerCase(Locale.ROOT);
+        int namespace = path.indexOf(':');
+        if (namespace >= 0) path = path.substring(namespace + 1);
+        for (String member : members) {
+            String candidate = member.toLowerCase(Locale.ROOT);
+            if (path.equals(candidate) || path.startsWith(candidate + "_")
+                    || path.endsWith("_" + candidate) || path.contains("_" + candidate + "_")
+                    || path.equals(candidate.replace('_', '-'))) return true;
+        }
+        return false;
+    }
+
     public Set<String> identityDimensions() { return identityDimensions; }
     public Map<String, String> catalogScopes() { return catalogScopes; }
     public boolean recognizesClass(String classId) { return !loaded || structuresByClass.containsKey(classId); }
