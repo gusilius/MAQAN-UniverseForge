@@ -115,6 +115,30 @@ public final class CharacterEvictionGate {
         }
     }
 
+    @FunctionalInterface
+    public interface DurablePublication {
+        void publish() throws java.io.IOException;
+    }
+
+    /**
+     * Publishes an addressable checkpoint only while the captured generation is still
+     * current. The state monitor serializes publication against markDirty(), preventing
+     * an older asynchronous WAL receipt from overwriting a newer Character snapshot.
+     */
+    public boolean publishIfCurrent(PersistenceTicket ticket, DurablePublication publication)
+            throws java.io.IOException {
+        Objects.requireNonNull(ticket, "ticket");
+        Objects.requireNonNull(publication, "publication");
+        State state = states.get(ticket.globalId());
+        if (state == null) return false;
+        synchronized (state) {
+            if (ticket.generation() != state.generation) return false;
+            publication.publish();
+            state.persistedGeneration = ticket.generation();
+            return true;
+        }
+    }
+
     /** Capture the exact clean generations that exist at the start of a WAL checkpoint. */
     public void beginCheckpoint() {
         for (State state : states.values()) {
