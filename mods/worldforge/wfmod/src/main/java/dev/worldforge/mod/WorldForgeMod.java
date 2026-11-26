@@ -108,6 +108,7 @@ public class WorldForgeMod {
         net.minecraftforge.fml.ModLoadingContext.get().registerConfig(
                 net.minecraftforge.fml.config.ModConfig.Type.COMMON, MaqanPerformanceConfig.SPEC, "maqan-performance.toml");
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(new MaqanServerPerformanceTelemetry());
         MinecraftForge.EVENT_BUS.register(new RegionTracker());
         MinecraftForge.EVENT_BUS.register(new EditorEvents());
         MinecraftForge.EVENT_BUS.register(new SyncService());
