@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.HashSet;
@@ -111,11 +110,19 @@ public final class CharacterAccessService {
     /** A long-lived physical-body pin; deliberately excluded from mutation ThreadLocal scopes. */
     public Lease acquirePresenceGlobal(String globalId) { return registry.acquirePresenceGlobal(globalId); }
 
-    /** Conservatively marks every Character currently leased by this thread as dirty. */
+    /**
+     * Conservatively marks every Character currently leased by this thread as dirty.
+     * ACTIVE_LEASES is thread-confined and markDirty() does not mutate that set, so
+     * iterate it directly. Copying it for every Character mutation made large batch
+     * application quadratic in the number of simultaneously held leases and allocated
+     * a temporary array/list on the server thread for every mutation.
+     */
     static void markCurrentLeasesDirty() {
         Set<Lease> active = ACTIVE_LEASES.get();
         if (active.isEmpty()) return;
-        for (Lease lease : List.copyOf(active)) if (!lease.isClosed()) lease.markDirty();
+        for (Lease lease : active) {
+            if (!lease.isClosed()) lease.markDirty();
+        }
     }
 
     /**
