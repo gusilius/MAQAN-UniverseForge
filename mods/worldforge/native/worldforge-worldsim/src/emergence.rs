@@ -448,10 +448,39 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
 
-    // Persisted sovereign assignments are immutable here. New states may only claim
-    // currently unassigned communities; no pass may silently merge existing realms.
+    // A real vanilla village immediately receives local political organization
+    // (a recognized head, house and court). This is not a multi-settlement state:
+    // broader statehood still requires the regional four-community threshold below.
     let mut assigned = polities.iter().filter(|p| p.map_id == map.map_id)
         .flat_map(|p| p.settlement_ids.iter().cloned()).collect::<BTreeSet<_>>();
+    if map.map_id.starts_with("vanilla-world:") {
+        for village in &settled {
+            if assigned.contains(&village.id)
+                || !cell_at(cells, village.x, village.z).is_some_and(|cell| cell.founding_site) {
+                continue;
+            }
+            let polity_id = format!("village_{:016x}",
+                roll(seed, "village-local-government", &map.map_id, &village.id, 0));
+            if polities.iter().any(|polity| polity.id == polity_id) {
+                assigned.insert(village.id.clone());
+                continue;
+            }
+            let dynasty_id = format!("house_{:016x}",
+                roll(seed, "village-founding-house", &polity_id, "", 0));
+            polities.push(EmergentPolity {
+                id: polity_id.clone(), map_id: map.map_id.clone(),
+                name: format!("Village {}", &village.id),
+                settlement_ids: vec![village.id.clone()], population: village.population,
+                founded_year: year, stability: 65, dynasty_id, dynasty_generations: 1,
+                ruler_global_id: None, last_succession_year: year,
+                years_in_generation: 0, succession_pressure: 0, weak_years: 0,
+            });
+            assigned.insert(village.id.clone());
+            events.push(EmergenceEvent { year, kind: "local_government_founded".into(),
+                subject_id: polity_id,
+                text: "A discovered village establishes its local leadership and court".into() });
+        }
+    }
 
     for anchor in &settled {
         if assigned.contains(&anchor.id) { continue; }
@@ -584,6 +613,14 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
         // can found communities. Suitable terrain alone never creates population.
         bootstrap_initial_civilizations(map, state.seed, &mut state.bands, &mut state.polities, &mut events);
         bootstrap(map, state.seed, &mut state.bands, &mut events);
+    }
+    // Local village leadership and its court exist from the first accepted structure
+    // observation; regional statehood remains a separate, slower development stage.
+    for map in maps {
+        if let Some(cells) = cells_by_map.get(map.map_id.as_str()) {
+            maybe_form_polity(map, cells, state.seed, target_year, &state.bands,
+                &mut state.polities, &mut events);
+        }
     }
     state.bands.sort_by(|a,b| a.id.cmp(&b.id));
     let mut years_advanced = 0u64;
@@ -751,8 +788,12 @@ mod tests {
         bootstrap_initial_civilizations(&map,424242,&mut bands,&mut polities,&mut events);
         bootstrap(&map,424242,&mut bands,&mut events);
         assert_eq!(bands.len(),1,"one detected village structure may found one local community");
-        assert!(bands[0].settled); assert!(polities.is_empty(),"one village cannot instantly become a state");
+        assert!(bands[0].settled);
+        maybe_form_polity(&map, &index_cells(&map), 424242, 0, &bands, &mut polities, &mut events);
+        assert_eq!(polities.len(), 1, "one real village gets local leadership and a court, not a regional state");
+        assert_eq!(polities[0].settlement_ids, vec![bands[0].id.clone()]);
         assert!(events.iter().any(|event|event.kind=="settlement_founded"));
+        assert!(events.iter().any(|event|event.kind=="local_government_founded"));
     }
 
     #[test]
