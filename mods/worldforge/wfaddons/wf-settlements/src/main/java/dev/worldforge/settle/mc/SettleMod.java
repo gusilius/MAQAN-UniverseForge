@@ -786,7 +786,8 @@ public class SettleMod {
                 .filter(colony -> colony != null && dimension.equals(colony.dim)
                         && !excluded.contains(colony.s.id)
                         && colony.genesisOperationId != null
-                        && colony.genesisOperationId.startsWith("minecraft:village:"))
+                        && (colony.genesisOperationId.startsWith("minecraft:village:")
+                            || colony.genesisOperationId.startsWith("worldforge:structure:")))
                 .filter(colony -> {
                     long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
                     return dx * dx + dz * dz <= limit;
