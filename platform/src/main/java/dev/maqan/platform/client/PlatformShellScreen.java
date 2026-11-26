@@ -540,6 +540,62 @@ public final class PlatformShellScreen extends Screen {
         searchVisible = false;
     }
 
+    private boolean commandCameraActive() {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            return Boolean.TRUE.equals(mode.getMethod("isCommandCameraActive").invoke(null));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    private String commandCameraView() {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            Object value = mode.getMethod("commandCameraView").invoke(null);
+            return value instanceof String text ? text : "";
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return "";
+        }
+    }
+
+    private void setCommandCameraView(String view) {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            mode.getMethod("setCommandCameraView", String.class).invoke(null, view);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            LOGGER.warn("RTS camera control is unavailable: {}", view);
+        }
+    }
+
+    private boolean openUnifiedRts() {
+        if (!ModList.get().isLoaded("wf_troops")) return false;
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            mode.getMethod("openUnified").invoke(null);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            LOGGER.warn("Unable to open unified RTS command workspace", unavailable);
+            return false;
+        }
+    }
+
+    private void openProfile(Profile target) {
+        if (target == Profile.COSMOS) {
+            setProfile(target);
+            return;
+        }
+        if (target == Profile.RTS && openUnifiedRts()) return;
+        String capabilityId = switch (target) {
+            case POLITICS -> "worldforge.realms.politics";
+            case SETTLEMENTS -> "worldforge.settlements";
+            case RTS -> "worldforge.rts";
+            default -> "";
+        };
+        CapabilityRegistry.all().stream().filter(c -> c.id().equals(capabilityId)).findFirst()
+                .ifPresentOrElse(this::openCapability, () -> setProfile(target));
+    }
+
     private void drawTopBar(GuiGraphics g, int mx, int my) {
         g.drawString(font, "M", 15, 12, CYAN, false);
         g.fill(34, 9, 35, 25, EDGE);
@@ -555,6 +611,26 @@ public final class PlatformShellScreen extends Screen {
             x += 52;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        if (commandCameraActive()) {
+            String current = commandCameraView();
+            String[] ids = {"SKY", "TACTICS", "FREE"};
+            String[] labels = {"STR", "ISO", "FREE"};
+            int cameraX = width - 252;
+            g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
+            for (int i = 0; i < ids.length; i++) {
+                int x = cameraX + i * 36;
+                boolean activeCamera = ids[i].equals(current);
+                g.fill(x, 5, x + 32, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
+                if (activeCamera) g.fill(x, 28, x + 32, 30, CYAN);
+                g.drawCenteredString(font, labels[i], x + 16, 13, activeCamera ? CYAN : TEXT);
+                if (mx >= x && mx < x + 32 && my >= 5 && my < 30)
+                    g.renderTooltip(font, Component.literal(switch (ids[i]) {
+                        case "SKY" -> "Стратегический вид";
+                        case "TACTICS" -> "Изометрическая камера";
+                        default -> "Свободная камера";
+                    }), mx, my);
+            }
+        }
         g.drawCenteredString(font, "▤", width - 76, 13, workspaceManagerVisible ? CYAN : MUTED);
         g.drawCenteredString(font, "◷", width - 48, 13, notificationCenterVisible ? CYAN : MUTED);
         g.drawCenteredString(font, "×", width - 18, 13, MUTED);
@@ -992,10 +1068,20 @@ public final class PlatformShellScreen extends Screen {
                 else onClose();
                 return true;
             }
+            if (commandCameraActive()) {
+                int cameraX = width - 252;
+                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
+                    int index = (int) ((mx - cameraX) / 36);
+                    if (index >= 0 && index < 3) {
+                        setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE"}[index]);
+                        return true;
+                    }
+                }
+            }
             int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
                 if (!profileAvailable(p)) continue;
-                if(mx>=x&&mx<x+48) { setProfile(p); return true; }
+                if(mx>=x&&mx<x+48) { openProfile(p); return true; }
                 x+=52;
             }
             return true;

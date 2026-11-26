@@ -92,6 +92,21 @@ public final class CommandMode {
         }));
     }
 
+    /** Public bridge for MAQAN's shell-level camera controls. */
+    public static boolean isCommandCameraActive() { return active && camEntity != null; }
+
+    public static String commandCameraView() { return RIG.view.name(); }
+
+    public static void setCommandCameraView(String name) {
+        if (!active || name == null) return;
+        try {
+            RIG.setView(CameraRig.View.valueOf(name.trim().toUpperCase(java.util.Locale.ROOT)));
+            frame(Minecraft.getInstance());
+        } catch (IllegalArgumentException ignored) {
+            // Ignore stale or unsupported toolbar actions.
+        }
+    }
+
     static void send(OrderPacket p) { TroopsMod.NET.sendToServer(p); }
     static void suppressRadialUntilRelease() { radialSuppressed = true; }
 
