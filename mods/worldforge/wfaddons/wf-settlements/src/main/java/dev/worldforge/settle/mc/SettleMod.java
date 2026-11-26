@@ -1542,6 +1542,23 @@ public class SettleMod {
         }
     }
 
+    /**
+     * Requests founding once a settlement has a real canonical anchor and its anchor
+     * chunk is already loaded. This also covers settlements whose chunk loaded before
+     * WorldSim committed the corresponding emergence frame; it never force-loads terrain.
+     */
+    public static void requestAutonomousInfrastructureIfLoaded(MinecraftServer server, String settlementId) {
+        if (server == null || settlementId == null || settlementId.isBlank()) return;
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || colony.s == null || colony.genesisOperationId == null
+                || !colony.genesisOperationId.startsWith("worldsim:settlement:")) return;
+        ServerLevel level = colony.level(server);
+        if (level == null) return;
+        BlockPos anchor = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
+        if (!level.hasChunkAt(anchor)) return;
+        enqueueAutonomousInfrastructure(settlementId);
+    }
+
     private static void enqueueAutonomousInfrastructure(String settlementId) {
         if (settlementId == null || settlementId.isBlank()) return;
         long lastAttempt = AUTONOMOUS_INFRASTRUCTURE_LAST_ATTEMPT_TICK.getOrDefault(

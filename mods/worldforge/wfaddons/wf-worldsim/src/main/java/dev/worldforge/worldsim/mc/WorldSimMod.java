@@ -2495,6 +2495,10 @@ public final class WorldSimMod {
                 String priorBinding = settlementIdForBand(band);
                 bindPhysicalSettlement(bandId, settlementId);
                 boundSettlementIds.add(settlementId);
+                // If the site lies in terrain already generated before this emergence
+                // frame committed, no future ChunkEvent.Load is guaranteed. Request it
+                // once here, but only when the anchor chunk is already resident.
+                SettleMod.requestAutonomousInfrastructureIfLoaded(server, settlementId);
                 progress.dirty |= colonyCreated || !Objects.equals(previousType, foundingType)
                         || !Objects.equals(priorBinding, settlementId);
                 progress.completedBands.add(progressKey);
