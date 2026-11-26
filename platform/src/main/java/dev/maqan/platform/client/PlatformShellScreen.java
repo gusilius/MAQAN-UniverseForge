@@ -656,7 +656,7 @@ public final class PlatformShellScreen extends Screen {
         }
         if (!compactTopbar())
             g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
-        if (commandCameraActive()) {
+        if (commandCameraActive() && width >= 480) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE"};
             String[] labels = {"STR", "ISO", "FREE"};
@@ -1112,7 +1112,7 @@ public final class PlatformShellScreen extends Screen {
                 else onClose();
                 return true;
             }
-            if (commandCameraActive()) {
+            if (commandCameraActive() && width >= 480) {
                 int cameraX = cameraControlX();
                 if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
                     int index = (int) ((mx - cameraX) / 36);
