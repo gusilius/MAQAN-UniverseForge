@@ -272,8 +272,10 @@ fn bootstrap_vanilla_initial_civilizations(
     // Region identity is tied to the world's sampling resolution, not the currently
     // observed bounding box. As exploration grows, old region keys never move and a
     // player crossing a chunk boundary cannot re-roll an existing founding region.
-    let region_span = u64::from(map.sample_stride.max(1)).saturating_mul(8)
-        .max(separation.saturating_mul(4)).min(u64::from(u32::MAX)) as u32;
+    // Fixed macro-region dimensions: never derive this from the currently observed
+    // bounds, otherwise exploring another chunk would resize regions and reroll sites.
+    let region_span = u64::from(map.sample_stride.max(1)).saturating_mul(32)
+        .min(u64::from(u32::MAX)) as u32;
     let region_span = region_span.max(1);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
     for cell in &candidates {
@@ -285,12 +287,20 @@ fn bootstrap_vanilla_initial_civilizations(
         spatial_insert(&mut occupied, (band.x, band.z), bucket_span);
     }
     let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
+    // A macro-region can found at most one initial cluster for the lifetime of this
+    // emergence state. This closes the frontier loophole where each newly observed
+    // chunk could contribute another cluster to a region that had already founded.
+    let mut occupied_regions: HashSet<(u32, u32)> = bands.iter()
+        .filter(|band| band.map_id == map.map_id)
+        .map(|band| (band.x / region_span, band.z / region_span))
+        .collect();
     let separation_sq = separation.saturating_mul(separation);
 
     // Several bounded regional cohorts can found independent states in one world.
     // A settlement is assigned to at most one polity; new frontier observations can
     // later create additional states without rewriting existing sovereign identities.
     for ((region_x, region_z), regional_candidates) in groups {
+        if occupied_regions.contains(&(region_x, region_z)) { continue; }
         let region_key = format!("{region_x}:{region_z}");
         // Only a minority of viable regions become inhabited. The map density setting
         // raises the odds gradually (9%..34%); the decision is stable for this world seed
@@ -319,7 +329,7 @@ fn bootstrap_vanilla_initial_civilizations(
             let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
             let id = format!("band_{:016x}", roll(seed, "vanilla-initial-band-id", &key, "", 0));
             if !known_band_ids.insert(id.clone()) { continue; }
-            let residents = 32 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
+            let residents = 8 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
             bands.push(EmergentBand {
                 id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
                 population: residents, food_reserve: 18 + i64::from(cell.suitability) / 3,
@@ -334,7 +344,8 @@ fn bootstrap_vanilla_initial_civilizations(
         }
         settlement_ids.sort();
         settlement_ids.dedup();
-        if settlement_ids.len() < 4 || population < 120 { continue; }
+        if settlement_ids.len() < 4 || population < 32 { continue; }
+        occupied_regions.insert((region_x, region_z));
         if polities.iter().any(|polity| polity.map_id == map.map_id
             && polity.settlement_ids.iter().any(|id| settlement_ids.contains(id))) {
             continue;
@@ -783,6 +794,7 @@ mod tests {
     fn vanilla_founding_is_region_sparse_and_seed_deterministic() {
         let vanilla = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
+            population_density_pct: 100,
             ..map()
         };
         let mut first_bands = Vec::new();
@@ -803,8 +815,15 @@ mod tests {
         // Only a minority should found a cluster; a chunk observation is not a mandate
         // to create a settlement in every newly observed region.
         assert!(!first_bands.is_empty(), "the configured sparse chance must still allow founding");
-        assert!(first_bands.len() < 16 * 4,
+        assert!(first_bands.len() < 16 * 6,
             "a region can only found a bounded four-or-six community cluster");
+        assert!(first_bands.iter().all(|band| (8..=16).contains(&band.population)),
+            "initial village populations must remain small rather than materializing large crowds");
+        let before = first_bands.len();
+        bootstrap_vanilla_initial_civilizations(
+            &vanilla, 91_827, &mut first_bands, &mut first_polities, &mut first_events);
+        assert_eq!(first_bands.len(), before,
+            "a region already founded must not found another cluster when chunks are observed again");
         assert!(first_polities.len() < 16,
             "not every observed macro-region should become a polity");
     }
