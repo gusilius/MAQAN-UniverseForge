@@ -592,6 +592,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
         WF_METRIC_PID="$pid" powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' > "$OUTPUT/core-process-$stamp.json" 2>&1 || true
       fi
     fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during core observation"; exit 15; }
     sleep 1
   done
