@@ -53,8 +53,14 @@ public final class VanillaWorldGeography {
     private static final int WORLD_COORDINATE_OFFSET = 30_000_000;
     private static final int WORLD_COORDINATE_EXTENT = WORLD_COORDINATE_OFFSET * 2 + 1;
     private static final int SAMPLE_STEP = 4;
-    private static final int SCHEMA = 1;
+    private static final int SCHEMA = 2;
     private static final Map<String, Region> REGIONS = new TreeMap<>();
+    /** Durable index of every observed vanilla or mod-provided structure start. */
+    private static final TreeMap<String, JsonObject> STRUCTURES = new TreeMap<>();
+    /** Optional explicit classification hook for structure mods; no hard dependency on their classes. */
+    public enum StructureRole { SETTLEMENT, RESIDENTIAL, MILITARY, ECONOMIC, RELIGIOUS, INFRASTRUCTURE, LANDMARK, DUNGEON, OTHER }
+    private static final Map<ResourceLocation, StructureRole> STRUCTURE_ROLE_OVERRIDES = new TreeMap<>();
+
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING = new TreeMap<>();
     private static final Set<String> PENDING_KEYS = new HashSet<>();
     private static final int MAX_CAPTURE_CHUNKS_PER_TICK = 8;
@@ -208,31 +214,106 @@ public final class VanillaWorldGeography {
             }
         }
         if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
-        // Structure starts are authoritative founding evidence; terrain suitability is not.
+        // Every valid StructureStart is indexed, regardless of namespace or owning mod.
+        // Only structures classified as inhabited settlement anchors found a community;
+        // fortresses, dungeons, temples, mines and other structures remain available to
+        // later settlement, economy, military and political layers without becoming towns.
+        captureStructureStarts(level, chunk);
+    }
+
+    /** Mods may explicitly classify their registered structure type without a compile-time dependency. */
+    public static synchronized void registerStructureRole(ResourceLocation structureType, StructureRole role) {
+        if (structureType == null || role == null) throw new IllegalArgumentException("structure type and role are required");
+        STRUCTURE_ROLE_OVERRIDES.put(structureType, role);
+    }
+
+    private static StructureRole classifyStructure(ResourceLocation key) {
+        StructureRole override = STRUCTURE_ROLE_OVERRIDES.get(key);
+        if (override != null) return override;
+        String path = key.getPath().toLowerCase(java.util.Locale.ROOT);
+        if (containsAny(path, "village", "settlement", "town", "city", "hamlet", "colony",
+                "camp", "homestead", "outpost", "tribe")) return StructureRole.SETTLEMENT;
+        if (containsAny(path, "house", "home", "dwelling", "cabin", "hut", "farmhouse", "manor"))
+            return StructureRole.RESIDENTIAL;
+        if (containsAny(path, "fortress", "fort", "castle", "citadel", "barrack", "keep", "watchtower"))
+            return StructureRole.MILITARY;
+        if (containsAny(path, "mine", "farm", "market", "workshop", "factory", "warehouse", "mill", "port"))
+            return StructureRole.ECONOMIC;
+        if (containsAny(path, "temple", "shrine", "church", "monastery", "sanctuary"))
+            return StructureRole.RELIGIOUS;
+        if (containsAny(path, "bridge", "road", "tunnel", "canal", "rail", "aqueduct"))
+            return StructureRole.INFRASTRUCTURE;
+        if (containsAny(path, "dungeon", "spawner", "crypt", "catacomb"))
+            return StructureRole.DUNGEON;
+        if (containsAny(path, "ruin", "monument", "pyramid", "obelisk", "landmark"))
+            return StructureRole.LANDMARK;
+        return StructureRole.OTHER;
+    }
+
+    private static boolean containsAny(String value, String... needles) {
+        for (String needle : needles) if (value.contains(needle)) return true;
+        return false;
+    }
+
+    private static void captureStructureStarts(ServerLevel level, ChunkAccess chunk) {
+        String dimension = level.dimension().location().toString();
+        ChunkPos startChunk = chunk.getPos();
+        long discoveredYear = Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L);
         for (var entry : chunk.getAllStarts().entrySet()) {
-            var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
-            if (entry.getValue() != null && entry.getValue().isValid()
-                    && typeKey != null && typeKey.getPath().contains("village")) {
-                markVillageFoundingSite(level, chunk);
-                break;
-            }
+            var start = entry.getValue();
+            if (start == null || !start.isValid()) continue;
+            ResourceLocation typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
+            if (typeKey == null) continue;
+            var bounds = start.getBoundingBox();
+            int centerX = (bounds.minX() + bounds.maxX()) / 2;
+            int centerZ = (bounds.minZ() + bounds.maxZ()) / 2;
+            StructureRole role = classifyStructure(typeKey);
+            String id = dimension + "|" + typeKey + "|" + startChunk.x + "|" + startChunk.z;
+            JsonObject record = new JsonObject();
+            record.addProperty("id", id);
+            record.addProperty("dimension", dimension);
+            record.addProperty("type", typeKey.toString());
+            record.addProperty("namespace", typeKey.getNamespace());
+            record.addProperty("path", typeKey.getPath());
+            record.addProperty("role", role.name().toLowerCase(java.util.Locale.ROOT));
+            record.addProperty("settlement_anchor", role == StructureRole.SETTLEMENT);
+            record.addProperty("start_chunk_x", startChunk.x);
+            record.addProperty("start_chunk_z", startChunk.z);
+            record.addProperty("center_x", centerX);
+            record.addProperty("center_z", centerZ);
+            record.addProperty("min_x", bounds.minX());
+            record.addProperty("min_y", bounds.minY());
+            record.addProperty("min_z", bounds.minZ());
+            record.addProperty("max_x", bounds.maxX());
+            record.addProperty("max_y", bounds.maxY());
+            record.addProperty("max_z", bounds.maxZ());
+            record.addProperty("discovered_year", discoveredYear);
+            JsonObject previous = STRUCTURES.put(id, record);
+            if (previous == null || !previous.equals(record)) dirty = true;
+            if (role == StructureRole.SETTLEMENT)
+                markStructureFoundingSite(level, chunk, centerX, centerZ);
         }
     }
 
-    private static void markVillageFoundingSite(ServerLevel level, ChunkAccess chunk) {
-        ChunkPos pos = chunk.getPos();
-        int regionX = Math.floorDiv(pos.x, REGION_CHUNKS);
-        int regionZ = Math.floorDiv(pos.z, REGION_CHUNKS);
+    private static void markStructureFoundingSite(ServerLevel level, ChunkAccess startChunk,
+                                                   int centerX, int centerZ) {
+        int centerChunkX = Math.floorDiv(centerX, 16);
+        int centerChunkZ = Math.floorDiv(centerZ, 16);
+        ChunkAccess centerChunk = level.getChunkSource().getChunkNow(centerChunkX, centerChunkZ);
+        boolean exactCenterLoaded = centerChunk != null;
+        if (!exactCenterLoaded) centerChunk = startChunk; // never force-load a distant structure chunk
+        int localX = exactCenterLoaded ? Math.floorMod(centerX, 16) : 8;
+        int localZ = exactCenterLoaded ? Math.floorMod(centerZ, 16) : 8;
+        int regionX = Math.floorDiv(centerChunkX, REGION_CHUNKS);
+        int regionZ = Math.floorDiv(centerChunkZ, REGION_CHUNKS);
         String id = mapId(level.dimension().location().toString(), regionX, regionZ);
         Region region = REGIONS.computeIfAbsent(id, Region::new);
-        int localChunkX = Math.floorMod(pos.x, REGION_CHUNKS) * 16;
-        int localChunkZ = Math.floorMod(pos.z, REGION_CHUNKS) * 16;
-        int localX = 10, localZ = 10;
-        int x = localChunkX + localX, z = localChunkZ + localZ;
+        int x = Math.floorMod(centerChunkX, REGION_CHUNKS) * 16 + localX;
+        int z = Math.floorMod(centerChunkZ, REGION_CHUNKS) * 16 + localZ;
         long key = (long) z * REGION_BLOCKS + x;
         JsonObject cell = region.cells.get(key);
         if (cell == null) {
-            cell = sample(level, chunk, localX, localZ, x, z);
+            cell = sample(level, centerChunk, localX, localZ, x, z);
             cell.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
             region.cells.put(key, cell);
         }
@@ -243,6 +324,17 @@ public final class VanillaWorldGeography {
             snapshotBuild = null;
         }
     }
+
+    /** Stable read-only copy for settlement/building/economy/military consumers. */
+    public static synchronized JsonArray structuresForDimension(String dimension) {
+        JsonArray result = new JsonArray();
+        if (dimension == null || dimension.isBlank()) return result;
+        for (JsonObject structure : STRUCTURES.values())
+            if (dimension.equals(structure.get("dimension").getAsString())) result.add(structure.deepCopy());
+        return result;
+    }
+
+    public static synchronized int discoveredStructureCount() { return STRUCTURES.size(); }
 
     private static JsonObject sample(ServerLevel level, ChunkAccess chunk,
                                      int localX, int localZ, int regionX, int regionZ) {
@@ -599,6 +691,7 @@ public final class VanillaWorldGeography {
         if (server == null) return;
         if (activeServer != server) {
             REGIONS.clear();
+            STRUCTURES.clear();
             cachedSnapshot = null;
             snapshotBuild = null;
             PENDING.clear(); PENDING_KEYS.clear();
@@ -613,7 +706,8 @@ public final class VanillaWorldGeography {
         if (!Files.isRegularFile(file)) return;
         try {
             JsonObject root = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonObject.class);
-            if (root == null || !root.has("schema_version") || root.get("schema_version").getAsInt() != SCHEMA
+            if (root == null || !root.has("schema_version")
+                    || (root.get("schema_version").getAsInt() != 1 && root.get("schema_version").getAsInt() != SCHEMA)
                     || !root.has("regions") || !root.get("regions").isJsonArray())
                 throw new IOException("unsupported vanilla geography cache schema");
             for (var item : root.getAsJsonArray("regions")) {
@@ -632,6 +726,14 @@ public final class VanillaWorldGeography {
                     region.cells.put((long) z * REGION_BLOCKS + x, cell.deepCopy());
                 }
                 REGIONS.put(id, region);
+            }
+            if (root.has("structures") && root.get("structures").isJsonArray()) {
+                for (var structureElement : root.getAsJsonArray("structures")) {
+                    if (!structureElement.isJsonObject()) continue;
+                    JsonObject structure = structureElement.getAsJsonObject();
+                    if (!structure.has("id") || !structure.has("dimension") || !structure.has("type")) continue;
+                    STRUCTURES.put(structure.get("id").getAsString(), structure.deepCopy());
+                }
             }
         } catch (Exception error) {
             // Fail closed: a corrupt cache must not silently be overwritten by partial observations.
@@ -663,6 +765,9 @@ public final class VanillaWorldGeography {
                 regions.add(item);
             }
             root.add("regions", regions);
+            JsonArray structures = new JsonArray();
+            STRUCTURES.values().forEach(structure -> structures.add(structure.deepCopy()));
+            root.add("structures", structures);
             Path temp = file.resolveSibling(file.getFileName() + ".tmp");
             Files.writeString(temp, GSON.toJson(root), StandardCharsets.UTF_8);
             try {
