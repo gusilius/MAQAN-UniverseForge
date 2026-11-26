@@ -161,6 +161,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
       - name: Run isolated NPC, worldgen, politics, life and integration suites
+        id: logic_suite
+        continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: |
@@ -321,8 +323,10 @@ jobs:
           SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
           SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
           ECONOMY_OUTCOME: ${{ steps.economy_stress.outcome }}
+          LOGIC_SUITE_OUTCOME: ${{ steps.logic_suite.outcome }}
         run: |
           $outcomes = [ordered]@{
+            "Logic test suite" = $env:LOGIC_SUITE_OUTCOME
             "01 Server Core" = $env:SERVER_CORE_OUTCOME
             "02 Population" = $env:POPULATION_OUTCOME
             "03 Families / Social" = $env:SOCIAL_OUTCOME
