@@ -234,7 +234,8 @@ public final class LivingWorldAcceptanceLab {
         LOGGER.warn("LIVING_WORLD_STAGE_A status=STARTED world={} source={} destination={} resource={} realm={} army={} route={} durationTicks={} commit={}",
                 run.worldId, run.source.s.id, run.destination.s.id, run.resource, run.realm, army.id, routeId,
                 duration, System.getProperty("wf.acceptance.commit", "runtime-unknown"));
-        source.sendSuccess(() -> Component.literal("Stage A started in this Minecraft save: route=" + routeId
+        final int startedRouteId = routeId;
+        source.sendSuccess(() -> Component.literal("Stage A started in this Minecraft save: route=" + startedRouteId
                 + ", recruited army=" + army.id + ", duration=" + duration + " ticks. Run /wfworldsim acceptance-a status."), true);
         return 1;
     }
