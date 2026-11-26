@@ -414,6 +414,24 @@ public final class VanillaVillageAdapter {
     private static void reconcileInfrastructureChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunkPos) {
         int minX = chunkPos.getMinBlockX(), minZ = chunkPos.getMinBlockZ();
         String dimension = level.dimension().location().toString();
+        // A structure may have been discovered before any settlement existed nearby.
+        // Revisit starts only in already-loaded chunks around a known settlement so
+        // modded houses, farms, forts and civic buildings can be linked later.
+        ChunkAccess loadedChunk = level.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z);
+        if (loadedChunk != null) {
+            for (Map.Entry<net.minecraft.world.level.levelgen.structure.Structure, StructureStart> entry
+                    : loadedChunk.getAllStarts().entrySet()) {
+                StructureStart start = entry.getValue();
+                if (start == null || !start.isValid()) continue;
+                var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
+                if (typeKey == null) continue;
+                BoundingBox bounds = start.getBoundingBox();
+                int centerX = (bounds.minX() + bounds.maxX()) / 2;
+                int centerZ = (bounds.minZ() + bounds.maxZ()) / 2;
+                if (isSettlementAnchor(typeKey.getPath())) adopt(level, centerX, centerZ, typeKey.toString());
+                else adoptCataloguedStructure(level, centerX, centerZ, typeKey.toString());
+            }
+        }
         // Restrict this block/heightmap scan to village colonies in the spatial
         // neighborhood; never walk the complete strategic settlement registry per chunk.
         for (Colony colony : ColonyInterestIndex.nearbyAt(
