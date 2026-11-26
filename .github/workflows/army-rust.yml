@@ -1,0 +1,87 @@
+name: WorldForge Army / Troops / Population / Settlements / Trade targeted validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worldforge-settlement-trade-targeted-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-windows:
+    name: WorldForge native compute (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Test native simulation, population, army combat, troop and settlement trade compute
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test --target x86_64-pc-windows-msvc
+      - name: Build Windows native library
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-rts-native-windows
+          path: mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll
+          if-no-files-found: error
+
+  native-linux:
+    name: WorldForge native compute (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test native simulation, population, army combat and troop compute
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test
+      - name: Build Linux native library
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-rts-native-linux
+          path: mods/worldforge/native/worldforge-worldsim/target/release/libworldforge_worldsim.so
+          if-no-files-found: error
+
+  targeted-addons:
+    name: Army / Troops / People / Population / Settlements / Trade / WorldSim dependency-closure build and logic tests
+    runs-on: windows-latest
+    needs: [native-windows, native-linux]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1.1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: worldforge-rts-native-windows
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: worldforge-rts-native-linux
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-linux-x86_64
+      - name: Run complete pure-Java logic regression suite (including wf-people population)
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: bash tools/test-all.sh ../wfmod
+      - name: Build Army, Troops, People, Settlements and WorldSim with only dependency closure
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: bash tools/build-selected-addons.sh ../wfmod wf-army wf-troops wf-people wf-settlements wf-worldsim
+

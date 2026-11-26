@@ -1,0 +1,228 @@
+# RTS: производительность и устранение слабых мест
+
+Дата прохода: 16 ноября 2026 года. База: `main` на момент создания `feature/rts-performance-hardening`.
+
+## Обнаруженные узкие места
+
+1. `Squads.squadOf(unit)` ранее сканировал каждый отряд и его список участников. Этот путь используется при выборе, разделении, слиянии и командах; его стоимость росла вместе с числом отрядов.
+2. `TroopController.morale()` разбирал `s.owner` через `UUID.fromString` без защиты. Повреждённое/устаревшее значение владельца могло прервать военный шаг при смене состояния морали.
+3. Тактические вычисления не должны выполняться отдельным JNI-вызовом на каждого бойца. Вход Rust должен быть агрегированным снимком отряда, а batch — набором независимых отрядов.
+4. Нельзя переносить поиск Minecraft entities, работу с чанками, реестрами Character, сетью, сохранениями или права командования в Rust.
+5. На проверенной mainline Rust crate существует как `mods/worldforge/native/worldforge-sim`, но в проверенных исходниках main не обнаружен готовый Java bridge для именно этого tactical contract. Не выдавать наличие чистой Rust-функции за работающий native runtime.
+
+## Что исправлено в этой ветке
+
+- В `Squads` добавлен reverse index `memberToSquad` для быстрого разрешения участника к отряду.
+- Индекс обновляется при создании, удалении, разделении, слиянии, расформировании и загрузке.
+- Для совместимости с прежними addon-вызовами, напрямую изменяющими публичный `members`, добавлен lazy repair path.
+- Добавлены проверки жизненного цикла индекса, merge/split/disband, legacy mutation и persistence rebuild.
+- В `TroopController` owner UUID теперь разбирается безопасно; неверный UUID не должен обрушить обработку морали/уведомления.
+- В Rust `worldforge-sim::tactical` добавлен чистый детерминированный вычислитель предложений.
+- Добавлен allocation-free batch API `evaluate_tactical_batch_into`: вызывающая сторона переиспользует output buffer; слишком маленький буфер отклоняется до записи результатов.
+- Добавлены Rust unit tests на player-direct authority, пороги риска, retreat/pursuit permissions, batch из 4096 снимков, порядок/ревизии, малый буфер и пустой batch.
+
+## Архитектура межмодульной интеграции
+
+- `wf-people`: единственная каноническая личность и lifecycle.
+- `wf-troops`: физические тела, squad membership, formation, orders и применение приказов.
+- `wf-army`: стратегический roster, армейские операции и снабжение.
+- `wf-settlements`: recruitment sites, workforce, stock и строительные данные.
+- `wf-orders` / `wf-war` / social addons: собственные доменные эффекты и durable receipts.
+- Rust: чистая численная обработка агрегированных immutable snapshots.
+- MAQAN UI: запрос/отображение, без второго roster и второго источника прав.
+
+## Новый проход: формации в Rust
+
+- Добавлен `worldforge-sim::formation`: генерация LINE/BLOCK/COLUMN/WEDGE/CIRCLE/LOOSE.
+- Добавлены поворот/перенос локальных координат в мировые и назначение ролей по слотам.
+- Все горячие функции принимают caller-owned output/scratch buffers и не выделяют память в своей реализации.
+- Для LOOSE используется детерминированный integer hash вместо RNG; расположение воспроизводимо при одинаковом размере и spacing.
+- Буферы проверяются до записи; слишком маленькие буферы возвращают ошибку.
+- Тесты описывают геометрию, повторяемость, роль-слоты и набор из 4096 позиций.
+
+Ограничение совместимости: Java `Formations` пока остаётся активным исполнителем и владельцем фактических целей. Rust-геометрия — подготовленный pure compute slice, не включённый в игровой цикл. LOOSE intentionally deterministic but its exact coordinate sequence differs from Java's seeded `Random`; перед переключением runtime нужно согласовать parity или миграционную версию формаций, чтобы уже сохранённые отряды не меняли рисунок строя неожиданно.
+
+## Новый проход: Spatial Grid и близкие цели
+
+- В Rust добавлен `worldforge-sim::spatial`: открытая адресация по хешу X/Z ячеек, цепочки индексов исходных точек, точные радиусные запросы и caller-owned буферы.
+- Запрос ограничивает число посещаемых ячеек через `max_cells`; слишком маленький выходной буфер отклоняется до частичной записи.
+- Добавлены тесты сверки с brute force на 1000 точках, совпадающих координат, отрицательных координат, малого output buffer, ограничения слишком широких запросов и набора из 4096 NPC.
+- В Java добавлен `TroopSpatialIndex`: переиспользуемый primitive hash для текущего снимка отряда, без хранения ссылок на Entity.
+- В `TroopController.morale()` удалены попарные обходы всех бойцов для поиска лидеров в радиусе ауры и лекарей в радиусе лечения.
+- Поиск теперь ограничен соседними X/Z-ячейками и затем фильтруется точной 3D-дистанцией, сохраняя прежнюю семантику Minecraft distanceToSqr. Лечение выбирает до трёх наиболее раненых кандидатов без временных списков, hp/max массивов и сортировки объектов.
+- Аура и координаты хранятся в переиспользуемых массивах. Spatial index перестраивается один раз на squad morale pass.
+
+Граница: Rust spatial module пока не подключён к native runtime. Текущий игровой proximity path использует Java Spatial Grid, чтобы сразу убрать квадратичные полные сканы без риска FFI. Сложность остаётся зависимой от числа кандидатов в плотной ячейке; физический отряд сейчас ограничен 40 участниками. При расширении лимита нужно отдельно профилировать плотные скопления и рассмотреть cell-level агрегаты.
+
+## Что ещё нельзя считать закрытым
+
+- Java snapshot builder и native adapter отсутствуют для нового tactical API.
+- Нет подтверждённой интеграции с общим simulation scheduler.
+- Rust proposal пока не применяется через `TroopController`.
+- Корпусная координация, поиск пути по рельефу, threat spatial index и масштабная materialization strategy требуют следующих этапов.
+- В текущем проходе не запускались Gradle, Cargo, Minecraft, dedicated server или in-game stress tests. Добавленные тесты — исходный код, а не подтверждённые прогоны.
+
+## Следующие инженерные этапы
+
+1. Найти и подключить существующий общий scheduler только после проверки фактической mainline реализации; не переносить scheduler из исторических веток.
+2. Создать bounded server-thread snapshot builder и Java-side revision/authority validator.
+3. Спроектировать безопасный native transport с fallback на текущий Java order executor; FFI отдельно ревьюить, не смешивать с чистым Rust доменом.
+4. Уменьшить allocation pressure в `TroopController`: переиспользуемые буферы/планы, частоты обновления по dirty revisions и threat changes, без пропуска критических combat events.
+5. Перенести в Rust чистую математику морали, снабжения, формационных оценок и групповых боевых прогнозов только после профилирования и contract tests против текущей Java реализации.
+6. Проверить cross-addon сценарии найма/призыва/возврата/смерти/разделения/слияния, сохраняя Character UUID и стратегический roster.
+
+
+## Масштабирование больших армий и поселений: переиспользуемые планы и индексы
+
+### Физические отряды
+- В `Formations.Workspace` добавлены переиспользуемые primitive arrays для локальных/мировых координат, рангов ролей, сортировочных индексов и назначения слотов.
+- Добавлены `slotsInto`, `placeInto`, `assignInto`; рабочие методы не создают Slot, double[], Integer[] и временные списки на бойца.
+- `TroopController` использует один workspace на последовательный server-thread pass для MOVE/ATTACK_MOVE/PATROL, RETREAT, FOLLOW и GUARD.
+- Примитивная сортировка сохраняет старый порядок: melee → cavalry → ranged → support, затем боковая позиция; равенства разрешаются исходным индексом. Геометрия LOOSE воспроизводит прежний seeded Random.
+- Добавлены parity-тесты для шести формаций, нескольких размеров, мирового преобразования, распределения ролей и повторного использования ёмкости.
+- Ограничение: workspace общий и допустим только при непараллельном, нерекурсивном исполнении `TroopController.step` на серверном потоке. При распараллеливании его нужно делать task-local/thread-local.
+
+### Экономика и задачи больших поселений
+- `ResidentTaskGraph` больше не сканирует всю историю квитанций для каждого `produce`: последний `PROCESSED` receipt индексируется отдельно по building ID.
+- `count(stage)` теперь читает счётчик по enum, а не выполняет stream по истории.
+- Индексы пересобираются после загрузки сохранения; счётчики корректируются при удалении старейших записей из ограниченной истории в 5000 квитанций.
+- Добавлены тесты независимости индексов зданий, восстановления после JSON и согласованности счётчиков после вытеснения истории.
+
+### Ограничения масштабирования, которые остаются открытыми
+- `Squads.MAX_SIZE = 40` — лимит одного физического отряда, не всей армии. Большая армия должна состоять из многих отрядов/корпусов; стратегический roster не должен создавать Entity для каждого бойца постоянно.
+- Settlement.tick по-прежнему разбивает время на шаги до 2 секунд и каждый шаг проходит несколько производственных/логистических стадий. Нельзя увеличивать шаг без доказательства временной эквивалентности: это может изменить порядок найма, голода, строительства, производства и доставки.
+- `ResidentTaskGraph` хранит ограниченную историю, но его lot queues и сериализация всё ещё требуют профилирования на очень больших поселениях.
+- Rust spatial/tactical/formation пока не подключён к native runtime; Java остаётся авторитетным игровым исполнителем.
+- Не выполнялись Gradle/Cargo/unit tests/Minecraft stress tests в этом проходе. Исходный код тестов добавлен, но прохождение не подтверждено.
+
+## Resident work-target scanning: bounded candidate selection
+
+В `WFWorker.WorkGoal` устранён один из наиболее дорогих паттернов поиска ресурсов: создание полного `List<BlockPos>`, сортировка всех найденных блоков и последующий обход только первых восьми доступных целей.
+
+Теперь каждый WorkGoal держит два небольших primitive scratch arrays (32 packed BlockPos / 32 distance values), сохраняет ближайшие кандидаты вставкой в ограниченное окно и проверяет до восьми уникальных целей на достижимость. Окно шире лимита проверок намеренно: несколько брёвен одного дерева не должны вытеснить соседние деревья до дедупликации. Поиск по-прежнему ограничен прежним локальным окном и вертикальным диапазоном; незагруженные чанки не читаются. Первый скан рабочих жителей дополнительно распределён по 30-tick фазе через workerId, чтобы избежать синхронного всплеска сканирования.
+
+Ограничения:
+- Terrain scan всё ещё читает блоки в локальном объёме и остаётся затратным; следующая оптимизация — shared per-colony terrain/resource index с invalidation по изменению блоков, а не повторный scan каждым NPC.
+- Проверка подхода и поиск связанного дерева пока используют отдельные навигационные/коллекционные операции; они требуют профилирования и дальнейшего снижения allocations.
+- Изменение затрагивает только физические тела жителей. Полная численная популяция продолжает жить в Settlement/Character domain и не должна материализоваться целиком в Entity.
+- В этом проходе Gradle/Cargo/MC integration и стресс-тесты не запускались; runtime performance gain пока не измерен.
+
+## Stable-ID resident index for large settlements
+
+В `Settlement` добавлен внутренний `workersById` индекс. Публичный упорядоченный `workers` список сохранён как источник порядка обхода и сериализации, поэтому существующие экономические циклы и формат сохранения не меняются. `worker(id)` теперь выполняет O(1) lookup; добавление и удаление обновляют индекс, загрузка JSON восстанавливает его одновременно с resident list. При коллизии повреждённых ID индекс сохраняет первого встретившегося жителя, не подменяя его более поздним элементом списка.
+
+Добавлены тесты на 2000 жителей: идентичность каждого результата lookup, отсутствие неизвестных ID, немедленное удаление из индекса и восстановление после сериализации.
+
+Это устраняет повторный линейный поиск по населению для частых обращений entity/приказов/связок Character. Это не делает все циклы симуляции константными: операции, которым действительно нужно обработать всех жителей, остаются O(population), но точечные запросы больше не сканируют список.
+
+Проверки сборки и исполнения тестов в этом проходе не запускались.
+
+## Строительная система и рабочие зоны: аудит и защита схем
+
+Аудит подтвердил существующую собственную систему MAQAN:
+- `Schematic` импортирует Litematica `.litematic`, Sponge `.schem` v2/v3 и ванильные `.nbt`; внешние моды не являются runtime-зависимостью.
+- `SchemLibrary` загружает файлы из config/worldforge/schematics и <world>/worldforge/schematics; JSON sidecar может переопределять параметры здания.
+- `Blueprints` предоставляет планы; `BuildingSite` укладывает блоки снизу вверх, учитывает доступность чанков и присутствие строителей, поддерживает помощь игрока.
+- `Colony.WorkOrder` сохраняет рабочие зоны, режим, размеры, целевой уровень, cursor и видимость overlay.
+- `WorkerControl` предлагает wood/stone/ore/clear/level/harvest/honey/herbs; `WFWorker` выбирает цели, валит связанное дерево, ищет достижимые точки, использует временные безопасные опоры.
+- `Worker` сохраняет универсальную профессию laborer и ограничения специалистов; `ResidentEquipment` привязывает инструменты к профессии, уровню и навыкам Character, повышает навыки после успешной работы.
+
+Найденные пробелы:
+1. Неизвестные block IDs в схеме раньше тихо пропускались в `SchemLibrary.plan`, что позволяло строить неполный дом.
+2. Неизвестная/отсутствующая схема могла перейти в процедурную коробку через fallback `Blueprints.get`, вместо явной ошибки.
+3. `clear` — режим расчистки растительности, не универсальное безопасное удаление произвольного выбранного блока.
+4. Нет законченного отдельного UX/контракта для точечного demolition и выделения произвольной области с whitelist/blacklist блоков, глубиной и политикой сохранения дропа.
+5. Не подтверждена полноценная трансформация схем (поворот/зеркало с преобразованием directional/block properties и block entities).
+6. Физическая укладка `BuildingSite` вызывает `setBlock` по плану, но этот участок не списывает соответствующие реальные строительные материалы из складов поштучно. Экономическая стоимость здания учитывается отдельно; это расхождение нужно решить единым reservation/consumption контрактом, прежде чем объявлять материальную логистику строительства завершённой.
+
+Защита добавлена:
+- `Blueprints.Plan` теперь несёт явное поле `error` и `valid()`, при этом сохранён старый 5-аргументный конструктор.
+- `SchemLibrary.plan` возвращает invalid plan для отсутствующей схемы и для схем с неизвестными block IDs; больше не строит неполный результат.
+- `BuildingSite.tick` останавливает такую стройку с понятным статусом вместо продвижения курсора.
+- RTS `BuildControl` передаёт текст ошибки в construction payload.
+
+Не объявлять точечное demolition, трансформации схем и физическое списание материалов реализованными: это отдельные следующие этапы. Runtime/Gradle tests не выполнялись.
+
+## Exact-block demolition and unified interaction contract
+
+В RTS-панели добавлен девятый режим рабочих зон: «снести указанный блок». Выделенный строитель/универсальный рабочий получает точечный WorkOrder на координаты блока под курсором. Сервер проверяет право управления поселением и профессиональную пригодность; режим принимает только arg=0 и не превращается в массовый снос области. Рабочий удаляет ровно один выбранный блок с дропом, затем завершает приказ. Блоки с BlockEntity (контейнеры, машины и прочее состояние) и блоки с отрицательной прочностью (например, bedrock) отклоняются. Пакетный валидатор ограничивает kind диапазоном 0..8.
+
+Это намеренно безопасный первый этап. Произвольное выделение области для сноса, фильтры блоков, глубина, whitelist/blacklist и политика добычи/складирования дропа пока не реализованы. Также не реализовано точечное действие через first-person radial/dialogue: текущая команда доступна через существующий RTS-инструмент участков. First-person должен использовать тот же WorkOrder/authority pipeline, а не создавать параллельный API.
+
+Общий интерфейс: команда добавлена в уже существующий цикл режимов «Участки (Y)» экрана CommandScreen; отдельный экран не создаётся. Дальнейшая интеграция должна вынести рабочие действия в provider/action API общей оболочки и компактное контекстное radial submenu, чтобы одинаковые операции вызывались из RTS, диалога жителя и удерживаемого first-person command wheel.
+
+## Demolition target selection hardening
+
+Повторный аудит выявил важный edge case: исполнитель уже отклонял BlockEntity и неразрушаемые блоки, но поиск цели мог выбрать такой блок первым. Это создавало бесполезные повторные подходы к цели. Теперь фильтр безопасности применяется на этапе сканирования кандидатов, до pathfinding: блоки с BlockEntity и отрицательной destroy speed вообще не попадают в список целей. Также координата Y теперь корректно допускает нижнюю границу build height.
+
+First-person Alt radial wheel уже существует для боевых приказов (MOVE/ATTACK/HOLD/PATROL/FOLLOW/GUARD/RETREAT), но аудит подтвердил, что рабочие/строительные операции в него пока не подключены. Диалоги жителей и их bridge-модули также существуют; общая точка выдачи тех же WorkOrder через диалог/радиальное меню остаётся следующим интеграционным этапом. Не считать first-person строительные приказы реализованными.
+
+## Canonical command intent layer (RTS / first-person / radial foundation)
+
+Добавлен transport-independent контракт `CommandIntent` в `wfmod`:
+- нормализует actor, source, domain, action, выбранные Character/entity UUID, target, координаты, очередь и аргументы;
+- удаляет повторяющиеся subject IDs с сохранением порядка;
+- ограничивает число субъектов (200), аргументов и размеры строк, отклоняет некорректные UUID/координаты;
+- формирует стабильный bounded payload для существующего `ActionExecutionService`, с детерминированным journal request ID из actor + client request ID;
+- не выполняет игровых мутаций и не заменяет проверки прав доменных модулей.
+
+В `WorldForgeApi` добавлен `executeCommandIntent`: единая точка подачи intent в существующий durable/idempotent execution journal. Военный/поселенческий packet handler `TroopsMod.handleOrder` переведён на этот контракт. Таким образом RTS, first-person G и Alt radial, которые используют тот же OrderPacket/handler, теперь проходят через общий intent envelope и тот же journal; доменные действия всё ещё исполняются существующим `handleOrderDirect` / `WorkerControl`.
+
+Границы текущего этапа:
+- поле source пока передаётся как RTS, поскольку текущий сетевой OrderPacket не несёт достоверную классификацию источника; дальнейшее расширение протокола должно маркировать RTS/FIRST_PERSON/RADIAL без доверия к этой метке как к полномочию.
+- диалог `wfresident open` пока открывает диалог, но ещё не отправляет WorkOrder через этот intent API.
+- `CommandIntent` пока является общим envelope и journal ingress, а не новым универсальным исполнительным движком. Военные, строительные и поселенческие владельцы данных остаются authoritative.
+- Rust compute не затрагивался: переносить в Rust нужно поиск целей/планирование/оценку областей и массовые вычисления, не сетевую авторизацию, Character registry или фактические Minecraft mutations.
+
+Добавлены unit checks для дедупликации субъектов, канонического durable mapping и отклонения некорректных subject IDs. Сборка и тесты в этой сессии не запускались; наличие CI check-runs не подтверждено.
+
+## Simulation LOD / low-memory scalability policy and first hot-path optimization
+
+Целевой принцип производительности MAQAN: детализация симуляции зависит от наблюдаемости, актуальной задачи и стратегической важности, а не от общего числа Character. Один Character UUID и его состояние сохраняются при переходах между уровнями детализации; LOD никогда не создаёт второго NPC/солдата и не меняет владельца инвентаря/профессии.
+
+Целевые уровни:
+1. **Materialized / near-player** — настоящее Minecraft entity, pathfinding, combat, animation and interactions only for bodies that must be physically visible/interactive.
+2. **Active off-screen task** — worker/build/squad continues in domain state; task progress, reservations, resources and coarse movement advance without per-tick entity AI/pathfinding.
+3. **Strategic aggregate** — distant population, production, supply, army readiness and travel advance in deterministic batches/events; individual Character records remain canonical, but no per-character Minecraft entity or continuous full AI.
+4. **Dormant/event-driven** — unchanged entities receive no periodic expensive evaluation; wake on relevant event, player proximity, task deadline, raid, migration, supply threshold or other explicit dependency.
+
+LOD transitions must preserve Character UUID, role/duty, inventory/equipment, family/social state, orders, worksite reservations, progress and deterministic simulation time. Materialization requires loaded chunks and a per-server budget; dematerialization must never cancel an authoritative task or lose work progress. Critical player-issued orders and active construction continue off-screen at abstract/task level.
+
+**Low-memory target (4–8 GB system RAM):** bounded entity materialization, bounded batch sizes, reusable snapshot/scratch buffers, no unbounded per-NPC queues, no per-tick object graph copies, no loading chunks just to simulate remote residents, no forced entity for every strategic soldier. The system must degrade visual entity density / update frequency before degrading game-system correctness. Quality means continuity and correct outcomes, not keeping thousands of Minecraft entities alive.
+
+### Confirmed hot-path issue found in current Java settlement simulation
+
+In `SettleMod.runLifeAI`, every resident previously rescanned all settlement buildings to determine whether leisure facilities exist and rescanned all residents to determine whether a companion exists. For N residents, this added O(N × buildings + N²) work to each life-AI pass. These are settlement-wide facts, not resident-specific facts.
+
+The pass now computes both facts once before iterating residents, reducing this portion to O(buildings + residents) while preserving the prior semantics (a companion means another worker record; leisure means a completed, unpaused leisure/tavern/inn building). Also removed a duplicate culture fallback assignment in `syncPeople`.
+
+This is a structural complexity improvement, not a measured FPS/RAM claim. No benchmark or in-game profile has yet been run.
+
+### Audit observations requiring the next implementation stages
+
+- `Bodies.tick` already limits creation to four worker entities per pass and uses player proximity, but it scans colony workers and live-body entries and currently uses settlement-centre proximity. It needs a budgeted proximity index/chunk-aware policy and hysteresis without spawning workers into unloaded chunks.
+- `WFWorker.tick` runs the entity superclass tick (AI/navigation) every game tick while materialized; per-body work scans and route selection must be profiled and throttled by task state, not blindly invoked for every resident.
+- `SettleMod.onTick` runs settlement tick, `syncPeople`, `runLifeAI` and map logistics every STEP_TICKS; construction sites are separate. The active/off-screen split is not yet implemented.
+- `runLifeAI` still resolves Characters and evaluates individual needs for every worker on each settlement step. The next pass should introduce a deterministic dirty/event scheduler and batched due-resident processing, preserving deadlines and player-owned/military tasks.
+- The Rust crate `worldforge-sim` already contains deterministic tactical batch evaluation and bounded allocation-free spatial queries. It does not yet implement population LOD, work scheduling or resident life batches. Extend this existing crate rather than introducing another native engine.
+- Army strategic records must remain aggregate and must not require a Minecraft entity per soldier. Materialize only nearby/engaged/selected units within explicit budgets; selection, command groups and command authority remain valid for abstract units.
+
+Not yet implemented: complete LOD scheduler, per-player visibility sets, off-screen work progression, strategic Character batch scheduler, army entity materialization budgets, adaptive low-memory settings, and benchmark suite. This section records target architecture and verified code observations, not a claim that these stages are already complete.
+
+## Configurable performance controls
+
+Добавлен общий Forge COMMON config `config/maqan-performance.toml`, зарегистрированный ядром `wfmod` и доступный через стандартную страницу конфигурации WorldForge в меню Mods. Это первая общая точка настроек производительности; она не создаёт отдельные конфиги для каждого addon.
+
+Текущие действующие параметры:
+- `workerSpawnRadius` — радиус материализации рабочих (16–256, default 48 blocks).
+- `workerDespawnRadius` — радиус дематериализации с hysteresis (24–384, default 72; runtime гарантирует минимум spawn + 8).
+- `maxWorkerSpawnsPerPass` — общий лимит создания тел рабочих за один проход Bodies (0–32, default 2).
+- `maxActiveWorkerBodiesPerColony` — верхняя граница materialized worker bodies на поселение (0–512, default 24).
+- `settlementSimulationIntervalTicks` — интервал стратегического шага поселения (5–200, default 20). При изменении интервала скорость шага масштабируется относительно базовых 20 тиков, чтобы не менять скорость игрового времени.
+- `lifeAiIntervalSteps` — частота обычной обработки потребностей/жизненных AI (1–20 settlement steps, default 1). Реакция на incoming raid обходит этот интервал и выполняется срочно.
+
+`Bodies` теперь использует конфигурируемые spawn/despawn радиусы и лимиты. Подсчёт уже живых тел поселения делается один раз перед проходом рабочих, а не повторно для каждого кандидата, чтобы не добавлять O(workers × liveBodies) при введении лимита.
+
+Важно: пока это Forge config screen в меню Mods, а не полноценная вкладка настроек внутри единой MAQAN PlatformShell. Следующий UI этап — отобразить эти же значения через единый MAQAN Settings provider без второго источника конфигурации. Параметры off-screen progression и chunk pausing намеренно не выставлены: их поведение ещё не реализовано и нельзя показывать пользователю неработающие переключатели.
+
+Текущая конфигурация относится к worker materialization и settlement cadence. Отдельные лимиты армии, Rust batch sizes, spatial query budgets, memory presets и visibility hysteresis будут добавляться после реализации соответствующих механизмов. Нельзя обещать, что настройка радиуса сама по себе включает полноценный LOD.

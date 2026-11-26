@@ -1,0 +1,1 @@
+package dev.worldforge.mod.client; import java.util.*; public class Waypoints { public static class Wp { public int x,z,rgb; public String name; } public static final List<Wp> LIST=new ArrayList<>(); public static void add(String n,int x,int z){} public static void remove(Wp w){} }

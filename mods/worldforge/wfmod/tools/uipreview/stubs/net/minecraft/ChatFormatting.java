@@ -1,0 +1,1 @@
+package net.minecraft; public enum ChatFormatting { GRAY, DARK_GRAY }

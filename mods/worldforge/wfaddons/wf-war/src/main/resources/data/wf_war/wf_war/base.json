@@ -1,0 +1,10 @@
+{
+  "casus_belli": {
+    "conquest":     {"name": "Завоевание",       "goal": "conquer",      "target": "independent", "max_goals": 2, "truce_days": 1825},
+    "subjugation":  {"name": "Подчинение",       "goal": "subjugate",    "target": "independent", "relation": "vassal", "truce_days": 1825},
+    "tribute_war":  {"name": "Принуждение к дани","goal": "subjugate",    "target": "independent", "relation": "tributary", "truce_days": 1095},
+    "independence": {"name": "Война за независимость", "goal": "independence", "target": "overlord", "truce_days": 3650},
+    "humiliation":  {"name": "Унижение",         "goal": "humiliate",    "target": "any", "truce_days": 730},
+    "betrayal":     {"name": "Предательство",    "goal": "conquer",      "target": "ally_ok", "max_goals": 1, "truce_days": 3650}
+  }
+}

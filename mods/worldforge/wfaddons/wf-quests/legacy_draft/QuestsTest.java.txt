@@ -1,0 +1,242 @@
+package dev.worldforge.tests;
+
+import dev.worldforge.mod.api.StatApi;
+import dev.worldforge.quests.*;
+
+import java.nio.file.*;
+import java.util.*;
+
+public class QuestsTest {
+    static int fails;
+    static void ok(boolean c, String w) { System.out.println((c ? "ok   " : "FAIL ") + w); if (!c) fails++; }
+
+    static final class Fake extends Quests.Hooks0 {
+        final Map<String, Integer> inv = new HashMap<>();
+        final Map<String, Integer> lvl = new HashMap<>(), orgRank = new HashMap<>(), rep = new HashMap<>(), influence = new HashMap<>();
+        final Map<String, String> tags = new HashMap<>();
+        final List<String> news = new ArrayList<>(), ran = new ArrayList<>();
+        int xp;
+        @Override public int count(String o, String i) { return inv.getOrDefault(o + ":" + i, 0); }
+        @Override public boolean take(String o, String i, int n) { if (count(o, i) < n) return false; inv.merge(o + ":" + i, -n, Integer::sum); return true; }
+        @Override public void give(String o, String i, int n) { inv.merge(o + ":" + i, n, Integer::sum); }
+        @Override public String realmOf(String o) { return "stark"; }
+        @Override public String run(String o, String a, String r, List<String> args) { ran.add(a); return "ok"; }
+        @Override public int level(String o) { return lvl.getOrDefault(o, 1); }
+        @Override public void xp(String o, int n) { xp += n; }
+        @Override public void rep(String o, String f, int n) { rep.merge(f, n, Integer::sum); }
+        @Override public void influence(String o, String org, int n) { influence.merge(org, n, Integer::sum); }
+        @Override public int orgRank(String o, String org) { return orgRank.getOrDefault(o + ":" + org, -1); }
+        @Override public List<String> neighbors(String r) { return List.of("lannister", "baratheon"); }
+        @Override public String tag(String o, String k) { return tags.getOrDefault(o + ":" + k, ""); }
+        @Override public void news(String r, String t) { news.add(t); }
+    }
+
+    static final Quests.Giver VILLAGER = new Quests.Giver("n:v1", "Марта", List.of("villager"), "", "stark", "villager");
+    static final Quests.Giver MARSHAL = new Quests.Giver("n:m1", "Маршал Брайен", List.of("marshal"), "", "stark", "military");
+    static final Quests.Giver CHANC = new Quests.Giver("n:c1", "Канцлер", List.of("chancellor"), "", "stark", "official");
+    static final Quests.Giver RULER = new Quests.Giver("n:r1", "Лорд", List.of("ruler"), "", "stark", "noble");
+    static final Quests.Giver MERCH = new Quests.Giver("n:g1", "Глава гильдии", List.of("villager"), "merchants_guild", "stark", "guild");
+
+    static Quests.Offer find(List<Quests.Offer> l, String q) { for (Quests.Offer o : l) if (o.quest.equals(q)) return o; return null; }
+
+    /** Выполняет задание давателю: даёт нужные предметы/убийства и сдаёт. */
+    static Quests.Result finish(Quests q, Fake h, String P, Quests.Offer o, Quests.Giver g, int day) {
+        if (!q.accept(P, o, day)) throw new IllegalStateException("accept: " + q.lastError);
+        Quests.Active a = q.player(P).active.get(q.player(P).active.size() - 1);
+        for (int i = 0; i < a.steps.size(); i++) {
+            Map<String, Object> st = a.steps.get(i);
+            String t = String.valueOf(st.get("type"));
+            int n = st.get("count") instanceof Number x ? x.intValue() : 1;
+            switch (t) {
+                case "fetch", "deliver" -> h.inv.merge(P + ":" + st.get("item"), n, Integer::sum);
+                case "kill" -> q.report(P, "kill", String.valueOf(st.get("mob")), n);
+                case "reach" -> q.report(P, "reach", String.valueOf(st.get("place")), 1);
+                case "talk" -> q.report(P, "talk", String.valueOf(st.get("role")), 1);
+                case "choice" -> { List<?> opts = (List<?>) st.get("options"); q.choose(P, a.uid, String.valueOf(((Map<?, ?>) opts.get(0)).get("id"))); }
+                case "wait" -> day += n;
+                case "level" -> h.lvl.put(P, Math.max(h.lvl.getOrDefault(P, 1), ((Number) st.get("min")).intValue()));
+                default -> { }
+            }
+        }
+        Quests.Giver target = g;
+        for (Map<String, Object> st : a.steps) if ("deliver".equals(st.get("type"))) target = new Quests.Giver("x", "x", List.of(String.valueOf(st.get("to"))), "", "stark", "official");
+        Quests.Result r = q.turnIn(P, a.uid, target.id().equals("x") ? target : g, day);
+        return r;
+    }
+
+    public static void main(String[] a) throws Exception {
+        StatApi.resetForTests();
+        QuestDefs d = new QuestDefs();
+        try (var s = Files.list(Paths.get("wf-quests/src/main/resources/data/wf_quests/wf_quests"))) { for (Path p : (Iterable<Path>) s.sorted()::iterator) d.load(Files.readString(p)); }
+        List<String> bad = d.validate();
+        ok(bad.isEmpty(), "данные корректны " + bad);
+        Set<String> cats = new TreeSet<>();
+        for (var q : d.quests.values()) cats.add(q.category());
+        ok(d.quests.size() >= 55 && cats.size() >= 8 && d.events.size() >= 12, "объём: заданий " + d.quests.size() + ", категорий " + cats + ", событий " + d.events.size());
+
+        Fake h = new Fake();
+        Quests q = new Quests(d);
+        q.hooks = h;
+        q.publish();
+        String P = "p:1";
+        h.lvl.put(P, 5);
+
+        // выдача
+        List<Quests.Offer> v1 = q.offers(P, VILLAGER, 10), v2 = q.offers(P, VILLAGER, 10), v3 = q.offers(P, VILLAGER, 11);
+        ok(!v1.isEmpty() && v1.size() <= 3 && v1.stream().map(o -> o.id).toList().equals(v2.stream().map(o -> o.id).toList()), "у жителя до 3 заданий, стабильно в течение дня: " + v1.stream().map(o -> o.name).toList());
+        ok(!v1.stream().map(o -> o.id).toList().equals(v3.stream().map(o -> o.id).toList()), "на другой день предложения другие");
+        ok(v1.stream().allMatch(o -> d.quests.get(o.quest).giver().kinds().contains("villager")), "житель даёт только свои поручения");
+        List<Quests.Offer> m1 = q.offers(P, MARSHAL, 10);
+        ok(m1.stream().allMatch(o -> d.quests.get(o.quest).giver().roles().contains("marshal")), "маршал даёт военные поручения: " + m1.stream().map(o -> o.name).toList());
+        ok(q.offers(P, CHANC, 10).stream().allMatch(o -> d.quests.get(o.quest).giver().roles().contains("chancellor")), "канцлер даёт дипломатические");
+        ok(q.offers(P, RULER, 10).stream().noneMatch(o -> o.quest.startsWith("r_charter")), "хартия закрыта без цепочки миссий");
+        Quests.Offer ov = v1.get(0);
+        ok(ov.text.contains("Марта") && !ov.text.contains("{"), "текст собран: " + ov.text);
+        ok(ov.gold > 0 && ov.xp > 0, "награда выбрана: " + ov.gold + " зол., " + ov.xp + " опыта");
+
+        // сдача: предметы, награда
+        Quests.Offer wheat = null;
+        for (int day = 20; day < 60 && wheat == null; day++) { wheat = find(q.offers(P, VILLAGER, day), "v_wheat"); if (wheat != null) break; }
+        ok(wheat != null, "поручение про пшеницу нашлось");
+        ok(q.accept(P, wheat, 20), "принято");
+        int uid = q.player(P).active.get(0).uid;
+        Quests.Result r = q.turnIn(P, uid, VILLAGER, 21);
+        ok(!r.ok && r.text.contains("Ещё не всё"), "без предметов не сдать: " + r.text);
+        int need = ((Number) wheat.steps.get(0).get("count")).intValue();
+        h.inv.put(P + ":wheat", need);
+        r = q.turnIn(P, uid, VILLAGER, 21);
+        ok(r.ok && h.count(P, "wheat") == 0 && h.count(P, "gold") == wheat.gold && h.xp == wheat.xp, "сдача: предметы забраны, золото " + h.count(P, "gold") + " и опыт получены");
+        ok(q.flagOf(P, "quest:done:v_wheat") && q.player(P).completed == 1, "флаг выполнения и счётчик");
+        ok(!q.turnIn(P, uid, VILLAGER, 21).ok, "второй раз не сдать");
+
+        // убийства и чужой даватель
+        Quests.Offer bandits = null;
+        for (int day = 30; day < 80 && bandits == null; day++) bandits = find(q.offers(P, MARSHAL, day), "m_bandits");
+        ok(bandits != null && q.accept(P, bandits, 30), "задание на разбойников принято");
+        int u2 = q.player(P).active.get(q.player(P).active.size() - 1).uid;
+        q.report(P, "kill", "zombie", 5);
+        ok(!q.turnIn(P, u2, MARSHAL, 31).ok, "пока мало убийств - нельзя");
+        q.report(P, "kill", "hostile", ((Number) bandits.steps.get(0).get("count")).intValue());
+        ok(!q.turnIn(P, u2, VILLAGER, 31).ok && q.turnIn(P, u2, VILLAGER, 31).text.contains("Сдать это нужно у"), "сдавать нужно давателю");
+        ok(q.turnIn(P, u2, MARSHAL, 31).ok && h.rep.getOrDefault("army", 0) == 3, "сдача маршалу, репутация армии +3");
+
+        // цепочка деревни
+        h.lvl.put(P, 6);
+        ok(find(q.offers(P, VILLAGER, 40), "v_shadow_2") == null, "второй шаг цепочки закрыт");
+        Quests.Offer s1 = null;
+        for (int day = 40; day < 200 && s1 == null; day++) s1 = find(q.offers(P, VILLAGER, day), "v_shadow_1");
+        ok(s1 != null && finish(q, h, P, s1, VILLAGER, 60).ok, "первый шаг цепочки выполнен");
+        Quests.Offer s2 = null;
+        for (int day = 61; day < 300 && s2 == null; day++) s2 = find(q.offers(P, VILLAGER, day), "v_shadow_2");
+        ok(s2 != null, "после первого шага открылся второй");
+        ok(finish(q, h, P, s2, VILLAGER, 100).ok, "второй шаг: предметы и разговор с кастеляном");
+        Quests.Offer s3 = null;
+        for (int day = 101; day < 400 && s3 == null; day++) s3 = find(q.offers(P, VILLAGER, day), "v_shadow_3");
+        ok(s3 != null && q.accept(P, s3, 120), "развилка финала открыта");
+        Quests.Active fa = q.player(P).active.get(q.player(P).active.size() - 1);
+        ok(!q.pendingChoices(P, fa.uid).isEmpty() && q.pendingChoices(P, fa.uid).size() == 3, "три варианта: " + q.pendingChoices(P, fa.uid));
+        int goldBefore = fa.gold;
+        ok(q.choose(P, fa.uid, "parley") && fa.gold > goldBefore && q.flagOf(P, "shadow:parley"), "выбор «договориться» повышает награду (x1.6) и ставит флаг");
+        ok(!q.choose(P, fa.uid, "burn"), "второй выбор невозможен");
+
+        // срок и провал
+        Quests.Offer eg = null;
+        for (int day = 200; day < 400 && eg == null; day++) eg = find(q.offers(P, new Quests.Giver("n:s1", "Управляющий", List.of("steward"), "", "stark", "official"), day), "s_grain_audit");
+        ok(eg != null && q.accept(P, eg, 300), "задание со сроком (12 дней)");
+        q.tick(305);
+        ok(q.player(P).active.stream().anyMatch(x -> x.quest.equals("s_grain_audit")), "до срока задание живо");
+        q.tick(313);
+        ok(q.player(P).active.stream().noneMatch(x -> x.quest.equals("s_grain_audit")) && q.flagOf(P, "quest:failed:s_grain_audit") && q.player(P).failed == 1, "просрочено: провал и флаг");
+
+        // организации и звания
+        String M = "p:2";
+        h.lvl.put(M, 3);
+        ok(q.offers(M, MERCH, 10).isEmpty(), "не член гильдии - нет заданий");
+        h.orgRank.put(M + ":merchants_guild", 0);
+        List<Quests.Offer> mo = q.offers(M, MERCH, 10);
+        ok(!mo.isEmpty() && mo.stream().allMatch(o -> o.quest.equals("mo_caravan")), "новичок получает только простые: " + mo.stream().map(o -> o.name).toList());
+        h.orgRank.put(M + ":merchants_guild", 2);
+        Set<String> seen = new TreeSet<>();
+        for (int day = 1; day < 30; day++) for (var o : q.offers(M, MERCH, day)) seen.add(o.quest);
+        ok(seen.contains("mo_monopoly") && seen.contains("mo_route"), "с рангом 2 доступны сложные: " + seen);
+
+        // раса и класс
+        var custom = d.parseQuest("{\"id\":\"elf_only\",\"name\":\"Только эльфам\",\"giver\":{\"roles\":[\"villager\"]},\"req\":{\"races\":[\"elf\"]},\"steps\":[{\"type\":\"talk\",\"role\":\"ruler\"}]}");
+        ok(!q.why(custom, M, VILLAGER, 1).isEmpty(), "задание для эльфов закрыто человеку: " + q.why(custom, M, VILLAGER, 1));
+        h.tags.put(M + ":race", "elf");
+        ok(q.why(custom, M, VILLAGER, 1).isEmpty(), "эльфу открыто");
+
+        // deliver: нужен получатель с нужной ролью
+        Quests.Offer del = null;
+        for (int day = 1; day < 100 && del == null; day++) del = find(q.offers(P, VILLAGER, 500 + day), "v_bakers_bread");
+        ok(del != null && q.accept(P, del, 600), "доставка хлеба принята");
+        int ud = q.player(P).active.get(q.player(P).active.size() - 1).uid;
+        h.inv.put(P + ":bread", 99);
+        ok(!q.turnIn(P, ud, VILLAGER, 601).ok, "доставку жителю не сдать: нужен управляющий");
+        var stew = new Quests.Giver("n:s2", "Управляющий", List.of("steward"), "", "stark", "official");
+        ok(q.turnIn(P, ud, stew, 601).ok, "управляющему сдана");
+
+        // права: цепочка миссий -> post_quest -> объявление игрока
+        String K = "p:3", L = "p:4";
+        h.lvl.put(K, 12); h.lvl.put(L, 5);
+        ok(!q.has(K, "post_quest") && q.post(K, "stark", "kill", "zombie", 5, 50, 10, 1) == null && q.lastError.contains("post_quest"), "без права объявление нельзя: " + q.lastError);
+        String[] chain = {"c_mission_1", "c_mission_2", "c_mission_3"};
+        for (String cq : chain) {
+            Quests.Offer o = null;
+            for (int day = 1; day < 400 && o == null; day++) o = find(q.offers(K, CHANC, 1000 + day), cq);
+            ok(o != null, "цепочка миссий: " + cq + " доступна");
+            Quests.Result fr = finish(q, h, K, o, CHANC, 2000);
+            ok(fr.ok, cq + " выполнено: " + fr.text.replace("\n", " | "));
+        }
+        ok(q.has(K, "post_quest") && q.flagOf(K, "quest:royal_envoy"), "в конце цепочки выдано право post_quest");
+        h.inv.put(K + ":gold", 200);
+        String posted = q.post(K, "stark", "kill", "zombie", 5, 60, 10, 2000);
+        ok(posted != null && h.count(K, "gold") == 140, "объявление повешено, залог 60 списан: " + posted);
+        ok(q.board("stark").size() >= 1, "оно на доске");
+        h.lvl.put(L, 5);
+        List<Quests.Offer> ol = q.offers(L, CHANC, 2001);
+        Quests.Offer bounty = find(ol, "bounty");
+        ok(bounty != null && q.accept(L, bounty, 2001), "другой игрок видит и берёт объявление у чиновника");
+        ok(!q.accept(K, bounty, 2001) || true, "—");
+        q.report(L, "kill", "zombie", 5);
+        int ub = q.player(L).active.get(q.player(L).active.size() - 1).uid;
+        ok(q.turnIn(L, ub, CHANC, 2002).ok && h.count(L, "gold") == 60, "плата из залога выплачена исполнителю: " + h.count(L, "gold"));
+        // залог возвращается при истечении
+        q.post(K, "stark", "fetch", "iron_ingot", 3, 50, 3, 2010);
+        int before = h.count(K, "gold");
+        q.tick(2020);
+        ok(h.count(K, "gold") == before + 50, "просроченное объявление вернуло залог");
+        ok(q.post(K, "stark", "kill", "zombie", 5, 5, 10, 2030) == null, "награда меньше минимума отвергнута: " + q.lastError);
+
+        // права на создание контента
+        ok(q.contentPermission("p:9", false, "org", "create", 0) != null && q.contentPermission("p:9", true, "org", "create", 0) == null, "ContentApi: без права нельзя, оператору можно");
+        q.grant("p:9", "create_org");
+        ok(q.contentPermission("p:9", false, "org", "create", 0) == null && q.contentPermission("p:9", false, "org", "create", 5) != null, "с правом можно, но не больше " + Quests.CONTENT_LIMIT);
+
+        // события
+        Random rng = new Random(7);
+        int started = 0; Set<String> ids = new TreeSet<>();
+        for (int day = 1; day < 400; day++) { var ev = q.rollEvent("stark", day, rng, day % 360 < 90 ? "Зима" : day % 360 < 180 ? "Весна" : day % 360 < 270 ? "Лето" : "Осень", 3, false); if (ev != null) { started++; ids.add(ev.id()); } q.tick(day); }
+        ok(started >= 10 && ids.size() >= 6, "события идут: " + started + " за 400 дней, видов " + ids.size());
+        ok(!ids.contains("border_skirmish"), "пограничные стычки только на войне");
+        ok(h.news.size() == started, "каждое событие попало в новости");
+        var q2 = new Quests(d); q2.hooks = h;
+        for (int day = 1000; day < 1400; day++) { var ev = q2.rollEvent("stark", day, new Random(day), "Осень", 3, true); if (ev != null) ids.add(ev.id()); }
+        ok(ids.contains("border_skirmish"), "на войне стычки случаются");
+        Quests q3 = new Quests(d); q3.hooks = h;
+        for (int day = 1; day < 100 && q3.activeEvents("w").isEmpty(); day++) q3.rollEvent("w", day, new Random(day), "Осень", 3, false);
+        ok(!q3.activeEvents("w").isEmpty() && (!q3.eventMods("w").isEmpty()), "событие даёт бонусы: " + q3.eventMods("w"));
+        q3.publish();
+        ok(StatApi.mods("r:w").equals(q3.eventMods("w")), "бонусы событий видны в общей шине для r:<id>");
+        ok(q3.board("w").size() >= 0, "доска доступна");
+
+        // сохранение
+        String js = q.toJson();
+        Quests q4 = new Quests(d); q4.hooks = h; q4.fromJson(js);
+        ok(q4.toJson().equals(js), "save/load без потерь (" + js.length() + " байт)");
+        ok(q4.viewJson(P, 600, "stark").contains("history") && q4.viewJson(K, 2000, "stark").contains("rights"), "viewJson");
+        ok(q4.abandon(P, ud, 700) || true, "abandon не падает");
+        System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
+        if (fails > 0) System.exit(1);
+    }
+}

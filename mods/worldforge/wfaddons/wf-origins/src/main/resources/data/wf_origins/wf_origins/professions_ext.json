@@ -1,0 +1,1145 @@
+{
+ "professions": [
+  {
+   "id": "fisher",
+   "name": "Рыбак",
+   "desc": "Река и море кормят.",
+   "group": "farm",
+   "workplace": "fishery",
+   "wage": 4,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Рыбак",
+     "xp": 150,
+     "mods": {
+      "luck": 0.5,
+      "carry": 3
+     }
+    },
+    {
+     "name": "Мастер лова",
+     "xp": 600,
+     "mods": {
+      "luck": 0.5,
+      "carry": 3
+     }
+    },
+    {
+     "name": "Старый морской волк",
+     "xp": 2000,
+     "mods": {
+      "luck": 0.5,
+      "carry": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "herbalist",
+   "name": "Травник",
+   "desc": "Лесные травы лечат и кормят.",
+   "group": "farm",
+   "workplace": "healer_hut",
+   "wage": 4,
+   "ranks": [
+    {
+     "name": "Сборщик",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Травник",
+     "xp": 150,
+     "mods": {
+      "heal_pct": 3,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Знахарь",
+     "xp": 600,
+     "mods": {
+      "heal_pct": 3,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Мудрый травник",
+     "xp": 2000,
+     "mods": {
+      "heal_pct": 3,
+      "luck": 0.3
+     }
+    }
+   ]
+  },
+  {
+   "id": "tailor",
+   "name": "Портной",
+   "desc": "Одежда и знамёна.",
+   "group": "craft",
+   "workplace": "tailor",
+   "wage": 5,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Портной",
+     "xp": 150,
+     "mods": {
+      "craft_quality_pct": 3,
+      "opinion": 0.5
+     }
+    },
+    {
+     "name": "Мастер иглы",
+     "xp": 600,
+     "mods": {
+      "craft_quality_pct": 3,
+      "opinion": 0.5
+     }
+    },
+    {
+     "name": "Придворный портной",
+     "xp": 2000,
+     "mods": {
+      "craft_quality_pct": 3,
+      "opinion": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "id": "tanner",
+   "name": "Кожевник",
+   "desc": "Кожа и упряжь.",
+   "group": "craft",
+   "workplace": "tannery",
+   "wage": 5,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Кожевник",
+     "xp": 150,
+     "mods": {
+      "craft_quality_pct": 3,
+      "armor": 0.3
+     }
+    },
+    {
+     "name": "Мастер кожи",
+     "xp": 600,
+     "mods": {
+      "craft_quality_pct": 3,
+      "armor": 0.3
+     }
+    },
+    {
+     "name": "Мастер-шорник",
+     "xp": 2000,
+     "mods": {
+      "craft_quality_pct": 3,
+      "armor": 0.3
+     }
+    }
+   ]
+  },
+  {
+   "id": "baker",
+   "name": "Пекарь",
+   "desc": "Хлеб - основа любого города.",
+   "group": "service",
+   "workplace": "bakery",
+   "wage": 4,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Пекарь",
+     "xp": 150,
+     "mods": {
+      "health_regen": 0.01,
+      "opinion": 0.5
+     }
+    },
+    {
+     "name": "Мастер печи",
+     "xp": 600,
+     "mods": {
+      "health_regen": 0.01,
+      "opinion": 0.5
+     }
+    },
+    {
+     "name": "Хлебодар",
+     "xp": 2000,
+     "mods": {
+      "health_regen": 0.01,
+      "opinion": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "id": "shipwright",
+   "name": "Корабел",
+   "desc": "Лодки, барки, корабли.",
+   "group": "craft",
+   "workplace": "shipyard",
+   "wage": 7,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Плотник верфи",
+     "xp": 150,
+     "mods": {
+      "craft_quality_pct": 3,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Корабел",
+     "xp": 600,
+     "mods": {
+      "craft_quality_pct": 3,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Мастер флота",
+     "xp": 2000,
+     "mods": {
+      "craft_quality_pct": 3,
+      "build_speed_pct": 3
+     }
+    }
+   ],
+   "req_stat": {
+    "might": 5
+   }
+  },
+  {
+   "id": "bard",
+   "name": "Бард",
+   "desc": "Песни, новости и слухи.",
+   "group": "service",
+   "workplace": "tavern",
+   "wage": 4,
+   "ranks": [
+    {
+     "name": "Уличный певец",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Бард",
+     "xp": 150,
+     "mods": {
+      "opinion": 1,
+      "xp_gain_pct": 1
+     }
+    },
+    {
+     "name": "Придворный бард",
+     "xp": 600,
+     "mods": {
+      "opinion": 1,
+      "xp_gain_pct": 1
+     }
+    },
+    {
+     "name": "Легенда сцены",
+     "xp": 2000,
+     "mods": {
+      "opinion": 1,
+      "xp_gain_pct": 1
+     }
+    }
+   ],
+   "req_stat": {
+    "diplomacy": 5
+   }
+  },
+  {
+   "id": "cartographer_p",
+   "name": "Картограф",
+   "desc": "Карты, пути и границы.",
+   "group": "scholar",
+   "workplace": "library",
+   "wage": 6,
+   "ranks": [
+    {
+     "name": "Чертёжник",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Картограф",
+     "xp": 150,
+     "mods": {
+      "move_speed_pct": 1,
+      "xp_gain_pct": 2
+     }
+    },
+    {
+     "name": "Мастер карт",
+     "xp": 600,
+     "mods": {
+      "move_speed_pct": 1,
+      "xp_gain_pct": 2
+     }
+    },
+    {
+     "name": "Королевский картограф",
+     "xp": 2000,
+     "mods": {
+      "move_speed_pct": 1,
+      "xp_gain_pct": 2
+     }
+    }
+   ],
+   "req_stat": {
+    "learning": 6
+   }
+  },
+  {
+   "id": "engineer",
+   "name": "Инженер",
+   "desc": "Механизмы, осадные машины, мосты.",
+   "group": "craft",
+   "workplace": "workshop",
+   "wage": 8,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Инженер",
+     "xp": 150,
+     "mods": {
+      "build_speed_pct": 4,
+      "craft_quality_pct": 2
+     }
+    },
+    {
+     "name": "Мастер-инженер",
+     "xp": 600,
+     "mods": {
+      "build_speed_pct": 4,
+      "craft_quality_pct": 2
+     }
+    },
+    {
+     "name": "Главный инженер",
+     "xp": 2000,
+     "mods": {
+      "build_speed_pct": 4,
+      "craft_quality_pct": 2
+     }
+    }
+   ],
+   "req_stat": {
+    "intellect": 8
+   }
+  },
+  {
+   "id": "trainer",
+   "name": "Конюший",
+   "desc": "Лошади и боевые звери.",
+   "group": "military",
+   "workplace": "stables",
+   "wage": 6,
+   "ranks": [
+    {
+     "name": "Конюх",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Объездчик",
+     "xp": 150,
+     "mods": {
+      "move_speed_pct": 2,
+      "carry": 3
+     }
+    },
+    {
+     "name": "Мастер-конюший",
+     "xp": 600,
+     "mods": {
+      "move_speed_pct": 2,
+      "carry": 3
+     }
+    },
+    {
+     "name": "Главный конюший",
+     "xp": 2000,
+     "mods": {
+      "move_speed_pct": 2,
+      "carry": 3
+     }
+    }
+   ],
+   "req_stat": {
+    "agility": 5
+   }
+  },
+  {
+   "id": "bladesmith",
+   "name": "Мастер мечей",
+   "desc": "Клинки, что поют.",
+   "from": "smith",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Подмастерье мечей",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Мечник-кузнец",
+     "xp": 200,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "crit_pct": 1
+     }
+    },
+    {
+     "name": "Мастер мечей",
+     "xp": 800,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "crit_pct": 1
+     }
+    },
+    {
+     "name": "Легенда клинка",
+     "xp": 2500,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "crit_pct": 1
+     }
+    }
+   ],
+   "exclusive": "smithtype"
+  },
+  {
+   "id": "polearm_smith",
+   "name": "Мастер древкового",
+   "desc": "Копья, алебарды и боевые молоты.",
+   "from": "smith",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Мастер копий",
+     "xp": 200,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "melee_dmg_pct": 1
+     }
+    },
+    {
+     "name": "Мастер алебард",
+     "xp": 800,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "melee_dmg_pct": 1
+     }
+    },
+    {
+     "name": "Легенда древка",
+     "xp": 2500,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "melee_dmg_pct": 1
+     }
+    }
+   ],
+   "exclusive": "smithtype"
+  },
+  {
+   "id": "banker",
+   "name": "Банкир",
+   "desc": "Ссуды, векселя и проценты.",
+   "from": "merchant",
+   "min_rank": 2,
+   "wage": 12,
+   "ranks": [
+    {
+     "name": "Меняла",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Банкир",
+     "xp": 200,
+     "mods": {
+      "tax_pct": 2,
+      "trade_profit_pct": 3
+     }
+    },
+    {
+     "name": "Глава банка",
+     "xp": 800,
+     "mods": {
+      "tax_pct": 2,
+      "trade_profit_pct": 3
+     }
+    },
+    {
+     "name": "Казначей державы",
+     "xp": 2500,
+     "mods": {
+      "tax_pct": 2,
+      "trade_profit_pct": 3
+     }
+    }
+   ],
+   "exclusive": "trade",
+   "workplace": "bank"
+  },
+  {
+   "id": "smuggler_trader",
+   "name": "Скупщик",
+   "desc": "Всё, что нельзя продавать, продаётся здесь.",
+   "from": "merchant",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Перекупщик",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Скупщик",
+     "xp": 200,
+     "mods": {
+      "trade_profit_pct": 5,
+      "gold_find_pct": 3
+     }
+    },
+    {
+     "name": "Барыга",
+     "xp": 800,
+     "mods": {
+      "trade_profit_pct": 5,
+      "gold_find_pct": 3
+     }
+    },
+    {
+     "name": "Король чёрного рынка",
+     "xp": 2500,
+     "mods": {
+      "trade_profit_pct": 5,
+      "gold_find_pct": 3
+     }
+    }
+   ],
+   "exclusive": "trade",
+   "workplace": "market"
+  },
+  {
+   "id": "poisoner",
+   "name": "Отравитель",
+   "desc": "Лечит и калечит одним ремеслом.",
+   "from": "alchemist",
+   "min_rank": 2,
+   "wage": 11,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Травильщик",
+     "xp": 200,
+     "mods": {
+      "crit_pct": 2,
+      "spy_success_pct": 2
+     }
+    },
+    {
+     "name": "Отравитель",
+     "xp": 800,
+     "mods": {
+      "crit_pct": 2,
+      "spy_success_pct": 2
+     }
+    },
+    {
+     "name": "Мастер ядов",
+     "xp": 2500,
+     "mods": {
+      "crit_pct": 2,
+      "spy_success_pct": 2
+     }
+    }
+   ],
+   "exclusive": "alch"
+  },
+  {
+   "id": "apothecary_p",
+   "name": "Аптекарь",
+   "desc": "Лекарства и укрепляющие настои.",
+   "from": "alchemist",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Аптекарь",
+     "xp": 200,
+     "mods": {
+      "heal_pct": 6,
+      "health_regen": 0.02
+     }
+    },
+    {
+     "name": "Старший аптекарь",
+     "xp": 800,
+     "mods": {
+      "heal_pct": 6,
+      "health_regen": 0.02
+     }
+    },
+    {
+     "name": "Мастер снадобий",
+     "xp": 2500,
+     "mods": {
+      "heal_pct": 6,
+      "health_regen": 0.02
+     }
+    }
+   ],
+   "exclusive": "alch"
+  },
+  {
+   "id": "sapper",
+   "name": "Сапёр",
+   "desc": "Подкопы и осадные работы.",
+   "from": "soldier",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Землекоп",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Сапёр",
+     "xp": 200,
+     "mods": {
+      "mining_speed_pct": 4,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Мастер подкопа",
+     "xp": 800,
+     "mods": {
+      "mining_speed_pct": 4,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Главный сапёр",
+     "xp": 2500,
+     "mods": {
+      "mining_speed_pct": 4,
+      "build_speed_pct": 3
+     }
+    }
+   ],
+   "exclusive": "troop"
+  },
+  {
+   "id": "standard_bearer",
+   "name": "Знаменосец",
+   "desc": "Держит знамя там, где всего опаснее.",
+   "from": "soldier",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Оруженосец",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Знаменосец",
+     "xp": 200,
+     "mods": {
+      "levy_pct": 4,
+      "armor": 1
+     }
+    },
+    {
+     "name": "Старший знаменосец",
+     "xp": 800,
+     "mods": {
+      "levy_pct": 4,
+      "armor": 1
+     }
+    },
+    {
+     "name": "Хранитель штандарта",
+     "xp": 2500,
+     "mods": {
+      "levy_pct": 4,
+      "armor": 1
+     }
+    }
+   ],
+   "exclusive": "troop"
+  },
+  {
+   "id": "drillmaster",
+   "name": "Муштровщик",
+   "desc": "Из новобранцев делает солдат.",
+   "from": "soldier",
+   "min_rank": 3,
+   "wage": 11,
+   "ranks": [
+    {
+     "name": "Капрал",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Муштровщик",
+     "xp": 200,
+     "mods": {
+      "levy_pct": 6,
+      "xp_gain_pct": 3
+     }
+    },
+    {
+     "name": "Старший сержант",
+     "xp": 800,
+     "mods": {
+      "levy_pct": 6,
+      "xp_gain_pct": 3
+     }
+    },
+    {
+     "name": "Мастер строя",
+     "xp": 2500,
+     "mods": {
+      "levy_pct": 6,
+      "xp_gain_pct": 3
+     }
+    }
+   ],
+   "exclusive": "troop"
+  },
+  {
+   "id": "notary",
+   "name": "Нотариус",
+   "desc": "Печати, договоры, наследства.",
+   "from": "scribe",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Копиист",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Нотариус",
+     "xp": 200,
+     "mods": {
+      "tax_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Старший нотариус",
+     "xp": 800,
+     "mods": {
+      "tax_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Государственный нотариус",
+     "xp": 2500,
+     "mods": {
+      "tax_pct": 3,
+      "opinion": 1
+     }
+    }
+   ],
+   "exclusive": "scribetype"
+  },
+  {
+   "id": "chronicler",
+   "name": "Летописец",
+   "desc": "Записывает всё, что было.",
+   "from": "scribe",
+   "min_rank": 2,
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Переписчик",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Хронист",
+     "xp": 200,
+     "mods": {
+      "xp_gain_pct": 5,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Летописец",
+     "xp": 800,
+     "mods": {
+      "xp_gain_pct": 5,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Придворный летописец",
+     "xp": 2500,
+     "mods": {
+      "xp_gain_pct": 5,
+      "luck": 0.3
+     }
+    }
+   ],
+   "exclusive": "scribetype"
+  },
+  {
+   "id": "architect",
+   "name": "Зодчий",
+   "desc": "Здания, что стоят веками.",
+   "from": "mason",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Зодчий",
+     "xp": 200,
+     "mods": {
+      "build_speed_pct": 6,
+      "craft_quality_pct": 3
+     }
+    },
+    {
+     "name": "Мастер-зодчий",
+     "xp": 800,
+     "mods": {
+      "build_speed_pct": 6,
+      "craft_quality_pct": 3
+     }
+    },
+    {
+     "name": "Главный зодчий",
+     "xp": 2500,
+     "mods": {
+      "build_speed_pct": 6,
+      "craft_quality_pct": 3
+     }
+    }
+   ],
+   "exclusive": "buildtype"
+  },
+  {
+   "id": "fortifier",
+   "name": "Фортификатор",
+   "desc": "Стены, башни и рвы.",
+   "from": "mason",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Фортификатор",
+     "xp": 200,
+     "mods": {
+      "armor": 1,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Мастер крепостей",
+     "xp": 800,
+     "mods": {
+      "armor": 1,
+      "build_speed_pct": 3
+     }
+    },
+    {
+     "name": "Главный фортификатор",
+     "xp": 2500,
+     "mods": {
+      "armor": 1,
+      "build_speed_pct": 3
+     }
+    }
+   ],
+   "exclusive": "buildtype"
+  },
+  {
+   "id": "beekeeper",
+   "name": "Пасечник",
+   "desc": "Мёд и воск.",
+   "from": "farmer",
+   "min_rank": 1,
+   "wage": 6,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Пасечник",
+     "xp": 200,
+     "mods": {
+      "farm_yield_pct": 3,
+      "heal_pct": 2
+     }
+    },
+    {
+     "name": "Мастер мёда",
+     "xp": 800,
+     "mods": {
+      "farm_yield_pct": 3,
+      "heal_pct": 2
+     }
+    },
+    {
+     "name": "Хранитель ульев",
+     "xp": 2500,
+     "mods": {
+      "farm_yield_pct": 3,
+      "heal_pct": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "vintner",
+   "name": "Винодел",
+   "desc": "Вино, что пьют короли.",
+   "from": "farmer",
+   "min_rank": 2,
+   "wage": 8,
+   "ranks": [
+    {
+     "name": "Виноградарь",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Винодел",
+     "xp": 200,
+     "mods": {
+      "trade_profit_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Мастер вина",
+     "xp": 800,
+     "mods": {
+      "trade_profit_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Королевский виночерпий",
+     "xp": 2500,
+     "mods": {
+      "trade_profit_pct": 3,
+      "opinion": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "falconer",
+   "name": "Сокольничий",
+   "desc": "Охота с ловчими птицами.",
+   "from": "hunter",
+   "min_rank": 2,
+   "wage": 8,
+   "ranks": [
+    {
+     "name": "Птичник",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Сокольничий",
+     "xp": 200,
+     "mods": {
+      "ranged_dmg_pct": 3,
+      "luck": 0.5
+     }
+    },
+    {
+     "name": "Старший сокольничий",
+     "xp": 800,
+     "mods": {
+      "ranged_dmg_pct": 3,
+      "luck": 0.5
+     }
+    },
+    {
+     "name": "Мастер ловчих",
+     "xp": 2500,
+     "mods": {
+      "ranged_dmg_pct": 3,
+      "luck": 0.5
+     }
+    }
+   ]
+  },
+  {
+   "id": "captain_guard",
+   "name": "Начальник стражи",
+   "desc": "Порядок в городе - на нём.",
+   "from": "guard",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Десятник",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Начальник стражи",
+     "xp": 200,
+     "mods": {
+      "armor": 1,
+      "levy_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Старший начальник",
+     "xp": 800,
+     "mods": {
+      "armor": 1,
+      "levy_pct": 3,
+      "opinion": 1
+     }
+    },
+    {
+     "name": "Главный страж",
+     "xp": 2500,
+     "mods": {
+      "armor": 1,
+      "levy_pct": 3,
+      "opinion": 1
+     }
+    }
+   ],
+   "req_classes": [
+    "warrior",
+    "guardian",
+    "knight",
+    "bulwark",
+    "legionary",
+    "sentinel"
+   ]
+  },
+  {
+   "id": "battle_medic",
+   "name": "Полевой лекарь",
+   "desc": "Лечит под стрелами.",
+   "from": "healer",
+   "min_rank": 2,
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Санитар",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Полевой лекарь",
+     "xp": 200,
+     "mods": {
+      "heal_pct": 6,
+      "max_health": 2
+     }
+    },
+    {
+     "name": "Старший лекарь",
+     "xp": 800,
+     "mods": {
+      "heal_pct": 6,
+      "max_health": 2
+     }
+    },
+    {
+     "name": "Мастер походной медицины",
+     "xp": 2500,
+     "mods": {
+      "heal_pct": 6,
+      "max_health": 2
+     }
+    }
+   ],
+   "req_classes": [
+    "warrior",
+    "guardian",
+    "knight",
+    "physician",
+    "apothecary",
+    "battle_surgeon"
+   ]
+  }
+ ]
+}

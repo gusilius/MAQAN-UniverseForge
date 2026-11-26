@@ -1,0 +1,326 @@
+{
+ "quests": [
+  {
+   "id": "wolves",
+   "name": "Волки у околицы",
+   "tier": 1,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Волки таскают овец у околицы. Прогоните {count} зверей - мы не забудем доброты.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "kill",
+     "text": "Убить волков: {count}",
+     "mob": "wolf",
+     "count": "{count}"
+    }
+   ],
+   "reward": {
+    "gold": 4,
+    "xp": 30,
+    "rep": {
+     "{realm}": 1
+    },
+    "relation": 3
+   },
+   "params": {
+    "count": {
+     "range": [
+      4,
+      7
+     ],
+     "scale": "level"
+    }
+   },
+   "max_level": 18,
+   "repeat": 12
+  },
+  {
+   "id": "wolf_alpha",
+   "name": "Вожак стаи",
+   "tier": 2,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Волки вернулись, и теперь их ведёт крупный вожак. Только вы справитесь.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "kill",
+     "text": "Убить волков: {count}",
+     "mob": "wolf",
+     "count": "{count}"
+    },
+    {
+     "id": "b",
+     "type": "talk",
+     "text": "Сообщить старосте, что стая разбита",
+     "reply": "Слава богам! Староста велит поставить вам кружку."
+    }
+   ],
+   "reward": {
+    "gold": 9,
+    "xp": 70,
+    "rep": {
+     "{realm}": 2
+    },
+    "relation": 5,
+    "flags": [
+     "wolf_slayer"
+    ]
+   },
+   "requires": {
+    "quests": [
+     "wolves"
+    ]
+   },
+   "params": {
+    "count": {
+     "range": [
+      8,
+      12
+     ],
+     "scale": "level"
+    }
+   },
+   "max_level": 25
+  },
+  {
+   "id": "firewood",
+   "name": "Дрова на зиму",
+   "tier": 1,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Скоро холода, а дров нет. Принесите {count} брёвен, заплатим серебром.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести {item}: {count}",
+     "item": "{item}",
+     "count": "{count}",
+     "reply": "Тепла хватит на всю зиму."
+    }
+   ],
+   "reward": {
+    "gold": 5,
+    "xp": 20,
+    "relation": 2
+   },
+   "params": {
+    "count": {
+     "range": [
+      16,
+      32
+     ]
+    },
+    "item": [
+     "oak_log",
+     "spruce_log",
+     "birch_log"
+    ]
+   },
+   "repeat": 8
+  },
+  {
+   "id": "harvest_help",
+   "name": "Помощь с урожаем",
+   "tier": 1,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Руки не справляются с жатвой. Принесите {count} штук ({item}), я расплачусь.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести {item}: {count}",
+     "item": "{item}",
+     "count": "{count}",
+     "reply": "Вот спасибо, выручили."
+    }
+   ],
+   "reward": {
+    "gold": 6,
+    "xp": 25,
+    "relation": 3,
+    "rep": {
+     "{realm}": 1
+    }
+   },
+   "params": {
+    "count": {
+     "range": [
+      14,
+      28
+     ]
+    },
+    "item": [
+     "wheat",
+     "potato",
+     "carrot",
+     "beetroot"
+    ]
+   },
+   "repeat": 6
+  },
+  {
+   "id": "night_guests",
+   "name": "Ночные гости",
+   "tier": 1,
+   "giver": [
+    "villager"
+   ],
+   "desc": "По ночам у дома бродят твари. Расправьтесь с {count} из них.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "kill",
+     "text": "Убить врагов: {count}",
+     "mob": "hostile",
+     "count": "{count}"
+    }
+   ],
+   "reward": {
+    "gold": 6,
+    "xp": 40,
+    "relation": 3
+   },
+   "params": {
+    "count": {
+     "range": [
+      6,
+      12
+     ],
+     "scale": "level"
+    }
+   },
+   "repeat": 5
+  },
+  {
+   "id": "letter_to_steward",
+   "name": "Письмо управляющему",
+   "tier": 1,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Моё прошение о земле застряло. Передайте весточку управляющему, пока вам по пути.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "talk",
+     "text": "Передать прошение управляющему",
+     "role": "steward",
+     "reply": "Прошение принято, передайте, что рассмотрим."
+    }
+   ],
+   "reward": {
+    "gold": 3,
+    "xp": 15,
+    "relation": 2
+   },
+   "repeat": 15
+  },
+  {
+   "id": "widow_debt",
+   "name": "Долг вдовы",
+   "tier": 2,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Вдова задолжала торговцу, и тот грозит отобрать дом. Что вы сделаете?",
+   "steps": [
+    {
+     "id": "a",
+     "type": "choice",
+     "text": "Как поступить с долгом вдовы?",
+     "options": [
+      {
+       "id": "pay",
+       "text": "Заплатить долг (20 золота)",
+       "requires": {
+        "gold": 20
+       },
+       "effects": {
+        "rep": {
+         "{realm}": 2
+        },
+        "relation": 12,
+        "xp": 40,
+        "flags": [
+         "kind_heart"
+        ]
+       }
+      },
+      {
+       "id": "talk",
+       "text": "Поговорить с торговцем (нужен 5-й уровень)",
+       "requires": {
+        "level_min": 5
+       },
+       "effects": {
+        "rep": {
+         "{realm}": 1
+        },
+        "relation": 6,
+        "xp": 80
+       }
+      },
+      {
+       "id": "leave",
+       "text": "Не вмешиваться",
+       "effects": {
+        "rep": {
+         "{realm}": -1
+        },
+        "relation": -4
+       }
+      }
+     ]
+    }
+   ],
+   "reward": {
+    "xp": 10
+   },
+   "repeat": 30,
+   "min_level": 2
+  },
+  {
+   "id": "lost_heirloom",
+   "name": "Семейная реликвия",
+   "tier": 2,
+   "giver": [
+    "villager"
+   ],
+   "desc": "Дедушкин оберег потерялся где-то на дороге. Принесите {count} самородков золота - так я смогу выкупить его у бродяг.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести золото: {count}",
+     "item": "gold",
+     "count": "{count}",
+     "reply": "Он снова с нами. Благодарю от всей семьи."
+    }
+   ],
+   "reward": {
+    "gold": 14,
+    "xp": 45,
+    "relation": 6
+   },
+   "params": {
+    "count": {
+     "range": [
+      6,
+      10
+     ]
+    }
+   },
+   "repeat": 20,
+   "min_level": 3
+  }
+ ]
+}

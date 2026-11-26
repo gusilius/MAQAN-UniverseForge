@@ -1,0 +1,33 @@
+{
+ "id": "scholar_visit",
+ "weight": 2,
+ "who": "ruler",
+ "cooldown_years": 8,
+ "title": "Учёный странник",
+ "text": "К двору {name} пришёл учёный с редкими книгами.",
+ "cond": {
+  "no_trait": "scholar"
+ },
+ "options": [
+  {
+   "text": "Принять и оплатить учителя (-20 золота)",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -20
+    },
+    {
+     "op": "stat",
+     "attr": "learning",
+     "delta": 2
+    }
+   ]
+  },
+  {
+   "text": "Прогнать",
+   "ai": 2,
+   "effects": []
+  }
+ ]
+}

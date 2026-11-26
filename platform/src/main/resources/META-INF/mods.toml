@@ -1,0 +1,21 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+[[mods]]
+modId="maqan_platform"
+version="0.1.0-alpha.1"
+displayName="MAQAN Platform"
+authors="MAQAN"
+description='''Shared desktop-style workspace shell for MAQAN modules.'''
+[[dependencies.maqan_platform]]
+modId="forge"
+mandatory=true
+versionRange="[47.4.28,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.maqan_platform]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.20.2)"
+ordering="NONE"
+side="BOTH"

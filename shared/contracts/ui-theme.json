@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "maqan.futuristic.dark",
+  "description": "Shared visual contract for MAQAN Platform, Atlas and WorldForge.",
+  "colors": {
+    "background": "#080D14",
+    "surface": "#101923",
+    "surfaceRaised": "#172330",
+    "surfaceHover": "#253948",
+    "surfaceInset": "#0B121A",
+    "border": "#34495B",
+    "borderSubtle": "#223442",
+    "text": "#E8EEF5",
+    "textMuted": "#8292A5",
+    "textDisabled": "#556474",
+    "accent": "#69CDE2",
+    "accentSoft": "#477F91",
+    "success": "#67B85C",
+    "warning": "#E5BD78",
+    "danger": "#D9503A",
+    "information": "#5AA0D8"
+  },
+  "geometry": {
+    "panelRadius": 0,
+    "controlRadius": 0,
+    "borderWidth": 1,
+    "focusIndicatorWidth": 2,
+    "spacingUnit": 4
+  },
+  "principles": [
+    "Keep the spatial map and simulation data visually dominant.",
+    "Use flat near-black surfaces and restrained one-pixel separators.",
+    "Use cyan for active navigation and focus, not decorative framing.",
+    "Preserve semantic status colors for success, warning, danger and information.",
+    "Never replace source-backed data with illustrative placeholders.",
+    "Keep each module independently installable and its data ownership unchanged."
+  ]
+}

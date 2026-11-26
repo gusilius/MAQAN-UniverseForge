@@ -1,0 +1,860 @@
+{
+  "id": "wf_people:chancellor",
+  "start": "hello",
+  "nodes": {
+    "hello": {
+      "speaker": "{npc_title}",
+      "text": "Я веду переписку государства {realm}. Чем могу быть полезен, {player}?",
+      "choices": [
+        {
+          "text": "Как обстоят дела с соседями?",
+          "next": "diplomacy"
+        },
+        {
+          "text": "Мне нужна аудиенция у правителя.",
+          "next": "audience"
+        },
+        {
+          "text": "Отдать распоряжение",
+          "next": "d_menu",
+          "if": [
+            {
+              "if": "player_has_realm"
+            },
+            {
+              "if": "npc_realm_is_yours"
+            }
+          ]
+        },
+        {
+          "text": "Нет ли для меня поручения?",
+          "next": "q_list",
+          "if": [
+            {
+              "if": "quest_offers_exist"
+            }
+          ]
+        },
+        {
+          "text": "Я по поводу вашего дела",
+          "next": "q_report",
+          "if": [
+            {
+              "if": "quest_interactable"
+            }
+          ]
+        },
+        {
+          "text": "Поговорим о торговле",
+          "next": "t_menu",
+          "if": [
+            {
+              "if": "trade_market_exists"
+            }
+          ]
+        },
+        {
+          "text": "Пообщаться по душам",
+          "next": "s_menu"
+        },
+        {
+          "text": "Ничего, благодарю."
+        }
+      ]
+    },
+    "diplomacy": {
+      "speaker": "{npc_title}",
+      "text": "Послания идут во все стороны. Подробности о договорах смотрите на вкладке «Дипломатия» карты.",
+      "next": "hello"
+    },
+    "audience": {
+      "speaker": "{npc_title}",
+      "text": "Правитель принимает в большом зале. Обратитесь к нему сами.",
+      "next": "hello"
+    },
+    "s_menu": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_refresh"
+        }
+      ],
+      "text": "{hearts}  {mood}. {reply}",
+      "choices": [
+        {
+          "text": "Поболтать",
+          "next": "s_chat",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "chat"
+            }
+          ]
+        },
+        {
+          "text": "Пошутить",
+          "next": "s_joke",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "joke"
+            }
+          ]
+        },
+        {
+          "text": "Сделать комплимент",
+          "next": "s_compliment",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "compliment"
+            }
+          ]
+        },
+        {
+          "text": "Флиртовать",
+          "next": "s_flirt",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "flirt"
+            },
+            {
+              "if": "not",
+              "of": [
+                {
+                  "if": "npc_married_to_you"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Обнять",
+          "next": "s_hug",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "hug"
+            }
+          ]
+        },
+        {
+          "text": "Поцеловать",
+          "next": "s_kiss",
+          "if": [
+            {
+              "if": "npc_ready",
+              "kind": "kiss"
+            }
+          ]
+        },
+        {
+          "text": "Подарить то, что в руке",
+          "next": "s_gift"
+        },
+        {
+          "text": "Что слышно нового?",
+          "next": "s_rumor"
+        },
+        {
+          "text": "Нет ли для меня дела?",
+          "next": "s_req_offer",
+          "if": [
+            {
+              "if": "not",
+              "of": [
+                {
+                  "if": "npc_has_request"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Я принёс, что вы просили.",
+          "next": "s_req_done",
+          "if": [
+            {
+              "if": "npc_request_ready"
+            }
+          ]
+        },
+        {
+          "text": "Напомните, о чём вы просили.",
+          "next": "s_req_show",
+          "if": [
+            {
+              "if": "npc_has_request"
+            },
+            {
+              "if": "not",
+              "of": [
+                {
+                  "if": "npc_request_ready"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Предложить встречаться",
+          "next": "s_date",
+          "if": [
+            {
+              "if": "npc_can_date"
+            }
+          ]
+        },
+        {
+          "text": "Предложить руку и сердце",
+          "next": "s_marry",
+          "if": [
+            {
+              "if": "npc_can_marry"
+            }
+          ]
+        },
+        {
+          "text": "Расстаться",
+          "next": "s_split",
+          "if": [
+            {
+              "if": "npc_dating"
+            },
+            {
+              "if": "not",
+              "of": [
+                {
+                  "if": "npc_married_to_you"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Развестись",
+          "next": "s_split",
+          "if": [
+            {
+              "if": "npc_married_to_you"
+            }
+          ]
+        },
+        {
+          "text": "Вернуться к делам",
+          "next": "hello"
+        }
+      ]
+    },
+    "s_chat": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "chat"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_joke": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "joke"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_compliment": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "compliment"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_flirt": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "flirt"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_hug": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "hug"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_kiss": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_interact",
+          "kind": "kiss"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_gift": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_gift"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_rumor": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_rumor"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_req_offer": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_request_offer"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_req_show"
+    },
+    "s_req_show": {
+      "speaker": "{npc_title}",
+      "text": "{request}",
+      "next": "s_menu"
+    },
+    "s_req_done": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_request_complete"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_date": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_date"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_marry": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_marry"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "s_split": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "npc_divorce"
+        }
+      ],
+      "text": "{reply}",
+      "next": "s_menu"
+    },
+    "d_menu": {
+      "speaker": "{npc_title}",
+      "text": "Я отправлю гонцов, {player}. Кому предложить торговый договор?",
+      "choices": [
+        {
+          "text": "{neighbor1_name}",
+          "next": "d_t1",
+          "if": [
+            {
+              "if": "player_has_realm"
+            },
+            {
+              "if": "npc_realm_is_yours"
+            },
+            {
+              "if": "has_var",
+              "name": "neighbor1"
+            }
+          ]
+        },
+        {
+          "text": "{neighbor2_name}",
+          "next": "d_t2",
+          "if": [
+            {
+              "if": "player_has_realm"
+            },
+            {
+              "if": "npc_realm_is_yours"
+            },
+            {
+              "if": "has_var",
+              "name": "neighbor2"
+            }
+          ]
+        },
+        {
+          "text": "{neighbor3_name}",
+          "next": "d_t3",
+          "if": [
+            {
+              "if": "player_has_realm"
+            },
+            {
+              "if": "npc_realm_is_yours"
+            },
+            {
+              "if": "has_var",
+              "name": "neighbor3"
+            }
+          ]
+        },
+        {
+          "text": "Расторгнуть договор с соседом",
+          "next": "d_x1",
+          "if": [
+            {
+              "if": "player_has_realm"
+            },
+            {
+              "if": "npc_realm_is_yours"
+            },
+            {
+              "if": "has_var",
+              "name": "neighbor1"
+            }
+          ]
+        },
+        {
+          "text": "Пока ничего",
+          "next": "hello"
+        }
+      ]
+    },
+    "d_t1": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "delegate",
+          "action": "trade_propose",
+          "args": "{neighbor1}",
+          "ok": "Гонец отправлен."
+        }
+      ],
+      "text": "{reply}",
+      "next": "d_menu"
+    },
+    "d_t2": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "delegate",
+          "action": "trade_propose",
+          "args": "{neighbor2}",
+          "ok": "Гонец отправлен."
+        }
+      ],
+      "text": "{reply}",
+      "next": "d_menu"
+    },
+    "d_t3": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "delegate",
+          "action": "trade_propose",
+          "args": "{neighbor3}",
+          "ok": "Гонец отправлен."
+        }
+      ],
+      "text": "{reply}",
+      "next": "d_menu"
+    },
+    "d_x1": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "delegate",
+          "action": "trade_cancel",
+          "args": "{neighbor1}",
+          "ok": "Договор расторгнут."
+        }
+      ],
+      "text": "{reply}",
+      "next": "d_menu"
+    },
+    "q_list": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "quest_offers"
+        }
+      ],
+      "text": "{quest_list}",
+      "choices": [
+        {
+          "text": "Беру первое",
+          "next": "q_a1",
+          "if": [
+            {
+              "if": "quest_offers_exist"
+            }
+          ]
+        },
+        {
+          "text": "Беру второе",
+          "next": "q_a2",
+          "if": [
+            {
+              "if": "quest_offers_exist"
+            }
+          ]
+        },
+        {
+          "text": "Беру третье",
+          "next": "q_a3",
+          "if": [
+            {
+              "if": "quest_offers_exist"
+            }
+          ]
+        },
+        {
+          "text": "Назад",
+          "next": "hello"
+        }
+      ]
+    },
+    "q_a1": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "quest_accept",
+          "n": 1
+        }
+      ],
+      "text": "{reply}\n\n{quest_list}",
+      "choices": [
+        {
+          "text": "Ещё что-нибудь?",
+          "next": "q_list"
+        },
+        {
+          "text": "Назад",
+          "next": "hello"
+        }
+      ]
+    },
+    "q_a2": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "quest_accept",
+          "n": 2
+        }
+      ],
+      "text": "{reply}\n\n{quest_list}",
+      "choices": [
+        {
+          "text": "Ещё что-нибудь?",
+          "next": "q_list"
+        },
+        {
+          "text": "Назад",
+          "next": "hello"
+        }
+      ]
+    },
+    "q_a3": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "quest_accept",
+          "n": 3
+        }
+      ],
+      "text": "{reply}\n\n{quest_list}",
+      "choices": [
+        {
+          "text": "Ещё что-нибудь?",
+          "next": "q_list"
+        },
+        {
+          "text": "Назад",
+          "next": "hello"
+        }
+      ]
+    },
+    "q_report": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "quest_interact"
+        }
+      ],
+      "text": "{reply}",
+      "next": "hello"
+    },
+    "t_menu": {
+      "speaker": "{npc_title}",
+      "text": "Торговля - дело доброе. Чем интересуетесь?",
+      "choices": [
+        {
+          "text": "Что нынче в цене?",
+          "next": "t_prices"
+        },
+        {
+          "text": "Куда выгодно везти товар?",
+          "next": "t_route"
+        },
+        {
+          "text": "Продать: зерно (10)",
+          "next": "t_sell_grain"
+        },
+        {
+          "text": "Продать: рыбу (10)",
+          "next": "t_sell_fish"
+        },
+        {
+          "text": "Продать: мясо (10)",
+          "next": "t_sell_meat"
+        },
+        {
+          "text": "Продать: брёвна (10)",
+          "next": "t_sell_timber"
+        },
+        {
+          "text": "Продать: камень (10)",
+          "next": "t_sell_stone"
+        },
+        {
+          "text": "Продать: железо (10)",
+          "next": "t_sell_iron"
+        },
+        {
+          "text": "Купить: зерно (10)",
+          "next": "t_buy_grain"
+        },
+        {
+          "text": "Купить: рыбу (10)",
+          "next": "t_buy_fish"
+        },
+        {
+          "text": "Купить: мясо (10)",
+          "next": "t_buy_meat"
+        },
+        {
+          "text": "Купить: брёвна (10)",
+          "next": "t_buy_timber"
+        },
+        {
+          "text": "Купить: камень (10)",
+          "next": "t_buy_stone"
+        },
+        {
+          "text": "Купить: железо (10)",
+          "next": "t_buy_iron"
+        },
+        {
+          "text": "Назад",
+          "next": "hello"
+        }
+      ]
+    },
+    "t_prices": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_prices"
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_route": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_route"
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_grain": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "grain",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_grain": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "grain",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_fish": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "fish",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_fish": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "fish",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_meat": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "meat",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_meat": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "meat",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_timber": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "timber",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_timber": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "timber",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_stone": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "stone",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_stone": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "stone",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_sell_iron": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_sell",
+          "good": "iron",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    },
+    "t_buy_iron": {
+      "speaker": "{npc_title}",
+      "do": [
+        {
+          "do": "trade_buy",
+          "good": "iron",
+          "qty": 10
+        }
+      ],
+      "text": "{reply}",
+      "next": "t_menu"
+    }
+  }
+}

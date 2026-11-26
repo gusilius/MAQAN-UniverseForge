@@ -1,0 +1,41 @@
+{
+ "id": "spy_rumor",
+ "weight": 3,
+ "who": "council",
+ "cooldown_years": 5,
+ "title": "Слухи при дворе",
+ "text": "{name} донёс, что при дворе шепчутся о неверных вассалах.",
+ "cond": {
+  "role": "spymaster"
+ },
+ "options": [
+  {
+   "text": "Усилить шпионов (-20 золота)",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -20
+    },
+    {
+     "op": "stat",
+     "attr": "intrigue",
+     "delta": 1
+    }
+   ]
+  },
+  {
+   "text": "Не обращать внимания",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "opinion",
+     "who": "council",
+     "value": -3,
+     "years": 3,
+     "label": "Игнорирует тревоги"
+    }
+   ]
+  }
+ ]
+}

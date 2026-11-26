@@ -1,0 +1,70 @@
+package dev.worldforge.tests;
+
+import dev.worldforge.settle.ResidentQuest;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import java.util.Map;
+
+public final class ResidentQuestTest {
+    private static int failures;
+    private static void check(boolean condition, String message) {
+        if (!condition) {
+            failures++;
+            System.out.println("FAIL " + message);
+        }
+    }
+
+    public static void main(String[] args) {
+        ResidentQuest quest = new ResidentQuest("bread_supply_c1", "Принести 3 хлеба", 3, 12);
+        check("food".equals(quest.resourceId()), "legacy bread contracts map to canonical food resource");
+        check(quest.status() == ResidentQuest.Status.OFFERED, "new contract starts as offered");
+        check(!quest.addProgress(1, 12), "offered contract cannot receive unaccepted progress");
+        check(quest.accept(), "offered contract can be accepted");
+        check(!quest.accept(), "contract cannot be accepted twice");
+        check(!quest.addProgress(2, 12), "partial delivery does not complete contract");
+        check(quest.progress() == 2 && quest.status() == ResidentQuest.Status.ACCEPTED,
+                "partial delivery persists progress");
+        check(quest.addProgress(4, 13), "delivery completes at required threshold");
+        check(quest.progress() == 3 && quest.complete() && quest.completedYear() == 13,
+                "completion clamps progress and records completion year");
+        check(!quest.addProgress(1, 14), "completed contract rejects duplicate delivery");
+        ResidentQuest restored = ResidentQuest.fromMap(quest.toMap());
+        check(restored.complete() && restored.progress() == 3 && restored.completedYear() == 13,
+                "contract survives save and restore");
+        ResidentQuest resourceContract = new ResidentQuest("wood-1", "Deliver wood", "wood", 4, 12);
+        ResidentQuest restoredResource = ResidentQuest.fromMap(resourceContract.toMap());
+        check("wood".equals(restoredResource.resourceId()) && restoredResource.required() == 4,
+                "profession-specific resource objective survives save and restore");
+        CharacterRegistry people = new CharacterRegistry();
+        Character resident = people.create("Mira", "", "", "f", 1);
+        resident.props.put("wf_resident_quest", quest.toMap());
+        CharacterRegistry peopleAfterSave = new CharacterRegistry();
+        peopleAfterSave.fromJson(people.toJson());
+        Character restoredResident = peopleAfterSave.get(resident.id);
+        ResidentQuest residentQuest = ResidentQuest.fromMap((Map<?, ?>) restoredResident.props.get("wf_resident_quest"));
+        check(residentQuest.complete() && residentQuest.progress() == 3,
+                "resident contract survives the canonical CharacterRegistry world save");
+
+        ResidentQuest abandoned = new ResidentQuest("other", "Другое поручение", 2, 12);
+        check(abandoned.abandon() && abandoned.status() == ResidentQuest.Status.ABANDONED,
+                "offered contract can be abandoned");
+        check(!abandoned.accept(), "abandoned contract cannot be accepted");
+
+        boolean badProgressRejected = false;
+        try {
+            ResidentQuest.fromMap(Map.of("id", "bad", "objective", "bad", "required", 2,
+                    "created_year", 1, "progress", 3, "completed_year", 0, "status", "ACCEPTED"));
+        } catch (IllegalArgumentException expected) { badProgressRejected = true; }
+        check(badProgressRejected, "corrupt progress is rejected on restore");
+
+        boolean badCompletionRejected = false;
+        try {
+            ResidentQuest.fromMap(Map.of("id", "bad", "objective", "bad", "required", 2,
+                    "created_year", 1, "progress", 1, "completed_year", 2, "status", "COMPLETED"));
+        } catch (IllegalArgumentException expected) { badCompletionRejected = true; }
+        check(badCompletionRejected, "inconsistent completion state is rejected");
+
+        System.out.println("ResidentQuestTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
+        if (failures > 0) throw new AssertionError("ResidentQuestTest failed: " + failures);
+    }
+}

@@ -1,13 +1,13 @@
 package dev.maqan.platform.client;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.Resource;
+
 import java.io.DataInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -19,20 +19,18 @@ import java.util.Optional;
 import java.util.prefs.Preferences;
 
 /**
- * Loads the shipped MAQAN skin manifest and renders its PNG assets.
- * The manifest coordinates are authored in the 1368x760 reference viewport;
- * each destination is scaled to the live GUI dimensions.
+ * The single owner of MAQAN interface skins. layout.json is the source of
+ * truth for texture names and 1368x760 logical rectangles.
  */
 public final class ThemeManager {
     public static final int REFERENCE_WIDTH = 1368;
     public static final int REFERENCE_HEIGHT = 760;
-    private static final String[] REQUIRED = {"royal", "iron", "grim", "elf"};
-    private static final String[] LAYOUT_ELEMENTS = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor"};
-    private static final String[] CHROME = {"top", "lcol", "rcol", "mm", "bot", "cor"};
+    private static final String[] THEMES = {"royal", "iron", "grim", "elf"};
+    private static final String[] FRAME_ELEMENTS = {"top", "lcol", "rcol", "mm", "bot", "cor"};
+    private static final String[] ALL_ELEMENTS = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor", "lw", "rw"};
     private static final Map<String, Texture> TEXTURES = new LinkedHashMap<>();
     private static final Map<String, int[]> RECTANGLES = new LinkedHashMap<>();
     private static String selectedTheme = "royal";
-    private static int sourceScale = 2;
     private static boolean initialized;
     private static boolean preferenceLoaded;
     private static boolean manifestValid;
@@ -43,12 +41,19 @@ public final class ThemeManager {
 
     public static synchronized void initialize() {
         if (initialized) return;
-        initialized = true;
         Preferences prefs = Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace");
         if (!preferenceLoaded) {
             selectedTheme = normalize(prefs.get("theme", "royal"));
             preferenceLoaded = true;
         }
+        loadSelectedTheme();
+    }
+
+    private static void loadSelectedTheme() {
+        initialized = true;
+        manifestValid = false;
+        TEXTURES.clear();
+        RECTANGLES.clear();
         try {
             Minecraft mc = Minecraft.getInstance();
             Resource manifest = mc.getResourceManager()
@@ -58,64 +63,64 @@ public final class ThemeManager {
             try (InputStreamReader reader = new InputStreamReader(manifest.open(), StandardCharsets.UTF_8)) {
                 root = JsonParser.parseReader(reader).getAsJsonObject();
             }
+
+            if (root.get("schemaVersion").getAsInt() != 2)
+                throw new IllegalStateException("Unsupported MAQAN layout schema");
             JsonObject viewport = root.getAsJsonObject("referenceViewport");
             if (viewport == null || viewport.get("width").getAsInt() != REFERENCE_WIDTH
                     || viewport.get("height").getAsInt() != REFERENCE_HEIGHT)
-                throw new IllegalStateException("Unexpected MAQAN reference viewport");
-            sourceScale = root.has("sourceScale") ? Math.max(1, root.get("sourceScale").getAsInt()) : 1;
+                throw new IllegalStateException("Expected 1368x760 reference viewport");
+
+            String defaultTheme = root.has("defaultTheme") ? root.get("defaultTheme").getAsString() : "royal";
+            if (!isSupported(selectedTheme)) selectedTheme = normalize(defaultTheme);
             JsonObject names = root.getAsJsonObject("textureNames");
             JsonObject skins = root.getAsJsonObject("skins");
-            if (names == null || skins == null) throw new IllegalStateException("Incomplete MAQAN skin manifest");
-            for (String theme : REQUIRED) {
+            if (names == null || skins == null) throw new IllegalStateException("Incomplete layout manifest");
+
+            for (String element : ALL_ELEMENTS) {
+                if (!names.has(element)) throw new IllegalStateException("Missing texture name for " + element);
+            }
+            for (String theme : THEMES) {
                 JsonObject skin = skins.getAsJsonObject(theme);
-                if (skin == null) throw new IllegalStateException("Missing theme " + theme);
-                for (String element : LAYOUT_ELEMENTS) {
-                    JsonArray rect = skin.getAsJsonArray(element);
-                    if (rect == null || rect.size() != 4) throw new IllegalStateException("Invalid " + theme + "/" + element + " layout");
-                }
+                if (skin == null) throw new IllegalStateException("Missing theme layout " + theme);
+                for (String element : FRAME_ELEMENTS) validateRectangle(skin, theme, element);
             }
+
             JsonObject activeSkin = skins.getAsJsonObject(selectedTheme);
-            for (String element : CHROME) {
-                JsonArray rect = activeSkin.getAsJsonArray(element);
-                RECTANGLES.put(element, new int[] {
-                        rect.get(0).getAsInt(), rect.get(1).getAsInt(),
-                        rect.get(2).getAsInt(), rect.get(3).getAsInt()
-                });
-            }
-            loadThemeTextures(names);
+            for (String element : FRAME_ELEMENTS) RECTANGLES.put(element, rectangle(activeSkin, element));
+            loadAllTextures(mc, names, selectedTheme);
             manifestValid = true;
         } catch (Exception error) {
-            manifestValid = false;
             TEXTURES.clear();
             RECTANGLES.clear();
-            System.err.println("[MAQAN] Unable to load UI theme manifest; using vector fallback: " + error.getMessage());
+            System.err.println("[MAQAN] Theme loading failed; retaining safe UI fallback: " + error.getMessage());
         }
     }
 
-    private static void loadThemeTextures(JsonObject names) throws Exception {
-        TEXTURES.clear();
-        String theme = selectedTheme;
-        for (String element : CHROME) {
+    private static void validateRectangle(JsonObject skin, String theme, String element) {
+        JsonArray rect = skin.getAsJsonArray(element);
+        if (rect == null || rect.size() != 4) throw new IllegalStateException("Invalid " + theme + "/" + element + " rectangle");
+        int x1 = rect.get(0).getAsInt(), y1 = rect.get(1).getAsInt();
+        int x2 = rect.get(2).getAsInt(), y2 = rect.get(3).getAsInt();
+        if (x1 < 0 || y1 < 0 || x2 <= x1 || y2 <= y1 || x2 > REFERENCE_WIDTH || y2 > REFERENCE_HEIGHT)
+            throw new IllegalStateException("Out-of-range " + theme + "/" + element + " rectangle");
+    }
+
+    private static int[] rectangle(JsonObject skin, String element) {
+        JsonArray rect = skin.getAsJsonArray(element);
+        return new int[] {rect.get(0).getAsInt(), rect.get(1).getAsInt(),
+                rect.get(2).getAsInt(), rect.get(3).getAsInt()};
+    }
+
+    private static void loadAllTextures(Minecraft mc, JsonObject names, String theme) throws Exception {
+        for (String element : ALL_ELEMENTS) {
             String filename = names.get(element).getAsString();
             ResourceLocation location = new ResourceLocation("maqan",
                     "textures/gui/" + theme + "/" + filename);
-            Optional<Resource> resource = Minecraft.getInstance().getResourceManager().getResource(location);
+            Optional<Resource> resource = mc.getResourceManager().getResource(location);
             if (resource.isEmpty()) throw new IllegalStateException("Missing theme texture " + location);
             int[] dimensions = pngDimensions(resource.get().open());
             TEXTURES.put(element, new Texture(location, dimensions[0], dimensions[1]));
-        }
-        // Window skins are not part of the fixed chrome rectangle set, but are
-        // resolved through the same resource manager and theme selection.
-        for (String filename : new String[] {
-                "window_left_blank.png", "window_right_blank.png",
-                "window_state.png", "window_diplomacy.png"
-        }) {
-            ResourceLocation location = new ResourceLocation("maqan",
-                    "textures/gui/" + theme + "/" + filename);
-            Optional<Resource> resource = Minecraft.getInstance().getResourceManager().getResource(location);
-            if (resource.isEmpty()) throw new IllegalStateException("Missing theme texture " + location);
-            int[] dimensions = pngDimensions(resource.get().open());
-            TEXTURES.put(filename, new Texture(location, dimensions[0], dimensions[1]));
         }
     }
 
@@ -124,40 +129,53 @@ public final class ThemeManager {
             byte[] signature = new byte[8];
             input.readFully(signature);
             if ((signature[0] & 255) != 137 || signature[1] != 80 || signature[2] != 78 || signature[3] != 71)
-                throw new IllegalStateException("Invalid PNG header");
-            input.readInt(); // IHDR chunk length
-            if (input.readInt() != 0x49484452) throw new IllegalStateException("PNG has no IHDR first chunk");
+                throw new IllegalStateException("Invalid PNG signature");
+            input.readInt();
+            if (input.readInt() != 0x49484452) throw new IllegalStateException("PNG IHDR chunk missing");
             int width = input.readInt();
             int height = input.readInt();
-            if (width < 1 || height < 1) throw new IllegalStateException("Invalid PNG dimensions");
+            if (width <= 0 || height <= 0) throw new IllegalStateException("Invalid PNG dimensions");
             return new int[] {width, height};
         }
     }
 
     public static synchronized boolean setTheme(String theme) {
+        initialize();
         String normalized = normalize(theme);
-        if (!isSupported(normalized)) return false;
+        if (!isSupported(theme == null ? "" : theme.toLowerCase(Locale.ROOT).trim())) return false;
         if (normalized.equals(selectedTheme) && manifestValid) return true;
+
         String previous = selectedTheme;
         selectedTheme = normalized;
-        Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace").put("theme", selectedTheme);
         initialized = false;
-        initialize();
+        loadSelectedTheme();
         if (!manifestValid) {
             selectedTheme = previous;
-            Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace").put("theme", previous);
             initialized = false;
-            initialize();
+            loadSelectedTheme();
             return false;
         }
+        Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace")
+                .put("theme", selectedTheme);
         return true;
     }
 
-    public static synchronized String selectedTheme() { return selectedTheme; }
-    public static String[] themes() { return REQUIRED.clone(); }
+    public static synchronized String selectedTheme() {
+        initialize();
+        return selectedTheme;
+    }
+
+    public static String[] themes() { return THEMES.clone(); }
+
     public static boolean isSupported(String value) {
-        for (String theme : REQUIRED) if (theme.equals(value)) return true;
+        if (value == null) return false;
+        for (String theme : THEMES) if (theme.equals(value)) return true;
         return false;
+    }
+
+    public static synchronized boolean isThemeLoaded() {
+        initialize();
+        return manifestValid && TEXTURES.size() == ALL_ELEMENTS.length;
     }
 
     private static String normalize(String value) {
@@ -165,12 +183,12 @@ public final class ThemeManager {
         return isSupported(candidate) ? candidate : "royal";
     }
 
-    public static void renderChrome(GuiGraphics graphics, int width, int height) {
+    public static synchronized void renderChrome(GuiGraphics graphics, int width, int height) {
         initialize();
         if (!manifestValid || width <= 0 || height <= 0) return;
         float sx = width / (float) REFERENCE_WIDTH;
         float sy = height / (float) REFERENCE_HEIGHT;
-        for (String element : CHROME) {
+        for (String element : FRAME_ELEMENTS) {
             int[] rect = RECTANGLES.get(element);
             Texture texture = TEXTURES.get(element);
             if (rect == null || texture == null) continue;
@@ -178,28 +196,29 @@ public final class ThemeManager {
             int y = Math.round(rect[1] * sy);
             int w = Math.max(1, Math.round((rect[2] - rect[0]) * sx));
             int h = Math.max(1, Math.round((rect[3] - rect[1]) * sy));
-            blit(graphics, texture, x, y, w, h);
+            drawScaled(graphics, texture, x, y, w, h);
         }
     }
 
-    public static void renderWindow(GuiGraphics graphics, int x, int y, int width, int height, String panelId) {
+    public static synchronized void renderWindow(GuiGraphics graphics, int x, int y,
+                                                   int width, int height, String panelId) {
         initialize();
         if (!manifestValid || width <= 0 || height <= 0) return;
-        String asset = switch (panelId) {
-            case "navigation" -> "window_left_blank.png";
-            case "inspector" -> "window_state.png";
-            case "tools" -> "window_diplomacy.png";
-            case "timeline" -> "window_right_blank.png";
-            default -> "window_left_blank.png";
+        String element = switch (panelId) {
+            case "navigation", "settings" -> "lw";
+            case "inspector" -> "lp";
+            case "tools" -> "rp";
+            case "timeline" -> "rw";
+            default -> "lw";
         };
-        Texture texture = TEXTURES.get(asset);
-        if (texture != null) blit(graphics, texture, x, y, width, height);
+        Texture texture = TEXTURES.get(element);
+        if (texture != null) drawScaled(graphics, texture, x, y, width, height);
     }
 
-    private static void blit(GuiGraphics graphics, Texture texture, int x, int y, int width, int height) {
-        // The source PNGs are authored at sourceScale=2. GuiGraphics' basic
-        // blit overload draws source pixels 1:1, so scale the pose to fit the
-        // manifest's logical destination rectangle instead of cropping them.
+    private static void drawScaled(GuiGraphics graphics, Texture texture,
+                                   int x, int y, int width, int height) {
+        // Texture PNGs are authored at sourceScale=2; fit the complete source
+        // image into the logical destination rectangle without cropping.
         graphics.pose().pushPose();
         graphics.pose().translate(x, y, 0.0D);
         graphics.pose().scale(width / (float) texture.width(),

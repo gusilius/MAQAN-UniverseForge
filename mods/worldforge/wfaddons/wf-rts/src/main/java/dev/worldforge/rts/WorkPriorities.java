@@ -1,0 +1,83 @@
+package dev.worldforge.rts;
+
+import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.Worker;
+
+import java.util.*;
+
+/**
+ * Матрица приоритетов работ как в RimWorld: строка - рабочий, столбец - профессия, значение 0 (не делать), 1 (самое важное) .. 4 (в последнюю очередь).
+ * Серверное состояние хранится в {@link Worker#jobPrio}; локальная карта содержит только оптимистичные значения до следующего
+ * подтверждённого снимка. Автоназначение и сохранение принадлежат {@code wf-settlements}, эта модель отвечает только за UI-цикл.
+ */
+public final class WorkPriorities {
+    public static final int MAX = 4;
+
+    private final Map<Integer, Map<String, Integer>> values = new HashMap<>();
+
+    public int get(Worker w, String prof) {
+        if (w == null || prof == null || !w.canPerform(prof)) return 0;
+        Map<String, Integer> m = values.get(w.id);
+        if (m != null && m.containsKey(prof)) return m.get(prof);
+        if (w.jobPrio != null && w.jobPrio.containsKey(prof)) {
+            Integer saved = w.jobPrio.get(prof);
+            return saved == null ? 0 : Math.max(0, Math.min(MAX, saved));
+        }
+        return w.canPerform(prof) ? 1 : 0;
+    }
+
+    /** Установить значение (0..4); возвращает команду для сервера. */
+    public String set(Worker w, String prof, int n) {
+        if (w == null || prof == null || !w.canPerform(prof)) return null;
+        n = Math.max(0, Math.min(MAX, n));
+        values.computeIfAbsent(w.id, k -> new HashMap<>()).put(prof, n);
+        return Orders.priorityWorkCmd(w.id, prof, n);
+    }
+
+    /** Discard optimistic UI values after a fresh server snapshot has been applied. */
+    public void clearOptimisticOverrides() { values.clear(); }
+
+    /** Щелчок по ячейке: 0->1->2->3->4->0, назад при back (ПКМ). Возвращает команду. */
+    public String cycle(Worker w, String prof, boolean back) {
+        if (w == null || !w.canPerform(prof)) return null;
+        int v = get(w, prof);
+        return set(w, prof, back ? (v + MAX) % (MAX + 1) : (v + 1) % (MAX + 1));
+    }
+
+    /** Щелчок по заголовку столбца: всем рабочим ставится следующее значение по первому в списке. */
+    public List<String> cycleColumn(Settlement s, String prof) {
+        List<String> out = new ArrayList<>();
+        if (s.workers.isEmpty()) return out;
+        Worker firstCompatible = s.workers.stream().filter(w -> w.canPerform(prof)).findFirst().orElse(null);
+        if (firstCompatible == null) return out;
+        int next = (get(firstCompatible, prof) + 1) % (MAX + 1);
+        for (Worker w : s.workers) if (w.canPerform(prof)) out.add(set(w, prof, next));
+        return out;
+    }
+
+    /** Lowest non-zero priority among actual settlement work roles; current role wins ties, then stable role order. */
+    public String best(Settlement s, Worker w) {
+        Set<String> roles = new TreeSet<>();
+        roles.add("builder");
+        for (var building : s.defs.buildings.values()) roles.addAll(building.jobs.keySet());
+        String best = null;
+        int bestPriority = Integer.MAX_VALUE;
+        int bestTieRank = Integer.MAX_VALUE;
+        for (String role : roles) {
+            int priority = get(w, role);
+            if (priority <= 0) continue;
+            // A resident's current assignment wins ties; otherwise generalists prefer construction
+            // over arbitrary alphabetical roles, keeping the settlement productive and deterministic.
+            int tieRank = role.equals(w.workRole()) ? 0 : role.equals("builder") ? 1 : 2;
+            if (priority < bestPriority || (priority == bestPriority && tieRank < bestTieRank)) {
+                best = role;
+                bestPriority = priority;
+                bestTieRank = tieRank;
+            }
+        }
+        return best;
+    }
+
+    public static List<String> professions(Defs d) { return new ArrayList<>(d.professions.keySet()); }
+}

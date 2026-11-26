@@ -1,0 +1,42 @@
+{
+ "id": "plague",
+ "weight": 1.2,
+ "who": "ruler",
+ "cooldown_years": 15,
+ "title": "Мор",
+ "text": "В землях {realm} объявился мор. Лекари просят денег на карантин.",
+ "cond": {},
+ "options": [
+  {
+   "text": "Закрыть дороги (-40 золота)",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -40
+    },
+    {
+     "op": "trait",
+     "add": "diligent"
+    }
+   ]
+  },
+  {
+   "text": "Молиться и ждать",
+   "ai": 1,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -10
+    },
+    {
+     "op": "opinion",
+     "who": "council",
+     "value": -8,
+     "years": 6,
+     "label": "Бездействие в мор"
+    }
+   ]
+  }
+ ]
+}

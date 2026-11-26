@@ -1,0 +1,128 @@
+{
+ "quests": [
+  {
+   "id": "m_trial_1",
+   "name": "Испытание оружием: стойка",
+   "category": "story",
+   "giver": {
+    "roles": [
+     "marshal"
+    ]
+   },
+   "text": "{giver}: «Чтобы стать чемпионом, пройди три испытания. Первое: {count} врагов - голыми руками не надо, но чисто.»",
+   "steps": [
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      12,
+      20
+     ],
+     "text": "Победить {count} × врагов",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 120,
+    "gold": 60,
+    "flags": [
+     "trial:1"
+    ]
+   },
+   "weight": 30,
+   "cooldown": 0,
+   "req": {
+    "min_level": 12
+   }
+  },
+  {
+   "id": "m_trial_2",
+   "name": "Испытание оружием: броня",
+   "category": "story",
+   "giver": {
+    "roles": [
+     "marshal"
+    ]
+   },
+   "text": "{giver}: «Второе: добудь {count} железных слитков - броня должна быть твоей.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "iron_ingot",
+     "count": [
+      24,
+      36
+     ],
+     "text": "Добыть {count} × железных слитков"
+    }
+   ],
+   "reward": {
+    "xp": 180,
+    "gold": 90,
+    "flags": [
+     "trial:2"
+    ]
+   },
+   "weight": 30,
+   "cooldown": 0,
+   "req": {
+    "min_level": 14,
+    "flags": [
+     "quest:done:m_trial_1"
+    ]
+   }
+  },
+  {
+   "id": "m_trial_3",
+   "name": "Испытание оружием: поединок",
+   "category": "story",
+   "giver": {
+    "roles": [
+     "marshal"
+    ]
+   },
+   "text": "{giver}: «Последнее: бдение и поединок. Подожди, пока остынет сердце, и побеждай.»",
+   "steps": [
+    {
+     "type": "wait",
+     "days": 2,
+     "text": "Провести ночь в бдении"
+    },
+    {
+     "type": "kill",
+     "mob": "skeleton",
+     "count": [
+      12,
+      20
+     ],
+     "text": "Победить {count} × скелетов-стражей",
+     "scale": "level"
+    },
+    {
+     "type": "level",
+     "min": 15,
+     "text": "Достичь 15 уровня"
+    }
+   ],
+   "reward": {
+    "xp": 400,
+    "gold": 220,
+    "flags": [
+     "quest:trial_of_arms"
+    ],
+    "rep": {
+     "army": 10
+    }
+   },
+   "weight": 30,
+   "cooldown": 0,
+   "done_text": "Теперь ты достоин звания чемпиона.",
+   "req": {
+    "min_level": 15,
+    "flags": [
+     "quest:done:m_trial_2"
+    ]
+   }
+  }
+ ]
+}

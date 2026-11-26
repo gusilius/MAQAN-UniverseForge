@@ -1,0 +1,29 @@
+{
+  "scaling": {"hp_per_level": 0.12, "dmg_per_level": 0.07, "blocks_per_level": 120, "over_player": 5, "under_player": 3, "base_level": 1},
+  "threats": [
+    {"id": "poachers", "name": "Браконьеры", "kind": "bandits", "min_level": 1, "max_level": 9, "weight": 14, "xp": 18, "gold": [3, 12],
+     "members": [{"role": "grunt", "entity": "minecraft:vindicator", "count": [1, 2], "names": ["Браконьер", "Беглый батрак", "Голодранец"], "hp_mult": 0.7, "dmg_mult": 0.6},
+                 {"role": "archer", "entity": "minecraft:pillager", "count": [1, 1], "names": ["Лучник-браконьер", "Охотник без лицензии"], "hp_mult": 0.7, "dmg_mult": 0.6}]},
+    {"id": "road_bandits", "name": "Дорожные разбойники", "kind": "bandits", "min_level": 4, "max_level": 24, "weight": 16, "xp": 30, "gold": [10, 30],
+     "members": [{"role": "grunt", "entity": "minecraft:vindicator", "count": [2, 3], "names": ["Разбойник", "Грабитель", "Головорез"]},
+                 {"role": "archer", "entity": "minecraft:pillager", "count": [1, 2], "names": ["Стрелок из засады", "Арбалетчик"]},
+                 {"role": "captain", "entity": "minecraft:vindicator", "count": [1, 1], "names": ["Атаман дороги", "Одноглазый Курт"], "hp_mult": 1.6, "dmg_mult": 1.2, "armor": 2}]},
+    {"id": "outlaw_band", "name": "Банда изгоев", "kind": "bandits", "min_level": 12, "max_level": 45, "weight": 12, "xp": 55, "gold": [40, 120],
+     "members": [{"role": "brute", "entity": "minecraft:vindicator", "count": [2, 4], "names": ["Изгой-секач", "Закованный в броню", "Дезертир"], "hp_mult": 1.2, "armor": 3},
+                 {"role": "archer", "entity": "minecraft:pillager", "count": [2, 3], "names": ["Лучник изгоев", "Меткий дезертир"], "armor": 1},
+                 {"role": "captain", "entity": "minecraft:vindicator", "count": [1, 1], "names": ["Предводитель изгоев", "Барон-отступник"], "hp_mult": 2.2, "dmg_mult": 1.4, "armor": 4}]},
+    {"id": "warband", "name": "Военная банда", "kind": "bandits", "min_level": 28, "max_level": 99, "weight": 10, "xp": 100, "gold": [150, 500],
+     "members": [{"role": "brute", "entity": "minecraft:vindicator", "count": [4, 6], "names": ["Наёмник-рубака", "Ветеран войны"], "hp_mult": 1.5, "armor": 5},
+                 {"role": "archer", "entity": "minecraft:pillager", "count": [3, 4], "names": ["Лучник-наёмник"], "hp_mult": 1.2, "armor": 3},
+                 {"role": "boss", "entity": "minecraft:evoker", "count": [1, 1], "names": ["Лорд-разбойник", "Чёрный капитан"], "hp_mult": 3.0, "dmg_mult": 1.6, "armor": 6}]},
+    {"id": "wolves", "name": "Стая волков", "kind": "beasts", "min_level": 1, "max_level": 20, "weight": 12, "xp": 12, "gold": [0, 0],
+     "members": [{"role": "grunt", "entity": "minecraft:wolf", "count": [3, 5], "names": ["Дикий волк", "Голодный волк"], "hp_mult": 1.0, "dmg_mult": 1.0}]},
+    {"id": "dire_pack", "name": "Стая лютоволков", "kind": "beasts", "min_level": 15, "max_level": 99, "weight": 8, "xp": 45, "gold": [0, 0],
+     "members": [{"role": "brute", "entity": "minecraft:wolf", "count": [4, 6], "names": ["Лютоволк"], "hp_mult": 2.0, "dmg_mult": 1.5},
+                 {"role": "captain", "entity": "minecraft:wolf", "count": [1, 1], "names": ["Вожак лютоволков"], "hp_mult": 3.5, "dmg_mult": 1.8}]},
+    {"id": "grave_walkers", "name": "Ходящие по могилам", "kind": "undead", "min_level": 6, "max_level": 99, "weight": 10, "xp": 40, "gold": [0, 20],
+     "members": [{"role": "grunt", "entity": "minecraft:zombie", "count": [4, 7], "names": ["Ходячий мертвец", "Тлеющий"], "hp_mult": 1.1},
+                 {"role": "archer", "entity": "minecraft:skeleton", "count": [2, 3], "names": ["Костяной стрелок"]},
+                 {"role": "captain", "entity": "minecraft:wither_skeleton", "count": [1, 1], "names": ["Костяной полководец"], "hp_mult": 2.0, "dmg_mult": 1.3}]}
+  ]
+}

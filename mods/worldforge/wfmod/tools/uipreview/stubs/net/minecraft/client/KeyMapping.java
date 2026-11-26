@@ -1,0 +1,1 @@
+package net.minecraft.client; public class KeyMapping { public boolean matches(int a,int b){return false;} }

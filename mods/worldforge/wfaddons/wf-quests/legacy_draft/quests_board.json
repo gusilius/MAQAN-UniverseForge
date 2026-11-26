@@ -1,0 +1,250 @@
+{
+ "quests": [
+  {
+   "id": "ev_wolves",
+   "name": "Волки в стужу",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Голодные волки у околиц. Награда за {count} шкур: {reward}.»",
+   "steps": [
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      6,
+      12
+     ],
+     "text": "Победить {count} × хищников",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 60,
+    "gold": 36
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_bandits",
+   "name": "Налёт разбойников",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Шайка грабит обозы! Награда за {count} голов: {reward}.»",
+   "steps": [
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      8,
+      14
+     ],
+     "text": "Разбить {count} × разбойников",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 90,
+    "gold": 55,
+    "rep": {
+     "army": 2
+    }
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_herbs",
+   "name": "Лекарство от мора",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Мор в городе. Нужны {count} пшеницы и хлеб для больных. Награда: {reward}.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "bread",
+     "count": [
+      10,
+      20
+     ],
+     "text": "Принести {count} × хлеб больным",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 70,
+    "gold": 44
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_fire",
+   "name": "Пожар в слободе",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Сгорели дома. Нужно {count} брёвен для восстановления. Награда: {reward}.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "oak_log",
+     "count": [
+      24,
+      48
+     ],
+     "text": "Принести {count} × брёвен",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 65,
+    "gold": 40
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_feast",
+   "name": "Праздничный стол",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Праздник урожая! Нужно {count} печёных яблок и хлеба. Награда: {reward}.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "bread",
+     "count": [
+      12,
+      24
+     ],
+     "text": "Принести {count} × хлеб для праздника",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 55,
+    "gold": 35
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_caravan",
+   "name": "Охрана каравана",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Караван идёт в {place}. Нужна охрана.»",
+   "steps": [
+    {
+     "type": "reach",
+     "place": "{neighbor}",
+     "text": "Сопроводить караван"
+    },
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      4,
+      8
+     ],
+     "text": "Отбиться от {count} × нападавших",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 100,
+    "gold": 65
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_envoy",
+   "name": "Прибыл посол",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Посол соседей ищет проводника ко двору.»",
+   "steps": [
+    {
+     "type": "talk",
+     "role": "chancellor",
+     "text": "Привести посла к канцлеру"
+    }
+   ],
+   "reward": {
+    "xp": 60,
+    "gold": 40,
+    "rep": {
+     "court": 2
+    }
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  },
+  {
+   "id": "ev_ore",
+   "name": "Горячка рудников",
+   "category": "event",
+   "giver": {
+    "kinds": [
+     "board"
+    ]
+   },
+   "text": "Объявление: «Рудники кипят! Нужно {count} железной руды. Награда: {reward}.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "raw_iron",
+     "count": [
+      24,
+      48
+     ],
+     "text": "Принести {count} × руды",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 70,
+    "gold": 50
+   },
+   "weight": 1,
+   "cooldown": 0,
+   "anywhere": true
+  }
+ ]
+}

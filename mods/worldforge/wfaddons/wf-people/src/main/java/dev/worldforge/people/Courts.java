@@ -1,0 +1,223 @@
+package dev.worldforge.people;
+
+import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.TitleEditor;
+
+import java.util.*;
+
+/**
+ * Заполняет карту людьми по ролям: у каждого государства правитель с семьёй, канцлер, маршал и так далее; у каждой деревни жители.
+ * Детерминированно: тот же seed даёт тех же людей; повторный вызов ничего не дублирует и только заполняет пустые места
+ * (например, после смерти канцлера).
+ */
+public final class Courts {
+    private Courts() {}
+
+    public static String realmPlace(String id) { return "realm:" + id; }
+
+    public static String titlePlace(int id) { return "title:" + id; }
+
+    private static long mix(long seed, String a, String b, int i) {
+        long h = seed * 0x9E3779B97F4A7C15L;
+        for (char c : (a + "|" + b + "|" + i).toCharArray()) h = (h ^ c) * 0x100000001B3L;
+        return h;
+    }
+
+    /** Возвращает число созданных персонажей. ed может быть null (тогда правитель в данных государства не меняется). */
+    public static int ensure(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return ensureBatched(d, ed, reg, defs, names, seed, year);
+        }
+    }
+
+    /** Fills realm-level offices for generated polities without requiring map titles. */
+    public static int ensureRealm(TitleData.Realm realm, CharacterRegistry reg,
+                                  RoleDefs defs, NameBank names, long seed, int year) {
+        if (realm == null || reg == null || defs == null || names == null) return 0;
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            TerritorialIdentity.syncNameHierarchy(names);
+            String place = realmPlace(realm.id);
+            String race = text(realm.props.get("race"));
+            if (race.isBlank()) race = dominantRace(realm.props.get("races"));
+            String culture = text(realm.props.get("culture"));
+            if (culture.isBlank()) culture = names.culture(race);
+            Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
+            int created = 0;
+            for (Role role : defs.all()) {
+                if (!"realm".equals(role.per)) continue;
+                String key = holderKey(role.id, place);
+                int have = reg.holderCount(role.id, place);
+                for (int i = have; i < role.count; i++) {
+                    create(null, null, reg, defs, names, role, place, culture, realm.id, race,
+                            new Random(mix(seed, place, role.id, i)), year, usedHouses);
+                    created++;
+                }
+            }
+            return created;
+        }
+    }
+
+    private static int ensureBatched(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
+        TerritorialIdentity.syncNameHierarchy(names);
+        int created = 0;
+        // Only title offices inside an actually owned realm belong to the living political
+        // hierarchy. Geography-only maps still contain thousands of unowned barony/county
+        // records; filling offices for every one of them creates a phantom population before
+        // any polity has claimed territory.
+        Set<Integer> realmOwnedTitles = realmOwnedTitleIds(d);
+        // House uniqueness still needs the currently used house names, but office counts
+        // are served by the registry's role/place reverse index rather than a full-population
+        // aggregation pass.
+        Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
+        for (Role role : defs.all()) {
+            List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
+            if (role.per.equals("realm")) {
+                for (TitleData.Realm r : d.realmList()) {
+                    String realmRace = text(r.props.get("race"));
+                    if (realmRace.isBlank()) realmRace = dominantRace(r.props.get("races"));
+                    String realmCulture = text(r.props.get("culture"));
+                    if (realmCulture.isBlank()) realmCulture = names.culture(realmRace);
+                    places.add(new String[]{realmPlace(r.id), realmCulture, r.id, realmRace});
+                }
+            } else {
+                int tier = -1;
+                for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
+                // Shared role packs target different map schemas (historical county/barony
+                // versus image province/region/state). A role with no matching tier is dormant;
+                // it must not prevent the realm-level ruler, court and family from being created.
+                if (tier < 0) continue;
+                for (TitleData.Title t : d.allTitles())
+                    if (t.tier == tier && realmOwnedTitles.contains(t.id))
+                        places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id), raceOf(d, t)});
+            }
+            for (String[] pl : places) {
+                String key = holderKey(role.id, pl[0]);
+                int have = reg.holderCount(role.id, pl[0]);
+                for (int i = have; i < role.count; i++) {
+                    create(d, ed, reg, defs, names, role, pl[0], pl[1], pl[2], pl[3],
+                            new Random(mix(seed, pl[0], role.id, i)), year, usedHouses);
+                    created++;
+                }
+            }
+        }
+        return created;
+    }
+
+    /**
+     * Returns title IDs that lie on the parent chain of at least one province owned by
+     * a canonical realm. TitleData.realmOf accepts province IDs only, so derive the
+     * ancestor set from owned tier-0 provinces in one pass.
+     */
+    private static Set<Integer> realmOwnedTitleIds(TitleData data) {
+        Set<Integer> owned = new HashSet<>();
+        for (TitleData.Title province : data.allTitles()) {
+            if (province.tier != 0 || data.realmOf(province) == null) continue;
+            for (TitleData.Title current = province; current != null;
+                 current = current.parent > 0 ? data.get(current.parent) : null) {
+                owned.add(current.id);
+            }
+        }
+        return owned;
+    }
+
+    private static String holderKey(String role, String place) {
+        return role + "#" + place;
+    }
+
+    private static String cultureOf(TitleData d, TitleData.Title t) {
+        for (TitleData.Title c = t; c != null; c = c.parent > 0 ? d.get(c.parent) : null) {
+            String value = text(c.props.get("culture"));
+            if (!value.isBlank()) return value;
+        }
+        TitleData.Title province = t;
+        while (province != null && province.tier > 0) province = province.parent > 0 ? d.get(province.parent) : null;
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) return "";
+        String explicit = text(realm.props.get("culture"));
+        String race = text(realm.props.get("race"));
+        if (race.isBlank()) race = dominantRace(realm.props.get("races"));
+        return explicit.isBlank() ? race : explicit;
+    }
+
+    private static String raceOf(TitleData d, TitleData.Title t) {
+        for (TitleData.Title current = t; current != null; current = current.parent > 0 ? d.get(current.parent) : null) {
+            String value = text(current.props.get("race"));
+            if (!value.isBlank()) return value;
+        }
+        TitleData.Title province = t;
+        while (province != null && province.tier > 0) province = province.parent > 0 ? d.get(province.parent) : null;
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) return "";
+        String race = text(realm.props.get("race"));
+        return race.isBlank() ? dominantRace(realm.props.get("races")) : race;
+    }
+
+    private static String dominantRace(Object raw) {
+        if (raw instanceof Map<?, ?> shares) {
+            return shares.entrySet().stream()
+                    .filter(e -> e.getValue() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0)
+                    .max(Comparator.comparingDouble(e -> ((Number) e.getValue()).doubleValue()))
+                    .map(e -> String.valueOf(e.getKey())).orElse("");
+        }
+        if (raw instanceof String value) {
+            String best = ""; double max = 0;
+            for (String item : value.split(",")) {
+                String[] pair = item.trim().split(":", 2);
+                if (pair.length != 2) continue;
+                try {
+                    double share = Double.parseDouble(pair[1].trim());
+                    if (Double.isFinite(share) && share > max) { max = share; best = pair[0].trim(); }
+                } catch (NumberFormatException ignored) { }
+            }
+            return best;
+        }
+        return "";
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static String pick(List<String> l, Random r) { return l.get(r.nextInt(l.size())); }
+
+    private static void create(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, Role role, String place, String wantedCulture, String label, String race, Random r, int year, Set<String> usedHouses) {
+        String culture = names.culture(wantedCulture);
+        String characterRace = TerritorialIdentity.chooseSubrace(race, r);
+        NameBank.Pool pool = names.poolForRace(characterRace, culture);
+        boolean male = r.nextInt(100) < (role.ruler ? 75 : 50);
+        String first = pick(male ? pool.male : pool.female, r);
+        String house = role.ruler || role.noble
+                ? names.generateUnique(characterRace, culture, "houses", r, usedHouses) : "";
+        int age = role.ruler ? 25 + r.nextInt(31) : 20 + r.nextInt(41);
+        TitleData.Realm realm = d != null && place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
+        String preset = realm != null && role.ruler && realm.ruler != null && !realm.ruler.isBlank() ? realm.ruler : null;   // правитель, заданный вручную, остаётся
+        Character c = reg.create(preset != null ? preset : first, house, culture, male ? "m" : "f", year - age);
+        if (!characterRace.isBlank()) c.props.put("origin.race", characterRace);
+        if (house.isEmpty() && !pool.surnames.isEmpty()) c.props.put("identity.surname", pick(pool.surnames, r));
+        reg.appoint(c.id, role.id, place);
+        if (role.ruler && realm != null && preset == null && ed != null) ed.setRuler(realm.id, c.name + (house.isEmpty() ? "" : " " + house));
+        if (role.family) makeFamily(reg, names, pool, c, year, r, characterRace, usedHouses);
+    }
+
+    private static void makeFamily(CharacterRegistry reg, NameBank names, NameBank.Pool pool,
+            Character head, int year, Random r, String race, Set<String> usedHouses) {
+        boolean headMale = head.gender.equals("m");
+        String spouseHouse = names.generateUnique(race, head.culture, "houses", r, usedHouses);
+        Character sp = reg.create(pick(headMale ? pool.female : pool.male, r), spouseHouse, head.culture, headMale ? "f" : "m", head.birthYear + r.nextInt(9) - 4);
+        if (!race.isBlank()) sp.props.put("origin.race", race);
+        if (spouseHouse.isEmpty() && !pool.surnames.isEmpty()) sp.props.put("identity.surname", pick(pool.surnames, r));
+        reg.marry(head.id, sp.id);
+        int age = year - head.birthYear;
+        int kids = age < 20 ? 0 : r.nextInt(4);
+        Character father = headMale ? head : sp, mother = headMale ? sp : head;
+        for (int i = 0; i < kids; i++) {
+            int lo = Math.max(father.birthYear, mother.birthYear) + 18, born = lo + r.nextInt(Math.max(1, year - lo + 1));
+            if (born > year) break;
+            boolean m = r.nextBoolean();
+            Character child = reg.addChild(father, mother, pick(m ? pool.male : pool.female, r), m ? "m" : "f", born);
+            if (!child.house.isEmpty()) usedHouses.add(child.house);
+            if (!race.isBlank()) child.props.put("origin.race", race);
+            if (child.house.isEmpty() && !pool.surnames.isEmpty()) child.props.put("identity.surname", father.props.getOrDefault("identity.surname", pick(pool.surnames, r)));
+        }
+    }
+}

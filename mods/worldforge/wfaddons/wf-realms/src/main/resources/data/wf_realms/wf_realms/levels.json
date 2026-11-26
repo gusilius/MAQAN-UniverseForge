@@ -1,0 +1,67 @@
+{
+ "levels": [
+  {
+   "id": "band",
+   "name": "Стоянка",
+   "min_provinces": 0,
+   "points": 0.5,
+   "doctrine_slots": 1,
+   "law_slots": 1,
+   "mods": {
+    "tax_pct": 0
+   }
+  },
+  {
+   "id": "tribe",
+   "name": "Племя",
+   "min_provinces": 2,
+   "points": 1,
+   "doctrine_slots": 2,
+   "law_slots": 2,
+   "mods": {
+    "levy_pct": 2
+   }
+  },
+  {
+   "id": "principality",
+   "name": "Княжество",
+   "min_provinces": 4,
+   "min_prestige": 100,
+   "points": 1.5,
+   "doctrine_slots": 4,
+   "law_slots": 3,
+   "mods": {
+    "tax_pct": 2,
+    "levy_pct": 3
+   }
+  },
+  {
+   "id": "kingdom",
+   "name": "Королевство",
+   "min_provinces": 8,
+   "min_prestige": 400,
+   "points": 2.5,
+   "doctrine_slots": 6,
+   "law_slots": 4,
+   "mods": {
+    "tax_pct": 4,
+    "levy_pct": 5,
+    "opinion": 1
+   }
+  },
+  {
+   "id": "empire",
+   "name": "Империя",
+   "min_provinces": 16,
+   "min_prestige": 1500,
+   "points": 4,
+   "doctrine_slots": 9,
+   "law_slots": 5,
+   "mods": {
+    "tax_pct": 6,
+    "levy_pct": 8,
+    "opinion": 2
+   }
+  }
+ ]
+}

@@ -1,0 +1,33 @@
+{
+ "id": "mercenary_offer",
+ "weight": 2,
+ "who": "council",
+ "cooldown_years": 6,
+ "title": "Предложение наёмников",
+ "text": "{name} докладывает: капитан наёмников предлагает службу.",
+ "cond": {
+  "role": "marshal"
+ },
+ "options": [
+  {
+   "text": "Принять (-30 золота)",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -30
+    },
+    {
+     "op": "stat",
+     "attr": "martial",
+     "delta": 1
+    }
+   ]
+  },
+  {
+   "text": "Отказать",
+   "ai": 3,
+   "effects": []
+  }
+ ]
+}

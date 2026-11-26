@@ -1,0 +1,7 @@
+{
+ "item.wf_settle.settle_wand": "Settlement Wand",
+ "entity.wf_settle.worker": "Settler",
+ "key.wf_settle.panel": "Settlement panel",
+ "key.categories.worldforge": "WorldForge",
+ "key.wf_settle.treasury": "Treasury and cities"
+}

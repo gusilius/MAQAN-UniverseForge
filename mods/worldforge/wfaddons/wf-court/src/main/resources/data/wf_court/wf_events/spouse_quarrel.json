@@ -1,0 +1,47 @@
+{
+ "id": "spouse_quarrel",
+ "weight": 3,
+ "who": "ruler",
+ "cooldown_years": 4,
+ "title": "Размолвка",
+ "text": "{name} поссорился с супругой на пиру при всех.",
+ "cond": {
+  "married": true
+ },
+ "options": [
+  {
+   "text": "Извиниться публично",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "opinion",
+     "who": "spouse",
+     "value": 15,
+     "years": 6,
+     "label": "Извинение"
+    },
+    {
+     "op": "trait",
+     "add": "patient"
+    }
+   ]
+  },
+  {
+   "text": "Настоять на своём",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "opinion",
+     "who": "spouse",
+     "value": -15,
+     "years": 6,
+     "label": "Ссора на пиру"
+    },
+    {
+     "op": "trait",
+     "add": "wroth"
+    }
+   ]
+  }
+ ]
+}

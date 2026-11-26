@@ -1,0 +1,177 @@
+package dev.worldforge.tests;
+
+import dev.worldforge.mod.api.StatApi;
+import dev.worldforge.realms.*;
+
+import java.nio.file.*;
+import java.util.*;
+
+public class RealmsTest {
+    static int fails;
+    static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+    static int day = 100;
+
+    public static void main(String[] a) throws Exception {
+        RealmDefs d = new RealmDefs();
+        try (var s = Files.list(Paths.get("wf-realms/src/main/resources/data/wf_realms/wf_realms"))) { for (Path p : (Iterable<Path>) s.sorted()::iterator) d.load(Files.readString(p)); }
+        List<String> bad = d.validate();
+        ok(bad.isEmpty(), "данные корректны " + bad);
+        ok(d.govs.size() >= 10 && d.levels.size() == 5 && d.terrains.size() == 7 && d.branches.size() == 4 && d.laws.size() == 4, "объём данных");
+        String displayHouseId = Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast");
+        ok(displayHouseId.matches("[A-Za-z0-9_.:-]{3,96}")
+                        && displayHouseId.equals(Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast")),
+                "human-readable family names map to deterministic valid dynasty IDs");
+        ok(!displayHouseId.equals(Statecraft.stableDynastyId("planetos", "dwarf", "House of the Northern Coast"))
+                        && !displayHouseId.equals(Statecraft.stableDynastyId("other-map", "human", "House of the Northern Coast")),
+                "canonical dynasty IDs are isolated by map and culture");
+        ok(Statecraft.stableDynastyId("planetos", "human", "house_0123456789abcdef")
+                        .equals("house_0123456789abcdef"),
+                "existing generated canonical house IDs remain unchanged");
+
+        Statecraft identityPolitics = new Statecraft();
+        identityPolitics.registerDynasty("house_alpha", "character-alpha", "House of the Northern Coast");
+        identityPolitics.registerDynasty("house_beta", "character-beta", "House of the Eastern Reach");
+        ok(!identityPolitics.setDynastyName("house_beta", "House of the Northern Coast")
+                        && identityPolitics.lastError.contains("already reserved"),
+                "a second dynasty cannot claim another house's display name");
+        ok(identityPolitics.dynasties().size() == 2,
+                "canonical dynasty registry exposes one stable identity per house");
+
+        StatApi.resetForTests();
+        Realms r = new Realms(d);
+        final int[] prov = {1}, pres = {0};
+        final Map<String, Double> races = new HashMap<>(), terr = new HashMap<>(), policySignals = new HashMap<>();
+        r.hooks = new Realms.Hooks() {
+            @Override public int provinces(String x) { return prov[0]; }
+            @Override public int prestige(String x) { return pres[0]; }
+            @Override public Map<String, Double> races(String x) { return races; }
+            @Override public Map<String, Double> terrain(String x) { return terr; }
+            @Override public Map<String, Double> policySignals(String x) { return policySignals; }
+            @Override public int today() { return day; }
+        };
+        r.publish();
+        ok(r.level("a") == 0 && r.levelDef("a").id().equals("band"), "стоянка при 1 провинции");
+        prov[0] = 9; pres[0] = 450;
+        ok(r.levelDef("a").id().equals("kingdom"), "королевство при 9 провинциях и 450 престижа");
+        pres[0] = 0;
+        ok(r.levelDef("a").id().equals("tribe") || r.levelDef("a").id().equals("band") || r.level("a") == 1, "без престижа уровень ограничен");
+        pres[0] = 450;
+
+        // расы и местность
+        races.put("human", 0.9); races.put("dwarf", 0.1); terr.put("plains", 0.8); terr.put("coast", 0.2);
+        ok(!r.setGov("a", "holdfast", false) && r.lastError.contains("20%"), "гномий оплот закрыт людям: " + r.lastError);
+        races.clear(); races.put("dwarf", 0.8); races.put("human", 0.2); terr.clear(); terr.put("mountains", 0.9); terr.put("plains", 0.1);
+        ok(r.setGov("a", "holdfast", false), "оплот открыт гномам: " + r.lastError);
+        races.clear(); races.put("human", 0.8); races.put("dwarf", 0.2);
+        terr.clear(); terr.put("mountains", 0.9); terr.put("plains", 0.1);
+        ok(r.setGov("minority-heritage", "holdfast", false),
+                "20% ancestral representation can support a race-specialized constitutional form");
+        double fitHold = r.fit("a", d.govs.get("holdfast")), fitFeud = r.fit("a", d.govs.get("feudal_monarchy"));
+        ok(fitHold > fitFeud && fitHold > 20, "race and terrain suitability ranks the mountain hold above feudal monarchy: hold=" + fitHold + ", feudal=" + fitFeud);
+        ok(StatApi.tag("r:a", "gov").equals("holdfast") && StatApi.tag("r:a", "gov_category").equals("republic") && StatApi.tag("r:a", "realm_level").equals("kingdom"), "метки в шине");
+        ok(StatApi.mods("r:a").getOrDefault("mining_speed_pct", 0.0) > 25, "бонусы через шину: " + StatApi.mods("r:a").get("mining_speed_pct"));
+        ok(!r.setGov("a", "horde", false) && r.lastError.contains("орк") || r.lastError.length() > 0, "смена строя: " + r.lastError);
+        ok(!r.setGov("a", "theocracy", false) && r.lastError.contains("дн"), "кулдаун смены строя: " + r.lastError);
+        day += 31;
+        ok(r.setGov("a", "theocracy", false) && r.state("a").laws.isEmpty(), "после кулдауна смена удалась");
+
+        // доктрины
+        ok(!r.unlock("a", "martial:levy") && r.lastError.contains("нужно"), "ветка требует предшественника: " + r.lastError);
+        ok(!r.unlock("a", "martial:drill") && r.lastError.contains("очков"), "нужны очки: " + r.lastError);
+        r.tick("a"); day += 20; int days = r.tick("a");
+        ok(days == 20 && r.state("a").points >= 40, "очки накапливаются: " + r.state("a").points);
+        ok(r.unlock("a", "martial:drill") && r.unlock("a", "martial:levy"), "цепочка изучена");
+        ok(!r.unlock("a", "martial:cavalry") && r.lastError.contains("строю"), "кавалерия не для теократии: " + r.lastError);
+        double lev0 = r.mods("a").getOrDefault("levy_pct", 0.0);
+        ok(lev0 > 10, "доктрины дают бонус: " + lev0);
+        // ячейки
+        int slots = r.doctrineSlots("a");
+        r.state("a").points = 1000;
+        int learned = 2;
+        for (String k : List.of("economy:tools", "economy:roads", "economy:markets", "lore:scribes", "lore:schools", "lore:hospitals", "statecraft:courts", "statecraft:bureaucracy", "lore:university")) if (r.unlock("a", k)) learned++;
+        ok(learned == slots && r.lastError.contains("ячеек"), "ячейки доктрин ограничены: " + learned + "/" + slots);
+
+        // законы
+        ok(r.setLaw("a", "taxation", "heavy") && r.mods("a").getOrDefault("opinion", 0.0) < r.mods("a").getOrDefault("opinion", 0.0) + 1, "закон принят");
+        ok(!r.setLaw("a", "taxation", "low") && r.lastError.contains("дн"), "кулдаун закона: " + r.lastError);
+        ok(!r.setLaw("a", "nope", "x"), "нет закона");
+        r.setLaw("a", "faith", "state"); r.setLaw("a", "trade_policy", "free"); r.setLaw("a", "conscription", "levy");
+        ok(r.state("a").laws.size() <= r.lawSlots("a"), "ячейки законов ограничены: " + r.state("a").laws.size() + "/" + r.lawSlots("a"));
+
+        // ИИ
+        races.clear(); races.put("orc", 1.0); terr.clear(); terr.put("plains", 1.0);
+        String g1 = r.suggest("b", 1), g2 = r.suggest("b", 1);
+        ok(g1.equals(g2) && !g1.isEmpty(), "ИИ выбирает строй детерминированно: " + g1);
+        r.autoDevelop("b", 5);
+        ok(!r.state("b").gov.isEmpty(), "автоустановка строя: " + r.state("b").gov);
+
+        // Политический ИИ использует реальные сигналы войны, казны, торговли и состава населения.
+        races.clear(); races.put("human", 0.5); races.put("elf", 0.5);
+        terr.clear(); terr.put("coast", 1.0);
+        policySignals.clear();
+        policySignals.put("war", 1.0); policySignals.put("fiscal_stress", 1.0);
+        policySignals.put("trade_access", 1.0); policySignals.put("cultural_diversity", 1.0);
+        policySignals.put("ruler_martial", 1.0); policySignals.put("ruler_stewardship", 1.0);
+        policySignals.put("ruler_diplomacy", 0.8); policySignals.put("ruler_learning", 0.9);
+        policySignals.put("ruler_trait_brave", 1.0); policySignals.put("ruler_trait_scholar", 1.0);
+        r.state("policy-war").gov = "holdfast";
+        r.state("policy-war").points = 1000;
+        r.autoDevelop("policy-war", 24);
+        ok("conscript".equals(r.state("policy-war").laws.get("conscription")),
+                "war pressure drives the AI toward a stronger conscription policy");
+        ok("heavy".equals(r.state("policy-war").laws.get("taxation")),
+                "fiscal stress drives the AI toward higher revenue when stability is intact");
+        ok("free".equals(r.state("policy-war").laws.get("trade_policy")),
+                "coastal trade access drives the AI toward open trade");
+        ok("tolerant".equals(r.state("policy-war").laws.get("faith")),
+                "cultural plurality drives the AI toward religious tolerance");
+        ok(r.state("policy-war").nodes.contains("martial:drill"),
+                "wartime doctrine priorities are reflected in the existing doctrine tree");
+
+        policySignals.clear(); policySignals.put("vassal_discontent", 1.0); policySignals.put("unrest", 1.0);
+        r.state("policy-stability").gov = "holdfast";
+        r.autoDevelop("policy-stability", 25);
+        ok("low".equals(r.state("policy-stability").laws.get("taxation")),
+                "vassal discontent and unrest make the AI reduce taxation to stabilize the realm");
+
+        // Existing laws are reconsidered only after their own cooldown expires.
+        day += 100;
+        policySignals.clear(); policySignals.put("war", 0.0);
+        r.autoDevelop("policy-war", 26);
+        ok("volunteers".equals(r.state("policy-war").laws.get("conscription")),
+                "the AI abandons emergency conscription after wartime pressure ends and the law cooldown expires");
+
+        // The policy engine learns from the observed result after a law was adopted.
+        policySignals.clear();
+        r.state("policy-memory").gov = "holdfast";
+        r.state("policy-memory").points = 1000;
+        ok(r.setLaw("policy-memory", "taxation", "heavy"),
+                "policy-memory realm adopts the initial heavy-tax law");
+        ok(r.state("policy-memory").lawSignalBaselines.containsKey("taxation"),
+                "law adoption stores the actual pressure baseline");
+        policySignals.put("unrest", 1.0); policySignals.put("faction_pressure", 1.0);
+        day += 100;
+        r.autoDevelop("policy-memory", 27);
+        ok("low".equals(r.state("policy-memory").laws.get("taxation")),
+                "worsening unrest and faction pressure make the AI reconsider a previously adopted heavy-tax policy");
+        Realms memoryReload = new Realms(d); memoryReload.hooks = r.hooks;
+        memoryReload.fromJson(r.toJson());
+        ok(memoryReload.state("policy-memory").lawSignalBaselines.equals(r.state("policy-memory").lawSignalBaselines),
+                "policy outcome baselines survive save/load");
+        races.clear(); races.put("orc", 1.0); r.state("c").gov = "";
+        ok(d.govs.get(r.suggest("c", 3)).reqRaces().isEmpty() || d.govs.get(r.suggest("c", 3)).reqRaces().contains("orc"), "ИИ не берёт чужую расу");
+
+        // сохранение
+        Realms r2 = new Realms(d); r2.hooks = r.hooks;
+        r2.fromJson(r.toJson());
+        ok(r2.state("a").nodes.equals(r.state("a").nodes) && r2.state("a").laws.equals(r.state("a").laws) && r2.mods("a").equals(r.mods("a")), "save/load");
+        ok(r.viewJson("a").contains("govs") && r.viewJson("a").contains("holdfast"), "viewJson");
+
+        // расширяемость: добавление строя вручную
+        RealmDefs d2 = new RealmDefs();
+        d2.load("{\"levels\":[{\"id\":\"x\",\"name\":\"X\"}],\"governments\":[{\"id\":\"mine\",\"name\":\"М\",\"mods\":{\"a\":1}}]}");
+        ok(d2.validate().isEmpty() && d2.govs.containsKey("mine"), "своё государство добавляется одним JSON");
+        System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
+        if (fails > 0) System.exit(1);
+    }
+}

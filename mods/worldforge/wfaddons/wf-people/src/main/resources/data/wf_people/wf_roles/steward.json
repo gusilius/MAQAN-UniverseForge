@@ -1,0 +1,1 @@
+{"id": "steward", "name": "Управляющий", "per": "realm", "count": 1, "dialogue": "wf_people:steward", "noble": true, "unlocks": ["settlements", "economy"], "council": {"attr": "stewardship", "effects": {"income_pct": 2.0}}}

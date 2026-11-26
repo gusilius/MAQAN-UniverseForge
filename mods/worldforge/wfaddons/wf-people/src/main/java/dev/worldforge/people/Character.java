@@ -1,0 +1,55 @@
+package dev.worldforge.people;
+
+import java.util.*;
+
+/** Человек как данные. Тело в мире (моб) лишь изображает его и может исчезать, персонаж живёт в {@link CharacterRegistry}. */
+public final class Character {
+    /** Должность: роль и место ("realm:<id>" или "title:<id>"). */
+    public static final class Post {
+        public final String role, place;
+
+        public Post(String role, String place) { this.role = role; this.place = place; }
+    }
+
+    /** Stable world-wide UUID; legacy id remains only as a map-local compatibility key. */
+    public final String globalId;
+    public final String id;
+    public String name, house = "", culture = "", gender = "m";
+    public int birthYear;
+    public boolean alive = true;
+    public String father = "", mother = "", spouse = "";
+    public final List<String> children = new ArrayList<>();
+    public final List<Post> posts = new ArrayList<>();
+    public final Set<String> traits = new TreeSet<>();
+    public final Map<String, Object> props = new LinkedHashMap<>();
+    /** Runtime-only back-reference used to route direct domain mutations to the owning WAL queue. */
+    private transient CharacterAccessService accessService;
+
+    void attachAccessService(CharacterAccessService accessService) {
+        this.accessService = Objects.requireNonNull(accessService, "accessService");
+    }
+
+    void markDirty() {
+        CharacterAccessService owner = accessService;
+        if (owner != null) owner.markDirty(globalId);
+    }
+
+    Character(String id, String name) { this(id, java.util.UUID.randomUUID().toString(), name); }
+
+    Character(String id, String globalId, String name) {
+        this.id = Objects.requireNonNull(id, "id");
+        this.globalId = Objects.requireNonNull(globalId, "globalId");
+        java.util.UUID.fromString(this.globalId);
+        this.name = name;
+    }
+
+    public boolean has(String role, String place) {
+        for (Post p : posts) if (p.role.equals(role) && p.place.equals(place)) return true;
+        return false;
+    }
+
+    public boolean hasRole(String role) {
+        for (Post p : posts) if (p.role.equals(role)) return true;
+        return false;
+    }
+}

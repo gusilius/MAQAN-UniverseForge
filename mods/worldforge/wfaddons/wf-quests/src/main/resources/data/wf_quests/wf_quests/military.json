@@ -1,0 +1,374 @@
+{
+ "quests": [
+  {
+   "id": "bandit_hunt",
+   "name": "Охота на разбойников",
+   "tier": 2,
+   "giver": [
+    "military"
+   ],
+   "desc": "Разбойники режут торговцев на дорогах. Нужно {count} голов - за каждую плата.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "kill",
+     "text": "Истребить врагов: {count}",
+     "mob": "hostile",
+     "count": "{count}",
+     "reply": "Дороги станут безопаснее."
+    },
+    {
+     "id": "b",
+     "type": "talk",
+     "text": "Доложить {giver}",
+     "reply": "Хорошая работа. Дороги чище."
+    }
+   ],
+   "reward": {
+    "gold": 14,
+    "xp": 90,
+    "rep": {
+     "{realm}": 2
+    },
+    "relation": 4
+   },
+   "params": {
+    "count": {
+     "range": [
+      10,
+      18
+     ],
+     "scale": "level"
+    }
+   },
+   "repeat": 7,
+   "min_level": 3
+  },
+  {
+   "id": "patrol_border",
+   "name": "Патруль границы",
+   "tier": 2,
+   "giver": [
+    "military"
+   ],
+   "desc": "Проедьтесь до границы с {neighbor} и вернитесь с донесением: что там происходит?",
+   "steps": [
+    {
+     "id": "a",
+     "type": "reach",
+     "text": "Добраться до земель {neighbor}",
+     "realm": "{neighbor}"
+    },
+    {
+     "id": "b",
+     "type": "talk",
+     "text": "Доложить {giver}",
+     "reply": "Понял. Наблюдатели так и говорили."
+    }
+   ],
+   "reward": {
+    "gold": 12,
+    "xp": 70,
+    "rep": {
+     "{realm}": 2,
+     "{neighbor}": 0
+    }
+   },
+   "requires": {
+    "war": false
+   },
+   "params": {
+    "neighbor": "$neighbor"
+   },
+   "repeat": 10,
+   "min_level": 4
+  },
+  {
+   "id": "war_scout",
+   "name": "Разведка у врага",
+   "tier": 3,
+   "giver": [
+    "military"
+   ],
+   "desc": "Идёт война. Нужны глаза в земле {enemy}: пройдите вглубь и вернитесь живым.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "reach",
+     "text": "Проникнуть в земли {enemy}",
+     "realm": "{enemy}"
+    },
+    {
+     "id": "b",
+     "type": "talk",
+     "text": "Вернуться к {giver}",
+     "reply": "Сведения бесценны. Король узнает о вашей службе."
+    }
+   ],
+   "reward": {
+    "gold": 26,
+    "xp": 160,
+    "rep": {
+     "{realm}": 4
+    },
+    "relation": 6,
+    "news": "Разведчик принёс вести из земель {enemy}."
+   },
+   "requires": {
+    "war": true
+   },
+   "params": {
+    "enemy": "$enemy"
+   },
+   "repeat": 10,
+   "min_level": 6
+  },
+  {
+   "id": "war_supplies",
+   "name": "Снабжение войск",
+   "tier": 2,
+   "giver": [
+    "military"
+   ],
+   "desc": "Армия голодна. Принесите {count} хлеба - солдатам нужно есть.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести хлеб: {count}",
+     "item": "bread",
+     "count": "{count}",
+     "reply": "Ложки застучат. Спасибо."
+    }
+   ],
+   "reward": {
+    "gold": 15,
+    "xp": 80,
+    "rep": {
+     "{realm}": 2
+    },
+    "relation": 4
+   },
+   "requires": {
+    "war": true
+   },
+   "params": {
+    "count": {
+     "range": [
+      24,
+      48
+     ]
+    }
+   },
+   "repeat": 7
+  },
+  {
+   "id": "arrows_for_garrison",
+   "name": "Стрелы для гарнизона",
+   "tier": 2,
+   "giver": [
+    "military"
+   ],
+   "desc": "Лучникам нужны стрелы: принесите {count}.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести стрелы: {count}",
+     "item": "arrow",
+     "count": "{count}",
+     "reply": "Хватит на хорошую осаду."
+    }
+   ],
+   "reward": {
+    "gold": 10,
+    "xp": 50,
+    "relation": 3
+   },
+   "params": {
+    "count": {
+     "range": [
+      32,
+      64
+     ]
+    }
+   },
+   "repeat": 9,
+   "min_level": 3
+  },
+  {
+   "id": "armor_order",
+   "name": "Железо для брони",
+   "tier": 2,
+   "giver": [
+    "military"
+   ],
+   "desc": "Кузнецам нужно железо. Принесите {count} слитков - гарнизон получит новые доспехи.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "fetch",
+     "text": "Принести железо: {count}",
+     "item": "iron_ingot",
+     "count": "{count}",
+     "reply": "Хорошее железо."
+    }
+   ],
+   "reward": {
+    "gold": 18,
+    "xp": 75,
+    "relation": 4
+   },
+   "params": {
+    "count": {
+     "range": [
+      12,
+      24
+     ]
+    }
+   },
+   "repeat": 10,
+   "min_level": 4
+  },
+  {
+   "id": "trial_arms_1",
+   "name": "Испытание оружием: путь",
+   "tier": 3,
+   "giver": [
+    "military"
+   ],
+   "desc": "Хотите стать чемпионом? Начните с простого: докажите силу в бою, истребите {count} врагов.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "kill",
+     "text": "Победить врагов: {count}",
+     "mob": "hostile",
+     "count": "{count}"
+    },
+    {
+     "id": "b",
+     "type": "talk",
+     "text": "Вернуться к {giver}",
+     "reply": "Неплохо. Но настоящее испытание впереди."
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "xp": 220
+   },
+   "params": {
+    "count": {
+     "range": [
+      25,
+      35
+     ]
+    }
+   },
+   "min_level": 15,
+   "requires": {
+    "quests": [
+     "bandit_hunt"
+    ]
+   }
+  },
+  {
+   "id": "trial_arms_2",
+   "name": "Испытание оружием: поединок",
+   "tier": 4,
+   "giver": [
+    "military"
+   ],
+   "desc": "Последнее испытание: поединок чести. Как вы будете сражаться?",
+   "steps": [
+    {
+     "id": "a",
+     "type": "choice",
+     "text": "Как провести поединок?",
+     "options": [
+      {
+       "id": "honor",
+       "text": "Сражаться честно",
+       "effects": {
+        "xp": 400,
+        "gold": 50,
+        "rep": {
+         "{realm}": 3
+        },
+        "flags": [
+         "trial_of_arms",
+         "honorable"
+        ],
+        "news": "Поединок чести выигран."
+       }
+      },
+      {
+       "id": "cheat",
+       "text": "Схитрить - и победить любой ценой",
+       "effects": {
+        "xp": 300,
+        "gold": 30,
+        "rep": {
+         "{realm}": -2
+        },
+        "flags": [
+         "trial_of_arms",
+         "dishonorable"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "reward": {
+    "xp": 10
+   },
+   "requires": {
+    "quests": [
+     "trial_arms_1"
+    ]
+   },
+   "min_level": 15
+  },
+  {
+   "id": "raise_levy",
+   "name": "Сбор ополчения",
+   "tier": 3,
+   "giver": [
+    "military"
+   ],
+   "desc": "Мне нужны надёжные люди: найдите в округе {count} крепких молодых и приведите. Хватит и вашего слова за них, плату получите сразу.",
+   "steps": [
+    {
+     "id": "a",
+     "type": "talk",
+     "text": "Дать слово за людей перед {giver}",
+     "reply": "Беру на вашу ответственность."
+    }
+   ],
+   "reward": {
+    "gold": 8,
+    "xp": 40,
+    "relation": 4,
+    "action": {
+     "id": "army_raise",
+     "args": [
+      "levy",
+      "20"
+     ]
+    }
+   },
+   "requires": {
+    "ruler": true
+   },
+   "params": {
+    "count": [
+     10,
+     20
+    ]
+   },
+   "repeat": 15,
+   "min_level": 8
+  }
+ ]
+}

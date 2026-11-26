@@ -1,0 +1,87 @@
+{
+  "id": "night_watch",
+  "name": "Ночной дозор",
+  "kind": "brotherhood",
+  "color": 3357258,
+  "power": 38,
+  "treasury": 250,
+  "join_gold": 0,
+  "dues": 0,
+  "desc": "Братство на границе. Берёт любого, но требует службы навсегда. Не платит золотом, зато делает людей из тех, кто нигде не нужен.",
+  "rivals": [],
+  "liked": [
+    "brave",
+    "content",
+    "patient"
+  ],
+  "disliked": [
+    "craven",
+    "ambitious"
+  ],
+  "ranks": [
+    {
+      "id": "recruit",
+      "name": "Рекрут",
+      "influence": 0,
+      "perks": {}
+    },
+    {
+      "id": "ranger",
+      "name": "Разведчик",
+      "influence": 45,
+      "perks": {
+        "levy_pct": 2
+      }
+    },
+    {
+      "id": "steward",
+      "name": "Стюард",
+      "influence": 140,
+      "perks": {
+        "discount_pct": 3
+      }
+    },
+    {
+      "id": "lord",
+      "name": "Лорд-командующий",
+      "influence": 330,
+      "perks": {
+        "levy_pct": 5
+      }
+    }
+  ],
+  "missions": [
+    {
+      "id": "patrol",
+      "text": "Патруль за Стеной: убейте {n} чудовищ.",
+      "type": "deed",
+      "item": "kill_hostile",
+      "min": 12,
+      "max": 30,
+      "reward": 10,
+      "influence": 16
+    },
+    {
+      "id": "wood",
+      "text": "Для костров нужны брёвна: {n} шт.",
+      "type": "fetch",
+      "item": "oak_log",
+      "min": 24,
+      "max": 64,
+      "reward": 8,
+      "influence": 8
+    }
+  ],
+  "petitions": [
+    {
+      "id": "ration",
+      "name": "Паёк",
+      "desc": "30 золота из казны братства.",
+      "cost": 10,
+      "min_rank": 0,
+      "kind": "gold",
+      "amount": 30,
+      "cooldown": 10
+    }
+  ]
+}

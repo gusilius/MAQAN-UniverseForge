@@ -1,0 +1,422 @@
+{
+ "classes": [
+  {
+   "id": "warrior",
+   "name": "Воин",
+   "desc": "Мастер ближнего боя.",
+   "tier": 1,
+   "archetype": "warrior",
+   "mods": {
+    "melee_dmg_pct": 4,
+    "max_health": 2
+   },
+   "perks": {
+    "5": {
+     "name": "Боевой пыл",
+     "mods": {
+      "crit_pct": 2
+     }
+    },
+    "15": {
+     "name": "Закалка",
+     "mods": {
+      "armor": 1,
+      "max_health": 4
+     }
+    }
+   }
+  },
+  {
+   "id": "ranger",
+   "name": "Следопыт",
+   "desc": "Стрелок и проводник.",
+   "tier": 1,
+   "archetype": "ranger",
+   "mods": {
+    "ranged_dmg_pct": 4,
+    "move_speed_pct": 2
+   },
+   "perks": {
+    "5": {
+     "name": "Меткий глаз",
+     "mods": {
+      "crit_pct": 2
+     }
+    },
+    "15": {
+     "name": "Лёгкий шаг",
+     "mods": {
+      "dodge_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "guardian",
+   "name": "Страж",
+   "desc": "Живой щит.",
+   "tier": 1,
+   "archetype": "guardian",
+   "mods": {
+    "armor": 1.5,
+    "max_health": 4
+   },
+   "perks": {
+    "5": {
+     "name": "Стойка",
+     "mods": {
+      "resist_pct": 3
+     }
+    },
+    "15": {
+     "name": "Шипы",
+     "mods": {
+      "thorns": 2
+     }
+    }
+   }
+  },
+  {
+   "id": "scholar",
+   "name": "Учёный",
+   "desc": "Книги, зелья, ремесло.",
+   "tier": 1,
+   "archetype": "scholar",
+   "mods": {
+    "xp_gain_pct": 3,
+    "craft_quality_pct": 4
+   },
+   "perks": {
+    "5": {
+     "name": "Лёгкая рука",
+     "mods": {
+      "heal_pct": 4
+     }
+    },
+    "15": {
+     "name": "Пытливый ум",
+     "mods": {
+      "xp_gain_pct": 4
+     }
+    }
+   }
+  },
+  {
+   "id": "courtier",
+   "name": "Придворный",
+   "desc": "Дипломат и управленец.",
+   "tier": 1,
+   "archetype": "courtier",
+   "mods": {
+    "discount_pct": 2,
+    "opinion": 2
+   },
+   "perks": {
+    "5": {
+     "name": "Этикет",
+     "mods": {
+      "opinion": 1
+     }
+    },
+    "15": {
+     "name": "Казначей",
+     "mods": {
+      "tax_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "rogue",
+   "name": "Плут",
+   "desc": "Тени и клинки.",
+   "tier": 1,
+   "archetype": "rogue",
+   "mods": {
+    "stealth_pct": 4,
+    "crit_pct": 2
+   },
+   "perks": {
+    "5": {
+     "name": "Лёгкие руки",
+     "mods": {
+      "luck": 1
+     }
+    },
+    "15": {
+     "name": "Ускользающий",
+     "mods": {
+      "dodge_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "knight",
+   "name": "Рыцарь",
+   "desc": "Закованный в сталь воин чести.",
+   "tier": 2,
+   "from": "warrior",
+   "archetype": "warrior",
+   "min_level": 15,
+   "req_stat": {
+    "might": 10
+   },
+   "mods": {
+    "armor": 3,
+    "levy_pct": 4,
+    "max_health": 6
+   },
+   "perks": {
+    "20": {
+     "name": "Верховая выучка",
+     "mods": {
+      "move_speed_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "berserker",
+   "name": "Берсерк",
+   "desc": "Ярость вместо брони.",
+   "tier": 2,
+   "from": "warrior",
+   "min_level": 15,
+   "req_stat": {
+    "might": 10,
+    "vitality": 8
+   },
+   "mods": {
+    "melee_dmg_pct": 12,
+    "crit_pct": 4,
+    "armor": -1
+   },
+   "perks": {
+    "20": {
+     "name": "Кровавая пелена",
+     "mods": {
+      "melee_dmg_pct": 6
+     }
+    }
+   }
+  },
+  {
+   "id": "marksman",
+   "name": "Стрелок",
+   "desc": "Один выстрел - одна цель.",
+   "tier": 2,
+   "from": "ranger",
+   "min_level": 15,
+   "req_stat": {
+    "agility": 10
+   },
+   "mods": {
+    "ranged_dmg_pct": 12,
+    "crit_pct": 5
+   },
+   "perks": {
+    "20": {
+     "name": "Орлиный глаз",
+     "mods": {
+      "crit_pct": 4
+     }
+    }
+   }
+  },
+  {
+   "id": "warden",
+   "name": "Лесной страж",
+   "desc": "Хозяин дикой местности.",
+   "tier": 2,
+   "from": "ranger",
+   "min_level": 15,
+   "req_stat": {
+    "agility": 9,
+    "spirit": 7
+   },
+   "mods": {
+    "stealth_pct": 8,
+    "move_speed_pct": 4,
+    "luck": 2
+   }
+  },
+  {
+   "id": "bulwark",
+   "name": "Бастион",
+   "desc": "Неприступная стена.",
+   "tier": 2,
+   "from": "guardian",
+   "min_level": 15,
+   "req_stat": {
+    "vitality": 10
+   },
+   "mods": {
+    "armor": 4,
+    "max_health": 10,
+    "thorns": 2
+   }
+  },
+  {
+   "id": "physician",
+   "name": "Лекарь",
+   "desc": "Исцеляет и подставляет плечо.",
+   "tier": 2,
+   "from": "scholar",
+   "min_level": 15,
+   "req_stat": {
+    "learning": 8
+   },
+   "mods": {
+    "heal_pct": 15,
+    "health_regen": 0.1
+   }
+  },
+  {
+   "id": "artificer",
+   "name": "Мастер-механик",
+   "desc": "Золотые руки.",
+   "tier": 2,
+   "from": "scholar",
+   "min_level": 15,
+   "req_stat": {
+    "intellect": 9
+   },
+   "mods": {
+    "craft_quality_pct": 15,
+    "mining_speed_pct": 8
+   }
+  },
+  {
+   "id": "chancellor",
+   "name": "Канцлер",
+   "desc": "Государственный ум.",
+   "tier": 2,
+   "from": "courtier",
+   "min_level": 15,
+   "req_stat": {
+    "diplomacy": 9,
+    "stewardship": 8
+   },
+   "mods": {
+    "discount_pct": 5,
+    "tax_pct": 6,
+    "opinion": 3
+   }
+  },
+  {
+   "id": "spymaster",
+   "name": "Мастер шпионов",
+   "desc": "Паутина интриг.",
+   "tier": 2,
+   "from": "rogue",
+   "min_level": 15,
+   "req_stat": {
+    "intrigue": 9
+   },
+   "mods": {
+    "spy_success_pct": 15,
+    "stealth_pct": 8
+   }
+  },
+  {
+   "id": "assassin",
+   "name": "Убийца",
+   "desc": "Холодный клинок в ночи.",
+   "tier": 2,
+   "from": "rogue",
+   "min_level": 15,
+   "req_stat": {
+    "agility": 10
+   },
+   "mods": {
+    "crit_pct": 8,
+    "melee_dmg_pct": 8,
+    "stealth_pct": 6
+   }
+  },
+  {
+   "id": "champion",
+   "name": "Чемпион",
+   "desc": "Лучший из рыцарей.",
+   "tier": 3,
+   "from": "knight",
+   "min_level": 30,
+   "req_stat": {
+    "might": 14,
+    "martial": 10
+   },
+   "req_flags": [
+    "quest:trial_of_arms"
+   ],
+   "mods": {
+    "melee_dmg_pct": 12,
+    "armor": 4,
+    "levy_pct": 6,
+    "max_health": 10
+   }
+  },
+  {
+   "id": "warlord",
+   "name": "Полководец",
+   "desc": "Ведёт армии и ломает осады.",
+   "tier": 3,
+   "from": "knight",
+   "min_level": 30,
+   "req_stat": {
+    "martial": 14
+   },
+   "mods": {
+    "levy_pct": 14,
+    "opinion": 2,
+    "melee_dmg_pct": 6
+   }
+  },
+  {
+   "id": "deadeye",
+   "name": "Снайпер",
+   "desc": "Без промаха.",
+   "tier": 3,
+   "from": "marksman",
+   "min_level": 30,
+   "req_stat": {
+    "agility": 14
+   },
+   "mods": {
+    "ranged_dmg_pct": 20,
+    "crit_pct": 8
+   }
+  },
+  {
+   "id": "archmage_scribe",
+   "name": "Архивариус",
+   "desc": "Хранитель всех знаний.",
+   "tier": 3,
+   "from": "physician",
+   "min_level": 30,
+   "req_stat": {
+    "learning": 14
+   },
+   "mods": {
+    "xp_gain_pct": 12,
+    "heal_pct": 20
+   }
+  },
+  {
+   "id": "shadow_master",
+   "name": "Хозяин теней",
+   "desc": "Невидим и неуловим.",
+   "tier": 3,
+   "from": "spymaster",
+   "min_level": 30,
+   "req_stat": {
+    "intrigue": 14
+   },
+   "mods": {
+    "stealth_pct": 18,
+    "spy_success_pct": 18,
+    "dodge_pct": 6
+   }
+  }
+ ]
+}

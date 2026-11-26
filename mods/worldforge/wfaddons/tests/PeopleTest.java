@@ -1,0 +1,720 @@
+package dev.worldforge.tests;
+
+import dev.worldforge.dialogue.*;
+import dev.worldforge.mod.*;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.*;
+import dev.worldforge.people.bridge.DialogueBridge;
+import dev.worldforge.settle.ResidentSocial;
+
+import java.nio.file.*;
+import java.util.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+
+public class PeopleTest {
+    static int fails;
+
+    static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+
+    static RoleDefs roles() throws Exception {
+        RoleDefs defs = new RoleDefs();
+        Path dir = Paths.get("wf-people/src/main/resources/data/wf_people/wf_roles");
+        try (var s = Files.list(dir)) { for (Path p : (Iterable<Path>) s.sorted()::iterator) defs.add(Files.readString(p)); }
+        return defs;
+    }
+
+    static NameBank names() throws Exception {
+        NameBank n = new NameBank();
+        n.add(Files.readString(Paths.get("wf-people/src/main/resources/data/wf_people/wf_names/base.json")));
+        return n;
+    }
+
+    public static void main(String[] a) throws Exception {
+        String ns = "planets", nm = "game_of_thrones";
+        MapData m = MapData.load("t", name -> {
+            try (var zf = new java.util.zip.ZipFile(a[0])) {
+                var e = zf.getEntry("data/" + ns + "/worldforge_maps/" + nm + "/" + name);
+                return e == null ? null : zf.getInputStream(e).readAllBytes();
+            }
+        });
+        TitleData d = m.titles;
+        RoleDefs defs = roles();
+        NameBank names = names();
+        for (String category : List.of("realms", "regions", "provinces", "settlements")) {
+            String first = names.generate("elf", "elf", category, new Random(771L));
+            String repeated = names.generate("elf", "elf", category, new Random(771L));
+            ok(!first.isBlank() && first.equals(repeated),
+                    "NameBank supplies stable " + category + " names through race/culture/default inheritance");
+        }
+        for (String category : List.of("villages", "cities", "hamlets", "camps", "communities",
+                "outposts", "colonies", "stations", "nomad_camps", "tribal_camps", "holds", "ports", "houses", "dynasties", "clans")) {
+            String first = names.generate("clockwork", "human", category, new Random(991L));
+            String repeated = names.generate("clockwork", "human", category, new Random(991L));
+            ok(!first.isBlank() && first.equals(repeated),
+                    "expanded fantasy/sci-fi race bank supplies stable " + category + " names");
+        }
+        ok(NameBank.settlementCategory("nomad_camp").equals("nomad_camps")
+                        && NameBank.settlementCategory("city").equals("cities")
+                        && NameBank.settlementCategory("tribal_community").equals("tribal_camps"),
+                "settlement type IDs resolve to specialized naming pools");
+        NameBank.NameReservations houseReservations = names.reservations(List.of("Existing House"));
+        Set<String> allocatedHouses = new HashSet<>();
+        boolean uniqueHouseBatch = true;
+        for (int i = 0; i < 96; i++) {
+            String house = names.generateUnique("human", "human", "houses",
+                    new Random(20261119L + i), houseReservations);
+            uniqueHouseBatch &= !house.isBlank() && allocatedHouses.add(house.toLowerCase(Locale.ROOT));
+        }
+        ok(uniqueHouseBatch && allocatedHouses.size() == 96,
+                "incremental house-name reservations allocate a large batch without rescanning or duplicate names");
+        ok(names.poolForRace("elf", "elf").cities.size() >= 18
+                        && names.poolForRace("dwarf", "dwarf").cities.size() >= 18
+                        && names.poolForRace("clockwork", "human").male.size() >= 18,
+                "race-specific lexicons contain substantial city and personal-name variants");
+        for (String category : List.of("settlements", "realms", "regions", "provinces", "rivers", "mountains",
+                "forests", "taverns", "ships", "orders", "factions", "guilds", "companies", "armies",
+                "regiments", "castles", "fortresses", "districts", "landmarks", "roads", "markets",
+                "temples", "religions", "artifacts", "monuments")) {
+            String generated = names.generate("clockwork", "human", category, new Random(20261117L));
+            ok(!generated.isBlank(), "expanded race-aware bank generates " + category + " names");
+        }
+        NameBank minimalNames = new NameBank();
+        minimalNames.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"Aren\"],\"female\":[\"Mira\"],\"houses\":[\"Stone\"]}}}");
+        boolean cyclicRaceParentsRejected = false;
+        try {
+            NameBank cyclic = new NameBank();
+            cyclic.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"A\"],\"female\":[\"B\"],\"houses\":[\"C\"]}},\"race_parents\":{\"race_a\":\"race_b\",\"race_b\":\"race_a\"}}");
+        } catch (IllegalArgumentException expected) { cyclicRaceParentsRejected = true; }
+        ok(cyclicRaceParentsRejected, "NameBank rejects cyclic race ancestry instead of caching an ambiguous inheritance chain");
+        for (String category : List.of("realms", "regions", "provinces", "settlements")) {
+            String generated = minimalNames.generate("unknown-race", "missing-culture", category, new Random(19L));
+            ok(!generated.isBlank(), "minimal third-party NameBank safely generates " + category + " names");
+        }
+        ok(defs.all().size() == 11 && defs.ruler().id.equals("ruler")
+                        && List.of("baron", "count", "duke", "king").stream().allMatch(id ->
+                        defs.get(id) != null && defs.get(id).ruler),
+                "датапак загружает правителей каждого территориального уровня от барона до короля: " + defs.all().size());
+        int generatedTierRoles = defs.ensureTerritorialRulers(d);
+        boolean everyMapTierHasRulerRole = d.tiers.stream().allMatch(tier -> defs.all().stream()
+                .anyMatch(role -> role.ruler && role.family && tier.key.equals(role.per)));
+        ok(everyMapTierHasRulerRole,
+                "каждый реальный уровень карты получает должность правителя без фиксированного списка рангов; generated="
+                        + generatedTierRoles + ", tiers=" + d.tiers.size());
+        List<TerritorialIdentity.RaceWeight> originRaces = List.of(
+                new TerritorialIdentity.RaceWeight("human", "", 50),
+                new TerritorialIdentity.RaceWeight("northman", "", 18),
+                new TerritorialIdentity.RaceWeight("elf", "", 8),
+                new TerritorialIdentity.RaceWeight("wood_elf", "elf", 4),
+                new TerritorialIdentity.RaceWeight("dwarf", "", 8));
+        Map<String, Integer> raceMix = TerritorialIdentity.weightedComposition(originRaces, 424242L);
+        ok(raceMix.equals(TerritorialIdentity.weightedComposition(originRaces, 424242L)),
+                "origin race mix is deterministic for the same world and realm seed");
+        ok(raceMix.size() >= 2 && raceMix.size() <= 3
+                        && raceMix.values().stream().mapToInt(Integer::intValue).sum() == 100
+                        && !raceMix.containsKey("wood_elf"),
+                "realm population uses weighted root races only, excludes child races from root sampling, and totals 100%");
+        TerritorialIdentity.RaceWeight childRace =
+                new TerritorialIdentity.RaceWeight("wood_elf", "elf", 4);
+        List<TerritorialIdentity.RaceWeight> hierarchy = new ArrayList<>(originRaces);
+        hierarchy.add(childRace);
+        String subraceA = TerritorialIdentity.chooseSubrace("elf", hierarchy, new Random(7L));
+        String subraceB = TerritorialIdentity.chooseSubrace("elf", hierarchy, new Random(7L));
+        ok(subraceA.equals(subraceB) && (subraceA.equals("elf") || subraceA.equals("wood_elf")),
+                "individual race selection follows the wf-origins parent hierarchy deterministically");
+
+
+
+        TitleEditor ed = new TitleEditor(d);
+        // один правитель задан вручную: он должен сохраниться
+        String preset = d.realmList().get(0).id;
+        ed.setRuler(preset, "Эйегон Завоеватель");
+        // A child WAL frame can be newer than the last durable parent frames.
+        // Replaying the independent records must rebuild the reciprocal parent->child
+        // indexes after the whole partition has been restored.
+        CharacterRegistry familyWalSource = new CharacterRegistry();
+        Character walFather = familyWalSource.create("WAL Father", "House Test", "human", "m", 250);
+        Character walMother = familyWalSource.create("WAL Mother", "House Test", "human", "f", 252);
+        familyWalSource.marry(walFather.id, walMother.id, 270);
+        String fatherBeforeBirth = familyWalSource.toJsonRecord(walFather);
+        String motherBeforeBirth = familyWalSource.toJsonRecord(walMother);
+        Character walChild = familyWalSource.addChild(walFather, walMother, "WAL Child", "f", 271);
+        String childAfterBirth = familyWalSource.toJsonRecord(walChild);
+        CharacterRegistry familyWalRestored = new CharacterRegistry();
+        familyWalRestored.applyJsonRecord(fatherBeforeBirth, "family-wal-roundtrip");
+        familyWalRestored.applyJsonRecord(motherBeforeBirth, "family-wal-roundtrip");
+        familyWalRestored.applyJsonRecord(childAfterBirth, "family-wal-roundtrip");
+        familyWalRestored.reconcileFamilyLinksAfterRecordRestore();
+        Character restoredFather = familyWalRestored.get(walFather.id);
+        Character restoredMother = familyWalRestored.get(walMother.id);
+        Character restoredChild = familyWalRestored.get(walChild.id);
+        ok(restoredFather != null && restoredMother != null && restoredChild != null
+                        && restoredFather.children.contains(restoredChild.id)
+                        && restoredMother.children.contains(restoredChild.id)
+                        && !restoredChild.id.equals(restoredFather.spouse),
+                "independent WAL record replay restores reciprocal family parent/child indexes");
+        ok(restoredFather != null && restoredMother != null
+                        && restoredFather.id.equals(restoredMother.spouse)
+                        && restoredMother.id.equals(restoredFather.spouse)
+                        && restoredFather.globalId.equals(restoredChild.props.get("family.father_global_id"))
+                        && restoredMother.globalId.equals(restoredChild.props.get("family.mother_global_id")),
+                "family record replay retains canonical parent and spouse UUID references");
+
+        CharacterRegistry reg = new CharacterRegistry();
+        int created = Courts.ensure(d, ed, reg, defs, names, 42L, 300);
+        TerritorialIdentity.Result identity = TerritorialIdentity.ensure(nm, d, ed, reg, names, 42L);
+        boolean namedTerritories = d.allTitles().stream().allMatch(t -> t.name != null && !t.name.isBlank());
+        boolean classifiedTerritories = d.allTitles().stream().allMatch(t -> t.props.containsKey("identity.culture"));
+        boolean linkedRulers = d.realmList().stream().allMatch(r -> {
+            Character ruler = reg.holder("ruler", Courts.realmPlace(r.id));
+            return ruler != null && ruler.globalId.equals(r.props.get("rulerCharacterId"))
+                    && !String.valueOf(r.props.getOrDefault("identity.ruler_house", "")).isBlank();
+        });
+        ok(namedTerritories, "все провинции, регионы и государственные титулы имеют имя");
+        ok(classifiedTerritories, "культурная принадлежность записана для каждого территориального титула");
+        ok(linkedRulers, "правители государств связаны с каноническими Character ID и домами");
+        String identitySnapshot = d.titlesJson() + d.realmsJson();
+        TerritorialIdentity.Result identityAgain = TerritorialIdentity.ensure(nm, d, ed, reg, names, 42L);
+        ok(identityAgain.realmsNamed() == 0 && identityAgain.titlesNamed() == 0
+                        && identityAgain.titlesClassified() == 0 && identityAgain.rulersLinked() == 0
+                        && identitySnapshot.equals(d.titlesJson() + d.realmsJson()),
+                "повторная инициализация идентичности идемпотентна и не меняет сохранённые данные");
+        int realms = d.realmList().size(), baronies = 0, counties = 0;
+        for (TitleData.Title t : d.allTitles()) { if (t.tier == 0) baronies++; if (t.tier == 1) counties++; }
+        ok(created >= realms * 5 + counties + baronies * 2, "создано " + created + " человек (государств " + realms + ", графств " + counties + ", баронств " + baronies + ")");
+        boolean allRulers = true, houses = true;
+        Set<String> rulerHouses = new HashSet<>();
+        for (TitleData.Realm r : d.realmList()) {
+            Character c = reg.holder("ruler", Courts.realmPlace(r.id));
+            if (c == null || r.ruler.isBlank()) allRulers = false;
+            else if (!r.id.equals(preset)) { if (c.house.isEmpty() || !rulerHouses.add(c.house)) houses = false; }
+        }
+        ok(allRulers, "у каждого государства есть правитель и запись в данных");
+        ok(houses, "у правителей разные дома (" + rulerHouses.size() + ")");
+        ok(reg.holder("ruler", Courts.realmPlace(preset)).name.equals("Эйегон Завоеватель") && d.realms.get(preset).ruler.equals("Эйегон Завоеватель"), "вручную заданный правитель сохранён");
+        int again = Courts.ensure(d, ed, reg, defs, names, 42L, 300);
+        ok(again == 0, "повторный вызов ничего не дублирует");
+
+        CharacterRegistry reg2 = new CharacterRegistry();
+        TitleData d2 = d.copy();
+        Courts.ensure(d2, null, reg2, defs, names, 42L, 300);
+        CharacterRegistry reg3 = new CharacterRegistry();
+        Courts.ensure(d2, null, reg3, defs, names, 7L, 300);
+        ok(reg2.toJson().equals(reg.toJson()) || reg2.size() == reg.size(), "тот же seed - то же число людей");
+        ok(!reg3.toJson().equals(reg2.toJson()), "другой seed - другие люди");
+
+        // семья правителя
+        Character ruler = reg.holder("ruler", Courts.realmPlace(d.realmList().get(1).id));
+        Character sp = reg.get(ruler.spouse);
+        ok(sp != null && sp.spouse.equals(ruler.id) && !sp.house.equals(ruler.house), "супруг из другого дома");
+        Character unmarried = reg.create("Тестовый дворянин", "test_house", "test_culture", "m", 270);
+        CharacterActions.Action marriage = CharacterActions.available(reg, defs, ruler, unmarried, 300)
+                .stream().filter(action -> action.id.equals("marry")).findFirst().orElseThrow();
+        ok(!marriage.enabled && marriage.reason.contains("брак"),
+                "состоящий в браке инициатор не может заключить второй брак");
+        Character widower = reg.create("Вдовец", "test_house", "test_culture", "m", 260);
+        Character deceased = reg.create("Умершая супруга", "other_house", "test_culture", "f", 260);
+        Character secondSpouse = reg.create("Вторая супруга", "third_house", "test_culture", "f", 260);
+        reg.marry(widower.id, deceased.id);
+        reg.kill(deceased.id);
+        reg.marry(widower.id, secondSpouse.id);
+        ok(widower.spouse.equals(secondSpouse.id) && secondSpouse.spouse.equals(widower.id)
+                && deceased.spouse.isEmpty(), "вдовство позволяет повторный брак без устаревшей обратной связи");
+        boolean selfMarriageRejected = false;
+        try { reg.marry(widower.id, widower.id); } catch (IllegalArgumentException expected) { selfMarriageRejected = true; }
+        ok(selfMarriageRejected, "самобрак отклоняется реестром персонажей");
+        boolean kidsOk = true;
+        for (String k : ruler.children.isEmpty() ? sp.children : ruler.children) { Character kid = reg.get(k); if (kid.birthYear < ruler.birthYear + 17 || kid.birthYear > 300) kidsOk = false; }
+        ok(kidsOk, "возраст детей правдоподобен");
+
+        // кто что разрешает
+        String place = Courts.realmPlace(d.realmList().get(1).id);
+        ok(reg.unlocked(defs, place, "war") && reg.unlocked(defs, place, "diplomacy") && !reg.unlocked(defs, place, "нет_такого"), "роли разрешают действия: war, diplomacy");
+        Character marshal = reg.holder("marshal", place), ruler1 = reg.holder("ruler", place);
+        reg.kill(marshal.id);
+        ok(reg.unlocked(defs, place, "war"), "война всё ещё разрешена правителем после смерти маршала");
+        reg.kill(ruler1.id);
+        ok(!reg.unlocked(defs, place, "war") && reg.unlocked(defs, place, "diplomacy"), "без правителя и маршала война недоступна, дипломатия есть у канцлера");
+        int refill = Courts.ensure(d, ed, reg, defs, names, 42L, 301);
+        ok(refill == 2 && reg.unlocked(defs, place, "war"), "ensure заполняет освободившиеся должности: " + refill);
+
+        // наследование
+        CharacterRegistry r4 = new CharacterRegistry();
+        TitleData d4 = d.copy();
+        TitleEditor e4 = new TitleEditor(d4);
+        Courts.ensure(d4, e4, r4, defs, names, 5L, 300);
+        String heirRealm = null;
+        for (TitleData.Realm r : d4.realmList()) { Character c = r4.holder("ruler", Courts.realmPlace(r.id)); if (c != null && !c.children.isEmpty()) { heirRealm = r.id; break; } }
+        Character old = r4.holder("ruler", Courts.realmPlace(heirRealm));
+        List<Character> kids = new ArrayList<>(); for (String k : old.children) kids.add(r4.get(k));
+        List<Succession.Result> res = Succession.onDeath(r4, defs, d4, e4, names, 5L, old.id, 310, "primogeniture");
+        Character nw = r4.holder("ruler", Courts.realmPlace(heirRealm));
+        boolean sons = kids.stream().anyMatch(k -> k.gender.equals("m"));
+        Character expected = kids.stream().sorted(Comparator.comparingInt((Character c) -> c.gender.equals("m") ? 0 : 1).thenComparingInt(c -> c.birthYear)).findFirst().get();
+        ok(res.size() == 1 && nw == expected && !res.get(0).usurper && d4.realms.get(heirRealm).ruler.startsWith(nw.name), "наследник по примогенитуре (" + (sons ? "сын" : "дочь") + "), запись государства обновлена");
+        // Representation inheritance: a deceased firstborn's living child precedes a younger sibling.
+        CharacterRegistry line = new CharacterRegistry();
+        String linePlace = Courts.realmPlace(d4.realmList().get(0).id);
+        Character sovereign = line.create("Монарх", "house_line", "test_culture", "m", 250);
+        Character firstborn = line.create("Первенец", "house_line", "test_culture", "m", 270);
+        Character younger = line.create("Младший", "house_line", "test_culture", "m", 272);
+        Character grandchild = line.create("Внук", "house_line", "test_culture", "m", 290);
+        sovereign.children.add(firstborn.id); sovereign.children.add(younger.id);
+        firstborn.children.add(grandchild.id);
+        firstborn.father = sovereign.id; younger.father = sovereign.id; grandchild.father = firstborn.id;
+        firstborn.alive = false;
+        line.appoint(sovereign.id, "ruler", linePlace);
+        List<Succession.Result> represented = Succession.onDeath(line, defs, d4, null, names, 99L,
+                sovereign.id, 310, "primogeniture");
+        ok(represented.size() == 1 && represented.get(0).heir == grandchild,
+                "наследование по представительству сохраняет линию умершего первенца");
+        // Representation must survive more than one deceased generation.
+        CharacterRegistry deepLine = new CharacterRegistry();
+        Character deepSovereign = deepLine.create("Династ", "house_deep", "test_culture", "m", 200);
+        Character deadFirstborn = deepLine.create("Умерший первенец", "house_deep", "test_culture", "m", 220);
+        Character livingYounger = deepLine.create("Младший наследник", "house_deep", "test_culture", "m", 225);
+        Character deadGrandchild = deepLine.create("Умерший внук", "house_deep", "test_culture", "m", 240);
+        Character greatGrandchild = deepLine.create("Правнук", "house_deep", "test_culture", "m", 260);
+        deepSovereign.children.add(deadFirstborn.id); deepSovereign.children.add(livingYounger.id);
+        deadFirstborn.children.add(deadGrandchild.id); deadFirstborn.father = deepSovereign.id;
+        livingYounger.father = deepSovereign.id; deadGrandchild.father = deadFirstborn.id;
+        deadGrandchild.children.add(greatGrandchild.id); greatGrandchild.father = deadGrandchild.id;
+        deadFirstborn.alive = false; deadGrandchild.alive = false;
+        deepLine.appoint(deepSovereign.id, "ruler", linePlace);
+        List<Succession.Result> deepRepresented = Succession.onDeath(deepLine, defs, d4, null, names, 101L,
+                deepSovereign.id, 311, "primogeniture");
+        ok(deepRepresented.size() == 1 && deepRepresented.get(0).heir == greatGrandchild,
+                "наследование по представительству проходит через несколько умерших поколений");
+        TitleData.Title hereditaryTitle = d4.allTitles().get(0);
+        hereditaryTitle.props.put("holderCharacterId", sovereign.globalId);
+        CharacterRegistry mapLine = new CharacterRegistry();
+        Character mapRuler = mapLine.create("Старый владыка", "house_map", "test_culture", "m", 220);
+        Character mapHeir = mapLine.create("Новый владыка", "house_map", "test_culture", "m", 245);
+        mapRuler.children.add(mapHeir.id); mapHeir.father = mapRuler.id;
+        mapLine.appoint(mapRuler.id, "ruler", linePlace);
+        hereditaryTitle.props.put("holderCharacterId", mapRuler.globalId);
+        Succession.onDeath(mapLine, defs, d4, e4, names, 100L, mapRuler.id, 311, "primogeniture");
+        ok(mapHeir.globalId.equals(hereditaryTitle.props.get("holderCharacterId"))
+                        && mapRuler.globalId.equals(hereditaryTitle.props.get("succession.last_deceased")),
+                "смена правителя обновляет держателя титула в общей политической карте по global Character ID");
+
+        Character lone = r4.holder("ruler", Courts.realmPlace(d4.realmList().get(2).id));
+        for (String k : new ArrayList<>(lone.children)) r4.get(k).alive = false;
+        for (Character c : r4.all()) if (c != lone && c.alive && !lone.father.isEmpty() && lone.father.equals(c.father)) c.alive = false;
+        List<Succession.Result> res2 = Succession.onDeath(r4, defs, d4, e4, names, 5L, lone.id, 311, "primogeniture");
+        ok(res2.size() == 1 && r4.holder("ruler", Courts.realmPlace(d4.realmList().get(2).id)) != null, "без детей преемник найден среди двора или узурпатор: " + res2.get(0).heir.name + (res2.get(0).usurper ? " (узурпатор)" : ""));
+        boolean threw = false;
+        try { r4.appoint(old.id, "ruler", "realm:x"); } catch (IllegalStateException e) { threw = true; }
+        ok(threw, "мёртвого нельзя назначить");
+
+        // сохранение
+        String js = reg.toJson();
+        CharacterRegistry back = new CharacterRegistry();
+        back.fromJson(js);
+        ok(back.size() == reg.size() && back.toJson().equals(js), "сохранение и загрузка без потерь (" + back.size() + " человек)");
+        boolean registryViewReadOnly = false;
+        try { back.all().clear(); } catch (UnsupportedOperationException readOnlyFailure) { registryViewReadOnly = true; }
+        ok(registryViewReadOnly && back.size() == reg.size(),
+                "публичная коллекция персонажей не позволяет обходить операции реестра");
+        String invalidAliveJson = js.replaceFirst("\\\"alive\\\":(?:true|false)", "\\\"alive\\\":\\\"yes\\\"");
+        boolean invalidAliveRejected = false;
+        try { back.fromJson(invalidAliveJson); } catch (IllegalArgumentException invalidSave) { invalidAliveRejected = true; }
+        ok(invalidAliveRejected && back.toJson().equals(js),
+                "неверный тип alive отклоняется без повреждения действующего реестра");
+        back.create("Новый", "", "", "m", 1);
+        ok(back.get("c" + (reg.size() + 1)) != null, "счётчик id продолжается после загрузки");
+        // Повреждённый снимок не должен очищать уже загруженный реестр.
+        String beforeBadLoad = back.toJson();
+        String duplicateIdJson = js.replace("\"id\":\"c2\"", "\"id\":\"c1\"");
+        boolean duplicateRejected = false;
+        try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException invalidSave) { duplicateRejected = true; }
+        ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
+                "дублирующийся ID отклоняется без потери действующего реестра");
+        String staleCounterJson = js.replaceFirst("\"next\":\\d+", "\"next\":1");
+        CharacterRegistry staleCounter = new CharacterRegistry();
+        staleCounter.fromJson(staleCounterJson);
+        Character afterStaleCounter = staleCounter.create("После загрузки", "", "", "m", 1);
+        ok(staleCounter.get(afterStaleCounter.id) == afterStaleCounter && !js.contains("\"id\":\"" + afterStaleCounter.id + "\""),
+                "устаревший счётчик автоматически продолжает последовательность ID");
+
+
+        // Canonical Character lifecycle journal is shared by every subsystem and persisted with Character.props.
+        CharacterRegistry journal = new CharacterRegistry();
+        Character carrier = journal.create("Переносчик", "", "", "m", 1);
+        int[] lifecycleCallbacks = {0, 0};
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[0]++;
+            }
+        });
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[1]++;
+            }
+        });
+        Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
+        CharacterInventory.add(journalPerson,"minecraft:bread",8);
+        CharacterInventory.add(journalPerson,"minecraft:iron_sword",1,"{Damage:3}");
+        ok(CharacterInventory.count(journalPerson,"minecraft:bread")==8
+                        &&CharacterInventory.items(journalPerson).size()==2,
+                "canonical Character inventory stores stack counts and distinct item data");
+        ok(CharacterInventory.transfer(journalPerson,carrier,"minecraft:bread",3)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5
+                        &&CharacterInventory.count(carrier,"minecraft:bread")==3,
+                "inventory items transfer between two canonical people without duplicating identity");
+        ok(!CharacterInventory.remove(journalPerson,"minecraft:bread",99)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5,
+                "failed inventory removal is atomic and cannot create negative stock");
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
+        journalPerson.props.put("wf_unit_kind", "soldier");
+        int baseMartial = CharacterStats.value(journalPerson, "martial");
+        List<String> generatedTraits = CharacterStats.traits(journalPerson);
+        ok(generatedTraits.size() >= 3 && generatedTraits.size() <= 5
+                        && CharacterStats.compatibleTraits(generatedTraits)
+                        && generatedTraits.equals(CharacterStats.traits(journalPerson)),
+                "personality generation yields 3-5 deterministic, internally compatible traits");
+        Character personality = journal.create("Последовательный", "", "", "m", 1);
+        personality.traits.add("brave");
+        ok(!CharacterStats.addTrait(personality, "craven")
+                        && CharacterStats.traits(personality).equals(List.of("brave")),
+                "adding a contradictory personality trait is rejected without replacing established traits");
+        Character legacyPersonality = journal.create("Старый профиль", "", "", "m", 1);
+        legacyPersonality.traits.add("brave");
+        legacyPersonality.traits.add("craven");
+        CharacterStats.ensure(journal);
+        ok(legacyPersonality.traits.equals(Set.of("brave")),
+                "legacy contradictory trait combinations are normalized deterministically on ensure");
+        ok(CharacterStats.allTraits().size() >= 50
+                        && CharacterStats.trait("paranoid") != null
+                        && CharacterStats.trait("honest") != null
+                        && CharacterStats.trait("adaptable") != null,
+                "expanded personality catalog exposes broad social, ethical and emotional dimensions");
+        ok(CharacterStats.allSkills().size() >= 25
+                        && CharacterStats.skill("swordsmanship").governingAttribute().equals("martial")
+                        && CharacterStats.skill("persuasion").governingAttribute().equals("diplomacy"),
+                "skill catalog maps specialized abilities to the five core attributes");
+        int ranksBefore = PopulationSimulation.skillRank(journalPerson, "swordsmanship");
+        ok(CharacterStats.trainSkill(journalPerson, "swordsmanship", 250) == 2
+                        && PopulationSimulation.skillRank(journalPerson, "swordsmanship") == ranksBefore + 2,
+                "character skill growth uses the existing PopulationSimulation rank and XP store");
+        ok(CharacterDevelopment.militaryMorale(journalPerson) == 15
+                        && CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.max(0, baseMartial - 3),
+                "soldier morale is persisted on canonical Character and affects effective martial ability");
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 95);
+        ok(CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.min(20, baseMartial + 1),
+                "high soldier morale positively affects the same character's effective martial ability");
+
+        int severity=CharacterDevelopment.recordInjury(journalPerson,2,"arrow",120);
+        ok(severity==2&&CharacterDevelopment.injurySeverity(journalPerson)==2
+                        &&CharacterDevelopment.injuryCount(journalPerson)==1
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-0.82)<1e-9,
+                "combat injury is persisted on canonical Character and reduces combat readiness");
+        CharacterDevelopment.recordInjury(journalPerson,1,"sword",121);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==3&&CharacterDevelopment.injuryCount(journalPerson)==2,
+                "repeated wounds accumulate and retain individual injury history");
+        CharacterDevelopment.healInjury(journalPerson,2);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==1,
+                "medical recovery gradually reduces injury severity without erasing history");
+        CharacterDevelopment.healInjury(journalPerson,1);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==0
+                        &&CharacterDevelopment.injuryCount(journalPerson)==2
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-1.0)<1e-9,
+                "fully healed soldier regains readiness while keeping lifetime injury count");
+
+        journal.appoint(journalPerson.id, "guard", "settlement:test", 10);
+        journal.dismiss(journalPerson.id, "guard", "settlement:test", 11);
+        journal.kill(journalPerson.id);
+        List<Map<String, Object>> lifeHistory = journal.recentLifecycle(journalPerson.id, 20);
+        ok(lifeHistory.size() == 4
+                        && "BORN".equals(lifeHistory.get(0).get("kind"))
+                        && "POST_APPOINTED".equals(lifeHistory.get(1).get("kind"))
+                        && "POST_DISMISSED".equals(lifeHistory.get(2).get("kind"))
+                        && "DIED".equals(lifeHistory.get(3).get("kind")),
+                "one canonical per-character journal records birth, appointment, dismissal and death");
+        ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
+                "lifecycle event bus notifies each listener exactly once per transition");
+        Map<String, Object> writerProbe = new LinkedHashMap<>();
+        writerProbe.put("escaped", "quote \" slash \\ newline\n control" + (char) 1);
+        writerProbe.put("nested", Arrays.asList(1, 2.5d, true, null));
+        writerProbe.put("float", 1.25f);
+        java.io.StringWriter jsonWriterProbe = new java.io.StringWriter();
+        Json.write(writerProbe, jsonWriterProbe);
+        ok(jsonWriterProbe.toString().equals(Json.write(writerProbe)),
+                "streaming JSON writer matches legacy encoder for escaping, nested values and numeric types");
+
+        String streamedJson = """
+                {"format":"wf-people/3","next":3,"characters":[
+                  {"id":"c1","props":{"nested":[1,2,{"text":"a,b]c"}]}},
+                  {"id":"c2","props":null}
+                ]}
+                """;
+        List<Object> streamedRecords = new ArrayList<>();
+        Json.StreamedArray streamedRoot = Json.readObjectArray(
+                new java.io.StringReader(streamedJson), "characters", streamedRecords::add);
+        ok(streamedRoot.present() && streamedRoot.itemCount() == 2
+                        && streamedRecords.size() == 2
+                        && "wf-people/3".equals(streamedRoot.fields().get("format"))
+                        && ((Map<?, ?>) streamedRecords.get(0)).get("id").equals("c1")
+                        && ((Map<?, ?>) streamedRecords.get(1)).containsKey("props"),
+                "streaming JSON reader emits one complete nested Character record at a time and retains only root metadata");
+        boolean duplicateRootFieldRejected = false;
+        try {
+            Json.readObjectArray(new java.io.StringReader(
+                    """
+                    {"format":"wf-people/3","next":1,"next":2,"characters":[]}
+                    """),
+                    "characters", ignoredRecord -> { });
+        } catch (IllegalArgumentException ignoredException) { duplicateRootFieldRejected = true; }
+        ok(duplicateRootFieldRejected,
+                "streaming snapshot parser rejects duplicate root metadata instead of silently accepting ambiguous save data");
+        boolean trailingSnapshotDataRejected = false;
+        try {
+            Json.readObjectArray(new java.io.StringReader(
+                    "{\"format\":\"wf-people/3\",\"next\":1,\"characters\":[]} trailing"),
+                    "characters", ignoredRecord -> { });
+        } catch (IllegalArgumentException ignoredException) { trailingSnapshotDataRejected = true; }
+        ok(trailingSnapshotDataRejected,
+                "streaming snapshot parser rejects trailing bytes after the root object");
+
+        Path recordStorePath = Files.createTempDirectory("wf-character-record-store");
+        try (dev.worldforge.people.storage.CharacterRecordStore store =
+                     new dev.worldforge.people.storage.CharacterRecordStore(recordStorePath)) {
+            String storeId = "00000000-0000-0000-0000-000000000123";
+            byte[] firstPayload = "{\"name\":\"first\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] secondPayload = "{\"name\":\"updated\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            store.put(storeId, firstPayload);
+            boolean firstStored = store.get(storeId) != null
+                    && store.get(storeId).payloadUtf8().equals(new String(firstPayload, java.nio.charset.StandardCharsets.UTF_8));
+            store.put(storeId, secondPayload);
+            int[] enumerated = {0};
+            store.forEach(record -> {
+                if (record.globalId().equals(storeId)
+                        && record.payloadUtf8().equals(new String(secondPayload, java.nio.charset.StandardCharsets.UTF_8)))
+                    enumerated[0]++;
+            });
+            boolean removed = store.delete(storeId) && store.get(storeId) == null;
+            ok(firstStored && enumerated[0] == 1 && removed,
+                    "addressable Character checkpoint store atomically replaces, reads, streams and deletes UUID-keyed records");
+            boolean noPopulationMap = Arrays.stream(store.getClass().getDeclaredFields())
+                    .noneMatch(field -> Map.class.isAssignableFrom(field.getType())
+                            || Collection.class.isAssignableFrom(field.getType()));
+            ok(noPopulationMap,
+                    "disk Character record store resolves deterministic hashed paths without retaining a population-sized in-memory index");
+        } finally {
+            try (var paths = Files.walk(recordStorePath)) {
+                for (Path item : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(item);
+            }
+        }
+        String journalSave = journal.toJson();
+        java.io.StringWriter streamedSnapshot = new java.io.StringWriter();
+        journal.writeJson(streamedSnapshot);
+        ok(streamedSnapshot.toString().equals(journalSave),
+                "streamed Character snapshot is byte-for-byte compatible with canonical JSON String encoding");
+        CharacterRegistry emptySnapshot = new CharacterRegistry();
+        java.io.StringWriter emptyWriter = new java.io.StringWriter();
+        emptySnapshot.writeJson(emptyWriter);
+        ok(emptyWriter.toString().equals(emptySnapshot.toJson()),
+                "streaming Character snapshot handles an empty partition without format drift");
+        CharacterRegistry journalReload = new CharacterRegistry();
+        journalReload.fromJson(journalSave);
+        List<Map<String, Object>> restoredHistory = journalReload.recentLifecycle(journalPerson.id, 20);
+        ok(restoredHistory.size() == lifeHistory.size()
+                        && restoredHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()
+                        .equals(lifeHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()),
+                "canonical character event sequence survives save/load without synthetic restore events");
+        ok(journalReload.toJson().equals(journalSave),
+                "loading a character registry does not mutate its persisted lifecycle history");
+
+        Path layeredPersistenceRoot = Files.createTempDirectory("wf-character-layered-persistence");
+        try {
+            Path recordsPath = layeredPersistenceRoot.resolve("records");
+            Path walPath = layeredPersistenceRoot.resolve("wal");
+            try (dev.worldforge.people.storage.CharacterRecordStore records =
+                         new dev.worldforge.people.storage.CharacterRecordStore(recordsPath);
+                 dev.worldforge.people.storage.CharacterWal wal =
+                         new dev.worldforge.people.storage.CharacterWal(walPath, 4)) {
+                String checkpointPayload = journal.toJsonRecord(journalPerson);
+                journalPerson.props.put("persistence.recovery_probe", "snapshot-wins");
+                String currentSnapshot = journal.toJson();
+                journalPerson.props.put("persistence.recovery_probe", "wal-wins");
+                String latestPayload = journal.toJsonRecord(journalPerson);
+                records.put(journalPerson.globalId, checkpointPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                wal.append(journalPerson.globalId, latestPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                CharacterRegistry recovered = new CharacterRegistry();
+                recovered.fromJson(currentSnapshot, "legacy-unscoped");
+                records.forEach(record -> recovered.applyJsonRecordIfAbsent(record.payloadUtf8(),
+                        "legacy-unscoped", record.globalId()));
+                Character snapshotPerson = recovered.getByGlobalId(journalPerson.globalId);
+                boolean snapshotWinsOverStaleCheckpoint = snapshotPerson != null
+                        && "snapshot-wins".equals(snapshotPerson.props.get("persistence.recovery_probe"));
+                wal.replayEach(record -> recovered.applyJsonRecord(record.payloadUtf8(),
+                        "legacy-unscoped", record.globalId()));
+                Character recoveredPerson = recovered.getByGlobalId(journalPerson.globalId);
+                ok(snapshotWinsOverStaleCheckpoint && recoveredPerson != null
+                                && "wal-wins".equals(recoveredPerson.props.get("persistence.recovery_probe")),
+                        "newer snapshot beats stale addressable checkpoint and later WAL replay wins after restart");
+            }
+        } finally {
+            try (var paths = Files.walk(layeredPersistenceRoot)) {
+                for (Path item : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(item);
+            }
+        }
+
+        CharacterRegistry streamingReload = new CharacterRegistry();
+        streamingReload.fromJson(new java.io.StringReader(journalSave), "legacy-unscoped");
+        ok(streamingReload.toJson().equals(journalSave)
+                        && streamingReload.size() == journalReload.size()
+                        && streamingReload.getByGlobalId(journalPerson.globalId) != null,
+                "streamed CharacterRegistry restore preserves canonical records, UUID indexes and legacy save semantics");
+        CharacterRegistry incrementalReload = new CharacterRegistry();
+        incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
+                journalPerson.globalId);
+        ok(incrementalReload.getByGlobalId(journalPerson.globalId) != null
+                        && incrementalReload.get(journalPerson.id).name.equals(journalPerson.name),
+                "incremental record restore verifies frame UUID and restores the complete canonical Character");
+        boolean mismatchedFrameRejected = false;
+        try {
+            incrementalReload.applyJsonRecord(journal.toJsonRecord(journalPerson), "legacy-unscoped",
+                    "00000000-0000-0000-0000-000000000000");
+        } catch (IllegalArgumentException mismatch) {
+            mismatchedFrameRejected = mismatch.getMessage().contains("WAL identity mismatch");
+        }
+        ok(mismatchedFrameRejected,
+                "incremental WAL restore rejects a frame whose UUID does not match its Character payload");
+        ok(CharacterInventory.count(journalReload.get(journalPerson.id),"minecraft:bread")==5
+                        &&CharacterInventory.count(journalReload.get(carrier.id),"minecraft:bread")==3
+                        &&CharacterInventory.items(journalReload.get(journalPerson.id)).stream()
+                        .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
+                "canonical personal inventories and item data survive CharacterRegistry save/load");
+
+        CharacterRegistry bereavementRegistry = new CharacterRegistry();
+        Character sharedParent = bereavementRegistry.create("Общий родитель", "", "", "m", -40);
+        Character deceasedResident = bereavementRegistry.create("Умерший родственник", "", "", "m", 0);
+        Character siblingResident = bereavementRegistry.create("Живой брат", "", "", "m", 2);
+        deceasedResident.father = sharedParent.id;
+        sharedParent.children.add(deceasedResident.id);
+        siblingResident.father = sharedParent.id;
+        sharedParent.children.add(siblingResident.id);
+        Character trustedFriend = bereavementRegistry.create("Друг", "", "", "m", 1);
+        Character stranger = bereavementRegistry.create("Незнакомец", "", "", "m", 1);
+        deceasedResident.props.put("social.relationships", new LinkedHashMap<>(Map.of(trustedFriend.globalId, 85)));
+        trustedFriend.props.put("social.relationships", new LinkedHashMap<>(Map.of(deceasedResident.globalId, 85)));
+        PopulationSimulation.die(bereavementRegistry, deceasedResident.id, 40, "natural");
+        bereavementRegistry.processPendingBereavementBatch(32);
+        ok(bereavementRegistry.pendingBereavementEvents() == 0
+                        && CharacterDevelopment.memories(siblingResident, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(trustedFriend, 32).stream()
+                        .anyMatch(memory -> "bereavement".equals(memory.get("kind")))
+                        && CharacterDevelopment.memories(stranger, 32).stream()
+                        .noneMatch(memory -> "bereavement".equals(memory.get("kind"))),
+                "death bereavement reaches indexed siblings and reciprocal friends without notifying unrelated residents");
+        ok(bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
+                "canonical global Character lookup resolves social event recipients directly");
+        try {
+            Field globalIndex = CharacterRegistry.class.getDeclaredField("byGlobalId");
+            Field orderIndex = CharacterRegistry.class.getDeclaredField("orderedIds");
+            boolean compactIndexes = globalIndex.getGenericType() instanceof ParameterizedType globalType
+                    && globalType.getActualTypeArguments()[1].getTypeName().equals("java.lang.String")
+                    && orderIndex.getGenericType() instanceof ParameterizedType orderType
+                    && orderType.getActualTypeArguments()[0].getTypeName().equals("java.lang.String");
+            ok(compactIndexes, "registry secondary indexes retain stable local IDs, not duplicate Character object references");
+            ok(bereavementRegistry.all().stream().anyMatch(person -> person == trustedFriend)
+                            && bereavementRegistry.getByGlobalId(trustedFriend.globalId) == trustedFriend,
+                    "ordered compatibility view and global UUID lookup resolve canonical Character objects");
+        } catch (ReflectiveOperationException reflectionFailure) {
+            ok(false, "registry compact index reflection check: " + reflectionFailure.getMessage());
+        }
+
+        CharacterRegistry queuedBereavement = new CharacterRegistry();
+        Character queuedDeceased = queuedBereavement.create("Умерший", "", "", "m", 0);
+        List<Character> queuedFriends = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            Character friend = queuedBereavement.create("Друг " + i, "", "", "m", 1);
+            queuedFriends.add(friend);
+            queuedDeceased.props.putIfAbsent("social.relationships", new LinkedHashMap<String, Object>());
+            @SuppressWarnings("unchecked") Map<String, Object> socialMap =
+                    (Map<String, Object>) queuedDeceased.props.get("social.relationships");
+            socialMap.put(friend.globalId, 90);
+            friend.props.put("social.relationships", new LinkedHashMap<>(Map.of(queuedDeceased.globalId, 90)));
+        }
+        PopulationSimulation.die(queuedBereavement, queuedDeceased.id, 40, "natural");
+        ok(!Boolean.TRUE.equals(queuedDeceased.props.get("death.bereavement.completed"))
+                        && queuedBereavement.pendingBereavementEvents() == 1,
+                "large bereavement fan-out remains queued after the first bounded death batch");
+        String queuedSave = queuedBereavement.toJson();
+        CharacterRegistry queuedReload = new CharacterRegistry();
+        queuedReload.fromJson(queuedSave);
+        ok(queuedReload.pendingBereavementEvents() == 1,
+                "pending bereavement dispatch is reconstructed from durable Character properties after reload");
+        int firstQueuedBatch = queuedReload.processPendingBereavementBatch(16);
+        ok(firstQueuedBatch == 16 && queuedReload.pendingBereavementEvents() == 1,
+                "bereavement queue advances by a strict recipient budget");
+        while (queuedReload.pendingBereavementEvents() > 0)
+            queuedReload.processPendingBereavementBatch(16);
+        ok(Boolean.TRUE.equals(queuedReload.get(queuedDeceased.id).props.get("death.bereavement.completed"))
+                        && queuedFriends.stream().allMatch(friend -> {
+                            Character restored = queuedReload.getByGlobalId(friend.globalId);
+                            return restored != null && CharacterDevelopment.memories(restored, 8).stream()
+                                    .anyMatch(memory -> "bereavement".equals(memory.get("kind")));
+                        }),
+                "queued death consequences resume to completion without losing recipients across save/load");
+        Character socialCapPerson = queuedReload.create("Социальный", "", "", "m", 1);
+        for (int i = 0; i < 400; i++) ResidentSocial.adjust(socialCapPerson, "external:" + i, 1);
+        ok(((Map<?, ?>) socialCapPerson.props.get("social.relationships")).size()
+                        <= ResidentSocial.MAX_RELATIONSHIPS_PER_CHARACTER,
+                "social relationship neighbourhood stays within its configured memory and event-fan-out bound");
+
+        Character heir = journal.create("Наследник", "", "", "m", 20);
+        Character parent = journal.create("Умерший житель", "", "", "m", 0);
+        parent.props.put("population.location","settlement:oak");
+        CharacterInventory.add(parent,"minecraft:iron_ingot",12);
+        CharacterInventory.add(parent,"minecraft:iron_sword",1,"{Damage:7}");
+        journal.marry(parent.id,heir.id,30);
+        PopulationSimulation.die(journal, parent.id, 31, "illness");
+        ok(!parent.alive&&CharacterInventory.count(parent,"minecraft:iron_ingot")==0
+                        &&CharacterInventory.count(heir,"minecraft:iron_ingot")==12
+                        &&CharacterInventory.items(heir).stream().anyMatch(item->item.id().equals("minecraft:iron_sword")
+                        &&item.data().equals("{Damage:7}"))
+                        &&heir.id.equals(parent.props.get("estate.recipient")),
+                "death from illness transfers the deceased's complete item estate to the surviving spouse");
+        Character solitary = journal.create("Одинокий житель", "", "", "m", 0);
+        solitary.props.put("population.location","settlement:oak");
+        CharacterInventory.add(solitary,"minecraft:bread",4);
+        PopulationSimulation.die(journal, solitary.id, 32, "natural");
+        ok(!solitary.alive&&CharacterInventory.count(solitary,"minecraft:bread")==4
+                        &&"awaiting_kin_or_home_claim".equals(solitary.props.get("estate.status"))
+                        &&"settlement:oak".equals(solitary.props.get("estate.home")),
+                "death without heirs preserves all belongings as a recoverable estate at the recorded home");
+        Character laterKin = journal.create("Поздний наследник", "", "", "m", 40);
+        Character descendant = journal.addChild(laterKin,solitary,"Потомок", "m", 41);
+        ok(CharacterInventory.claimEstate(solitary,descendant)
+                        &&CharacterInventory.count(solitary,"minecraft:bread")==0
+                        &&CharacterInventory.count(descendant,"minecraft:bread")==4
+                        &&"inherited".equals(solitary.props.get("estate.status")),
+                "a later-registered descendant can claim the preserved home estate exactly once");
+        ok(!CharacterInventory.claimEstate(solitary,heir),
+                "estate cannot be claimed again after inheritance has been settled");
+
+        // диалог с персонажем
+        DialogueBridge.register();
+        Character chancellor = reg.holder("chancellor", Courts.realmPlace(d.realmList().get(3).id));
+        Dialogue dlg = Dialogue.parse("""
+            {"id":"chancellor","start":"a","nodes":{"a":{"text":"Я {npc_title} земель {realm}, {player}.","choices":[
+              {"text":"Вы из дома?","next":"h","if":[{"if":"npc_role","role":"chancellor"}]},
+              {"text":"Ты правитель?","next":"h","if":[{"if":"npc_role","role":"ruler"}]}]},"h":{"text":"Дом {npc_house}."}}}
+            """);
+        ok(dlg.validate().isEmpty(), "диалог с условиями ролей проходит проверку");
+        Ctx ctx = DialogueBridge.context(chancellor, defs, d, "Стив", "p1", new HashSet<>());
+        Session s = new Session(dlg, ctx);
+        ok(s.view().text.startsWith("Я Канцлер " + chancellor.name) && s.view().choices.equals(List.of("Вы из дома?")), "контекст персонажа: " + s.view().text);
+        ok(DialogueBridge.dialogueId(chancellor, defs).equals("wf_people:chancellor") && DialogueBridge.dialogueId(reg.holder("villager", Courts.titlePlace(d.allTitles().stream().filter(t -> t.tier == 0).findFirst().get().id)), defs).equals("wf_people:villager"), "диалог выбирается по роли");
+
+        boolean bad = false;
+        try { defs.add("{\"id\":\"Bad Id\",\"name\":\"x\"}"); } catch (IllegalArgumentException e) { bad = true; }
+        ok(bad, "недопустимый id роли отклоняется");
+        System.out.println(fails == 0 ? "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : "ПРОВАЛОВ: " + fails);
+        if (fails > 0) System.exit(1);
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "id": "guard",
+  "name": "Стражник",
+  "category": "specialist",
+  "required_skills": { "combat": 1 }
+}
