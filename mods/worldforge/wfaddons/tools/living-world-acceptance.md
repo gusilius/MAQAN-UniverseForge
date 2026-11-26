@@ -4,7 +4,7 @@
 
 The acceptance target is one continuously running Minecraft world, not a sum of unrelated subsystem stress tests. Population, social life, settlements, economy, politics, military/RTS, persistence, and runtime lifecycle must advance together and exchange canonical state.
 
-An isolated stress test is diagnostic evidence only. It can locate a bottleneck; it cannot establish whole-world readiness.
+Economy is a permanent, first-class part of every integrated stage, from A through F. It is never an optional or disconnected stage and must not be switched off to improve a population result. An isolated stress test is diagnostic evidence only. It can locate a bottleneck; it cannot establish whole-world readiness.
 
 ## Existing work is part of the acceptance contract
 
@@ -30,6 +30,10 @@ A stage advances only after the previous stage passes. Never jump to the million
 4. **Stage D — large world.** Increase population and settlement count only within measured resource budgets. Exercise wars, casualties, injuries, inheritance, territory, market shocks, and recovery while all domains remain active.
 5. **Stage E — massive world.** Increase scale progressively after D passes. Verify bounded queues, scheduler backlog, persistence lag, heap/GC and memory reclamation over a sustained run.
 6. **Stage F — extreme experiment.** Million-character or higher experiments are opt-in research runs, not ordinary PR gates. They do not compensate for failures in A–E.
+
+## Economy is always in the world loop
+
+At every stage, production, inventories, storage, prices, market transactions, trade routes, wages and costs, treasury, taxes, construction budgets, army provisioning and consumption must advance against the same canonical world state. A test may inspect the ledger separately to diagnose a bottleneck, but the stage result is invalid if economic simulation is paused, mocked, replaced by fixed counters, or run in a separate world. Economy throughput and queue/WAL costs count toward the same TPS, RAM, CPU and persistence budgets as NPCs, settlements and RTS.
 
 ## Required causal chain
 
@@ -79,4 +83,4 @@ Keep fast compile/domain checks on ordinary changes. Run the integrated small-wo
 
 ## Current capability inventory (baseline, not a pass)
 
-At the time this contract was introduced, the repository had separate runtime drivers for population, social life and settlements; economy had a separate Java stress group. The workflow's 12-entry "driver inventory" only checked path presence for many entries. The integrated orchestration and complete causal-chain evidence were not yet established. This inventory must be updated from observed runtime results, not assumptions.
+At the time this contract was introduced, the repository had separate runtime drivers for population, social life and settlements, plus an economy domain stress test. The complete domain test command includes economy; economy is not removed from the domain suite. The limitation is that the economy stress driver does not by itself prove that the live market, treasury and trade loop interacts with NPC production, settlement stocks, taxes, recruitment and army supply in one Minecraft world. The workflow's 12-entry driver inventory only checked path presence for many entries. Integrated orchestration and complete causal-chain evidence were not yet established. This inventory must be updated from observed runtime results, not assumptions.
