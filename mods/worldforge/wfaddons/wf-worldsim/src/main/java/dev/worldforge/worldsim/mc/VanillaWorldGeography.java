@@ -195,6 +195,8 @@ public final class VanillaWorldGeography {
                     sample.add("discovered_year", previous.has("discovered_year")
                             ? previous.get("discovered_year").deepCopy()
                             : new com.google.gson.JsonPrimitive(0));
+                    if (previous.has("founding_site") && previous.get("founding_site").getAsBoolean())
+                        sample.addProperty("founding_site", true);
                 } else {
                     sample.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
                 }
@@ -205,6 +207,39 @@ public final class VanillaWorldGeography {
             }
         }
         if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
+    }
+
+    /**
+     * Records a real generated village structure as a founding site. The marker is
+     * attached to the loaded structure-start chunk's sampled terrain cell and is
+     * durable with the geography cache; no neighboring chunk is requested.
+     */
+    public static synchronized void markVillageFoundingSite(ServerLevel level, ChunkAccess chunk) {
+        if (level == null || chunk == null || !isOrdinaryGeographyLevel(level)) return;
+        load(level.getServer());
+        ChunkPos pos = chunk.getPos();
+        int regionX = Math.floorDiv(pos.x, REGION_CHUNKS);
+        int regionZ = Math.floorDiv(pos.z, REGION_CHUNKS);
+        String id = mapId(level.dimension().location().toString(), regionX, regionZ);
+        Region region = REGIONS.computeIfAbsent(id, Region::new);
+        int localChunkX = Math.floorMod(pos.x, REGION_CHUNKS) * 16;
+        int localChunkZ = Math.floorMod(pos.z, REGION_CHUNKS) * 16;
+        // The central sample is deliberately inside this already-loaded chunk.
+        int localX = 10, localZ = 10;
+        int x = localChunkX + localX, z = localChunkZ + localZ;
+        long key = (long) z * REGION_BLOCKS + x;
+        JsonObject cell = region.cells.get(key);
+        if (cell == null) {
+            cell = sample(level, chunk, localX, localZ, x, z);
+            cell.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
+            region.cells.put(key, cell);
+        }
+        if (!cell.has("founding_site") || !cell.get("founding_site").getAsBoolean()) {
+            cell.addProperty("founding_site", true);
+            dirty = true;
+            cachedSnapshot = null;
+            snapshotBuild = null;
+        }
     }
 
     private static JsonObject sample(ServerLevel level, ChunkAccess chunk,
@@ -234,6 +269,7 @@ public final class VanillaWorldGeography {
         cell.addProperty("land", land);
         cell.addProperty("suitability", suitability);
         cell.addProperty("owner_realm_id", "");
+        cell.addProperty("founding_site", false);
         return cell;
     }
 
