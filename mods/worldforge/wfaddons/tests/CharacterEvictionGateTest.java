@@ -10,7 +10,7 @@ public final class CharacterEvictionGateTest {
         if (!value) failures++;
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws java.io.IOException {
         CharacterEvictionGate gate = new CharacterEvictionGate();
         String id = "00000000-0000-0000-0000-000000000001";
         gate.register(id);
