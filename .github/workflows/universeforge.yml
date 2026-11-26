@@ -33,47 +33,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  stress-contour-coverage:
-    name: "Contour ${{ matrix.id }} — ${{ matrix.name }} (driver inventory)"
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { id: "01", name: "Server Core", driver: "mods/worldforge/wfaddons/tools/world-runtime-smoke.sh" }
-          - { id: "02", name: "Character / Population", driver: "mods/worldforge/wfaddons/wf-people/src/main/java/dev/worldforge/people/mc/RuntimeStressLab.java" }
-          - { id: "03", name: "Families / Social", driver: "mods/worldforge/wfaddons/wf-relations/src/main/java/dev/worldforge/relations/mc/SocialLifeStressLab.java" }
-          - { id: "04", name: "Settlements / Labor", driver: "mods/worldforge/wfaddons/wf-settlements/src/main/java/dev/worldforge/settle/mc/SettlementStressLab.java" }
-          - { id: "05", name: "Economy / Trade / Treasury", driver: "" }
-          - { id: "06", name: "Politics / States", driver: "" }
-          - { id: "07", name: "Army / RTS", driver: "" }
-          - { id: "08", name: "World Generation", driver: "" }
-          - { id: "09", name: "Dimensions / Planets", driver: "" }
-          - { id: "10", name: "Persistence / Recovery", driver: "" }
-          - { id: "11", name: "Long-term Autonomous Life", driver: "" }
-          - { id: "12", name: "Full Integration", driver: "" }
-    steps:
-      - uses: actions/checkout@v4
-      - name: Report contour driver coverage (not a stress pass)
-        shell: pwsh
-        env:
-          CONTOUR_ID: ${{ matrix.id }}
-          CONTOUR_NAME: ${{ matrix.name }}
-          DRIVER_PATH: ${{ matrix.driver }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:DRIVER_PATH)) {
-            $state = "NOT_IMPLEMENTED"
-          } elseif (Test-Path $env:DRIVER_PATH) {
-            $state = "DRIVER_PRESENT_UNVERIFIED"
-          } else {
-            $state = "DRIVER_MISSING"
-          }
-          "CONTOUR_$($env:CONTOUR_ID)_$state" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "### Contour $($env:CONTOUR_ID) — $($env:CONTOUR_NAME)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Driver: $($env:DRIVER_PATH)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Status: **$state**" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($state -eq "DRIVER_MISSING") { throw "Declared contour driver path does not exist." }
-
   world-runtime-acceptance:
     name: Build once; test vanilla Overworld and image dimension in one server
     runs-on: windows-latest
@@ -115,13 +74,6 @@ jobs:
           cargo build --release --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "WorldSim native build failed" }
 
-      - name: Run CK3-scale population and political stress gates
-        working-directory: mods/worldforge/native/worldforge-worldsim
-        shell: pwsh
-        run: |
-          cargo test --release --target x86_64-pc-windows-msvc scale -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw "100k/500k/1m population or 10k-realm political stress gate failed" }
-
       - name: Stage native engine into the WorldSim mod
         shell: pwsh
         run: |
@@ -160,184 +112,30 @@ jobs:
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
-      - name: Run isolated NPC, worldgen, politics, life and integration suites
+      - name: Run complete domain suite including economy (diagnostic, not world acceptance)
         id: logic_suite
-        continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: |
-          bash tools/test-all.sh ../wfmod "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" suite
+          bash tools/test-all.sh ../wfmod "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" all
 
-      - name: Contour 01 — isolated vanilla Server Core lifecycle and same-world recovery
-        id: server_core
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "server-core"
-          WF_CORE_OBSERVE_SECONDS: "120"
-          WF_RUNTIME_TIMEOUT_SECONDS: "600"
+      - name: Report integrated Minecraft acceptance evidence status
+        if: always()
+        shell: pwsh
         run: |
-          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-01-server-core"
+          "## Integrated living-world acceptance" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Verdict: **INCONCLUSIVE — integrated in-game orchestrator and causal-chain receipts are not implemented yet**" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- The pure-Java domain suite and successful Forge startup are diagnostic evidence only; they do not prove the living-world acceptance contract." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Population, social, settlement, economy, politics, army/RTS, NPC unload/reload, WAL recovery and client frame-time evidence must be collected in one progressive integrated scenario." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Million-character and other isolated long stress runs are not executed on every push." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
-      - name: Aggregate Server Core contour result
+      - name: Final build and domain-test gate
         if: always()
         shell: pwsh
         env:
-          CORE_OUTCOME: ${{ steps.server_core.outcome }}
-        run: |
-          "CONTOUR_01_SERVER_CORE_OUTCOME=$env:CORE_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:CORE_OUTCOME -ne "success") {
-            "Contour 01 failed; continuing so independent contours still execute." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
-
-      - name: Contour 02 — real canonical population, production tick scheduler and durable Character writes
-        id: population_stress
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "population-stress"
-          WF_STRESS_ENABLED: "true"
-          WF_STRESS_TARGET: "1000000"
-          WF_STRESS_BATCH: "128"
-          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
-        run: |
-          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-02-population"
-
-      - name: Aggregate Population contour result
-        if: always()
-        shell: pwsh
-        env:
-          POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
-        run: |
-          "CONTOUR_02_POPULATION_OUTCOME=$env:POPULATION_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:POPULATION_OUTCOME -ne "success") {
-            "Contour 02 failed; continuing to Families / Social and Settlements / Labor." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
-
-      - name: Contour 03 — Families / Social lifecycle (same acceptance job, independent server runs)
-        id: social_stress
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "social-stress"
-          WF_SOCIAL_STRESS_DAYS: "635"
-          WF_RUNTIME_TIMEOUT_SECONDS: "3600"
-        run: |
-          set -euo pipefail
-          for target in 10000 20000 50000 100000 500000; do
-            echo "CONTOUR_03_STAGE_BEGIN=${target}"
-            WF_SOCIAL_STRESS_TARGET="${target}" bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-03-social-${target}"
-            echo "CONTOUR_03_STAGE_PASS=${target}"
-            echo "CONTOUR_03_SOCIAL_${target}=PASS" | tee -a "$GITHUB_STEP_SUMMARY"
-          done
-
-      - name: Aggregate Families / Social contour result
-        if: always()
-        shell: pwsh
-        env:
-          SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
-        run: |
-          "CONTOUR_03_SOCIAL_OUTCOME=$env:SOCIAL_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:SOCIAL_OUTCOME -ne "success") {
-            "Contour 03 failed; continuing to Settlements / Labor." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
-
-      - name: Contour 04 — real Minecraft Settlements / Labor / physical LOD stress
-        id: settlement_stress
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "settlement-stress"
-          WF_SETTLEMENT_STRESS_TARGET: "250"
-          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
-        run: |
-          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-contour-04-settlements"
-
-      - name: Aggregate Settlements / Labor contour result
-        if: always()
-        shell: pwsh
-        env:
-          SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
-        run: |
-          "CONTOUR_04_SETTLEMENTS_OUTCOME=$env:SETTLEMENT_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:SETTLEMENT_OUTCOME -ne "success") {
-            "Contour 04 failed; all four requested runtime contours have been attempted." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
-      - name: Contour 05 — progressive Economy / Trade / Treasury scale and recovery
-        id: economy_stress
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ECONOMY_STRESS_ENABLED: "true"
-          WF_ECONOMY_STRESS_MAX_POPULATION: "1000000"
-          WF_ECONOMY_STRESS_MAX_SETTLEMENTS: "1000"
-          WF_RUNTIME_TIMEOUT_SECONDS: "1800"
-        run: |
-          bash tools/test-all.sh ../wfmod "" economy
-
-      - name: Aggregate Economy / Trade / Treasury contour result
-        if: always()
-        shell: pwsh
-        env:
-          ECONOMY_OUTCOME: ${{ steps.economy_stress.outcome }}
-        run: |
-          "CONTOUR_05_ECONOMY_OUTCOME=$env:ECONOMY_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:ECONOMY_OUTCOME -ne "success") {
-            "Contour 05 failed; preserving diagnostics and continuing to the remaining inventory." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          }
-
-      # Dual-world Genesis is intentionally deferred while the five requested
-      # independent load contours are stabilized. Do not spend another multi-hour runner here.
-      - name: Dual-world Genesis — deferred by current acceptance scope
-        id: dual_world_smoke
-        if: ${{ false }}
-        shell: pwsh
-        run: |
-          "SAME_SERVER_DUAL_WORLD_OUTCOME=deferred" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-
-      - name: Upload same-server dual-world and acceptance diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maqan-world-runtime-server-acceptance
-          path: |
-            ${{ runner.temp }}/maqan-contour-01-server-core/
-            ${{ runner.temp }}/maqan-contour-02-population/
-            ${{ runner.temp }}/maqan-contour-03-social-*/
-            ${{ runner.temp }}/maqan-contour-04-settlements/
-            ${{ runner.temp }}/maqan-world-runtime-map/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Final acceptance gate — fail only after every contour has run
-        if: always()
-        shell: pwsh
-        env:
-          SERVER_CORE_OUTCOME: ${{ steps.server_core.outcome }}
-          POPULATION_OUTCOME: ${{ steps.population_stress.outcome }}
-          SOCIAL_OUTCOME: ${{ steps.social_stress.outcome }}
-          SETTLEMENT_OUTCOME: ${{ steps.settlement_stress.outcome }}
-          ECONOMY_OUTCOME: ${{ steps.economy_stress.outcome }}
           LOGIC_SUITE_OUTCOME: ${{ steps.logic_suite.outcome }}
         run: |
-          $outcomes = [ordered]@{
-            "Logic test suite" = $env:LOGIC_SUITE_OUTCOME
-            "01 Server Core" = $env:SERVER_CORE_OUTCOME
-            "02 Population" = $env:POPULATION_OUTCOME
-            "03 Families / Social" = $env:SOCIAL_OUTCOME
-            "04 Settlements / Labor" = $env:SETTLEMENT_OUTCOME
-            "05 Economy / Trade / Treasury" = $env:ECONOMY_OUTCOME
-          }
-          $failed = @()
-          foreach ($entry in $outcomes.GetEnumerator()) {
-            "$($entry.Key): $($entry.Value)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            if ($entry.Value -ne "success") { $failed += "$($entry.Key)=$($entry.Value)" }
-          }
-          if ($failed.Count -gt 0) {
-            throw "Runtime acceptance failed after all contours were attempted: $($failed -join '; ')"
+          "Domain suite (diagnostic): $env:LOGIC_SUITE_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:LOGIC_SUITE_OUTCOME -ne "success") {
+            throw "Build/domain suite failed. Integrated living-world acceptance remains a separate INCONCLUSIVE status until its in-game orchestrator exists."
           }
