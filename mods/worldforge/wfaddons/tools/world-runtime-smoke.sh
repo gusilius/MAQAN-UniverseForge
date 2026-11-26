@@ -163,6 +163,26 @@ runtime_exit() {
     echo "ERROR: runtime scenario cannot PASS without observed JVM exit 0 and graceful shutdown"
     exit_code=14
   fi
+  # Export WorldSim's bounded profiler snapshot from the persisted save before the
+  # temporary server directory is removed. Missing data remains explicitly absent.
+  if [ -f "$WORK/world/worldforge/wf_worldsim.json" ]; then
+    python3 - "$WORK/world/worldforge/wf_worldsim.json" "$WORK/performance-profile.json" <<'PY'
+import json, pathlib, sys
+source, target = map(pathlib.Path, sys.argv[1:])
+try:
+    state = json.loads(source.read_text(encoding="utf-8"))
+    profile = state.get("performance_profile")
+    if isinstance(profile, dict):
+        target.write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+        print("WORLDSIM_PERFORMANCE_PROFILE_EXPORTED=1")
+    else:
+        print("WORLDSIM_PERFORMANCE_PROFILE_EXPORTED=0")
+except Exception as error:
+    print("WORLDSIM_PERFORMANCE_PROFILE_EXPORT_FAILED=" + str(error))
+PY
+  else
+    echo "WORLDSIM_PERFORMANCE_PROFILE_EXPORTED=0"
+  fi
   python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --server-exit-code "$SERVER_EXIT_CODE" --termination "$TERMINATION_EVIDENCE" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
   exit "$exit_code"
