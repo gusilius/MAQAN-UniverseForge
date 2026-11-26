@@ -155,7 +155,14 @@ public final class PlatformShellScreen extends Screen {
 
     /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
     public static void openProviderView(String providerModId, Screen view) {
-        Minecraft.getInstance().setScreen(wrapProviderView(providerModId, view));
+        Minecraft mc = Minecraft.getInstance();
+        // Reuse the live MAQAN shell when a provider is opened from inside it.
+        // Replacing the shell here discarded workspace state and could leave the
+        // provider's camera/input lifecycle detached from the visible host.
+        if (mc.screen instanceof PlatformShellScreen current) {
+            if (current.attachProviderView(providerModId, view)) return;
+        }
+        mc.setScreen(wrapProviderView(providerModId, view));
     }
 
     @Override public boolean isPauseScreen() { return false; }

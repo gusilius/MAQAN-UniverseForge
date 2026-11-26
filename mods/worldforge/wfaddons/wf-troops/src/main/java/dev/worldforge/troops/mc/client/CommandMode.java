@@ -266,8 +266,16 @@ public final class CommandMode {
     /** Public entry point used by the settlement HUD bridge; all management opens the same command workspace. */
     public static void openUnified() {
         Minecraft mc = Minecraft.getInstance();
-        if (!active && mc.screen == null) enter(mc);
-        else if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
+        if (mc.player == null || mc.level == null) return;
+        // Opening RTS from the MAQAN workspace happens while a Screen is already
+        // installed. The old null-screen guard silently ignored that legitimate path,
+        // leaving a decorative RTS page with no camera controller behind it.
+        if (!active) {
+            firstPersonCommand = false;
+            enter(mc);
+            return;
+        }
+        if (!(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
             openCommandView(mc, new CommandScreen());
     }
 
