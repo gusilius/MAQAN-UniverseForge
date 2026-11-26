@@ -21,9 +21,12 @@ CAUSAL_LINKS = (
 )
 METRICS = (
     "tps_min", "mspt_p50", "mspt_p95", "mspt_p99", "mspt_max",
-    "cpu_percent_max", "process_working_set_bytes_max",
-    "heap_used_bytes_max", "gc_pause_ms_max", "queue_depth_max",
-    "scheduler_backlog_max", "persistence_lag_ms_max",
+    "cpu_percent_max", "process_working_set_bytes_max", "process_private_bytes_max",
+    "heap_used_bytes_max", "heap_committed_bytes_max", "non_heap_used_bytes_max",
+    "gc_collection_count", "gc_collection_ms", "gc_pause_ms_max",
+    "thread_count_max", "physical_npc_peak", "background_population_peak",
+    "queue_depth_max", "scheduler_backlog_max", "oldest_queue_item_age_ms_max",
+    "wal_pending_max", "durable_writes", "persistence_lag_ms_max", "snapshot_ms_max", "wal_replayed_records"
 )
 
 def fail(message):
@@ -60,6 +63,15 @@ def main():
             inconclusive("missing run identity field: " + key)
     if report.get("duration_seconds", 0) <= 0:
         inconclusive("duration_seconds must be positive")
+    stage_order = ["A", "B", "C", "D", "E", "F"]
+    if report["stage"] not in stage_order:
+        inconclusive("unknown progressive stage: " + str(report["stage"]))
+    prior = report.get("previous_stage_verdicts", {})
+    if not isinstance(prior, dict):
+        inconclusive("previous_stage_verdicts must be an object")
+    for required_stage in stage_order[:stage_order.index(report["stage"])]:
+        if prior.get(required_stage) != "PASS":
+            inconclusive("cannot advance: previous stage " + required_stage + " is not PASS")
 
     subsystems = report.get("subsystems")
     if not isinstance(subsystems, dict):
