@@ -121,6 +121,9 @@ public final class VanillaVillageAdapter {
     /** Namespace-independent settlement-anchor rules for vanilla and arbitrary structure mods. */
     private static boolean isSettlementAnchor(String path) {
         String value = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        if (SettleMod.STRUCTURE_CATALOG.matchesStructureClass("settlement_anchor", value)) return true;
+        // Backward-compatible fallback for older datapacks that have not yet loaded
+        // the extended catalogue; namespaces are intentionally ignored.
         return value.contains("village") || value.contains("settlement") || value.contains("hamlet")
                 || value.contains("town") || value.contains("city") || value.contains("colony")
                 || value.contains("homestead") || value.contains("outpost") || value.contains("camp")
