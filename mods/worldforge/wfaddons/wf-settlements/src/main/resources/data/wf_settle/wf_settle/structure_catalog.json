@@ -22,6 +22,18 @@
     "fallback": "use compatible built-in assets or defer placement; never silently substitute a forbidden racial/cultural structure"
   },
   "structure_classes": {
+    "settlement_anchor": [
+      "village",
+      "settlement",
+      "hamlet",
+      "town",
+      "city",
+      "colony",
+      "homestead",
+      "outpost",
+      "camp",
+      "tribal_camp"
+    ],
     "residential": [
       "house",
       "hut",
