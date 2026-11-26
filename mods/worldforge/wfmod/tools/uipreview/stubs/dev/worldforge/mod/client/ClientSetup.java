@@ -1,1 +1,0 @@
-package dev.worldforge.mod.client; public class ClientSetup { public static final net.minecraft.client.KeyMapping OPEN = new net.minecraft.client.KeyMapping(); }

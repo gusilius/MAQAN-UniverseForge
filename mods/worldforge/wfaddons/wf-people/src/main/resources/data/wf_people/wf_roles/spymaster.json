@@ -1,1 +1,0 @@
-{"id": "spymaster", "name": "Мастер над шептунами", "per": "realm", "count": 1, "dialogue": "wf_people:spymaster", "noble": true, "unlocks": ["intrigue"], "council": {"attr": "intrigue", "effects": {"plot_defense": 2.0, "scheme_power": 1.0}}}

@@ -1,1 +1,0 @@
-package net.minecraft.client.renderer.texture; public class DynamicTexture extends AbstractTexture { public DynamicTexture(com.mojang.blaze3d.platform.NativeImage n){ this.n=n; } }

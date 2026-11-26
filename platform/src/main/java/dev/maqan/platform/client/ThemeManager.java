@@ -27,12 +27,14 @@ public final class ThemeManager {
     public static final int REFERENCE_WIDTH = 1368;
     public static final int REFERENCE_HEIGHT = 760;
     private static final String[] REQUIRED = {"royal", "iron", "grim", "elf"};
-    private static final String[] CHROME = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor"};
+    private static final String[] LAYOUT_ELEMENTS = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor"};
+    private static final String[] CHROME = {"top", "lcol", "rcol", "mm", "bot", "cor"};
     private static final Map<String, Texture> TEXTURES = new LinkedHashMap<>();
     private static final Map<String, int[]> RECTANGLES = new LinkedHashMap<>();
     private static String selectedTheme = "royal";
     private static int sourceScale = 2;
     private static boolean initialized;
+    private static boolean preferenceLoaded;
     private static boolean manifestValid;
 
     private record Texture(ResourceLocation location, int width, int height) { }
@@ -43,7 +45,10 @@ public final class ThemeManager {
         if (initialized) return;
         initialized = true;
         Preferences prefs = Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace");
-        selectedTheme = normalize(prefs.get("theme", "royal"));
+        if (!preferenceLoaded) {
+            selectedTheme = normalize(prefs.get("theme", "royal"));
+            preferenceLoaded = true;
+        }
         try {
             Minecraft mc = Minecraft.getInstance();
             Resource manifest = mc.getResourceManager()
@@ -64,7 +69,7 @@ public final class ThemeManager {
             for (String theme : REQUIRED) {
                 JsonObject skin = skins.getAsJsonObject(theme);
                 if (skin == null) throw new IllegalStateException("Missing theme " + theme);
-                for (String element : CHROME) {
+                for (String element : LAYOUT_ELEMENTS) {
                     JsonArray rect = skin.getAsJsonArray(element);
                     if (rect == null || rect.size() != 4) throw new IllegalStateException("Invalid " + theme + "/" + element + " layout");
                 }
@@ -133,11 +138,18 @@ public final class ThemeManager {
         String normalized = normalize(theme);
         if (!isSupported(normalized)) return false;
         if (normalized.equals(selectedTheme) && manifestValid) return true;
+        String previous = selectedTheme;
         selectedTheme = normalized;
+        Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace").put("theme", selectedTheme);
         initialized = false;
         initialize();
-        if (!manifestValid) return false;
-        Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace").put("theme", selectedTheme);
+        if (!manifestValid) {
+            selectedTheme = previous;
+            Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace").put("theme", previous);
+            initialized = false;
+            initialize();
+            return false;
+        }
         return true;
     }
 

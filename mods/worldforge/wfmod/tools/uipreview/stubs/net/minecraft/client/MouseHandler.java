@@ -1,1 +1,0 @@
-package net.minecraft.client; public class MouseHandler { public double xpos(){return 0;} public double ypos(){return 0;} }

@@ -1,1 +1,0 @@
-{"id": "marshal", "name": "Маршал", "per": "realm", "count": 1, "dialogue": "wf_people:marshal", "noble": true, "unlocks": ["war", "levy"], "council": {"attr": "martial", "effects": {"levy_pct": 2.0, "commander": 0.5}}}

@@ -1,2 +1,0 @@
-package net.minecraft.client.gui.components; import net.minecraft.client.gui.Font; import net.minecraft.network.chat.Component;
-public class EditBox { public boolean visible; public EditBox(Font f,int a,int b,int c,int d,Component e){} public void setMaxLength(int n){} public void setVisible(boolean b){} public void setHint(Component c){} public boolean isFocused(){return false;} public void setFocused(boolean b){} public String getValue(){return "";} public void setValue(String s){} public boolean keyPressed(int a,int b,int c){return false;} }
