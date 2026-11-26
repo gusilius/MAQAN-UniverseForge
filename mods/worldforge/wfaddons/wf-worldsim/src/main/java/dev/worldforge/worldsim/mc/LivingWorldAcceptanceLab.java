@@ -77,7 +77,6 @@ public final class LivingWorldAcceptanceLab {
         final long gcCountStart = gcMetric(true), gcMillisStart = gcMetric(false);
         final long heapStart = heapUsed();
         final long treasurySequenceStart;
-        final long sourceProductionSequenceStart;
         final double sourceStockStart, destinationStockStart, destinationSilverStart;
         final double sourcePriceStart, destinationPriceStart;
         final double realmBalanceStart;
@@ -89,6 +88,7 @@ public final class LivingWorldAcceptanceLab {
         final ArmyEngine armyEngine;
         final Army army;
         final long startedWorldDay;
+        long tickStartNanos;
         int tickCount, tickCursor, tickSamples;
         long maxTickNanos;
         long peakHeapBytes = heapStart;
@@ -311,21 +311,19 @@ public final class LivingWorldAcceptanceLab {
             String supplyOwner = TroopsMod.acceptanceSupplyOwnerId(run.realm, run.army.id, run.mapId);
             double delivered = 0;
             double consumed = 0;
-            if (run.source.s.amount("food") > 1.0) {
-                delivered = SettleMod.transferFoodToArmy(run.level, run.realm, supplyAccount, supplyOwner,
-                        1.0, run.army.location, run.army.location, "living-acceptance-a-rations:" + run.worldId);
-                TreasuryLedger ledger = WorldForgeMod.treasury();
-                double available = ledger.balance(supplyAccount);
-                consumed = Math.min(1.0, available);
-                if (consumed > 1e-9 && ledger.withdrawOnce(supplyAccount, consumed,
-                        TreasuryLedger.Kind.CONSUMPTION, "field-rations",
-                        "living-acceptance-a-consumption:" + run.worldId,
-                        WorldForgeApi.clock().worldMinute(), "Stage A integrated army field ration")) {
-                    run.treasuryCheckpoint = WorldForgeMod.saveTreasuryNow(run.server) && run.treasuryCheckpoint;
-                    run.supplyCheckpoint = TroopsMod.advanceAcceptanceSupply(run.realm, run.army.id,
-                            run.mapId, run.level.dimension().location().toString(), 1, 1.0,
-                            available, consumed, run.startedWorldDay);
-                }
+            delivered = SettleMod.transferFoodToArmy(run.level, run.realm, supplyAccount, supplyOwner,
+                    1.0, run.source.cx, run.source.cz, "living-acceptance-a-rations:" + run.worldId);
+            TreasuryLedger ledger = WorldForgeMod.treasury();
+            double available = ledger.balance(supplyAccount);
+            consumed = Math.min(1.0, available);
+            if (consumed > 1e-9 && ledger.withdrawOnce(supplyAccount, consumed,
+                    TreasuryLedger.Kind.CONSUMPTION, "field-rations",
+                    "living-acceptance-a-consumption:" + run.worldId,
+                    WorldForgeApi.clock().worldMinute(), "Stage A integrated army field ration")) {
+                run.treasuryCheckpoint = WorldForgeMod.saveTreasuryNow(run.server) && run.treasuryCheckpoint;
+                run.supplyCheckpoint = TroopsMod.advanceAcceptanceSupply(run.realm, run.army.id,
+                        run.mapId, run.level.dimension().location().toString(), 1, 1.0,
+                        available, consumed, run.startedWorldDay) != null;
             }
             run.deliveredRations = delivered;
             run.consumedRations = consumed;
