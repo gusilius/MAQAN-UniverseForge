@@ -61,9 +61,6 @@ public final class VanillaVillageAdapter {
             if (start == null || !start.isValid()) continue;
             var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
             if (typeKey == null || !typeKey.getPath().contains("village")) continue;
-            // Feed the exact observed structure-start chunk into WorldSim's durable
-            // geography evidence. Terrain samples alone must never found a community.
-            dev.worldforge.worldsim.mc.VanillaWorldGeography.markVillageFoundingSite(level, chunk);
             BoundingBox bounds = start.getBoundingBox();
             int x = (bounds.minX() + bounds.maxX()) / 2;
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
