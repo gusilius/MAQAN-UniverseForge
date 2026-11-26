@@ -301,15 +301,20 @@ public final class VanillaWorldGeography {
         int centerChunkZ = Math.floorDiv(centerZ, 16);
         ChunkAccess centerChunk = level.getChunkSource().getChunkNow(centerChunkX, centerChunkZ);
         boolean exactCenterLoaded = centerChunk != null;
-        if (!exactCenterLoaded) centerChunk = startChunk; // never force-load a distant structure chunk
+        // If the structure center is not resident, anchor to the actual start chunk,
+        // not to an unloaded center chunk. This avoids mismatching sampled terrain with
+        // geographic coordinates and never force-loads the center.
+        int anchorChunkX = exactCenterLoaded ? centerChunkX : startChunk.getPos().x;
+        int anchorChunkZ = exactCenterLoaded ? centerChunkZ : startChunk.getPos().z;
+        if (!exactCenterLoaded) centerChunk = startChunk;
         int localX = exactCenterLoaded ? Math.floorMod(centerX, 16) : 8;
         int localZ = exactCenterLoaded ? Math.floorMod(centerZ, 16) : 8;
-        int regionX = Math.floorDiv(centerChunkX, REGION_CHUNKS);
-        int regionZ = Math.floorDiv(centerChunkZ, REGION_CHUNKS);
+        int regionX = Math.floorDiv(anchorChunkX, REGION_CHUNKS);
+        int regionZ = Math.floorDiv(anchorChunkZ, REGION_CHUNKS);
         String id = mapId(level.dimension().location().toString(), regionX, regionZ);
         Region region = REGIONS.computeIfAbsent(id, Region::new);
-        int x = Math.floorMod(centerChunkX, REGION_CHUNKS) * 16 + localX;
-        int z = Math.floorMod(centerChunkZ, REGION_CHUNKS) * 16 + localZ;
+        int x = Math.floorMod(anchorChunkX, REGION_CHUNKS) * 16 + localX;
+        int z = Math.floorMod(anchorChunkZ, REGION_CHUNKS) * 16 + localZ;
         long key = (long) z * REGION_BLOCKS + x;
         JsonObject cell = region.cells.get(key);
         if (cell == null) {
@@ -648,6 +653,7 @@ public final class VanillaWorldGeography {
                 value.addProperty("blocks_per_pixel_milli", 1000);
                 value.addProperty("sample_stride", SAMPLE_STEP);
                 value.add("cells", new JsonArray());
+                value.add("structures", new JsonArray());
                 return value;
             });
             JsonArray cells = map.getAsJsonArray("cells");
@@ -666,6 +672,15 @@ public final class VanillaWorldGeography {
             processed++;
         }
         if (build.regions.hasNext()) return false;
+
+        // Keep the complete mod-agnostic structure catalog beside the geography
+        // snapshot. Native emergence may ignore unknown metadata fields, while Java
+        // settlement/building/military adapters can consume the exact same records.
+        for (JsonObject structure : STRUCTURES.values()) {
+            String mapId = "vanilla-world:" + structure.get("dimension").getAsString();
+            JsonObject map = build.maps.get(mapId);
+            if (map != null) map.getAsJsonArray("structures").add(structure.deepCopy());
+        }
 
         JsonArray result = new JsonArray();
         for (var entry : build.maps.entrySet()) {
