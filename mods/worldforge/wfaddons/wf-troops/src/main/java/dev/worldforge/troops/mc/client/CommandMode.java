@@ -88,8 +88,15 @@ public final class CommandMode {
     @SubscribeEvent
     public static void setup(FMLClientSetupEvent e) {
         e.enqueueWork(() -> ClientViews.register(CommandScreen.BUILD_VIEW, payload -> {
-            if (Minecraft.getInstance().screen instanceof CommandScreen s) s.setBuilds(payload);
+            CommandScreen screen = currentCommandView();
+            if (screen != null) screen.setBuilds(payload);
         }));
+    }
+
+    static CommandScreen currentCommandView() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof CommandScreen screen) return screen;
+        return isHostedCommandViewActive(mc) ? hostedCommandView : null;
     }
 
     /** Public bridge for MAQAN's shell-level camera controls. */

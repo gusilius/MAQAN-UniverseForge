@@ -66,7 +66,8 @@ public final class CommandScreen extends Screen {
             Defs defs = new Defs();
             if (m.get("defs") instanceof List<?> raw) for (Object o : raw) if (o instanceof String id) defs.add(id);
             incomingSettlement = Settlement.fromJson((String) m.get("s"), defs);
-            if (Minecraft.getInstance().screen instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+            CommandScreen screen = CommandMode.currentCommandView();
+            if (screen != null) screen.setSettlement(incomingSettlement);
         } catch (RuntimeException ex) {
             org.slf4j.LoggerFactory.getLogger("wf_troops").error("Не удалось подключить модель поселения к общей RTS-панели", ex);
         }
@@ -339,7 +340,9 @@ public final class CommandScreen extends Screen {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
         if (overMiniMap(x,y)) {
-            if (button == 0 && settlement != null) focusMiniMap(x,y);
+            if (button == 0 && settlement != null
+                    && x >= miniMapX()+8 && x < miniMapX()+128
+                    && y >= miniMapY()+18 && y < miniMapY()+88) focusMiniMap(x,y);
             return true;
         }
         if(!embeddedInMaqan && button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
@@ -467,10 +470,11 @@ public final class CommandScreen extends Screen {
         g.fill(x-3,y-3,x+w+3,y+h+3,0xD810151D);
         g.fill(x,y,x+w,y+h,0xFF101820);
         g.renderOutline(x,y,w,h,0xFF668091);
-        g.drawString(font,"SETTLEMENT",x+6,y+4,0xFF8FDDF0,false);
+        g.drawString(font,"ПОСЕЛЕНИЕ",x+6,y+4,0xFF8FDDF0,false);
         if(settlement==null){g.drawCenteredString(font,"NO DATA",x+w/2,y+43,0xFF788A98);return;}
         MiniMapBounds bounds=miniMapBounds();
         int ox=x+8,oy=y+18;
+        g.enableScissor(x+2,y+18,x+w-2,y+h-2);
         for(Building building:settlement.buildings) {
             int bx=ox+60+(int)Math.round((building.x-bounds.centerX)*bounds.scale);
             int bz=oy+38+(int)Math.round((building.z-bounds.centerZ)*bounds.scale);
@@ -488,6 +492,7 @@ public final class CommandScreen extends Screen {
         int cz=oy+38+(int)Math.round((CommandMode.RIG.fz-colZ-bounds.centerZ)*bounds.scale);
         g.fill(cx-3,cz-1,cx+4,cz+2,0xFF66D9FF);
         g.fill(cx-1,cz-3,cx+2,cz+4,0xFF66D9FF);
+        g.disableScissor();
     }
 
     @Override
