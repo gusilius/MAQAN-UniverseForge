@@ -149,6 +149,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean isPauseScreen() { return false; }
 
     @Override protected void init() {
+        ThemeManager.initialize();
         if (panels.isEmpty()) {
             panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
@@ -360,6 +361,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
         g.fill(0, 0, width, height, BG);
+        ThemeManager.renderChrome(g, width, height);
         Panel content = panels.get("content");
         if (content != null && content.visible) {
             g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
@@ -461,8 +463,6 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawTopBar(GuiGraphics g, int mx, int my) {
-        g.fill(0, 0, width, 34, SURFACE_ALT);
-        g.fill(0, 33, width, 35, EDGE);
         g.drawString(font, "M", 15, 12, CYAN, false);
         g.fill(34, 9, 35, 25, EDGE);
         int x = Math.max(178, width / 2 - 112);
@@ -490,8 +490,6 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawRail(GuiGraphics g, int mx, int my) {
-        g.fill(0, 35, 44, height, SURFACE_ALT);
-        g.fill(43, 35, 44, height, EDGE);
         String[] icons = {"☷", "◈", "⌕", "◷"};
         String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
         boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
@@ -568,28 +566,37 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawSettings(GuiGraphics g, int mx, int my) {
-        int w=224,h=146,x=52,y=Math.max(42,height-h-12);
+        int w=260,h=190,x=52,y=Math.max(42,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
-        g.fill(x,y,x+w,y+h,SURFACE);
-        g.fill(x,y,x+w,y+26,SURFACE_ALT);
+        ThemeManager.renderWindow(g,x,y,w,h,"settings");
+        g.fill(x,y,x+w,y+26,WorkspaceTheme.alpha(SURFACE_ALT,190));
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
-        g.drawString(font,"WORKSPACE",x+28,y+9,TEXT,false);
+        g.drawString(font,"WORKSPACE / APPEARANCE",x+28,y+9,TEXT,false);
         g.drawCenteredString(font,"×",x+w-15,y+8,MUTED);
         g.drawString(font,"Background grid",x+12,y+42,TEXT,false);
         g.drawString(font,ambientGrid?"✓":"—",x+w-26,y+42,ambientGrid?CYAN:MUTED,false);
         g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
-        g.drawString(font,"Panels remain draggable and resizable",x+12,y+103,MUTED,false);
-        g.drawString(font,"MAQAN / UI CORE",x+12,y+126,CYAN,false);
+        g.drawString(font,"Interface theme",x+12,y+99,TEXT,false);
+        String[] themes=ThemeManager.themes();
+        for(int i=0;i<themes.length;i++) {
+            int tx=x+10+i*61;
+            boolean selected=themes[i].equals(ThemeManager.selectedTheme());
+            g.fill(tx,y+115,tx+56,y+139,selected?0xAA3B879B:0xAA172330);
+            g.fill(tx,y+115,tx+56,y+117,selected?CYAN:EDGE);
+            g.drawCenteredString(font,themes[i].toUpperCase(java.util.Locale.ROOT),tx+28,y+124,selected?0xFFFFFFFF:TEXT);
+        }
+        g.drawString(font,"Textures: "+(ThemeManager.isSupported(ThemeManager.selectedTheme())?"loaded":"fallback"),x+12,y+151,MUTED,false);
+        g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         int visibleH = p.minimized ? 26 : p.h;
         if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
-        g.fill(p.x,p.y,p.x+p.w,p.y+visibleH,SURFACE);
-        g.fill(p.x,p.y,p.x+p.w,p.y+26,SURFACE_ALT);
+        ThemeManager.renderWindow(g, p.x, p.y, p.w, visibleH, p.id);
+        g.fill(p.x,p.y,p.x+p.w,p.y+26,WorkspaceTheme.alpha(SURFACE_ALT, 190));
         g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
         String icon = panelIcon(p.id);
         g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
@@ -939,11 +946,17 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(settingsVisible) {
-            int sx=52,sy=Math.max(42,height-158);
-            if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+146) return true;
+            int sx=52,sy=Math.max(42,height-202);
+            if(mx>=sx+232&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
+            if(mx>=sx&&mx<=sx+260&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
+            if(mx>=sx&&mx<=sx+260&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
+            if(mx>=sx+8&&mx<sx+252&&my>=sy+115&&my<sy+139) {
+                int index=(mx-(sx+10))/61;
+                String[] themes=ThemeManager.themes();
+                if(index>=0&&index<themes.length) ThemeManager.setTheme(themes[index]);
+                return true;
+            }
+            if(mx>=sx&&mx<=sx+260&&my>=sy&&my<=sy+190) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
             int x=58;
