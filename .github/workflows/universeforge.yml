@@ -112,6 +112,12 @@ jobs:
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
+      - name: Validate integrated acceptance gate syntax
+        shell: pwsh
+        run: |
+          python -m py_compile mods/worldforge/wfaddons/tools/living-world-acceptance.py
+          if ($LASTEXITCODE -ne 0) { throw "Integrated acceptance validator has a Python syntax error" }
+
       - name: Run complete domain suite including economy (diagnostic, not world acceptance)
         id: logic_suite
         working-directory: mods/worldforge/wfaddons
