@@ -217,9 +217,10 @@ public final class PlatformShellScreen extends Screen {
     private int profileButtonWidth() { return compactTopbar() ? 28 : 48; }
     private int profileButtonStep() { return compactTopbar() ? 32 : 52; }
     private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+8 : width-252; }
-    private boolean strategicCameraWorkspace() { return profile == Profile.RTS || profile == Profile.POLITICS; }
+    /** Only the political overview suppresses the lower timeline; RTS keeps its command/order strip. */
+    private boolean politicalCameraWorkspace() { return profile == Profile.POLITICS; }
     private WorkspaceDockTree.Node layoutRoot() {
-        return strategicCameraWorkspace() && workspaceRoot != null
+        return politicalCameraWorkspace() && workspaceRoot != null
                 ? WorkspaceDockTree.remove(workspaceRoot, "timeline") : workspaceRoot;
     }
     private WorkspaceDockTree.Rect workspaceBounds() {
@@ -259,7 +260,7 @@ public final class PlatformShellScreen extends Screen {
             if (!layout.containsKey(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
             if ("FLOAT".equals(panel.dock)) panel.visible = !hiddenPanels.contains(id);
             if (compactViewport() && !"content".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
-            if (strategicCameraWorkspace() && "timeline".equals(id)) panel.visible = false;
+            if (politicalCameraWorkspace() && "timeline".equals(id)) panel.visible = false;
         }
         clampPanels();
     }
