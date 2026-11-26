@@ -196,7 +196,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = observed_map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && !c.wilderness && c.suitability >= 48)
+        .filter(|c| c.land && !c.wilderness && c.suitability >= 48 && c.founding_site)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -212,9 +212,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     }
     let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
     for cell in candidates {
-        let density_scale = 20 + u64::from(map.population_density_pct.min(100)) * 80 / 100;
-        let chance = if cell.founding_site { 10_000 }
-            else { u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100 };
+        let chance = 10_000_u64;
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
         let minimum_spacing_sq = if cell.founding_site { 1 } else { spacing * spacing };
@@ -242,130 +240,11 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
 /// Bucket-based grouping split that sparse sample into bins with fewer than four
 /// candidates each. Select a deterministic set across the observed land instead.
 fn bootstrap_vanilla_initial_civilizations(
-    map: &GeographicMap,
-    seed: u64,
-    bands: &mut Vec<EmergentBand>,
-    polities: &mut Vec<EmergentPolity>,
-    events: &mut Vec<EmergenceEvent>,
+    _map: &GeographicMap, _seed: u64, _bands: &mut Vec<EmergentBand>,
+    _polities: &mut Vec<EmergentPolity>, _events: &mut Vec<EmergenceEvent>,
 ) {
-    if map.cells.is_empty() { return; }
-    let mut candidates = map.cells.iter()
-        .filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 36)
-        .collect::<Vec<_>>();
-    if candidates.is_empty() { return; }
-    candidates.sort_by(|a, b| {
-        b.suitability.cmp(&a.suitability)
-            .then_with(|| roll(seed, "vanilla-initial-site-order", &map.map_id,
-                &format!("{}:{}", a.x, a.z), 0)
-                .cmp(&roll(seed, "vanilla-initial-site-order", &map.map_id,
-                &format!("{}:{}", b.x, b.z), 0)))
-            .then_with(|| a.z.cmp(&b.z)).then_with(|| a.x.cmp(&b.x))
-    });
-
-    // Vanilla observations are sparse samples of a huge world. Keep founding
-    // cohorts local to the observed chunk neighbourhood, not to the eventual
-    // planet span; cap the distance so a newly explored frontier can still found
-    // several neighbouring communities and more than one independent polity.
-    let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    let observed_scale = observed_map_scale(map);
-    let separation = (observed_scale / 3).min(32).max(minimum_spacing).max(1);
-    // Region identity is tied to the world's sampling resolution, not the currently
-    // observed bounding box. As exploration grows, old region keys never move and a
-    // player crossing a chunk boundary cannot re-roll an existing founding region.
-    // Fixed macro-region dimensions: never derive this from the currently observed
-    // bounds, otherwise exploring another chunk would resize regions and reroll sites.
-    let region_span = u64::from(map.sample_stride.max(1)).saturating_mul(32)
-        .min(u64::from(u32::MAX)) as u32;
-    let region_span = region_span.max(1);
-    let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
-    for cell in &candidates {
-        groups.entry((cell.x / region_span, cell.z / region_span)).or_default().push(*cell);
-    }
-    let bucket_span = separation.min(u64::from(u32::MAX)).max(1) as u32;
-    let mut occupied = SpatialBuckets::new();
-    for band in bands.iter().filter(|band| band.map_id == map.map_id) {
-        spatial_insert(&mut occupied, (band.x, band.z), bucket_span);
-    }
-    let mut known_band_ids: HashSet<String> = bands.iter().map(|band| band.id.clone()).collect();
-    // A macro-region can found at most one initial cluster for the lifetime of this
-    // emergence state. This closes the frontier loophole where each newly observed
-    // chunk could contribute another cluster to a region that had already founded.
-    let mut occupied_regions: HashSet<(u32, u32)> = bands.iter()
-        .filter(|band| band.map_id == map.map_id)
-        .map(|band| (band.x / region_span, band.z / region_span))
-        .collect();
-    let separation_sq = separation.saturating_mul(separation);
-
-    // Several bounded regional cohorts can found independent states in one world.
-    // A settlement is assigned to at most one polity; new frontier observations can
-    // later create additional states without rewriting existing sovereign identities.
-    for ((region_x, region_z), regional_candidates) in groups {
-        if occupied_regions.contains(&(region_x, region_z)) { continue; }
-        let region_key = format!("{region_x}:{region_z}");
-        // Only a minority of viable regions become inhabited. The map density setting
-        // raises the odds gradually (9%..34%); the decision is stable for this world seed
-        // and fixed region key, so chunk loads and tick cadence cannot create extra rolls.
-        let density_pct = u64::from(map.population_density_pct.min(100));
-        let founding_chance = 900 + density_pct * 25;
-        if roll(seed, "vanilla-founding-region", &map.map_id, &region_key, 0) % 10_000
-            >= founding_chance { continue; }
-        let target_communities = 4 + (roll(seed, "vanilla-polity-size", &map.map_id,
-            &region_key, 0) % 3) as usize;
-        let mut selected: Vec<&GeographicCell> = Vec::new();
-        for cell in regional_candidates {
-            let point = (cell.x, cell.z);
-            if spatial_has_nearby(&occupied, point, bucket_span, separation_sq) { continue; }
-            selected.push(cell);
-            spatial_insert(&mut occupied, point, bucket_span);
-            if selected.len() == target_communities { break; }
-        }
-        // Do not leave partial, ownerless founding clusters behind. A region either
-        // qualifies as a complete initial community cluster or remains wilderness.
-        if selected.len() < 4 { continue; }
-
-        let mut settlement_ids = Vec::new();
-        let mut population = 0u64;
-        for cell in selected {
-            let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
-            let id = format!("band_{:016x}", roll(seed, "vanilla-initial-band-id", &key, "", 0));
-            if !known_band_ids.insert(id.clone()) { continue; }
-            let residents = 8 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
-            bands.push(EmergentBand {
-                id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
-                population: residents, food_reserve: 18 + i64::from(cell.suitability) / 3,
-                settled: true, founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year,
-            });
-            population += residents;
-            settlement_ids.push(id.clone());
-            events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id.clone(),
-                text: format!("A self-sustaining community emerges in {} terrain", cell.biome) });
-            events.push(EmergenceEvent { year: 0, kind: "settlement_founded".into(), subject_id: id,
-                text: format!("A permanent settlement is founded (initial population {})", residents) });
-        }
-        settlement_ids.sort();
-        settlement_ids.dedup();
-        if settlement_ids.len() < 4 || population < 32 { continue; }
-        occupied_regions.insert((region_x, region_z));
-        if polities.iter().any(|polity| polity.map_id == map.map_id
-            && polity.settlement_ids.iter().any(|id| settlement_ids.contains(id))) {
-            continue;
-        }
-        let group_key = settlement_ids.join("|");
-        let polity_id = format!("polity_{:016x}",
-            roll(seed, "vanilla-initial-polity-id", &map.map_id, &group_key, 0));
-        if polities.iter().any(|polity| polity.id == polity_id) { continue; }
-        let dynasty_id = format!("house_{:016x}",
-            roll(seed, "vanilla-initial-founding-house", &polity_id, "", 0));
-        let name = format!("{} Realm", polity_id.chars().take(12).collect::<String>());
-        polities.push(EmergentPolity {
-            id: polity_id.clone(), map_id: map.map_id.clone(), name: name.clone(),
-            settlement_ids, population, founded_year: 0, stability: 65,
-            dynasty_id, dynasty_generations: 1, ruler_global_id: None, last_succession_year: 0,
-            years_in_generation: 0, succession_pressure: 0, weak_years: 0,
-        });
-        events.push(EmergenceEvent { year: 0, kind: "state_founded".into(), subject_id: polity_id,
-            text: format!("{} emerges from an independent regional settlement cluster", name) });
-    }
+    // Vanilla terrain is never a founding input. Actual structure evidence is
+    // consumed by bootstrap() through GeographicCell::founding_site.
 }
 
 /// Creates a playable, living baseline for a newly created world from geography alone.
@@ -379,7 +258,7 @@ fn bootstrap_initial_civilizations(
     events: &mut Vec<EmergenceEvent>,
 ) {
     if map.map_id.starts_with("vanilla-world:") {
-        bootstrap_vanilla_initial_civilizations(map, seed, bands, polities, events);
+        // Native vanilla worlds may only found communities from observed structures.
         return;
     }
     // Image-worldgen already produced the canonical political hierarchy for this map.
@@ -393,10 +272,10 @@ fn bootstrap_initial_civilizations(
     // in full. Scale spacing to the currently observed land footprint, not the eventual
     // map dimensions, otherwise a small vanilla observation window can never found four
     // communities and the world remains politically empty forever.
-    let min_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).min();
-    let max_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.x).max();
-    let min_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).min();
-    let max_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48).map(|cell| cell.z).max();
+    let min_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48 && cell.founding_site).map(|cell| cell.x).min();
+    let max_x = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48 && cell.founding_site).map(|cell| cell.x).max();
+    let min_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48 && cell.founding_site).map(|cell| cell.z).min();
+    let max_z = map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48 && cell.founding_site).map(|cell| cell.z).max();
     let observed_span = match (min_x, max_x, min_z, max_z) {
         (Some(x0), Some(x1), Some(z0), Some(z1)) =>
             u64::from((x1 - x0).max(z1 - z0).saturating_add(1)),
@@ -410,7 +289,7 @@ fn bootstrap_initial_civilizations(
     let bucket = (separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
-    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48) {
+    for cell in map.cells.iter().filter(|cell| cell.land && !cell.wilderness && cell.suitability >= 48 && cell.founding_site) {
         groups.entry((cell.x / bucket, cell.z / bucket)).or_default().push(cell);
     }
 
@@ -701,13 +580,9 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     // A map may be loaded after the world has already developed. Bootstrap each map
     // independently instead of treating the first non-empty map as the whole universe.
     for map in maps {
-        // Give each newly discovered world-space an independent playable baseline
-        // before ordinary demographic emergence begins. The baseline is generated
-        // by the native simulation from terrain; no campaign or external script runs.
+        // Only authored settlement anchors or observed Minecraft structure starts
+        // can found communities. Suitable terrain alone never creates population.
         bootstrap_initial_civilizations(map, state.seed, &mut state.bands, &mut state.polities, &mut events);
-        // Geography is a growing set of observed cells, not a one-shot map import.
-        // Reconcile on every immutable snapshot so newly generated vanilla chunks
-        // can found additional communities in the same persistent world partition.
         bootstrap(map, state.seed, &mut state.bands, &mut events);
     }
     state.bands.sort_by(|a,b| a.id.cmp(&b.id));
@@ -757,7 +632,7 @@ mod tests {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
                     elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false });
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: x % 8 == 4 && z % 8 == 4 });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
@@ -791,41 +666,17 @@ mod tests {
     }
 
     #[test]
-    fn vanilla_founding_is_region_sparse_and_seed_deterministic() {
+    fn vanilla_terrain_without_structures_never_founds_settlements() {
         let vanilla = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
-            population_density_pct: 100,
-            ..map()
+            population_density_pct: 100, ..map()
         };
-        let mut first_bands = Vec::new();
-        let mut first_polities = Vec::new();
-        let mut first_events = Vec::new();
-        bootstrap_vanilla_initial_civilizations(
-            &vanilla, 91_827, &mut first_bands, &mut first_polities, &mut first_events);
-        let mut second_bands = Vec::new();
-        let mut second_polities = Vec::new();
-        let mut second_events = Vec::new();
-        bootstrap_vanilla_initial_civilizations(
-            &vanilla, 91_827, &mut second_bands, &mut second_polities, &mut second_events);
-
-        assert_eq!(first_bands, second_bands, "the same seed and region coordinates must not reroll");
-        assert_eq!(first_polities, second_polities);
-        assert_eq!(first_events, second_events);
-        // The 128x128 observed area contains sixteen fixed 32x32 macro-regions.
-        // Only a minority should found a cluster; a chunk observation is not a mandate
-        // to create a settlement in every newly observed region.
-        assert!(!first_bands.is_empty(), "the configured sparse chance must still allow founding");
-        assert!(first_bands.len() < 16 * 6,
-            "a region can only found a bounded four-or-six community cluster");
-        assert!(first_bands.iter().all(|band| (8..=16).contains(&band.population)),
-            "initial village populations must remain small rather than materializing large crowds");
-        let before = first_bands.len();
-        bootstrap_vanilla_initial_civilizations(
-            &vanilla, 91_827, &mut first_bands, &mut first_polities, &mut first_events);
-        assert_eq!(first_bands.len(), before,
-            "a region already founded must not found another cluster when chunks are observed again");
-        assert!(first_polities.len() < 16,
-            "not every observed macro-region should become a polity");
+        let mut bands = Vec::new(); let mut polities = Vec::new(); let mut events = Vec::new();
+        bootstrap_initial_civilizations(&vanilla, 91_827, &mut bands, &mut polities, &mut events);
+        bootstrap(&vanilla, 91_827, &mut bands, &mut events);
+        assert!(bands.is_empty(), "suitable terrain without a generated structure is not a settlement");
+        assert!(polities.is_empty(), "terrain without structures cannot create political states");
+        assert!(events.is_empty(), "empty terrain must not emit population or state founding events");
     }
 
     #[test]
@@ -850,137 +701,78 @@ mod tests {
     }
 
     #[test]
-    fn sparse_vanilla_spawn_samples_form_a_polity_without_bucket_alignment() {
-        let mut cells = Vec::new();
-        for index in 0..32_u32 {
-            let x = 128 + (index % 8) * 512;
-            let z = 128 + (index / 8) * 512;
-            for dz in [0, 16, 32, 48] {
-                for dx in [0, 16, 32, 48] {
-                    cells.push(GeographicCell {
-                        x: x + dx, z: z + dz, biome: "minecraft:plains".into(),
-                        elevation: 70, river: 0, land: true, suitability: 90,
-                        owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
-                    });
-                }
-            }
-        }
-        let map = GeographicMap {
-            map_id: "vanilla-world:minecraft:overworld".into(),
-            width_px: 60_000_001, height_px: 60_000_001,
-            blocks_per_pixel_milli: 1000, political_layers_present: false,
-            sample_stride: 4,
-            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
-        };
-        let mut bands = Vec::new();
-        let mut polities = Vec::new();
-        let mut events = Vec::new();
-        bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut events);
-        assert!(bands.len() >= 8, "sparse observed chunks should seed multiple regional communities");
-        assert!(polities.len() >= 2,
-            "separated regional clusters must form multiple sovereign polities, not one world-sized state");
-        let mut owned = BTreeSet::new();
-        for polity in &polities {
-            assert!(polity.settlement_ids.len() >= 4, "every initial polity needs a viable local founding cohort");
-            for settlement_id in &polity.settlement_ids {
-                assert!(owned.insert(settlement_id.as_str()),
-                    "one settlement cannot be assigned to multiple sovereign polities");
-            }
-        }
-    }
-
-    #[test]
-    fn compact_vanilla_patch_keeps_founders_spatially_separated() {
-        let cells = (0..4_u32).map(|index| GeographicCell {
-            x: 30_000_000 + index * 8,
-            z: 30_000_000,
-            biome: "minecraft:plains".into(),
-            elevation: 70,
-            river: 0,
-            land: true,
-            suitability: 90,
-            owner_realm_id: String::new(),
-            discovered_year: 0, wilderness: false, founding_site: false,
+    fn sparse_vanilla_terrain_samples_do_not_found_a_polity() {
+        let cells = (0..32_u32).flat_map(|index| {
+            let x = 128 + (index % 8) * 512; let z = 128 + (index / 8) * 512;
+            [0,16,32,48].into_iter().flat_map(move |dz| [0,16,32,48].into_iter().map(move |dx|
+                GeographicCell { x:x+dx, z:z+dz, biome:"minecraft:plains".into(),
+                    elevation:70, river:0, land:true, suitability:90, owner_realm_id:String::new(),
+                    discovered_year:0, wilderness:false, founding_site:false }))
         }).collect();
-        let map = GeographicMap {
-            map_id: "vanilla-world:minecraft:overworld".into(),
-            width_px: 60_000_001,
-            height_px: 60_000_001,
-            blocks_per_pixel_milli: 1000,
-            political_layers_present: false,
-            sample_stride: 4,
-            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
-            cells,
-        };
-        let mut bands = Vec::new();
-        let mut polities = Vec::new();
-        bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut Vec::new());
-        assert_eq!(bands.iter().filter(|band| band.settled).count(), 4);
-        assert_eq!(polities.len(), 1, "four viable, spatially separated cells may form one compact polity");
-        assert_eq!(polities[0].settlement_ids.len(), 4);
+        let map = GeographicMap { map_id:"vanilla-world:minecraft:overworld".into(),
+            width_px:60_000_001, height_px:60_000_001, blocks_per_pixel_milli:1000,
+            political_layers_present:false, sample_stride:4, settlement_level:4,
+            population_density_pct:38, wilderness_share_pct:0, cells };
+        let mut bands=Vec::new(); let mut polities=Vec::new();
+        bootstrap_initial_civilizations(&map,424242,&mut bands,&mut polities,&mut Vec::new());
+        bootstrap(&map,424242,&mut bands,&mut Vec::new());
+        assert!(bands.is_empty(), "suitable chunks without structure starts remain empty");
+        assert!(polities.is_empty(), "no structures means no polity");
     }
 
     #[test]
-    fn small_incremental_vanilla_observation_can_found_a_polity() {
-        let mut cells = Vec::new();
-        for z in (2..=78).step_by(4) {
-            for x in (2..=78).step_by(4) {
-                cells.push(GeographicCell {
-                    x, z, biome: "minecraft:plains".into(), elevation: 70,
-                    river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
-                });
-            }
-        }
-        let map = GeographicMap {
-            map_id: "vanilla-world:minecraft:overworld".into(),
-            width_px: 256, height_px: 256, blocks_per_pixel_milli: 1000,
-            political_layers_present: false, sample_stride: 4,
-            settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0, cells,
-        };
-        let mut bands = Vec::new();
-        let mut polities = Vec::new();
-        let mut events = Vec::new();
-        bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut events);
-        assert!(bands.len() >= 4, "observed land patch should produce several real communities");
-        assert!(!polities.is_empty(), "a sufficiently large suitable land patch should found a polity");
-        assert!(polities[0].settlement_ids.len() >= 4);
+    fn compact_vanilla_patch_without_structure_evidence_remains_empty() {
+        let cells=(0..4_u32).map(|index| GeographicCell { x:30_000_000+index*8,
+            z:30_000_000, biome:"minecraft:plains".into(), elevation:70, river:0,
+            land:true, suitability:90, owner_realm_id:String::new(), discovered_year:0,
+            wilderness:false, founding_site:false }).collect();
+        let map=GeographicMap { map_id:"vanilla-world:minecraft:overworld".into(),
+            width_px:60_000_001, height_px:60_000_001, blocks_per_pixel_milli:1000,
+            political_layers_present:false, sample_stride:4, settlement_level:4,
+            population_density_pct:38, wilderness_share_pct:0, cells };
+        let mut bands=Vec::new(); let mut polities=Vec::new();
+        bootstrap_initial_civilizations(&map,424242,&mut bands,&mut polities,&mut Vec::new());
+        bootstrap(&map,424242,&mut bands,&mut Vec::new());
+        assert!(bands.is_empty()); assert!(polities.is_empty());
     }
 
     #[test]
-    fn new_worlds_receive_independent_playable_civilizations_without_elapsed_years() {
-        let first = map();
-        let second = GeographicMap {
-            map_id: "vanilla-world:minecraft:overworld".into(),
-            ..map()
-        };
-        let snapshot = WorldSnapshot {
-            world_id: "one-server-two-worlds".into(),
-            seed: 8128,
-            day: 0,
-            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![],
-            borders: vec![], settlements: vec![], characters: vec![], workforce: vec![], capabilities: vec![], catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![], wars: vec![], armies: vec![], social_relations: vec![], named_entities: vec![],
-            geography: vec![first, second],
-        };
-        let frame = advance(EmergenceRequest { snapshot, state: None }).unwrap();
-        for world_id in ["planetos", "vanilla-world:minecraft:overworld"] {
-            let world_bands = frame.state.bands.iter()
-                .filter(|band| band.map_id == world_id && band.settled).collect::<Vec<_>>();
-            let world_polities = frame.state.polities.iter()
-                .filter(|polity| polity.map_id == world_id).collect::<Vec<_>>();
-            assert!(world_bands.len() >= 4, "{world_id} must start with real settled communities");
-            assert!(!world_polities.is_empty(), "{world_id} must start with at least one polity");
-            assert!(world_polities.iter().all(|polity| polity.population >= 120
-                && polity.settlement_ids.len() >= 4));
-        }
-        let first_ids = frame.state.bands.iter()
-            .filter(|band| band.map_id == "planetos").map(|band| band.id.as_str())
-            .collect::<BTreeSet<_>>();
-        let second_ids = frame.state.bands.iter()
-            .filter(|band| band.map_id == "vanilla-world:minecraft:overworld")
-            .map(|band| band.id.as_str()).collect::<BTreeSet<_>>();
-        assert!(first_ids.is_disjoint(&second_ids), "different dimensions must not share community identity");
-        assert_eq!(frame.state.last_year, 0, "initial civilization creation must not fast-forward the world clock");
+    fn one_observed_village_creates_one_local_settlement_not_a_state() {
+        let mut cells=Vec::new();
+        for z in (2..=78).step_by(4) { for x in (2..=78).step_by(4) {
+            cells.push(GeographicCell { x,z,biome:"minecraft:plains".into(),elevation:70,
+                river:0,land:true,suitability:90,owner_realm_id:String::new(),
+                discovered_year:0,wilderness:false,founding_site:x==34 && z==34 });
+        }}
+        let map=GeographicMap { map_id:"vanilla-world:minecraft:overworld".into(),
+            width_px:256,height_px:256,blocks_per_pixel_milli:1000,political_layers_present:false,
+            sample_stride:4,settlement_level:4,population_density_pct:38,wilderness_share_pct:0,cells };
+        let mut bands=Vec::new(); let mut polities=Vec::new(); let mut events=Vec::new();
+        bootstrap_initial_civilizations(&map,424242,&mut bands,&mut polities,&mut events);
+        bootstrap(&map,424242,&mut bands,&mut events);
+        assert_eq!(bands.len(),1,"one detected village structure may found one local community");
+        assert!(bands[0].settled); assert!(polities.is_empty(),"one village cannot instantly become a state");
+        assert!(events.iter().any(|event|event.kind=="settlement_founded"));
+    }
+
+    #[test]
+    fn new_vanilla_world_starts_empty_until_a_structure_is_observed() {
+        let first=map();
+        let mut second=GeographicMap { map_id:"vanilla-world:minecraft:overworld".into(), ..map() };
+        for cell in &mut second.cells { cell.founding_site=false; }
+        let snapshot=WorldSnapshot { world_id:"one-server-two-worlds".into(),seed:8128,day:0,
+            realms:vec![],titles:vec![],government_definitions:vec![],realm_governments:vec![],
+            borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],capabilities:vec![],
+            catalog_entries:vec![],diplomatic_relations:vec![],vassal_contracts:vec![],wars:vec![],
+            armies:vec![],social_relations:vec![],named_entities:vec![],geography:vec![first,second] };
+        let frame=advance(EmergenceRequest { snapshot,state:None }).unwrap();
+        assert!(frame.state.bands.iter().any(|band|band.map_id=="planetos"),
+            "authored settlement anchors still seed their world");
+        assert!(!frame.state.bands.iter().any(|band|band.map_id=="vanilla-world:minecraft:overworld"),
+            "new vanilla terrain must not receive invented settlements or population");
+        assert!(!frame.state.polities.iter().any(|polity|polity.map_id=="vanilla-world:minecraft:overworld"),
+            "new vanilla terrain must not receive an invented state");
+        assert_eq!(frame.state.last_year,0);
     }
 
     #[test]
