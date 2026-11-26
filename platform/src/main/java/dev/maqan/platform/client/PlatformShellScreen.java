@@ -62,7 +62,7 @@ public final class PlatformShellScreen extends Screen {
     private String resizingPanel;
     private String resizingSplitterPath, draggingPopup;
     private boolean panelDragMoved;
-    private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY;
+    private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY, dragStartX, dragStartY;
     private int settingsX=-1, settingsY=-1, managerX=-1, managerY=-1, notificationsX=-1, notificationsY=-1;
     private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
     private WorkspaceDockTree.Node workspaceRoot;
@@ -249,7 +249,7 @@ public final class PlatformShellScreen extends Screen {
             if (!layout.containsKey(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
             if ("FLOAT".equals(panel.dock)) panel.visible = !hiddenPanels.contains(id);
             if (compactViewport() && !"content".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
-            if (strategicCameraWorkspace() && "timeline".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
+            if (strategicCameraWorkspace() && "timeline".equals(id)) panel.visible = false;
         }
         clampPanels();
     }
@@ -1184,7 +1184,7 @@ public final class PlatformShellScreen extends Screen {
                 if((p.id.equals("inspector")||p.id.equals("tools"))&&mx>=p.x+28&&mx<p.x+116) return true;
                 draggingPanel=p.id; panelDragMoved=false;
                 pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
-                dragMouseX=(int)mx; dragMouseY=(int)my; return true;
+                dragMouseX=(int)mx; dragMouseY=(int)my; dragStartX=(int)mx; dragStartY=(int)my; return true;
             }
             if (p.id.equals("tools")) {
                 List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
@@ -1217,7 +1217,7 @@ public final class PlatformShellScreen extends Screen {
     private void applyPanelDrop(String sourceId, int mouseX, int mouseY) {
         if (sourceId == null || sourceId.equals("content")) return;
         Map<String, WorkspaceDockTree.Rect> rectangles =
-                WorkspaceDockTree.layout(workspaceRoot, workspaceBounds());
+                WorkspaceDockTree.layout(layoutRoot(), workspaceBounds());
         String targetId = null;
         WorkspaceDockTree.Rect targetRect = null;
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : rectangles.entrySet()) {
@@ -1452,7 +1452,7 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (draggingPanel != null) {
-            if (Math.hypot(mx - dragMouseX, my - dragMouseY) > 4) panelDragMoved=true;
+            if (Math.hypot(mx - dragStartX, my - dragStartY) > 4) panelDragMoved=true;
             dragMouseX=(int)mx; dragMouseY=(int)my;
             Panel p=panels.get(draggingPanel);
             if(p!=null&&"FLOAT".equals(p.dock)){p.x=(int)mx-pointerOffsetX;p.y=(int)my-pointerOffsetY;clampPanels();}
