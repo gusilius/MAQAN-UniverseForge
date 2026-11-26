@@ -112,6 +112,30 @@ jobs:
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
+      - name: Run integrated Stage A on a real Forge dedicated Minecraft server
+        if: success()
+        shell: bash
+        env:
+          WF_ACCEPTANCE_MODE: stage-a
+          WF_STAGE_A_TIMEOUT_SECONDS: "900"
+          WF_SIMULATION_TICK_MULTIPLIER: "1"
+        run: |
+          mkdir -p "$RUNNER_TEMP/maqan-stage-a"
+          bash mods/worldforge/wfaddons/tools/world-runtime-smoke.sh \
+            "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" \
+            mods/worldforge/wfaddons/dist \
+            "$RUNNER_TEMP/maqan-stage-a"
+
+      - name: Upload Stage A real-server diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-living-world-stage-a
+          path: |
+            ${{ runner.temp }}/maqan-stage-a/**
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Validate integrated acceptance gate syntax
         shell: pwsh
         run: |
