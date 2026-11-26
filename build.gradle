@@ -13,6 +13,12 @@ tasks.register('buildAtlas', Exec) {
     workingDir atlasDir
     commandLine 'gradle', '--no-daemon', 'build'
 }
+tasks.register('buildPlatform', Exec) {
+    group = 'maqan'
+    description = 'Build the shared MAQAN Platform workspace shell and UI assets.'
+    workingDir file('platform')
+    commandLine 'gradle', '--no-daemon', 'build'
+}
 tasks.register('buildWorldForgeCore', Exec) {
     group = 'maqan'
     description = 'Build the independent WorldForge core mod.'
@@ -28,7 +34,7 @@ tasks.register('buildWorldForgeAddons', Exec) {
 tasks.register('buildEcosystem') {
     group = 'maqan'
     description = 'Build Atlas and the complete WorldForge stack.'
-    dependsOn 'buildAtlas', 'buildWorldForgeAddons'
+    dependsOn 'buildAtlas', 'buildPlatform', 'buildWorldForgeAddons'
 }
 tasks.register('cleanEcosystem') {
     group = 'maqan'
