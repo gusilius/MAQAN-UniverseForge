@@ -780,6 +780,36 @@ mod tests {
     }
 
     #[test]
+    fn vanilla_founding_is_region_sparse_and_seed_deterministic() {
+        let vanilla = GeographicMap {
+            map_id: "vanilla-world:minecraft:overworld".into(),
+            ..map()
+        };
+        let mut first_bands = Vec::new();
+        let mut first_polities = Vec::new();
+        let mut first_events = Vec::new();
+        bootstrap_vanilla_initial_civilizations(
+            &vanilla, 91_827, &mut first_bands, &mut first_polities, &mut first_events);
+        let mut second_bands = Vec::new();
+        let mut second_polities = Vec::new();
+        let mut second_events = Vec::new();
+        bootstrap_vanilla_initial_civilizations(
+            &vanilla, 91_827, &mut second_bands, &mut second_polities, &mut second_events);
+
+        assert_eq!(first_bands, second_bands, "the same seed and region coordinates must not reroll");
+        assert_eq!(first_polities, second_polities);
+        assert_eq!(first_events, second_events);
+        // The 128x128 observed area contains sixteen fixed 32x32 macro-regions.
+        // Only a minority should found a cluster; a chunk observation is not a mandate
+        // to create a settlement in every newly observed region.
+        assert!(!first_bands.is_empty(), "the configured sparse chance must still allow founding");
+        assert!(first_bands.len() < 16 * 4,
+            "a region can only found a bounded four-or-six community cluster");
+        assert!(first_polities.len() < 16,
+            "not every observed macro-region should become a polity");
+    }
+
+    #[test]
     fn observed_vanilla_frontier_spacing_stays_bounded_as_the_world_expands() {
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
