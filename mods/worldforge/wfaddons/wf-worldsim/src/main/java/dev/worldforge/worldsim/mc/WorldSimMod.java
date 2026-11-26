@@ -277,6 +277,7 @@ public final class WorldSimMod {
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new VanillaWorldGeography());
+        MinecraftForge.EVENT_BUS.register(new LivingWorldAcceptanceLab());
         WorldForgeApi.events().addListener(item -> {
             recordChronicleEvent(item);
             publishPlatformTimelineEvent(item);
