@@ -84,7 +84,7 @@ if [ "${3:-}" = "--image-identity-only" ]; then
 fi
 
 groups_to_run=("$GROUP")
-if [ "$GROUP" = "suite" ]; then groups_to_run=(npc worldgen politics life integration); fi
+if [ "$GROUP" = "suite" ]; then groups_to_run=(npc worldgen politics life economy integration); fi
 total_passed=0
 total_failed=0
 total_skipped=0
