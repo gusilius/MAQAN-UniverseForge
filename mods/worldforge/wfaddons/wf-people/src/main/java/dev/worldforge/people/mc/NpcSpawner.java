@@ -71,34 +71,28 @@ final class NpcSpawner {
     private NpcSpawner() {}
 
     static void pass(MinecraftServer server) {
-        long currentPass = ++passCounter;
+        if (server == null) return;
         for (ServerLevel level : server.getAllLevels()) {
             List<ServerPlayer> players = new ArrayList<>();
-            for (ServerPlayer p : level.players()) if (!p.isSpectator()) players.add(p);
+            for (ServerPlayer player : level.players()) if (!player.isSpectator()) players.add(player);
             if (players.isEmpty()) continue;
-            MapData map = EditorManager.dataFor(level);
-            if (map == null || map.titles == null) continue;
-            CharacterRegistry registry = PeopleMod.registry(map);
+            CharacterRegistry registry = PeopleMod.peek(level);
             if (registry == null) continue;
-            long lastCourtPass = LAST_COURT_RECONCILE_PASS.getOrDefault(map, Long.MIN_VALUE);
-            if (lastCourtPass == Long.MIN_VALUE || currentPass - lastCourtPass >= COURT_RECONCILE_EVERY_PASSES) {
-                try {
-                    Courts.ensure(map.titles, EditorManager.editorFor(map), registry,
-                            PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(map), PeopleMod.YEAR);
-                    LAST_COURT_RECONCILE_PASS.put(map, currentPass);
-                } catch (Exception ex) {
-                    PeopleMod.LOGGER.error("wf_people: Courts.ensure: {}", ex.toString());
-                }
-            }
 
-            // Remove already-materialized legacy WFNpc bodies as well as preventing new ones.
-            // Their canonical records remain intact; only the stale physical projection is removed.
+            // Remove legacy physical WFNpc bodies near active players. Canonical Character
+            // records are retained; only their obsolete physical entity projection is unbound.
             for (ServerPlayer player : players) {
                 for (WFNpc body : level.getEntitiesOfClass(WFNpc.class,
                         player.getBoundingBox().inflate(FAR + 40))) {
                     String characterId = body.characterId();
-                    if (characterId != null && !characterId.isBlank())
-                        registry.unbindEntity(characterId, "npc", body.getUUID().toString());
+                    if (characterId != null && !characterId.isBlank()) {
+                        try {
+                            registry.unbindEntity(characterId, "npc", body.getUUID().toString());
+                        } catch (RuntimeException staleBinding) {
+                            PeopleMod.LOGGER.warn("wf_people: could not clear stale NPC binding for {}; removing physical body only",
+                                    characterId);
+                        }
+                    }
                     body.discard();
                 }
             }

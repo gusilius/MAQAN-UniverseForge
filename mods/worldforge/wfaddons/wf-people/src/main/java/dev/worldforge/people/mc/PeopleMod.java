@@ -403,10 +403,11 @@ public class PeopleMod {
         }
         int before = reg.size();
         try {
-            // The autonomous campaign runs in a dedicated, disposable server process.
-            // It must begin from geography only; ordinary Minecraft launches retain the
-            // normal Courts.ensure bootstrap because this property is absent by default.
+            // Political offices are not a population generator. New ordinary people enter
+            // the canonical registry only when VanillaVillageAdapter discovers a real village.
+            // Court seeding is an explicit opt-in for controlled content authoring, never a server-start default.
             boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.acceptance.empty-bootstrap");
+            boolean courtBootstrapEnabled = Boolean.getBoolean("worldforge.population.enable-court-bootstrap");
             TitleEditor identityEditor = m.titles == null ? null : EditorManager.editorFor(m);
             if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
                 TerritorialIdentity.DemographicResult demographics =
@@ -415,9 +416,9 @@ public class PeopleMod {
                     LOGGER.info("wf_people: origin-backed demographics map='{}' realms={} rootRaces={}",
                             m.name, demographics.realmsClassified(), demographics.distinctRaces());
             }
-            int generatedTierRoles = m.titles == null || emptyCampaignBootstrap
+            int generatedTierRoles = m.titles == null || emptyCampaignBootstrap || !courtBootstrapEnabled
                     ? 0 : ROLES.ensureTerritorialRulers(m.titles);
-            int created = m.titles == null || emptyCampaignBootstrap ? 0
+            int created = m.titles == null || emptyCampaignBootstrap || !courtBootstrapEnabled ? 0
                     : Courts.ensure(m.titles, identityEditor, reg, ROLES, NAMES, seed(m), YEAR);
             if (generatedTierRoles > 0)
                 LOGGER.info("wf_people: generated {} data-driven ruler roles for all {} map title tiers",
@@ -426,11 +427,11 @@ public class PeopleMod {
                 TerritorialIdentity.Result identity = TerritorialIdentity.ensure(
                         m.name, m.titles, identityEditor, reg, NAMES, seed(m));
                 LOGGER.info("wf_people: identity map='{}' realmsNamed={} titlesNamed={} classifications={} rulerLinks={}",
-                        m.name, identity.realmsNamed(), identity.titlesNamed(),
+                        identity.realmsNamed(), identity.titlesNamed(),
                         identity.titlesClassified(), identity.rulersLinked());
             }
-            if (emptyCampaignBootstrap && before == 0)
-                LOGGER.info("wf_people: campaign empty bootstrap enabled for map '{}'; authored court seeding skipped", m.name);
+            if (!courtBootstrapEnabled && before == 0)
+                LOGGER.info("wf_people: automatic court/person generation disabled for map '{}'; canonical villagers are adopted only from discovered Minecraft villages", m.name);
             LOGGER.info("wf_people: карта '{}': было {} людей, создано {}, теперь {}", m.name, before, created, reg.size());
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
