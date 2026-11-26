@@ -664,12 +664,12 @@ public final class PlatformShellScreen extends Screen {
             int cameraX = cameraControlX();
             if (!compactTopbar()) g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
             for (int i = 0; i < ids.length; i++) {
-                int x = cameraX + i * 36;
+                int cameraButtonX = cameraX + i * 36;
                 boolean activeCamera = ids[i].equals(current);
-                g.fill(x, 5, x + 32, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
-                if (activeCamera) g.fill(x, 28, x + 32, 30, CYAN);
-                g.drawCenteredString(font, labels[i], x + 16, 13, activeCamera ? CYAN : TEXT);
-                if (mx >= x && mx < x + 32 && my >= 5 && my < 30)
+                g.fill(cameraButtonX, 5, cameraButtonX + 32, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
+                if (activeCamera) g.fill(cameraButtonX, 28, cameraButtonX + 32, 30, CYAN);
+                g.drawCenteredString(font, labels[i], cameraButtonX + 16, 13, activeCamera ? CYAN : TEXT);
+                if (mx >= cameraButtonX && mx < cameraButtonX + 32 && my >= 5 && my < 30)
                     g.renderTooltip(font, Component.literal(switch (ids[i]) {
                         case "SKY" -> "Стратегический вид";
                         case "TACTICS" -> "Изометрическая камера";
