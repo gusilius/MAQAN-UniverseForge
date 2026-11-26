@@ -91,10 +91,17 @@ final class NpcSpawner {
                 }
             }
 
-            // Physical people are not generated from political title tiers.
-            // VanillaVillageAdapter adopts villagers already present in a confirmed
-            // Minecraft village and binds them to canonical Character IDs.
-            // This hard gate prevents realm/barony population from becoming thousands of entities.
+            // Remove already-materialized legacy WFNpc bodies as well as preventing new ones.
+            // Their canonical records remain intact; only the stale physical projection is removed.
+            for (ServerPlayer player : players) {
+                for (WFNpc body : level.getEntitiesOfClass(WFNpc.class,
+                        player.getBoundingBox().inflate(FAR + 40))) {
+                    String characterId = body.characterId();
+                    if (characterId != null && !characterId.isBlank())
+                        registry.unbindEntity(characterId, "npc", body.getUUID().toString());
+                    body.discard();
+                }
+            }
         }
     }
 

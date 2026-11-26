@@ -133,7 +133,9 @@ public final class Bodies {
             // An unloaded dimension is not an instruction to destroy its durable body binding.
             if (colonyLevel == null) continue;
 
-            boolean retained = nearbyById.containsKey(colonyId)
+            boolean discoveredVillage = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("minecraft:village:");
+            boolean retained = discoveredVillage && nearbyById.containsKey(colonyId)
                     && SimulationLod.shouldRetainWorkers(colony.dim, colony.cx, colony.cz);
             int workerId;
             try {
