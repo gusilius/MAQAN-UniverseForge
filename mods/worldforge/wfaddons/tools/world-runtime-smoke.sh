@@ -61,7 +61,7 @@ capture_process_metrics() {
   # Lightweight process-only sampling; expensive JVM thread dumps are deliberately rarer.
   local stamp
   stamp="$(date +%s)"
-  WF_METRIC_PID="$SERVER_PID" run_bounded 8 powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' >> "$OUTPUT/process-metrics.jsonl" 2>/dev/null || {
+  WF_METRIC_PID="$SERVER_PID" run_bounded 8 powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{phase=$env:WF_METRIC_PHASE;pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' >> "$OUTPUT/process-metrics.jsonl" 2>/dev/null || {
     echo "RUNTIME_PROCESS_SAMPLE_FAILED=$stamp"
   }
 }
@@ -321,6 +321,19 @@ for i in $(seq 1 150); do
   sleep 2
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
+# Capture an idle reference window in the same JVM/world before any stress driver starts.
+# This is an A/B reference, not a vanilla-vs-modded comparison.
+WF_METRIC_PHASE=baseline
+export WF_METRIC_PHASE
+echo "RUNTIME_METRIC_PHASE=baseline"
+for baseline_second in $(seq 1 20); do
+  if (( baseline_second % 5 == 0 )); then capture_process_metrics; fi
+  kill -0 "$SERVER_PID" 2>/dev/null || { tail -120 server.log; echo "ERROR: server exited during baseline measurement"; exit 4; }
+  sleep 1
+done
+WF_METRIC_PHASE=workload
+export WF_METRIC_PHASE
+echo "RUNTIME_METRIC_PHASE=workload"
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
