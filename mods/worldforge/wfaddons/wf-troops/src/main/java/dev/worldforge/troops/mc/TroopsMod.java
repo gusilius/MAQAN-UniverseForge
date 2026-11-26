@@ -1556,6 +1556,31 @@ public class TroopsMod {
         String ownerId() { return "army-supply:" + worldId + ":" + mapId + ":" + realm + ":" + armyId; }
     }
 
+    /**
+     * Stable supply-account coordinates exposed to the integrated living-world acceptance
+     * driver. The driver uses the production TreasuryLedger and this addon's actual SUPPLY store;
+     * it does not create a parallel readiness ledger.
+     */
+    public static String acceptanceSupplyAccountId(String realm, int armyId, String mapId, String dimension) {
+        return new SupplyKey(realm, armyId, WorldForgeMod.worldId().toString(), mapId, dimension).accountId();
+    }
+
+    public static String acceptanceSupplyOwnerId(String realm, int armyId, String mapId) {
+        return new SupplyKey(realm, armyId, WorldForgeMod.worldId().toString(), mapId, "").ownerId();
+    }
+
+    /** Advances the same durable field-supply state used by physical troops. */
+    public static OperationalSupply.Report advanceAcceptanceSupply(String realm, int armyId, String mapId,
+            String dimension, int soldiers, double days, double availableRations, double consumed, long worldDay) {
+        if (server == null || WorldForgeMod.worldId() == null)
+            throw new IllegalStateException("Troops world identity is not ready");
+        String key = new SupplyKey(realm, armyId, WorldForgeMod.worldId().toString(), mapId, dimension).id();
+        OperationalSupply.Report report = SUPPLY.advance(key, soldiers, days, availableRations, consumed, worldDay);
+        if (report != null && !saveDurably())
+            throw new IllegalStateException("Operational supply checkpoint could not be committed");
+        return report;
+    }
+
     /** Uses the saved field-supply state to apply combat/mobility effects when a soldier loads. */
     private static void applySupplyReadiness(TroopEntity troop) {
         if (troop == null || troop.realm == null || troop.realm.isBlank()) return;
