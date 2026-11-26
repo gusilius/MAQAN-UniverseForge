@@ -23,6 +23,7 @@ public final class ClientSetup {
         modBus.addListener(ClientSetup::keys);
         modBus.addListener(ClientSetup::overlays);
         MinecraftForge.EVENT_BUS.register(new ClientSetup());
+        MinecraftForge.EVENT_BUS.register(new ClientPerformanceTelemetry());
     }
 
     /**
