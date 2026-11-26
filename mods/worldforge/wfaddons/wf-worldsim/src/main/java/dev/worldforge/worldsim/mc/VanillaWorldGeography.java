@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -207,16 +208,18 @@ public final class VanillaWorldGeography {
             }
         }
         if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
+        // Structure starts are authoritative founding evidence; terrain suitability is not.
+        for (var entry : chunk.getAllStarts().entrySet()) {
+            var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
+            if (entry.getValue() != null && entry.getValue().isValid()
+                    && typeKey != null && typeKey.getPath().contains("village")) {
+                markVillageFoundingSite(level, chunk);
+                break;
+            }
+        }
     }
 
-    /**
-     * Records a real generated village structure as a founding site. The marker is
-     * attached to the loaded structure-start chunk's sampled terrain cell and is
-     * durable with the geography cache; no neighboring chunk is requested.
-     */
-    public static synchronized void markVillageFoundingSite(ServerLevel level, ChunkAccess chunk) {
-        if (level == null || chunk == null || !isOrdinaryGeographyLevel(level)) return;
-        load(level.getServer());
+    private static void markVillageFoundingSite(ServerLevel level, ChunkAccess chunk) {
         ChunkPos pos = chunk.getPos();
         int regionX = Math.floorDiv(pos.x, REGION_CHUNKS);
         int regionZ = Math.floorDiv(pos.z, REGION_CHUNKS);
@@ -224,7 +227,6 @@ public final class VanillaWorldGeography {
         Region region = REGIONS.computeIfAbsent(id, Region::new);
         int localChunkX = Math.floorMod(pos.x, REGION_CHUNKS) * 16;
         int localChunkZ = Math.floorMod(pos.z, REGION_CHUNKS) * 16;
-        // The central sample is deliberately inside this already-loaded chunk.
         int localX = 10, localZ = 10;
         int x = localChunkX + localX, z = localChunkZ + localZ;
         long key = (long) z * REGION_BLOCKS + x;
