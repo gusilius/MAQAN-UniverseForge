@@ -60,11 +60,12 @@ public final class VanillaVillageAdapter {
             StructureStart start = entry.getValue();
             if (start == null || !start.isValid()) continue;
             var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
-            if (typeKey == null || !typeKey.getPath().contains("village")) continue;
+            if (typeKey == null) continue;
             BoundingBox bounds = start.getBoundingBox();
             int x = (bounds.minX() + bounds.maxX()) / 2;
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
-            adopt(level, x, z, typeKey.toString());
+            if (isSettlementAnchor(typeKey.getPath())) adopt(level, x, z, typeKey.toString());
+            else adoptCataloguedStructure(level, x, z, typeKey.toString());
         }
         // Only chunks near an already-known vanilla village can contain adoptable
         // infrastructure. Synthetic/strategic colonies must not trigger this scan.
@@ -117,6 +118,56 @@ public final class VanillaVillageAdapter {
         }
     }
 
+    /** Namespace-independent settlement-anchor rules for vanilla and arbitrary structure mods. */
+    private static boolean isSettlementAnchor(String path) {
+        String value = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        return value.contains("village") || value.contains("settlement") || value.contains("hamlet")
+                || value.contains("town") || value.contains("city") || value.contains("colony")
+                || value.contains("homestead") || value.contains("outpost") || value.contains("camp")
+                || value.contains("tribal");
+    }
+
+    /** Existing modded houses, farms, halls, forts and workshops join the nearest canonical settlement. */
+    private static void adoptCataloguedStructure(ServerLevel level, int x, int z, String structureType) {
+        if (SettleMod.DEFS == null || !SettleMod.STRUCTURE_CATALOG.loaded()) return;
+        String matchedClass = SettleMod.STRUCTURE_CATALOG.structureClasses().stream()
+                .filter(classId -> SettleMod.STRUCTURE_CATALOG.matchesStructureClass(classId, structureType))
+                .sorted().findFirst().orElse("");
+        if (matchedClass.isBlank()) return;
+        var definition = SettleMod.DEFS.buildings.values().stream()
+                .filter(building -> matchedClass.equals(building.structureClass))
+                .sorted(java.util.Comparator.comparing(building -> building.id))
+                .findFirst().orElse(null);
+        if (definition == null) return;
+        String dimension = level.dimension().location().toString();
+        Colony colony = SettleMod.COLONIES.values().stream()
+                .filter(candidate -> candidate != null && candidate.s != null
+                        && dimension.equals(candidate.dim))
+                .filter(candidate -> {
+                    long dx = (long) candidate.cx - x, dz = (long) candidate.cz - z;
+                    return dx * dx + dz * dz <= 256L * 256L;
+                })
+                .min(java.util.Comparator.comparingLong(candidate -> {
+                    long dx = (long) candidate.cx - x, dz = (long) candidate.cz - z;
+                    return dx * dx + dz * dz;
+                })).orElse(null);
+        if (colony == null) return; // It remains in the durable world structure registry for later linkage.
+        String request = "mc.structure." + Integer.toUnsignedString(
+                (dimension + "|" + structureType + "|" + x + "|" + z).hashCode(), 36);
+        try {
+            colony.s.adoptExistingBuilding(request, definition.id, x - colony.cx, z - colony.cz);
+            DIRTY_INFRASTRUCTURE_COLONIES.add(colony);
+        } catch (RuntimeException failure) {
+            SettleMod.LOGGER.debug("wf_settle: could not link mod structure {} to {}: {}",
+                    structureType, colony.s.id, failure.getMessage());
+        }
+    }
+
+    private static boolean isSettlementOperation(String operation) {
+        return operation != null && (operation.startsWith("worldforge:structure:")
+                || operation.startsWith("minecraft:village:"));
+    }
+
     private static boolean hasNearbyVillage(ServerLevel level, ChunkPos position) {
         String dimension = level.dimension().location().toString();
         double centerX = position.getMinBlockX() + 8.0;
@@ -124,7 +175,7 @@ public final class VanillaVillageAdapter {
         for (Colony colony : ColonyInterestIndex.nearbyAt(
                 dimension, centerX, centerZ, RECONCILE_RADIUS + 12.0)) {
             if (colony != null && colony.genesisOperationId != null
-                    && colony.genesisOperationId.startsWith("minecraft:village:")) return true;
+                    && isSettlementOperation(colony.genesisOperationId)) return true;
         }
         return false;
     }
@@ -211,10 +262,11 @@ public final class VanillaVillageAdapter {
 
         String dimension = level.dimension().location().toString();
         String stableLocationId = java.util.UUID.nameUUIDFromBytes(
-                (dimension + ":" + x + ":" + z).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                (dimension + ":" + structureType + ":" + x + ":" + z)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .toString().replace("-", "");
-        String id = "vanilla_village_" + stableLocationId;
-        String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
+        String id = "world_structure_" + stableLocationId;
+        String operation = "worldforge:structure:" + dimension + ":" + structureType + ":" + x + ":" + z;
         // If autonomous emergence already materialized this location, adopt that exact
         // canonical colony instead of registering a second settlement for the structure.
         // Prefer the exact stable village ID on repeat discovery; only then reconcile
