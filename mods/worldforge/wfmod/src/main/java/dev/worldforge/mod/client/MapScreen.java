@@ -24,6 +24,8 @@ import java.util.List;
  */
 public class MapScreen extends Screen {
     private static final int BAR = 0, BOTTOM = 46;
+    private boolean embeddedInMaqan;
+    public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
     private double camX, camY, zoom;
     private boolean fitted;
@@ -220,10 +222,11 @@ public class MapScreen extends Screen {
     }
 
     private void fit() {
-        double zx = (width - 24) / (double) MapTextures.w, zy = (height - BAR - BOTTOM - 14) / (double) MapTextures.h;
+        int bottomReserve = embeddedInMaqan ? 0 : BOTTOM;
+        double zx = (width - 24) / (double) MapTextures.w, zy = (height - BAR - bottomReserve - 14) / (double) MapTextures.h;
         zoom = Math.min(zx, zy);
         camX = (width - MapTextures.w * zoom) / 2;
-        camY = BAR + (height - BAR - BOTTOM - MapTextures.h * zoom) / 2;
+        camY = BAR + (height - BAR - bottomReserve - MapTextures.h * zoom) / 2;
         fitted = true;
     }
 
@@ -305,16 +308,18 @@ public class MapScreen extends Screen {
         drawPlate(g);
         drawLegend(g);
         drawOverview(g);
-        drawScale(g);
-        drawHotbar(g, mx, my);
-        drawCoords(g, mx, my);
+        if (!embeddedInMaqan) {
+            drawScale(g);
+            drawHotbar(g, mx, my);
+            drawCoords(g, mx, my);
+        }
         panel.render(g, mx, my);
         super.render(g, mx, my, pt);
         if (hoverProv > 0 && !overUi) {
             List<Component> tip = describe(hoverProv, false);
             if (!tip.isEmpty()) g.renderComponentTooltip(font, tip, mx, my);
         }
-        for (Slot sl : slots) if (sl.hit(mx, my)) g.renderTooltip(font, Component.literal(isCurrent(sl.key) ? modeName(sl.key) : (slots.indexOf(sl) + 1) + ": " + modeName(sl.key)), mx, my);
+        if (!embeddedInMaqan) for (Slot sl : slots) if (sl.hit(mx, my)) g.renderTooltip(font, Component.literal(isCurrent(sl.key) ? modeName(sl.key) : (slots.indexOf(sl) + 1) + ": " + modeName(sl.key)), mx, my);
     }
 
     // ---- оформление: рамки со скосом, как у слотов инвентаря
@@ -323,8 +328,8 @@ public class MapScreen extends Screen {
     }
 
     private boolean overUi(int mx, int my) {
-        for (Slot sl : slots) if (sl.hit(mx, my)) return true;
-        if (!slots.isEmpty()) {
+        if (!embeddedInMaqan && !slots.isEmpty()) {
+            for (Slot sl : slots) if (sl.hit(mx, my)) return true;
             Slot f = slots.get(0), l = slots.get(slots.size() - 1);
             if (mx >= f.x - 6 && mx <= l.x + l.size + 6 && my >= f.y - 6) return true;
         }
@@ -575,7 +580,7 @@ public class MapScreen extends Screen {
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
         if (panel.click(mx, my, button)) return true;
-        if (button == 0) for (Slot sl : slots) if (sl.hit(mx, my)) { setMode(sl.key); return true; }
+        if (!embeddedInMaqan && button == 0) for (Slot sl : slots) if (sl.hit(mx, my)) { setMode(sl.key); return true; }
         if (!MapTextures.ready()) return false;
         if (button == 0 && ovwW > 0 && mx >= ovwX && mx < ovwX + ovwW && my >= ovwY && my < ovwY + ovwH) {
             dragOverview = true;

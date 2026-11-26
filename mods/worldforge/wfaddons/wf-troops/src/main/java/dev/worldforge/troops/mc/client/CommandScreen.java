@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc.client;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.troops.BuildGhost;
 import dev.worldforge.troops.CameraRig;
@@ -34,6 +35,8 @@ public final class CommandScreen extends Screen {
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
     private boolean dragging, midDrag, zoomDragging;
+    private boolean embeddedInMaqan;
+    public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private double dragX, dragY, mx, my;
     // стройка
     private static volatile Settlement incomingSettlement;
@@ -206,9 +209,16 @@ public final class CommandScreen extends Screen {
 
     private boolean inSelPanel(double px, double py) { return px < 192 && py > height - 90; }
 
+    private int miniMapX() { return width - 146; }
+    private int miniMapY() { return height - 104; }
+    private boolean overMiniMap(double x, double y) {
+        return embeddedInMaqan && x >= miniMapX() && x < miniMapX()+136 && y >= miniMapY() && y < miniMapY()+94;
+    }
+
     boolean overPanel(double px, double py) {
         if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
-        if (onZoomSlider(px, py)) return true;
+        if (overMiniMap(px, py)) return true;
+        if (!embeddedInMaqan && onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
     }
 
@@ -328,7 +338,11 @@ public final class CommandScreen extends Screen {
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
-        if(button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
+        if (overMiniMap(x,y)) {
+            if (button == 0 && settlement != null) focusMiniMap(x,y);
+            return true;
+        }
+        if(!embeddedInMaqan && button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
         if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
@@ -421,6 +435,59 @@ public final class CommandScreen extends Screen {
             else CommandMode.SEL.click(all, x, y, shift, System.currentTimeMillis());
         }
         return true;
+    }
+
+    private void focusMiniMap(double x, double y) {
+        if (settlement == null) return;
+        MiniMapBounds bounds = miniMapBounds();
+        double lx = bounds.centerX + (x - (miniMapX()+8) - 60) / bounds.scale;
+        double lz = bounds.centerZ + (y - (miniMapY()+18) - 38) / bounds.scale;
+        CommandMode.RIG.focusOn(colX + lx, colZ + lz);
+    }
+
+    private record MiniMapBounds(double centerX, double centerZ, double scale) {}
+    private MiniMapBounds miniMapBounds() {
+        double minX=-24,maxX=24,minZ=-24,maxZ=24;
+        if (settlement != null) {
+            for (Building building : settlement.buildings) {
+                minX=Math.min(minX,building.x-building.def.sizeX/2.0-8); maxX=Math.max(maxX,building.x+building.def.sizeX/2.0+8);
+                minZ=Math.min(minZ,building.z-building.def.sizeZ/2.0-8); maxZ=Math.max(maxZ,building.z+building.def.sizeZ/2.0+8);
+            }
+            for (var worker : settlement.workers) {
+                minX=Math.min(minX,worker.x-8); maxX=Math.max(maxX,worker.x+8);
+                minZ=Math.min(minZ,worker.z-8); maxZ=Math.max(maxZ,worker.z+8);
+            }
+        }
+        double spanX=Math.max(32,maxX-minX),spanZ=Math.max(32,maxZ-minZ);
+        return new MiniMapBounds((minX+maxX)*0.5,(minZ+maxZ)*0.5,Math.min(120/spanX,76/spanZ));
+    }
+
+    private void drawMiniMap(GuiGraphics g) {
+        int x=miniMapX(),y=miniMapY(),w=136,h=94;
+        g.fill(x-3,y-3,x+w+3,y+h+3,0xD810151D);
+        g.fill(x,y,x+w,y+h,0xFF101820);
+        g.renderOutline(x,y,w,h,0xFF668091);
+        g.drawString(font,"SETTLEMENT",x+6,y+4,0xFF8FDDF0,false);
+        if(settlement==null){g.drawCenteredString(font,"NO DATA",x+w/2,y+43,0xFF788A98);return;}
+        MiniMapBounds bounds=miniMapBounds();
+        int ox=x+8,oy=y+18;
+        for(Building building:settlement.buildings) {
+            int bx=ox+60+(int)Math.round((building.x-bounds.centerX)*bounds.scale);
+            int bz=oy+38+(int)Math.round((building.z-bounds.centerZ)*bounds.scale);
+            int bw=Math.max(2,(int)Math.round(building.def.sizeX*bounds.scale));
+            int bh=Math.max(2,(int)Math.round(building.def.sizeZ*bounds.scale));
+            g.fill(bx-bw/2,bz-bh/2,bx+bw/2+1,bz+bh/2+1,
+                    building.state==Building.State.DONE?0xFFB9A36A:0xFF687987);
+        }
+        for(var worker:settlement.workers) {
+            int wx=ox+60+(int)Math.round((worker.x-bounds.centerX)*bounds.scale);
+            int wz=oy+38+(int)Math.round((worker.z-bounds.centerZ)*bounds.scale);
+            g.fill(wx-1,wz-1,wx+2,wz+2,0xFF65D69A);
+        }
+        int cx=ox+60+(int)Math.round((CommandMode.RIG.fx-colX-bounds.centerX)*bounds.scale);
+        int cz=oy+38+(int)Math.round((CommandMode.RIG.fz-colZ-bounds.centerZ)*bounds.scale);
+        g.fill(cx-3,cz-1,cx+4,cz+2,0xFF66D9FF);
+        g.fill(cx-1,cz-3,cx+2,cz+4,0xFF66D9FF);
     }
 
     @Override
@@ -641,11 +708,12 @@ public final class CommandScreen extends Screen {
             g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
-        drawSelection(g, h);
+        if (!embeddedInMaqan) drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
-        drawZoomSlider(g);
+        if (!embeddedInMaqan) drawZoomSlider(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
+        if (embeddedInMaqan) drawMiniMap(g);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
                 : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
