@@ -328,14 +328,39 @@ public final class CommandMode {
 
     static void exit(Minecraft mc) {
         if (!active) return;
+        active = false; // Set first: removing the hosted view calls removed() synchronously.
+        lastView = RIG.view;
+        SEL.clear();
+        CommandScreen hosted = hostedCommandView;
+        boolean inShell = isHostedCommandViewActive(mc);
+        hostedCommandView = null;
+        camEntity = null;
+        if (mc.player != null) mc.setCameraEntity(mc.player);
+        mc.options.setCameraType(prevCamera);
+        if (inShell && hosted != null) {
+            try {
+                Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+                shell.getMethod("closeEmbeddedProviderView", Screen.class).invoke(null, hosted);
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                // The shell may have been removed already; camera restoration is still complete.
+            }
+        } else if (mc.screen instanceof CommandScreen) {
+            mc.setScreen(null);
+        }
+    }
+
+    /** A provider screen may be removed while another provider replaces it. Only the
+     * currently hosted command view owns the camera lifecycle. */
+    static void onCommandViewRemoved(CommandScreen view) {
+        if (view == null || hostedCommandView != view || !active) return;
+        Minecraft mc = Minecraft.getInstance();
         active = false;
         lastView = RIG.view;
         SEL.clear();
-        camEntity = null;
-        mc.setCameraEntity(mc.player);
-        mc.options.setCameraType(prevCamera);
         hostedCommandView = null;
-        if (mc.screen instanceof CommandScreen) mc.setScreen(null);
+        camEntity = null;
+        if (mc.player != null) mc.setCameraEntity(mc.player);
+        mc.options.setCameraType(prevCamera);
     }
 
     /** Покадровое движение камеры: WASD / края экрана - сдвиг, Q/E - поворот, стрелки - поворот и наклон, Shift - быстрее. */

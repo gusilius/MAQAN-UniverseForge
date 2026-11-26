@@ -72,7 +72,7 @@ public final class CommandScreen extends Screen {
 
     @Override public boolean isPauseScreen() { return false; }
     @Override public boolean shouldCloseOnEsc() { return false; }
-    @Override public void removed() { CommandMode.exit(Minecraft.getInstance()); }
+    @Override public void removed() { CommandMode.onCommandViewRemoved(this); }
 
     double mouseX() { return mx; }
     double mouseY() { return my; }
