@@ -303,7 +303,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.social.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]] && echo true || echo false) -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.settlement.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
+java -Dwf.living.acceptance.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "stage-a" ]] && echo true || echo false) -Dwf.acceptance.commit="${GITHUB_SHA:-unknown}" -Dwf.stress.enabled=${WF_STRESS_ENABLED:-false} -Dwf.social.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]] && echo true || echo false) -Dwf.acceptance.contour02=$([[ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]] && echo true || echo false) -Dwf.settlement.stress.enabled=$([[ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]] && echo true || echo false) -Dwf.simulation.tick-multiplier=${WF_SIMULATION_TICK_MULTIPLIER:-1} -Xms1G -Xmx3G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -337,6 +337,81 @@ echo "RUNTIME_METRIC_PHASE=workload"
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
   # multiplier is a test harness setting; every domain system still advances normally.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "stage-a" ]; then
+  CURRENT_STAGE="integrated_living_world_stage_a"
+  if [ "$VANILLA_RUNTIME" -ne 0 ]; then
+    echo "ERROR: Stage A requires the image-backed WorldForge dimension, not the vanilla-only smoke profile"
+    exit 61
+  fi
+  REPORT="world/worldforge/acceptance/living-world-stage-a.json"
+  echo "LIVING_WORLD_STAGE_A_SERVER=Forge-$FORGE"
+  echo "LIVING_WORLD_STAGE_A_MAP=$MAP_ID"
+  # Load a real map-world chunk so the normal Forge worldgen/genesis path runs
+  # before the acceptance command inspects the production settlement registry.
+  printf 'execute in worldforge:%s run forceload add 0 0 0 0\n' "$MAP_ID" >> in.txt
+  printf '%s\n' "wfworldsim status" "wfsettle list" >> in.txt
+  MAP_READY=0
+  for second in $(seq 1 180); do
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
+    if grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log; then MAP_READY=1; break; fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: Forge server exited during Stage A map activation"; exit 62; }
+    sleep 1
+  done
+  if [ "$MAP_READY" -ne 1 ]; then
+    tail -200 server.log
+    echo "ERROR: Stage A could not activate a real image-backed Minecraft chunk"
+    exit 63
+  fi
+  printf '%s\n' "wfsettle list" "wfworldsim acceptance-a start 6000" "wfworldsim acceptance-a status" >> in.txt
+  REPORT_READY=0
+  for second in $(seq 1 "${WF_STAGE_A_TIMEOUT_SECONDS:-900}"); do
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
+    if (( second % 15 == 0 )); then
+      echo "LIVING_WORLD_STAGE_A_ELAPSED_SECONDS=$second"
+      grep -E 'LIVING_WORLD_STAGE_A|acceptance-a|INCONCLUSIVE|FAIL|ERROR' server.log | tail -12 || true
+    fi
+    if [ -f "$REPORT" ]; then
+      cp "$REPORT" "$OUTPUT/living-world-stage-a.json"
+      REPORT_READY=1
+      break
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: Forge server exited during Stage A"; exit 64; }
+    sleep 1
+  done
+  if [ "$REPORT_READY" -ne 1 ]; then
+    grep -E 'LIVING_WORLD_STAGE_A|acceptance-a|INCONCLUSIVE|FAIL|ERROR|Exception' server.log | tail -100 || true
+    tail -160 server.log
+    echo "ERROR: Stage A did not produce its in-world evidence report"
+    exit 65
+  fi
+  python3 - "$REPORT" <<'PY'
+import json, pathlib, sys
+p=pathlib.Path(sys.argv[1])
+r=json.loads(p.read_text(encoding="utf-8"))
+print("LIVING_WORLD_STAGE_A_REPORT="+json.dumps(r,ensure_ascii=False,sort_keys=True))
+print("LIVING_WORLD_STAGE_A_STATUS="+str(r.get("status","MISSING")))
+if r.get("status") != "PASS":
+    raise SystemExit("Stage A did not PASS; preserve the report as diagnostic evidence and do not advance.")
+required=("production_to_market","market_to_treasury_politics","politics_to_recruitment","recruitment_to_supply")
+chain=r.get("causal_chain",{})
+missing=[key for key in required if chain.get(key) is not True]
+if missing:
+    raise SystemExit("Stage A causal evidence missing: "+", ".join(missing))
+for key in ("server_tps","server_mspt_p50","server_mspt_p95","server_mspt_p99","server_mspt_max",
+            "heap_used_bytes_max","heap_committed_bytes_max","gc_collections_delta","cpu_percent_max",
+            "wal_queue_depth_high_water","character_population","character_materialized",
+            "physical_worker_entities_start","physical_worker_entities_peak","physical_worker_entities_end"):
+    if key not in r:
+        raise SystemExit("Stage A runtime metric missing: "+key)
+print("LIVING_WORLD_STAGE_A_EVIDENCE=PASS")
+PY
+  CURRENT_STAGE="integrated_living_world_stage_a_complete"
+  echo "LIVING_WORLD_STAGE_A=PASS_PENDING_GRACEFUL_SHUTDOWN"
+  exit 0
+fi
+
 if [ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]; then
   CURRENT_STAGE="settlement_labor_stress"
   TARGET="${WF_SETTLEMENT_STRESS_TARGET:-250}"
