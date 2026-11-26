@@ -649,7 +649,8 @@ public final class PlatformShellScreen extends Screen {
                 g.renderTooltip(font, Component.literal(p.label), mx, my);
             x += buttonStep;
         }
-        g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        if (!compactTopbar())
+            g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
         if (commandCameraActive()) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE"};
