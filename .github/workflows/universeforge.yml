@@ -1,4 +1,4 @@
-name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
+name: MAQAN UniverseForge — build and domain diagnostics (Windows x64)
 
 on:
   push:
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   world-runtime-acceptance:
-    name: Build once; test vanilla Overworld and image dimension in one server
+    name: Build WorldForge and verify domain logic; integrated world verdict reported separately
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
