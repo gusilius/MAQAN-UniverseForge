@@ -197,7 +197,15 @@ public final class ThemeManager {
     }
 
     private static void blit(GuiGraphics graphics, Texture texture, int x, int y, int width, int height) {
-        graphics.blit(texture.location(), x, y, 0.0F, 0.0F, width, height,
-                texture.width(), texture.height());
+        // The source PNGs are authored at sourceScale=2. GuiGraphics' basic
+        // blit overload draws source pixels 1:1, so scale the pose to fit the
+        // manifest's logical destination rectangle instead of cropping them.
+        graphics.pose().pushPose();
+        graphics.pose().translate(x, y, 0.0D);
+        graphics.pose().scale(width / (float) texture.width(),
+                height / (float) texture.height(), 1.0F);
+        graphics.blit(texture.location(), 0, 0, 0.0F, 0.0F,
+                texture.width(), texture.height(), texture.width(), texture.height());
+        graphics.pose().popPose();
     }
 }
