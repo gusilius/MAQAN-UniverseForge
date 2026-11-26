@@ -61,6 +61,7 @@ public final class PlatformShellScreen extends Screen {
     private String draggingPanel;
     private String resizingPanel;
     private String resizingSplitterPath, draggingPopup;
+    private boolean panelDragMoved;
     private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY;
     private int settingsX=-1, settingsY=-1, managerX=-1, managerY=-1, notificationsX=-1, notificationsY=-1;
     private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
@@ -1181,7 +1182,8 @@ public final class PlatformShellScreen extends Screen {
                 }
                 if(p.pinned) return true;
                 if((p.id.equals("inspector")||p.id.equals("tools"))&&mx>=p.x+28&&mx<p.x+116) return true;
-                draggingPanel=p.id; pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
+                draggingPanel=p.id; panelDragMoved=false;
+                pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
                 dragMouseX=(int)mx; dragMouseY=(int)my; return true;
             }
             if (p.id.equals("tools")) {
@@ -1300,11 +1302,14 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void toggleWorkspacePanel(String id) {
-        if(hiddenPanels.contains(id)) {
+        Panel panel=panels.get(id);
+        boolean currentlyVisible=panel!=null && panel.visible && !hiddenPanels.contains(id);
+        if(!currentlyVisible) {
             hiddenPanels.remove(id);
-            if(compactViewport()) {
-                Panel p=panels.get(id);
-                if(p!=null&&!id.equals("content")){p.dock="FLOAT";p.x=Math.max(48,width-p.w-16);p.y=48;}
+            if(compactViewport() && panel!=null && !id.equals("content")) {
+                panel.dock="FLOAT";
+                panel.x=Math.max(48,width-panel.w-16);
+                panel.y=Math.max(42,Math.min(48,height-panel.h-8));
             }
         } else hiddenPanels.add(id);
         layoutWorkspace();saveWorkspaceState();
@@ -1447,6 +1452,7 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (draggingPanel != null) {
+            if (Math.hypot(mx - dragMouseX, my - dragMouseY) > 4) panelDragMoved=true;
             dragMouseX=(int)mx; dragMouseY=(int)my;
             Panel p=panels.get(draggingPanel);
             if(p!=null&&"FLOAT".equals(p.dock)){p.x=(int)mx-pointerOffsetX;p.y=(int)my-pointerOffsetY;clampPanels();}
@@ -1465,8 +1471,8 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean mouseReleased(double mx,double my,int button) {
         if (button == 0) {
             boolean changed=draggingPanel!=null||resizingPanel!=null||resizingSplitterPath!=null||draggingPopup!=null;
-            if(draggingPanel!=null) applyPanelDrop(draggingPanel,(int)mx,(int)my);
-            draggingPanel=null;resizingPanel=null;resizingSplitterPath=null;draggingPopup=null;
+            if(draggingPanel!=null && panelDragMoved) applyPanelDrop(draggingPanel,(int)mx,(int)my);
+            draggingPanel=null;panelDragMoved=false;resizingPanel=null;resizingSplitterPath=null;draggingPopup=null;
             if(changed){layoutWorkspace();saveWorkspaceState();}
         }
         boolean handled = super.mouseReleased(mx,my,button);
