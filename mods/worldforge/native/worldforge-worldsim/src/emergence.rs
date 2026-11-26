@@ -269,11 +269,15 @@ fn bootstrap_vanilla_initial_civilizations(
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
     let observed_scale = observed_map_scale(map);
     let separation = (observed_scale / 3).min(32).max(minimum_spacing).max(1);
-    let bucket_span = separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32;
-    let bucket_span = bucket_span.max(1);
+    // Region identity is tied to the world's sampling resolution, not the currently
+    // observed bounding box. As exploration grows, old region keys never move and a
+    // player crossing a chunk boundary cannot re-roll an existing founding region.
+    let region_span = u64::from(map.sample_stride.max(1)).saturating_mul(8)
+        .max(separation.saturating_mul(4)).min(u64::from(u32::MAX)) as u32;
+    let region_span = region_span.max(1);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
     for cell in &candidates {
-        groups.entry((cell.x / bucket_span, cell.z / bucket_span)).or_default().push(*cell);
+        groups.entry((cell.x / region_span, cell.z / region_span)).or_default().push(*cell);
     }
     let bucket_span = separation.min(u64::from(u32::MAX)).max(1) as u32;
     let mut occupied = SpatialBuckets::new();
@@ -287,8 +291,16 @@ fn bootstrap_vanilla_initial_civilizations(
     // A settlement is assigned to at most one polity; new frontier observations can
     // later create additional states without rewriting existing sovereign identities.
     for ((region_x, region_z), regional_candidates) in groups {
+        let region_key = format!("{region_x}:{region_z}");
+        // Only a minority of viable regions become inhabited. The map density setting
+        // raises the odds gradually (9%..34%); the decision is stable for this world seed
+        // and fixed region key, so chunk loads and tick cadence cannot create extra rolls.
+        let density_pct = u64::from(map.population_density_pct.min(100));
+        let founding_chance = 900 + density_pct * 25;
+        if roll(seed, "vanilla-founding-region", &map.map_id, &region_key, 0) % 10_000
+            >= founding_chance { continue; }
         let target_communities = 4 + (roll(seed, "vanilla-polity-size", &map.map_id,
-            &format!("{region_x}:{region_z}"), 0) % 5) as usize;
+            &region_key, 0) % 3) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in regional_candidates {
             let point = (cell.x, cell.z);
@@ -297,6 +309,9 @@ fn bootstrap_vanilla_initial_civilizations(
             spatial_insert(&mut occupied, point, bucket_span);
             if selected.len() == target_communities { break; }
         }
+        // Do not leave partial, ownerless founding clusters behind. A region either
+        // qualifies as a complete initial community cluster or remains wilderness.
+        if selected.len() < 4 { continue; }
 
         let mut settlement_ids = Vec::new();
         let mut population = 0u64;

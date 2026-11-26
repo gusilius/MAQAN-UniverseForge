@@ -35,6 +35,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -1420,7 +1421,9 @@ public class SettleMod {
         if (server == null || colony == null || colony.s == null
                 || colony.genesisOperationId == null
                 || !colony.genesisOperationId.startsWith("worldsim:settlement:")) return false;
-        if (!SimulationLod.shouldMaterializeSettlement(colony.dim, colony.cx, colony.cz)) return false;
+        // Physical founding is requested by a generated/loaded chunk near this stable
+        // anchor, never by player-distance LOD. LOD remains responsible only for active
+        // block-by-block construction and NPC work simulation.
         ServerLevel level = colony.level(server);
         if (level == null) return false;
         BlockPos probe = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
@@ -2744,6 +2747,25 @@ public class SettleMod {
         SimulationLod.publish(observers);
     }
 
+    /**
+     * A physical settlement may begin only after Minecraft has generated/loaded terrain
+     * around its deterministic anchor. Chunk events are sparse world events; player movement
+     * and the settlement simulation tick never create structures by themselves.
+     */
+    @SubscribeEvent
+    public void onSettlementTerrainChunkLoad(ChunkEvent.Load event) {
+        if (!(event.getLevel() instanceof ServerLevel level) || level.getServer() == null) return;
+        var chunkPos = event.getChunk().getPos();
+        double centerX = chunkPos.getMinBlockX() + 8.0;
+        double centerZ = chunkPos.getMinBlockZ() + 8.0;
+        String dimension = level.dimension().location().toString();
+        for (Colony colony : ColonyInterestIndex.nearbyAt(dimension, centerX, centerZ, 96.0)) {
+            if (colony == null || colony.s == null || colony.genesisOperationId == null
+                    || !colony.genesisOperationId.startsWith("worldsim:settlement:")) continue;
+            enqueueAutonomousInfrastructure(colony.s.id);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
@@ -2789,8 +2811,6 @@ public class SettleMod {
                         LAST_SIMULATED_WORLD_MINUTE.put(c.s.id, worldMinute);
                         remitCrownTaxes(c);
                         syncPeople(c, server);
-                        if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
-                            enqueueAutonomousInfrastructure(c.s.id);
                         long colonyStep = ColonySimulationCadence.stepNumber(c.s.id, ticks, simulationInterval);
                         if (c.s.raidIncoming || colonyStep
                                 % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
