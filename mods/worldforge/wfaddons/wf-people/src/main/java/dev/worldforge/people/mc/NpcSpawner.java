@@ -91,18 +91,10 @@ final class NpcSpawner {
                 }
             }
 
-            Map<String, WFNpc> bodies = new LinkedHashMap<>();
-            for (ServerPlayer player : players) {
-                for (WFNpc body : level.getEntitiesOfClass(WFNpc.class, player.getBoundingBox().inflate(FAR + 40))) {
-                    if (body.isRemoved()) continue;
-                    String id = body.characterId();
-                    if (id.isEmpty() || bodies.containsKey(id) && bodies.get(id) != body) body.discard();
-                    else bodies.put(id, body);
-                }
-            }
-
-            TargetIndex index = buildTargetIndex(level, map, registry);
-            for (ServerPlayer player : players) spawnFor(level, registry, player, bodies, index);
+            // Physical people are not generated from political title tiers.
+            // VanillaVillageAdapter adopts villagers already present in a confirmed
+            // Minecraft village and binds them to canonical Character IDs.
+            // This hard gate prevents realm/barony population from becoming thousands of entities.
         }
     }
 

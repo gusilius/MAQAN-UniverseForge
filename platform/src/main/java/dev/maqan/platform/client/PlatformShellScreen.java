@@ -46,7 +46,7 @@ public final class PlatformShellScreen extends Screen {
         String title;
         int x, y, w, h;
         boolean visible = true, minimized, pinned;
-        String dock = "FLOAT";
+        String dock = "DOCK";
         Panel(String id, String title, int x, int y, int w, int h) {
             this.id=id; this.title=title; this.x=x; this.y=y; this.w=w; this.h=h;
         }
@@ -86,7 +86,10 @@ public final class PlatformShellScreen extends Screen {
     private int previewLayer = 0;
     private int navigationScroll;
     private boolean workspaceStateLoaded;
-    private static final int WORKSPACE_SCHEMA = 1;
+    private Screen initializedView;
+    private int initializedViewWidth = -1, initializedViewHeight = -1;
+    private boolean providerMouseCaptured;
+    private static final int WORKSPACE_SCHEMA = 2;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -137,8 +140,17 @@ public final class PlatformShellScreen extends Screen {
         selectedCapabilityId = capability.id();
         Screen previous = providerViews.put(capability.id(), view);
         if (previous != null && previous != view) previous.removed();
-        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        if (width > 0 && height > 0) {
+            layoutWorkspace();
+            initViewInContent(view);
+        }
         return true;
+    }
+
+    /** True only while this exact provider view is the active content of the shared shell. */
+    public static boolean isHostedProviderViewActive(Screen view) {
+        Minecraft mc = Minecraft.getInstance();
+        return view != null && mc.screen instanceof PlatformShellScreen host && host.activeView() == view;
     }
 
     /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
@@ -173,11 +185,9 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (profile == Profile.COSMOS) ensureAtlasView();
-        if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
-        Screen providerView = providerViews.get(selectedCapabilityId);
-        if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         layoutWorkspace();
         clampPanels();
+        initViewInContent(activeView());
     }
 
     private WorkspaceDockTree.Node defaultWorkspaceTree() {
@@ -207,14 +217,16 @@ public final class PlatformShellScreen extends Screen {
                         "timeline", new WorkspaceDockTree.MinimumSize(180, 64)));
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
             Panel panel = panels.get(entry.getKey());
-            if (panel == null) continue;
+            if (panel == null || "FLOAT".equals(panel.dock)) continue;
             WorkspaceDockTree.Rect rect = entry.getValue();
             panel.x = rect.x(); panel.y = rect.y(); panel.w = rect.width(); panel.h = rect.height();
             panel.visible = !hiddenPanels.contains(panel.id);
         }
         for (String id : List.of("navigation", "content", "inspector", "tools", "timeline")) {
             Panel panel = panels.get(id);
-            if (panel != null && !layout.containsKey(id)) panel.visible = false;
+            if (panel == null) continue;
+            if (!layout.containsKey(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
+            if ("FLOAT".equals(panel.dock)) panel.visible = !hiddenPanels.contains(id);
         }
     }
 
@@ -240,6 +252,9 @@ public final class PlatformShellScreen extends Screen {
                 panel.minimized = prefs.getBoolean(key + "minimized", panel.minimized);
                 panel.pinned = prefs.getBoolean(key + "pinned", panel.pinned);
                 panel.dock = prefs.get(key + "dock", panel.dock);
+            }
+            if (schema < WORKSPACE_SCHEMA) {
+                for (Panel panel : panels.values()) panel.dock = "DOCK";
             }
             ambientGrid = prefs.getBoolean("ambient_grid", ambientGrid);
             panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
@@ -303,9 +318,9 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void resizeEmbeddedView() {
-        if (embeddedView == null) return;
-        embeddedView.init(Minecraft.getInstance(), width, height);
-        embeddedViewReady = true;
+        layoutWorkspace();
+        initViewInContent(activeView());
+        embeddedViewReady = embeddedView != null;
     }
 
     /** Route Atlas views and WorldForge views into their respective shared workspace slots. */
@@ -315,12 +330,12 @@ public final class PlatformShellScreen extends Screen {
             Screen previous = embeddedView;
             embeddedView = view;
             if (previous != null && previous != view) previous.removed();
-            if (width > 0 && height > 0) embeddedView.init(Minecraft.getInstance(), width, height);
+            if (width > 0 && height > 0) { layoutWorkspace(); initViewInContent(view); }
             return;
         }
         Screen previous = providerViews.put(selectedCapabilityId, view);
         if (previous != null && previous != view) previous.removed();
-        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        if (width > 0 && height > 0) { layoutWorkspace(); initViewInContent(view); }
     }
 
     /** Close a hosted provider view without dismissing the MAQAN workspace itself. */
@@ -349,8 +364,56 @@ public final class PlatformShellScreen extends Screen {
         return profile == Profile.COSMOS ? embeddedView : providerViews.get(selectedCapabilityId);
     }
 
+    private Panel contentPanel() { return panels.get("content"); }
+
+    private void initViewInContent(Screen view) {
+        Panel content = contentPanel();
+        if (view == null || content == null || width <= 0 || height <= 0) return;
+        int viewWidth = Math.max(1, content.w);
+        int viewHeight = Math.max(1, content.h);
+        if (view == initializedView && viewWidth == initializedViewWidth && viewHeight == initializedViewHeight) return;
+        view.init(Minecraft.getInstance(), viewWidth, viewHeight);
+        initializedView = view;
+        initializedViewWidth = viewWidth;
+        initializedViewHeight = viewHeight;
+    }
+
+    private boolean forwardViewMouseClicked(double mouseX, double mouseY, int button) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null
+                || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
+        providerMouseCaptured = view.mouseClicked(mouseX - content.x, mouseY - content.y, button);
+        return providerMouseCaptured;
+    }
+
+    private boolean forwardViewMouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null || !providerMouseCaptured) return false;
+        return view.mouseDragged(mouseX - content.x, mouseY - content.y, button, dx, dy);
+    }
+
+    private boolean forwardViewMouseReleased(double mouseX, double mouseY, int button) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null || !providerMouseCaptured) return false;
+        boolean handled = view.mouseReleased(mouseX - content.x, mouseY - content.y, button);
+        providerMouseCaptured = false;
+        return handled;
+    }
+
+    private boolean forwardViewMouseScrolled(double mouseX, double mouseY, double delta) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null
+                || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
+        return view.mouseScrolled(mouseX - content.x, mouseY - content.y, delta);
+    }
+
     private void clampPanels() {
         for (Panel p : panels.values()) {
+            if (!"FLOAT".equals(p.dock)) continue;
             p.w = Math.max(150, Math.min(p.w, width - 24));
             p.h = Math.max(54, Math.min(p.h, height - 48));
             p.x = Math.max(44, Math.min(p.x, width - p.w - 8));
@@ -365,8 +428,16 @@ public final class PlatformShellScreen extends Screen {
         if (content != null && content.visible) {
             g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
             Screen view = activeView();
-            if (view != null) view.render(g, mouseX, mouseY, partialTick);
-            else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+            if (view != null) {
+                initViewInContent(view);
+                g.pose().pushPose();
+                g.pose().translate(content.x, content.y, 0.0D);
+                view.render(g, mouseX - content.x, mouseY - content.y, partialTick);
+                g.pose().popPose();
+            } else {
+                WorkspacePreviewRenderer.render(g, font, content.w, content.h, profile.name(),
+                        previewLayer, mouseX - content.x, mouseY - content.y, ambientGrid);
+            }
             WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
@@ -825,10 +896,9 @@ public final class PlatformShellScreen extends Screen {
                 contextMenuVisible = true;
                 return true;
             }
-            return activeView() != null ? activeView().mouseClicked(mx, my, button) : true;
+            return forwardViewMouseClicked(mx, my, button);
         }
-        if (button != 0) return activeView() != null
-                ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
+        if (button != 0) return forwardViewMouseClicked(mx, my, button);
         if (workspaceManagerVisible) {
             int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
             int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
@@ -1009,8 +1079,7 @@ public final class PlatformShellScreen extends Screen {
             }
             return true;
         }
-        return activeView() != null
-                ? activeView().mouseClicked(mx,my,button) : true;
+        return forwardViewMouseClicked(mx, my, button);
     }
 
     private void applyPanelDrop(String sourceId, int mouseX, int mouseY) {
@@ -1026,7 +1095,20 @@ public final class PlatformShellScreen extends Screen {
                 targetId = entry.getKey(); targetRect = rect; break;
             }
         }
-        if (targetId == null || targetRect == null) return;
+        Panel source = panels.get(sourceId);
+        if (targetId == null || targetRect == null) {
+            workspaceRoot = WorkspaceDockTree.remove(workspaceRoot, sourceId);
+            if (source != null) {
+                source.dock = "FLOAT";
+                source.x = mouseX - source.w / 2;
+                source.y = mouseY - 12;
+                source.visible = !hiddenPanels.contains(source.id);
+                clampPanels();
+            }
+            WorkspaceDockTree.validate(workspaceRoot);
+            return;
+        }
+        if (source != null) source.dock = "DOCK";
         int relativeX = mouseX - targetRect.x();
         int relativeY = mouseY - targetRect.y();
         double nx = relativeX / (double) Math.max(1, targetRect.width());
@@ -1115,10 +1197,10 @@ public final class PlatformShellScreen extends Screen {
         };
         if (next == Profile.COSMOS) {
             ensureAtlasView();
-            if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
+            if (embeddedView != null) initViewInContent(embeddedView);
         } else {
             Screen view = providerViews.get(selectedCapabilityId);
-            if (view != null) view.init(Minecraft.getInstance(), width, height);
+            if (view != null) initViewInContent(view);
         }
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
@@ -1156,7 +1238,7 @@ public final class PlatformShellScreen extends Screen {
         selectedCapabilityId = capability.id();
         Screen view = activeView();
         if (view != null) {
-            view.init(Minecraft.getInstance(), width, height);
+            initViewInContent(view);
             return;
         }
         // Some providers expose a complete no-argument screen (for example the
@@ -1202,8 +1284,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-            if (activeView() != null)
-                handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
+            handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
             return handled;
         }
         if (resizingSplitterPath != null) {
@@ -1230,8 +1311,7 @@ public final class PlatformShellScreen extends Screen {
             clampPanels(); return true;
         }
         boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-        if (activeView() != null)
-            handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
+        handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
         return handled;
     }
 
@@ -1243,8 +1323,7 @@ public final class PlatformShellScreen extends Screen {
             if (changed) { layoutWorkspace(); saveWorkspaceState(); }
         }
         boolean handled = super.mouseReleased(mx,my,button);
-        if (activeView() != null)
-            handled = activeView().mouseReleased(mx,my,button) || handled;
+        handled = forwardViewMouseReleased(mx, my, button) || handled;
         return handled;
     }
 
@@ -1281,8 +1360,7 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
-        if (activeView() != null)
-            handled = activeView().mouseScrolled(mouseX,mouseY,delta) || handled;
+        handled = forwardViewMouseScrolled(mouseX, mouseY, delta) || handled;
         return handled;
     }
 
@@ -1356,8 +1434,9 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
         super.resize(minecraft, width, height);
-        resizeEmbeddedView();
-        for (Screen view : providerViews.values()) view.init(minecraft, width, height);
+        layoutWorkspace();
+        initializedView = null;
+        initViewInContent(activeView());
     }
 
 }

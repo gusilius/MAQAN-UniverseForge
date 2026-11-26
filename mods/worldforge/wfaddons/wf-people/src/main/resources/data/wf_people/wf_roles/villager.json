@@ -1,1 +1,1 @@
-{"id":"villager","name":"Житель","per":"barony","count":2,"dialogue":"wf_people:villager"}
+{"id":"villager","name":"Житель","per":"village","count":2,"dialogue":"wf_people:villager"}

@@ -62,6 +62,7 @@ public final class CommandMode {
     static final KeyMapping RADIAL_COMMAND = new KeyMapping("key.wf_troops.radial_command", GLFW.GLFW_KEY_LEFT_ALT, "key.categories.wf_troops");
     static boolean firstPersonCommand;
     static boolean active;
+    private static CommandScreen hostedCommandView;
     private static boolean radialSuppressed;
     static final UnitSelection SEL = new UnitSelection();
     static final CameraRig RIG = new CameraRig();
@@ -266,12 +267,23 @@ public final class CommandMode {
     public static void openUnified() {
         Minecraft mc = Minecraft.getInstance();
         if (!active && mc.screen == null) enter(mc);
-        else if (active && !(mc.screen instanceof CommandScreen) && !isPlatformWorkspace(mc.screen))
+        else if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
             openCommandView(mc, new CommandScreen());
     }
 
     private static boolean isPlatformWorkspace(Screen screen) {
         return screen != null && screen.getClass().getName().equals("dev.maqan.platform.client.PlatformShellScreen");
+    }
+
+    private static boolean isHostedCommandViewActive(Minecraft mc) {
+        if (hostedCommandView == null || !isPlatformWorkspace(mc.screen)) return false;
+        try {
+            Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            return Boolean.TRUE.equals(shell.getMethod("isHostedProviderViewActive", Screen.class)
+                    .invoke(null, hostedCommandView));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
     }
 
     /**
@@ -280,6 +292,7 @@ public final class CommandMode {
      * standalone screen when the host is absent.
      */
     private static void openCommandView(Minecraft mc, CommandScreen view) {
+        hostedCommandView = view;
         try {
             Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
             shell.getMethod("openProviderView", String.class, Screen.class)
@@ -313,6 +326,7 @@ public final class CommandMode {
         camEntity = null;
         mc.setCameraEntity(mc.player);
         mc.options.setCameraType(prevCamera);
+        hostedCommandView = null;
         if (mc.screen instanceof CommandScreen) mc.setScreen(null);
     }
 
@@ -323,8 +337,10 @@ public final class CommandMode {
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
         long win = mc.getWindow().getWindow();
-        // The same command workspace may be hosted by MAQAN Platform.
-        boolean ui = mc.screen instanceof CommandScreen || isPlatformWorkspace(mc.screen);
+        // Resolve the actual embedded command view; mc.screen is the MAQAN shell.
+        CommandScreen commandScreen = mc.screen instanceof CommandScreen standalone
+                ? standalone : isHostedCommandViewActive(mc) ? hostedCommandView : null;
+        boolean ui = commandScreen != null;
         double fwd = 0, right = 0;
         if (ui) {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_W)) fwd += 1;
@@ -337,9 +353,9 @@ public final class CommandMode {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_UP)) pitch -= 45 * dt;
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_DOWN)) pitch += 45 * dt;
             if (yaw != 0 || pitch != 0) RIG.rotate(yaw, pitch);
-            CommandScreen cs = (CommandScreen) mc.screen;
-            if (mc.isWindowActive() && !cs.busyWithMouse()) {
-                double[] es = CameraRig.edgeScroll(cs.mouseX(), cs.mouseY(), mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+            if (mc.isWindowActive() && !commandScreen.busyWithMouse()) {
+                double[] es = CameraRig.edgeScroll(commandScreen.mouseX(), commandScreen.mouseY(),
+                        commandScreen.width, commandScreen.height);
                 right += es[0]; fwd += es[1];
             }
         }
@@ -423,7 +439,8 @@ public final class CommandMode {
                 firstPersonCommand = false;
                 enter(mc);
             }
-            if (active && !(mc.screen instanceof CommandScreen)) exit(mc);                     // открылось другое окно (смерть, меню): выходим
+            if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
+                exit(mc); // Exit only when the embedded command view is no longer active.
             if (active) {
                 java.util.Set<String> alive = new java.util.HashSet<>();
                 for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) if (en.isAlive()) alive.add(en.getUUID().toString());

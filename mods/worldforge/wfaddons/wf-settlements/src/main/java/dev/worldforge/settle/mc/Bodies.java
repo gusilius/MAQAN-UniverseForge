@@ -93,7 +93,8 @@ public final class Bodies {
      * The global colony registry is never traversed by this hot path.
      */
     public static void tick(MinecraftServer server) {
-        int spawnBudget = Math.max(0, dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass());
+        int spawnBudget = Math.min(2,
+                Math.max(0, dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass()));
         if (server == null) return;
         // A zero spawn budget disables creation only. Existing bodies must still be reconciled
         // and despawned when their colony leaves the retention radius or loses its worker.
@@ -160,7 +161,8 @@ public final class Bodies {
         if (!liveReconciliationCursor.hasNext()) liveReconciliationCursor = null;
 
         int spawned = 0;
-        int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
+        int colonyBodyLimit = Math.min(2,
+                Math.max(0, dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony()));
         // Bound candidate inspection separately from successful spawns. Otherwise a nearby
         // colony with thousands of already-materialized workers forces a full worker-list scan
         // every pass even though the spawn budget is exhausted by existing bodies.
@@ -171,6 +173,10 @@ public final class Bodies {
             if (spawned >= spawnBudget || scanBudget <= 0) break;
             if (colony == null || colony.s == null || colony.s.id == null) continue;
             String colonyId = colony.s.id;
+            // No physical worker entities in generated/strategic settlement projections.
+            // Only a village explicitly adopted from a Minecraft structure may materialize workers.
+            if (colony.genesisOperationId == null
+                    || !colony.genesisOperationId.startsWith("minecraft:village:")) continue;
             ServerLevel level = colony.level(server);
             if (level == null || !SimulationLod.shouldSpawnWorkers(
                     colony.dim, colony.cx, colony.cz)) continue;
