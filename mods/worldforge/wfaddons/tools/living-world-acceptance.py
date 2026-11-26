@@ -23,7 +23,7 @@ METRICS = (
     "tps_min", "mspt_p50", "mspt_p95", "mspt_p99", "mspt_max",
     "cpu_percent_max", "process_working_set_bytes_max", "process_private_bytes_max",
     "heap_used_bytes_max", "heap_committed_bytes_max", "non_heap_used_bytes_max",
-    "gc_collection_count", "gc_collection_ms", "gc_pause_ms_max",
+    "tick_count", "gc_collection_count", "gc_collection_ms", "gc_pause_ms_max",
     "thread_count_max", "physical_npc_peak", "background_population_peak",
     "queue_depth_max", "scheduler_backlog_max", "oldest_queue_item_age_ms_max",
     "wal_pending_max", "durable_writes", "persistence_lag_ms_max", "snapshot_ms_max", "wal_replayed_records"
@@ -132,6 +132,9 @@ def main():
         if key == "tps_min":
             if values[key] < limit:
                 fail("TPS below configured minimum")
+        elif key in ("durable_writes", "tick_count"):
+            if values[key] < limit:
+                fail("minimum execution/durability target not reached: " + key)
         elif values[key] > limit:
             fail("resource/performance budget exceeded: " + key)
 
@@ -141,6 +144,20 @@ def main():
     for key in ("fps_min", "frame_ms_p95", "frame_ms_p99", "frame_ms_max"):
         if key not in client:
             inconclusive("client metric missing: " + key)
+        require_number(client, key)
+    client_budgets = report.get("client_budgets")
+    if not isinstance(client_budgets, dict):
+        inconclusive("explicit real-client performance budgets missing")
+    for key in ("fps_min", "frame_ms_p95", "frame_ms_p99", "frame_ms_max"):
+        if key not in client_budgets:
+            inconclusive("client budget missing: " + key)
+        limit = require_number(client_budgets, key)
+        value = float(client[key])
+        if key == "fps_min":
+            if value < limit:
+                fail("real-client FPS below configured minimum")
+        elif value > limit:
+            fail("real-client frame-time budget exceeded: " + key)
     print("LIVING_WORLD_VERDICT=PASS")
     print("LIVING_WORLD_STAGE=" + str(report["stage"]))
     print("LIVING_WORLD_COMMIT=" + str(report["commit"]))
