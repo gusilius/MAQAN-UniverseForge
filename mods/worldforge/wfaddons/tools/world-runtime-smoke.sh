@@ -57,6 +57,14 @@ wait_for_process_exit() {
   ! kill -0 "$pid" 2>/dev/null
 }
 
+capture_process_metrics() {
+  # Lightweight process-only sampling; expensive JVM thread dumps are deliberately rarer.
+  local stamp
+  stamp="$(date +%s)"
+  WF_METRIC_PID="$SERVER_PID" run_bounded 8 powershell.exe -NoProfile -Command '$p=Get-Process -Id ([int]$env:WF_METRIC_PID) -ErrorAction Stop; [pscustomobject]@{pid=$p.Id;cpu_seconds=$p.CPU;working_set_bytes=$p.WorkingSet64;private_memory_bytes=$p.PrivateMemorySize64;threads=$p.Threads.Count;handles=$p.HandleCount;sampled_at_utc=[DateTime]::UtcNow.ToString("o")} | ConvertTo-Json -Compress' >> "$OUTPUT/process-metrics.jsonl" 2>/dev/null || {
+    echo "RUNTIME_PROCESS_SAMPLE_FAILED=$stamp"
+  }
+}
 capture_server_threads() {
   local stamp pid
   stamp="$(date +%s)"
@@ -305,7 +313,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "settlement-stress" ]; then
   printf 'wfsettle-stress start %s\n' "$TARGET" >> in.txt
   SETTLEMENT_REPORT_READY=0
   for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
-    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
     if (( second % 15 == 0 )); then
       echo "SETTLEMENT_STRESS_ELAPSED_SECONDS=$second"
       grep 'WF_STRESS contour=04_settlements' server.log | tail -5 || true
@@ -389,7 +398,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "social-stress" ]; then
   printf 'wfrelstress start %s %s\n' "$TARGET" "$DAYS" >> in.txt
   SOCIAL_REPORT_READY=0
   for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
-    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
     if (( second % 60 == 0 )); then
       echo "SOCIAL_STRESS_ELAPSED_SECONDS=$second"
       grep 'WF_STRESS contour=03_social' server.log | tail -4 || true
@@ -471,7 +481,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "population-stress" ]; then
   printf 'wfstress population start %s %s\n' "$TARGET" "$BATCH" >> in.txt
   STRESS_REPORT_READY=0
   for second in $(seq 1 "$MAX_RUNTIME_SECONDS"); do
-    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
     if (( second % 60 == 0 )); then
       echo "POPULATION_STRESS_ELAPSED_SECONDS=$second"
       grep 'WF_STRESS contour=02_population progress' server.log | tail -3 || true
@@ -538,7 +549,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "server-core" ]; then
   # forcing chunks, or invoking population/worldgen acceptance scenarios.
   printf '%s\n' "list" >> in.txt
   for second in $(seq 1 "${WF_CORE_OBSERVE_SECONDS:-120}"); do
-    if (( second == 1 || second % 15 == 0 )); then
+    if (( second == 1 || second % 60 == 0 )); then
       capture_server_threads
       stamp="$(date +%s)"
       jcmd -l > "$OUTPUT/core-jcmd-$stamp.txt" 2>&1 || true
@@ -633,7 +644,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     # Preserve periodic JVM snapshots while the server is healthy. The watchdog's
     # own crash report did not contain the main Server thread in the last run, so
     # a time series is required to identify the last live call stack before a stall.
-    if (( second == 1 || second % 15 == 0 )); then capture_server_threads; fi
+    if (( second == 1 || second % 60 == 0 )); then capture_server_threads; fi
+    if (( second % 5 == 0 )); then capture_process_metrics; fi
     # Release both one-chunk tickets as soon as the target chunks have been generated.
     # The rest of the world must remain dormant and must not be simulated by this test.
     if (( FORCELoad_RELEASED == 0 )) \
