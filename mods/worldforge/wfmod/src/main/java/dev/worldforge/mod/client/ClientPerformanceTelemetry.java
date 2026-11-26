@@ -2,7 +2,7 @@ package dev.worldforge.mod.client;
 
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MaqanPerformanceConfig;
-import net.minecraftforge.client.event.RenderTickEvent;
+import net.minecraftforge.event.TickEvent.RenderTickEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.slf4j.Logger;
