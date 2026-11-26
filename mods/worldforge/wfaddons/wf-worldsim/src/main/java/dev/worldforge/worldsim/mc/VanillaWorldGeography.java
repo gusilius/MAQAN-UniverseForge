@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.settle.mc.SettleMod;
 import dev.worldforge.mod.MapChunkGenerator;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.TickEvent;
@@ -231,17 +232,26 @@ public final class VanillaWorldGeography {
         StructureRole override = STRUCTURE_ROLE_OVERRIDES.get(key);
         if (override != null) return override;
         String path = key.getPath().toLowerCase(java.util.Locale.ROOT);
-        if (containsAny(path, "village", "settlement", "town", "city", "hamlet", "colony",
-                "camp", "homestead", "outpost", "tribe")) return StructureRole.SETTLEMENT;
-        if (containsAny(path, "house", "home", "dwelling", "cabin", "hut", "farmhouse", "manor"))
+        var catalogue = SettleMod.STRUCTURE_CATALOG;
+        if (catalogue.matchesStructureClass("settlement_anchor", key.toString())
+                || containsAny(path, "village", "settlement", "town", "city", "hamlet", "colony",
+                        "camp", "homestead", "outpost", "tribe")) return StructureRole.SETTLEMENT;
+        if (catalogue.matchesStructureClass("residential", key.toString())
+                || containsAny(path, "house", "home", "dwelling", "cabin", "hut", "farmhouse", "manor"))
             return StructureRole.RESIDENTIAL;
-        if (containsAny(path, "fortress", "fort", "castle", "citadel", "barrack", "keep", "watchtower"))
+        if (catalogue.matchesStructureClass("military", key.toString())
+                || containsAny(path, "fortress", "fort", "castle", "citadel", "barrack", "keep", "watchtower"))
             return StructureRole.MILITARY;
-        if (containsAny(path, "mine", "farm", "market", "workshop", "factory", "warehouse", "mill", "port"))
+        if (catalogue.matchesStructureClass("agriculture", key.toString())
+                || catalogue.matchesStructureClass("industry", key.toString())
+                || catalogue.matchesStructureClass("commerce", key.toString())
+                || containsAny(path, "mine", "farm", "market", "workshop", "factory", "warehouse", "mill", "port"))
             return StructureRole.ECONOMIC;
-        if (containsAny(path, "temple", "shrine", "church", "monastery", "sanctuary"))
+        if (catalogue.matchesStructureClass("religious", key.toString())
+                || containsAny(path, "temple", "shrine", "church", "monastery", "sanctuary"))
             return StructureRole.RELIGIOUS;
-        if (containsAny(path, "bridge", "road", "tunnel", "canal", "rail", "aqueduct"))
+        if (catalogue.matchesStructureClass("infrastructure", key.toString())
+                || containsAny(path, "bridge", "road", "tunnel", "canal", "rail", "aqueduct"))
             return StructureRole.INFRASTRUCTURE;
         if (containsAny(path, "dungeon", "spawner", "crypt", "catacomb"))
             return StructureRole.DUNGEON;
