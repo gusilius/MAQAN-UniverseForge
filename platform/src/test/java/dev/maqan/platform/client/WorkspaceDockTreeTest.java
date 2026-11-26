@@ -87,6 +87,24 @@ class WorkspaceDockTreeTest {
     }
 
     @Test
+    void splitterPositionsMatchMinimumConstrainedPanelLayout() {
+        WorkspaceDockTree.Node tree = WorkspaceDockTree.dock(
+                new WorkspaceDockTree.Panel("map"), "map", "inspector",
+                WorkspaceDockTree.Side.RIGHT, 300);
+        var bounds = new WorkspaceDockTree.Rect(0, 0, 1_000, 600);
+        var minimums = Map.of(
+                "map", new WorkspaceDockTree.MinimumSize(800, 100),
+                "inspector", new WorkspaceDockTree.MinimumSize(150, 100));
+
+        var panels = WorkspaceDockTree.layout(tree, bounds, minimums);
+        var splitter = WorkspaceDockTree.splitters(tree, bounds, minimums).get(0);
+
+        assertEquals(panels.get("inspector").x(), splitter.position());
+        assertEquals(800, panels.get("map").width());
+        assertEquals(200, panels.get("inspector").width());
+    }
+
+    @Test
     void rejectsDuplicateIdsAndInvalidSplitWeights() {
         WorkspaceDockTree.Node duplicate = new WorkspaceDockTree.Split(
                 WorkspaceDockTree.Axis.HORIZONTAL, 500,

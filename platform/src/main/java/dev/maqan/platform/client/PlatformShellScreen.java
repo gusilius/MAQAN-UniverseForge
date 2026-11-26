@@ -226,6 +226,17 @@ public final class PlatformShellScreen extends Screen {
         return new WorkspaceDockTree.Rect(44, 35, Math.max(1, width - 44), Math.max(1, height - 35));
     }
 
+    /** Shared constraints for layout, splitter hit-testing and drag/drop geometry. */
+    private Map<String, WorkspaceDockTree.MinimumSize> workspaceMinimums() {
+        double scale = Math.min(1.0, Math.min(width / 1920.0, height / 1080.0));
+        return Map.of(
+                "navigation", new WorkspaceDockTree.MinimumSize(Math.max(112, (int) (150 * scale)), Math.max(96, (int) (120 * scale))),
+                "content", new WorkspaceDockTree.MinimumSize(Math.max(180, (int) (220 * scale)), Math.max(120, (int) (160 * scale))),
+                "inspector", new WorkspaceDockTree.MinimumSize(Math.max(116, (int) (180 * scale)), Math.max(110, (int) (140 * scale))),
+                "tools", new WorkspaceDockTree.MinimumSize(Math.max(116, (int) (180 * scale)), Math.max(96, (int) (120 * scale))),
+                "timeline", new WorkspaceDockTree.MinimumSize(160, Math.max(56, (int) (64 * scale))));
+    }
+
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
         WorkspaceDockTree.Rect bounds = workspaceBounds();
@@ -233,13 +244,7 @@ public final class PlatformShellScreen extends Screen {
         Map<String, WorkspaceDockTree.Rect> layout;
         if (compactViewport()) layout = Map.of("content", bounds);
         else {
-            double f = Math.min(1.0, Math.min(width / 1920.0, height / 1080.0));
-            layout = WorkspaceDockTree.layout(root, bounds, Map.of(
-                    "navigation", new WorkspaceDockTree.MinimumSize(Math.max(112,(int)(150*f)), Math.max(96,(int)(120*f))),
-                    "content", new WorkspaceDockTree.MinimumSize(Math.max(180,(int)(220*f)), Math.max(120,(int)(160*f))),
-                    "inspector", new WorkspaceDockTree.MinimumSize(Math.max(116,(int)(180*f)), Math.max(110,(int)(140*f))),
-                    "tools", new WorkspaceDockTree.MinimumSize(Math.max(116,(int)(180*f)), Math.max(96,(int)(120*f))),
-                    "timeline", new WorkspaceDockTree.MinimumSize(160, Math.max(56,(int)(64*f)))));
+            layout = WorkspaceDockTree.layout(root, bounds, workspaceMinimums());
         }
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
             Panel panel = panels.get(entry.getKey());
@@ -502,7 +507,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawDockSplitters(GuiGraphics g, int mx, int my) {
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
+        for (WorkspaceDockTree.Splitter splitter : (compactViewport() ? List.<WorkspaceDockTree.Splitter>of() : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums()))) {
             boolean horizontal = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL;
             int left = horizontal ? splitter.position() - 2 : splitter.start();
             int top = horizontal ? splitter.start() : splitter.position() - 2;
@@ -811,6 +816,7 @@ public final class PlatformShellScreen extends Screen {
         if(mouseX>=p.x&&mouseX<=p.x+26&&mouseY>=p.y&&mouseY<=p.y+26)
             g.renderTooltip(font,Component.literal(p.title),mouseX,mouseY);
         if (p.minimized) return;
+        g.enableScissor(p.x + 1, p.y + 26, p.x + p.w - 1, p.y + p.h - 1);
         switch (p.id) {
             case "navigation" -> drawNavigationPanel(g,p);
             case "inspector" -> drawInspectorPanel(g,p);
@@ -818,6 +824,7 @@ public final class PlatformShellScreen extends Screen {
             case "tools" -> drawCommandPanel(g,p);
             default -> {}
         }
+        g.disableScissor();
         g.fill(p.x+p.w-7,p.y+p.h-7,p.x+p.w-2,p.y+p.h-2,0xFF426174);
     }
 
@@ -1082,7 +1089,7 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false;
             return true;
         }
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
+        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums())) {
             boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
                     ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
@@ -1223,7 +1230,7 @@ public final class PlatformShellScreen extends Screen {
     private void applyPanelDrop(String sourceId, int mouseX, int mouseY) {
         if (sourceId == null || sourceId.equals("content")) return;
         Map<String, WorkspaceDockTree.Rect> rectangles =
-                WorkspaceDockTree.layout(layoutRoot(), workspaceBounds());
+                WorkspaceDockTree.layout(layoutRoot(), workspaceBounds(), workspaceMinimums());
         String targetId = null;
         WorkspaceDockTree.Rect targetRect = null;
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : rectangles.entrySet()) {
