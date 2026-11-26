@@ -60,8 +60,9 @@ public final class PlatformShellScreen extends Screen {
     private String selectedCapabilityId = "maqan.atlas.cosmos";
     private String draggingPanel;
     private String resizingPanel;
-    private String resizingSplitterPath;
+    private String resizingSplitterPath, draggingPopup;
     private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY;
+    private int settingsX=-1, settingsY=-1, managerX=-1, managerY=-1, notificationsX=-1, notificationsY=-1;
     private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
     private WorkspaceDockTree.Node workspaceRoot;
     private WorkspaceProfileStore profileStore;
@@ -209,19 +210,31 @@ public final class PlatformShellScreen extends Screen {
                                 new WorkspaceDockTree.Panel("tools")), 0)));
     }
 
+    private boolean compactViewport() { return width < 900 || height < 520; }
+    private boolean strategicCameraWorkspace() { return profile == Profile.RTS || profile == Profile.POLITICS; }
+    private WorkspaceDockTree.Node layoutRoot() {
+        return strategicCameraWorkspace() && workspaceRoot != null
+                ? WorkspaceDockTree.remove(workspaceRoot, "timeline") : workspaceRoot;
+    }
     private WorkspaceDockTree.Rect workspaceBounds() {
         return new WorkspaceDockTree.Rect(44, 35, Math.max(1, width - 44), Math.max(1, height - 35));
     }
 
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
-        Map<String, WorkspaceDockTree.Rect> layout = WorkspaceDockTree.layout(workspaceRoot,
-                workspaceBounds(), Map.of(
-                        "navigation", new WorkspaceDockTree.MinimumSize(150, 120),
-                        "content", new WorkspaceDockTree.MinimumSize(220, 160),
-                        "inspector", new WorkspaceDockTree.MinimumSize(180, 140),
-                        "tools", new WorkspaceDockTree.MinimumSize(180, 120),
-                        "timeline", new WorkspaceDockTree.MinimumSize(180, 64)));
+        WorkspaceDockTree.Rect bounds = workspaceBounds();
+        WorkspaceDockTree.Node root = layoutRoot();
+        Map<String, WorkspaceDockTree.Rect> layout;
+        if (compactViewport()) layout = Map.of("content", bounds);
+        else {
+            double f = Math.min(1.0, Math.min(width / 1920.0, height / 1080.0));
+            layout = WorkspaceDockTree.layout(root, bounds, Map.of(
+                    "navigation", new WorkspaceDockTree.MinimumSize(Math.max(112,(int)(150*f)), Math.max(96,(int)(120*f))),
+                    "content", new WorkspaceDockTree.MinimumSize(Math.max(180,(int)(220*f)), Math.max(120,(int)(160*f))),
+                    "inspector", new WorkspaceDockTree.MinimumSize(Math.max(116,(int)(180*f)), Math.max(110,(int)(140*f))),
+                    "tools", new WorkspaceDockTree.MinimumSize(Math.max(116,(int)(180*f)), Math.max(96,(int)(120*f))),
+                    "timeline", new WorkspaceDockTree.MinimumSize(160, Math.max(56,(int)(64*f)))));
+        }
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
             Panel panel = panels.get(entry.getKey());
             if (panel == null || "FLOAT".equals(panel.dock)) continue;
@@ -234,7 +247,10 @@ public final class PlatformShellScreen extends Screen {
             if (panel == null) continue;
             if (!layout.containsKey(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
             if ("FLOAT".equals(panel.dock)) panel.visible = !hiddenPanels.contains(id);
+            if (compactViewport() && !"content".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
+            if (strategicCameraWorkspace() && "timeline".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
         }
+        clampPanels();
     }
 
     private Preferences workspacePreferences() {
@@ -264,7 +280,10 @@ public final class PlatformShellScreen extends Screen {
                 for (Panel panel : panels.values()) panel.dock = "DOCK";
             }
             ambientGrid = prefs.getBoolean("ambient_grid", ambientGrid);
-            panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
+            panelShadows=prefs.getBoolean("panel_shadows",panelShadows);
+            settingsX=prefs.getInt("popup.settings.x",-1);settingsY=prefs.getInt("popup.settings.y",-1);
+            managerX=prefs.getInt("popup.manager.x",-1);managerY=prefs.getInt("popup.manager.y",-1);
+            notificationsX=prefs.getInt("popup.notifications.x",-1);notificationsY=prefs.getInt("popup.notifications.y",-1);
         }
         try {
             String activeName = profileStore.activeProfile();
@@ -287,6 +306,9 @@ public final class PlatformShellScreen extends Screen {
             prefs.put("capability", selectedCapabilityId);
             prefs.putBoolean("ambient_grid", ambientGrid);
             prefs.putBoolean("panel_shadows", panelShadows);
+            prefs.putInt("popup.settings.x",settingsX);prefs.putInt("popup.settings.y",settingsY);
+            prefs.putInt("popup.manager.x",managerX);prefs.putInt("popup.manager.y",managerY);
+            prefs.putInt("popup.notifications.x",notificationsX);prefs.putInt("popup.notifications.y",notificationsY);
             for (String id : List.of("navigation", "inspector", "tools", "timeline"))
                 prefs.putBoolean("hidden." + id, hiddenPanels.contains(id));
             for (Panel panel : panels.values()) {
@@ -419,13 +441,24 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void clampPanels() {
-        for (Panel p : panels.values()) {
-            if (!"FLOAT".equals(p.dock)) continue;
-            p.w = Math.max(150, Math.min(p.w, width - 24));
-            p.h = Math.max(54, Math.min(p.h, height - 48));
-            p.x = Math.max(44, Math.min(p.x, width - p.w - 8));
-            p.y = Math.max(38, Math.min(p.y, height - (p.minimized ? 26 : p.h) - 8));
+        for (Panel p : panels.values()) if ("FLOAT".equals(p.dock)) {
+            int mw=Math.max(1,width-12), mh=Math.max(26,height-42);
+            p.w=Math.max(Math.min(140,mw),Math.min(p.w,mw));
+            p.h=Math.max(Math.min(54,mh),Math.min(p.h,mh));
+            int maxX=Math.max(4,width-p.w-4), maxY=Math.max(34,height-(p.minimized?26:p.h)-4);
+            p.x=Math.max(Math.min(44,maxX),Math.min(p.x,maxX));
+            p.y=Math.max(Math.min(38,maxY),Math.min(p.y,maxY));
         }
+    }
+    private int popupW(int preferred) { return Math.max(1,Math.min(preferred,width-16)); }
+    private int popupH(int preferred) { return Math.max(28,Math.min(preferred,height-42)); }
+    private int popupX(int saved,int preferred,boolean right) {
+        int w=popupW(preferred), fallback=right?width-w-12:(width-w)/2;
+        return Math.max(8,Math.min(saved>=0?saved:fallback,Math.max(8,width-w-8)));
+    }
+    private int popupY(int saved,int preferred,int fallback) {
+        int h=popupH(preferred);
+        return Math.max(34,Math.min(saved>=0?saved:fallback,Math.max(34,height-h-8)));
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
@@ -463,7 +496,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawDockSplitters(GuiGraphics g, int mx, int my) {
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
             boolean horizontal = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL;
             int left = horizontal ? splitter.position() - 2 : splitter.start();
             int top = horizontal ? splitter.start() : splitter.position() - 2;
@@ -659,8 +692,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
-        int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
-        int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
+        int w=popupW(360),h=popupH(270),x=popupX(managerX,360,false),y=popupY(managerY,270,(height-h)/2);
         g.fill(0, 35, width, height, 0x99000000);
         g.fill(x, y, x + w, y + h, SURFACE);
         g.fill(x, y, x + w, y + 28, SURFACE_ALT);
@@ -689,8 +721,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawNotificationCenter(GuiGraphics g, int mx, int my) {
-        int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
-        int x = width - w - 12, y = 42;
+        int w=popupW(440),h=popupH(300),x=popupX(notificationsX,440,true),y=popupY(notificationsY,300,42);
         g.fill(0, 35, width, height, 0x66000000);
         g.fill(x, y, x + w, y + h, SURFACE);
         g.fill(x, y, x + w, y + 28, SURFACE_ALT);
@@ -720,7 +751,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawSettings(GuiGraphics g, int mx, int my) {
-        int w=260,h=190,x=52,y=Math.max(42,height-h-12);
+        int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
         ThemeManager.renderWindow(g,x,y,w,h,"settings");
         g.fill(x,y,x+w,y+26,WorkspaceTheme.alpha(SURFACE_ALT,190));
@@ -983,10 +1014,10 @@ public final class PlatformShellScreen extends Screen {
         }
         if (button != 0) return forwardViewMouseClicked(mx, my, button);
         if (workspaceManagerVisible) {
-            int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
-            int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
-            if (mx < x || mx >= x + w || my < y || my >= y + h) { workspaceManagerVisible = false; return true; }
-            if (my < y + 28 && mx >= x + w - 28) { workspaceManagerVisible = false; return true; }
+            int w=popupW(360),h=popupH(270),x=popupX(managerX,360,false),y=popupY(managerY,270,(height-h)/2);
+            if (mx < x || mx >= x+w || my < y || my >= y+h) { workspaceManagerVisible=false; return true; }
+            if (my < y+28 && mx >= x+w-28) { workspaceManagerVisible=false; return true; }
+            if (my < y+28) { draggingPopup="manager"; pointerOffsetX=(int)mx-x; pointerOffsetY=(int)my-y; return true; }
             int buttonY = y + h - 38;
             if (my >= buttonY && my < buttonY + 25) {
                 if (mx >= x + 10 && mx < x + 112) {
@@ -1016,13 +1047,12 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if (notificationCenterVisible) {
-            int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
-            int x = width - w - 12, y = 42;
+            int w=popupW(440),h=popupH(300),x=popupX(notificationsX,440,true),y=popupY(notificationsY,300,42);
             if (mx >= x + w - 28 && mx < x + w && my >= y && my < y + 28) {
                 notificationCenterVisible = false;
-            } else if (mx < x || mx >= x + w || my < y || my >= y + h) {
-                notificationCenterVisible = false;
-            }
+            } else if (my >= y && my < y+28 && mx >= x && mx < x+w-28) {
+                draggingPopup="notifications"; pointerOffsetX=(int)mx-x; pointerOffsetY=(int)my-y;
+            } else if (mx < x || mx >= x+w || my < y || my >= y+h) notificationCenterVisible=false;
             return true;
         }
         if (searchVisible) {
@@ -1045,7 +1075,7 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false;
             return true;
         }
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
             boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
                     ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
@@ -1109,7 +1139,8 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(settingsVisible) {
-            int sx=52,sy=Math.max(42,height-202);
+            int sx=popupX(settingsX,260,false),sy=popupY(settingsY,190,height-202);
+            if(my>=sy&&my<sy+26&&mx>=sx&&mx<sx+232) { draggingPopup="settings"; pointerOffsetX=(int)mx-sx; pointerOffsetY=(int)my-sy; return true; }
             if(mx>=sx+232&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
             if(mx>=sx&&mx<=sx+260&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
             if(mx>=sx&&mx<=sx+260&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
@@ -1131,6 +1162,9 @@ public final class PlatformShellScreen extends Screen {
             if(!p.visible || p.id.equals("content")) continue;
             int ph=p.minimized?26:p.h;
             if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
+            if ("FLOAT".equals(p.dock) && !p.minimized && mx>=p.x+p.w-14 && my>=p.y+p.h-14) {
+                resizingPanel=p.id; resizeStartX=(int)mx; resizeStartY=(int)my; resizeStartW=p.w; resizeStartH=p.h; return true;
+            }
             if (my <= p.y + 26) {
                 if ((p.id.equals("inspector") || p.id.equals("tools"))
                         && mx >= p.x + 28 && mx < p.x + 116) {
@@ -1145,7 +1179,10 @@ public final class PlatformShellScreen extends Screen {
                     if (!p.pinned) hiddenPanels.add(p.id);
                     layoutWorkspace(); saveWorkspaceState(); return true;
                 }
-                return true;
+                if(p.pinned) return true;
+                if((p.id.equals("inspector")||p.id.equals("tools"))&&mx>=p.x+28&&mx<p.x+116) return true;
+                draggingPanel=p.id; pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
+                dragMouseX=(int)mx; dragMouseY=(int)my; return true;
             }
             if (p.id.equals("tools")) {
                 List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
@@ -1263,10 +1300,14 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void toggleWorkspacePanel(String id) {
-        if (hiddenPanels.contains(id)) hiddenPanels.remove(id);
-        else hiddenPanels.add(id);
-        layoutWorkspace();
-        saveWorkspaceState();
+        if(hiddenPanels.contains(id)) {
+            hiddenPanels.remove(id);
+            if(compactViewport()) {
+                Panel p=panels.get(id);
+                if(p!=null&&!id.equals("content")){p.dock="FLOAT";p.x=Math.max(48,width-p.w-16);p.y=48;}
+            }
+        } else hiddenPanels.add(id);
+        layoutWorkspace();saveWorkspaceState();
     }
 
     private void invokeAtlasRailAction(String methodName) {
@@ -1380,8 +1421,20 @@ public final class PlatformShellScreen extends Screen {
             handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
             return handled;
         }
+        if (draggingPopup != null) {
+            int pw=draggingPopup.equals("manager")?360:draggingPopup.equals("notifications")?440:260;
+            int ph=draggingPopup.equals("manager")?270:draggingPopup.equals("notifications")?300:190;
+            int x=Math.max(8,Math.min((int)mx-pointerOffsetX,Math.max(8,width-popupW(pw)-8)));
+            int y=Math.max(34,Math.min((int)my-pointerOffsetY,Math.max(34,height-popupH(ph)-8)));
+            switch(draggingPopup) {
+                case "manager" -> {managerX=x;managerY=y;}
+                case "notifications" -> {notificationsX=x;notificationsY=y;}
+                case "settings" -> {settingsX=x;settingsY=y;}
+            }
+            return true;
+        }
         if (resizingSplitterPath != null) {
-            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
                 if (!splitter.path().equals(resizingSplitterPath)) continue;
                 int span = Math.max(1, splitter.end() - splitter.start());
                 int coordinate = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL ? (int) mx : (int) my;
@@ -1394,14 +1447,15 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (draggingPanel != null) {
-            dragMouseX = (int) mx; dragMouseY = (int) my;
+            dragMouseX=(int)mx; dragMouseY=(int)my;
+            Panel p=panels.get(draggingPanel);
+            if(p!=null&&"FLOAT".equals(p.dock)){p.x=(int)mx-pointerOffsetX;p.y=(int)my-pointerOffsetY;clampPanels();}
             return true;
         }
         if(resizingPanel!=null) {
             Panel p=panels.get(resizingPanel);
-            p.w=Math.max(160,resizeStartW+(int)mx-resizeStartX);
-            p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);
-            clampPanels(); return true;
+            if(p!=null){p.w=Math.max(140,resizeStartW+(int)mx-resizeStartX);p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);clampPanels();}
+            return true;
         }
         boolean handled = super.mouseDragged(mx,my,button,dx,dy);
         handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
@@ -1410,10 +1464,10 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
         if (button == 0) {
-            boolean changed = draggingPanel != null || resizingPanel != null || resizingSplitterPath != null;
-            if (draggingPanel != null) applyPanelDrop(draggingPanel, (int) mx, (int) my);
-            draggingPanel = null; resizingPanel = null; resizingSplitterPath = null;
-            if (changed) { layoutWorkspace(); saveWorkspaceState(); }
+            boolean changed=draggingPanel!=null||resizingPanel!=null||resizingSplitterPath!=null||draggingPopup!=null;
+            if(draggingPanel!=null) applyPanelDrop(draggingPanel,(int)mx,(int)my);
+            draggingPanel=null;resizingPanel=null;resizingSplitterPath=null;draggingPopup=null;
+            if(changed){layoutWorkspace();saveWorkspaceState();}
         }
         boolean handled = super.mouseReleased(mx,my,button);
         handled = forwardViewMouseReleased(mx, my, button) || handled;
@@ -1526,10 +1580,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
-        super.resize(minecraft, width, height);
-        layoutWorkspace();
-        initializedView = null;
-        initViewInContent(activeView());
+        super.resize(minecraft,width,height);
+        clampPanels();layoutWorkspace();initializedView=null;initViewInContent(activeView());
     }
 
 }
