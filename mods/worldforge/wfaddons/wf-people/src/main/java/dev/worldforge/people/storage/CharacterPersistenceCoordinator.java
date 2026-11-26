@@ -197,10 +197,10 @@ public final class CharacterPersistenceCoordinator implements AutoCloseable {
                 // WAL remains intact until the normal coordinated compaction succeeds, so a
                 // crash between these two durable writes is replay-safe.
                 try {
-                    records.put(record);
-                    if (!evictionGate.markPersisted(ticket)) {
+                    boolean published = evictionGate.publishIfCurrent(ticket, () -> records.put(record));
+                    if (!published) {
                         result.completeExceptionally(new StalePersistenceException(
-                                "Character changed while its WAL frame was being published: " + globalId));
+                                "Character changed before its WAL frame could be published: " + globalId));
                         return;
                     }
                     dirtyQueue.acknowledge(globalId, ticket.generation());
