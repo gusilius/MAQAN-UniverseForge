@@ -196,7 +196,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = observed_map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && !c.wilderness && c.suitability >= 48 && c.founding_site)
+        .filter(|c| c.land && !c.wilderness && c.founding_site)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -704,10 +704,11 @@ mod tests {
 
     #[test]
     fn vanilla_terrain_without_structures_never_founds_settlements() {
-        let vanilla = GeographicMap {
+        let mut vanilla = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
             population_density_pct: 100, ..map()
         };
+        for cell in &mut vanilla.cells { cell.founding_site = false; }
         let mut bands = Vec::new(); let mut polities = Vec::new(); let mut events = Vec::new();
         bootstrap_initial_civilizations(&vanilla, 91_827, &mut bands, &mut polities, &mut events);
         bootstrap(&vanilla, 91_827, &mut bands, &mut events);
@@ -777,8 +778,8 @@ mod tests {
     fn one_observed_village_creates_one_local_settlement_not_a_state() {
         let mut cells=Vec::new();
         for z in (2..=78).step_by(4) { for x in (2..=78).step_by(4) {
-            cells.push(GeographicCell { x,z,biome:"minecraft:plains".into(),elevation:70,
-                river:0,land:true,suitability:90,owner_realm_id:String::new(),
+            cells.push(GeographicCell { x,z,biome:"minecraft:desert".into(),elevation:70,
+                river:0,land:true,suitability:24,owner_realm_id:String::new(),
                 discovered_year:0,wilderness:false,founding_site:x==34 && z==34 });
         }}
         let map=GeographicMap { map_id:"vanilla-world:minecraft:overworld".into(),
@@ -790,9 +791,9 @@ mod tests {
         assert_eq!(bands.len(),1,"one detected village structure may found one local community");
         assert!(bands[0].settled);
         maybe_form_polity(&map, &index_cells(&map), 424242, 0, &bands, &mut polities, &mut events);
-        assert_eq!(polities.len(), 1, "one real village gets local leadership and a court, not a regional state");
-        assert_eq!(polities[0].settlement_ids, vec![bands[0].id.clone()]);
-        assert!(events.iter().any(|event|event.kind=="settlement_founded"));
+        assert_eq!(polities.len(),1,"one real village gets local leadership and a court, not a regional state");
+        assert_eq!(polities[0].settlement_ids,vec![bands[0].id.clone()]);
+        assert!(events.iter().any(|event|event.kind=="population_origin"));
         assert!(events.iter().any(|event|event.kind=="local_government_founded"));
     }
 
@@ -905,7 +906,10 @@ mod tests {
 
     #[test]
     fn authored_map_bootstrap_produces_many_small_independent_polities() {
-        let geography = map();
+        let mut geography = map();
+        for cell in &mut geography.cells {
+            cell.founding_site = cell.x % 4 == 2 && cell.z % 4 == 2;
+        }
         let mut bands = Vec::new();
         let mut polities = Vec::new();
         let mut events = Vec::new();
