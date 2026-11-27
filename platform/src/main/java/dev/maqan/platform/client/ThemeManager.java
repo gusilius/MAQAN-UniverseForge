@@ -31,6 +31,8 @@ public final class ThemeManager {
     private static final Map<String, Texture> TEXTURES = new LinkedHashMap<>();
     private static final Map<String, int[]> RECTANGLES = new LinkedHashMap<>();
     private static String selectedTheme = "royal";
+    private static float sourceScale = 1.6F;
+    private static int windowBorderPixels = 48;
     private static boolean initialized;
     private static boolean preferenceLoaded;
     private static boolean manifestValid;
@@ -70,6 +72,14 @@ public final class ThemeManager {
             if (viewport == null || viewport.get("width").getAsInt() != REFERENCE_WIDTH
                     || viewport.get("height").getAsInt() != REFERENCE_HEIGHT)
                 throw new IllegalStateException("Expected 1368x760 reference viewport");
+            sourceScale = root.has("sourceScale") ? root.get("sourceScale").getAsFloat() : 1.6F;
+            if (!Float.isFinite(sourceScale) || sourceScale < 0.5F || sourceScale > 4.0F)
+                throw new IllegalStateException("Invalid texture sourceScale");
+            if (root.has("windowBorderPixels")) {
+                windowBorderPixels = root.get("windowBorderPixels").getAsInt();
+                if (windowBorderPixels < 8 || windowBorderPixels > 160)
+                    throw new IllegalStateException("Invalid nine-slice border");
+            }
 
             String defaultTheme = root.has("defaultTheme") ? root.get("defaultTheme").getAsString() : "royal";
             if (!isSupported(selectedTheme)) selectedTheme = normalize(defaultTheme);
@@ -218,19 +228,20 @@ public final class ThemeManager {
         // Blank frames are decorative only; live text and controls are rendered by the host.
         String element = ("inspector".equals(panelId) || "tools".equals(panelId)) ? "rw" : "lw";
         Texture texture = TEXTURES.get(element);
-        if (texture != null) drawNineSlice(graphics, texture, x, y, width, height, 48);
+        if (texture != null) drawNineSlice(graphics, texture, x, y, width, height, windowBorderPixels);
     }
 
     /**
      * Preserve ornate source corners while stretching only the edges and center.
-     * The 48px source border corresponds to 24 logical pixels at sourceScale=2.
+     * Source border is converted using the scale declared by the actual asset pack.
      */
     private static void drawNineSlice(GuiGraphics graphics, Texture texture,
                                       int x, int y, int width, int height, int requestedBorder) {
         int border = Math.max(1, Math.min(requestedBorder,
                 Math.min(texture.width(), texture.height()) / 3));
-        int targetX = Math.min(width / 2, Math.max(1, border / 2));
-        int targetY = Math.min(height / 2, Math.max(1, border / 2));
+        int logicalBorder = Math.max(1, Math.round(border / sourceScale));
+        int targetX = Math.min(width / 2, logicalBorder);
+        int targetY = Math.min(height / 2, logicalBorder);
         int[] sx = {0, border, texture.width() - border, texture.width()};
         int[] sy = {0, border, texture.height() - border, texture.height()};
         int[] dx = {x, x + targetX, x + width - targetX, x + width};

@@ -4,7 +4,8 @@
     "width": 1368,
     "height": 760
   },
-  "sourceScale": 2,
+  "sourceScale": 1.6,
+  "windowBorderPixels": 48,
   "defaultTheme": "royal",
   "requiredThemes": [
     "royal",
