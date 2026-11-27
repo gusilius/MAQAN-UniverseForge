@@ -26,7 +26,7 @@ public final class ThemeManager {
     public static final int REFERENCE_WIDTH = 1368;
     public static final int REFERENCE_HEIGHT = 760;
     private static final String[] THEMES = {"royal", "iron", "grim", "elf"};
-    private static final String[] FRAME_ELEMENTS = {"top", "lcol", "rcol", "mm", "cor"};
+    private static final String[] FRAME_ELEMENTS = {"top", "lcol", "rcol", "mm", "bot", "cor"};
     private static final String[] ALL_ELEMENTS = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor", "lw", "rw"};
     private static final Map<String, Texture> TEXTURES = new LinkedHashMap<>();
     private static final Map<String, int[]> RECTANGLES = new LinkedHashMap<>();
