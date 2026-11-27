@@ -15,6 +15,7 @@ import dev.worldforge.troops.mc.TroopEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -244,9 +245,15 @@ public final class CommandScreen extends Screen {
     private int inspectY() { return settlementOpen ? 148 : 34; }
 
     private boolean inspectAt(double x,double y) {
+        List<String> ids=CommandMode.selected();
+        if (ids.size() == 1) {
+            if (x < INSPECT_X || x >= INSPECT_X + INSPECT_W
+                    || y < inspectY() || y >= inspectY() + 96) return false;
+            focusSelection();
+            return true;
+        }
         if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
         int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
-        List<String> ids=CommandMode.selected();
         if(row<0||row>=Math.min(8,ids.size()))return false;
         if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
         String id=ids.get(row);
@@ -280,9 +287,73 @@ public final class CommandScreen extends Screen {
         g.drawString(font, "Рабочие, армия, стройка и приказы — в этом командном пространстве", x + 6, y + h - 11, 0xFF9EA4B5, false);
     }
 
+    /** One selected body gets a real renderer-backed portrait; every vanilla/modded LivingEntity uses its registered renderer. */
+    private void drawSingleUnitPortrait(GuiGraphics g, LivingEntity entity, String entityUuid) {
+        int x = INSPECT_X, y = inspectY(), h = 96;
+        g.fill(x, y, x + INSPECT_W, y + h, 0xD910121A);
+        g.fill(x, y, x + INSPECT_W, y + 1, 0xFF8A7040);
+        boolean troop = entity instanceof TroopEntity;
+        String role, identity = "", state = "";
+        int morale = -1, xp = -1;
+        if (entity instanceof TroopEntity t) {
+            role = t.def() == null ? t.unitId() : t.def().role();
+            morale = t.moralePct();
+            identity = t.syncedCharacterId() == null ? "" : t.syncedCharacterId();
+            xp = t.syncedCombatXp();
+            state = t.squadId() == null || t.squadId().isBlank() ? "" : "Отряд " + t.squadId();
+        } else if (CommandMode.isWorkerEntity(entity)) {
+            role = CommandMode.workerString(entity, "professionId");
+            if (role.isBlank()) role = "Рабочий";
+            identity = CommandMode.workerString(entity, "characterId");
+            state = CommandMode.workerString(entity, "statusLabel");
+            int assigned = CommandMode.workerInt(entity, "assignedBuildingId");
+            if (assigned > 0) state += " · здание #" + assigned;
+        } else {
+            role = entity.getType().builtInRegistryHolder().key().location().toString();
+        }
+        g.drawString(font, troop ? "КОМАНДИР ОТРЯДА" : "ВЫБРАННЫЙ ПЕРСОНАЖ",
+                x + 6, y + 6, 0xFFE6C875, false);
+        g.fill(x + 4, y + 20, x + 78, y + h - 4, 0xFF202733);
+        g.renderOutline(x + 4, y + 20, 74, h - 24, 0xFF6A7482);
+        g.enableScissor(x + 5, y + 21, x + 77, y + h - 5);
+        try {
+            InventoryScreen.renderEntityInInventoryFollowsMouse(g,
+                    x + 5, y + 21, x + 77, y + h - 5, 34, 0.0F,
+                    (float) (mx - (x + 41)), (float) (my - (y + 55)), entity);
+        } catch (RuntimeException rendererFailure) {
+            g.drawCenteredString(font, "MODEL", x + 41, y + 55, 0xFF9EA4B5);
+        } finally {
+            g.disableScissor();
+        }
+        int tx = x + 84;
+        int health = entity.getMaxHealth() > 0
+                ? Math.round(100 * entity.getHealth() / entity.getMaxHealth()) : 0;
+        g.drawString(font, font.plainSubstrByWidth(entity.getDisplayName().getString(), INSPECT_W - 92),
+                tx, y + 23, troop ? 0xFFE6C875 : 0xFFB8D8A0, false);
+        g.drawString(font, font.plainSubstrByWidth(role, INSPECT_W - 92), tx, y + 35, 0xFFD7DCE8, false);
+        g.drawString(font, "Здоровье " + health + "%"
+                        + (morale >= 0 ? " · Мораль " + morale + "%" : "")
+                        + (xp >= 0 ? " · XP " + xp : ""),
+                tx, y + 47, 0xFFB5B7C2, false);
+        if (!state.isBlank())
+            g.drawString(font, font.plainSubstrByWidth(state, INSPECT_W - 92), tx, y + 59, 0xFF9EA4B5, false);
+        String id = identity.isBlank() ? entityUuid : identity;
+        g.drawString(font, id.length() > 22 ? id.substring(0, 22) + "…" : id,
+                tx, y + 72, 0xFF777F91, false);
+        g.drawString(font, "Клик по карточке — фокус камеры", tx, y + 83, 0xFF8F9AA9, false);
+    }
+
     private void drawUnitInspector(GuiGraphics g) {
         List<String> ids=CommandMode.selected();
         if(ids.isEmpty())return;
+        if (ids.size() == 1) {
+            String selectedId = ids.get(0);
+            for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+                if (!(entity instanceof LivingEntity living) || !entity.getUUID().toString().equals(selectedId)) continue;
+                drawSingleUnitPortrait(g, living, selectedId);
+                return;
+            }
+        }
         int rows=Math.min(8,ids.size());
         int h=24+rows*INSPECT_ROW;
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);

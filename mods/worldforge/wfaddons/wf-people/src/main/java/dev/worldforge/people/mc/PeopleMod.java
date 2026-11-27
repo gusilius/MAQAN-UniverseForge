@@ -162,6 +162,36 @@ public class PeopleMod {
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
+        dev.worldforge.mod.LeaderVisualProviders.register("wf_people", (server, globalId) -> {
+            if (server == null || !identityPartitionsReady || globalId == null || globalId.isBlank()) return null;
+            CharacterRegistry registry = AUTHORITY.registryForGlobal(globalId);
+            if (registry == null) return null;
+            try (CharacterAccessService.Lease lease = AUTHORITY.acquireGlobal(globalId)) {
+                if (lease == null || !lease.get().alive) return null;
+                Character person = lease.get();
+                Object profileValue = person.props.get("visual.model_profile");
+                String profile = profileValue instanceof String value ? value.trim() : "";
+                Map<String, String> bindings = registry.entityBindingUuidsForGlobal(globalId);
+                String bodyUuid = bindings.getOrDefault("npc", "");
+                if (bodyUuid.isBlank() && !bindings.isEmpty())
+                    bodyUuid = bindings.values().iterator().next();
+                if (bodyUuid.isBlank())
+                    return new dev.worldforge.mod.LeaderVisualProviders.Visual("", "", profile, person.name);
+                UUID uuid;
+                try { uuid = UUID.fromString(bodyUuid); }
+                catch (IllegalArgumentException malformed) {
+                    return new dev.worldforge.mod.LeaderVisualProviders.Visual("", "", profile, person.name);
+                }
+                for (ServerLevel level : server.getAllLevels()) {
+                    net.minecraft.world.entity.Entity body = level.getEntity(uuid);
+                    if (body == null) continue;
+                    ResourceLocation type = ForgeRegistries.ENTITY_TYPES.getKey(body.getType());
+                    return new dev.worldforge.mod.LeaderVisualProviders.Visual(uuid.toString(),
+                            type == null ? "" : type.toString(), profile, person.name);
+                }
+                return new dev.worldforge.mod.LeaderVisualProviders.Visual(uuid.toString(), "", profile, person.name);
+            }
+        });
         ENTITIES.register(bus);
         bus.addListener(PeopleMod::onAttributes);
         bus.addListener(PeopleMod::onCommonSetup);

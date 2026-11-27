@@ -940,6 +940,15 @@ public final class CharacterRegistry {
         return bindings == null ? null : bindings.get(bodyKind.toLowerCase(Locale.ROOT));
     }
 
+    /** All currently indexed physical bodies for one canonical Character, ordered by body kind. */
+    public synchronized Map<String, String> entityBindingUuidsForGlobal(String globalId) {
+        String localId = globalId == null ? null : localIdForGlobalId(globalId);
+        if (localId == null) return Map.of();
+        Map<String, String> bindings = entityBindingsByCharacterId.get(localId);
+        return bindings == null || bindings.isEmpty()
+                ? Map.of() : Collections.unmodifiableMap(new TreeMap<>(bindings));
+    }
+
     /** Indexes a persisted Genesis account binding by UUID without retaining the Character object. */
     public synchronized void indexPlayerBinding(String localId, String accountUuid) {
         String globalId = globalIdByLocalId.get(localId);

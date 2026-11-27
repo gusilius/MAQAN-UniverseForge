@@ -8,6 +8,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.network.chat.Component;
@@ -16,7 +19,9 @@ import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Большая карта: режимы как в Paradox (рельеф, провинции...империи, государства), колесо = масштаб, перетаскивание, клик по провинции
@@ -706,13 +711,13 @@ public class MapScreen extends Screen {
         return best;
     }
 
-    private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
-        int x = (int) Mat    /**
+    /**
      * Draws strategic map symbols with native GUI primitives. This deliberately avoids an
      * optional texture atlas: a missing atlas must never turn every strategic object into a
      * broken-texture square. The symbol remains crisp at every GUI scale.
      */
-    private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
+    private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy,
+                                      int mx, int my, LivingEntity commanderBody) {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
         boolean selected = marker.id.equals(selectedMarkerId);
         boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
@@ -742,27 +747,53 @@ public class MapScreen extends Screen {
         g.fill(left + 2, top + size - 4, left + size - 2, top + size - 2, realmColor);
         g.renderOutline(left, top, size, size, border);
 
-        if ("army".equals(marker.type)) {
-            // A compact commander standard, not a stack of individual troop markers.
-            int poleX = left + Math.max(5, size / 5);
-            g.fill(poleX, top + 5, poleX + 1, top + size - 5, 0xFFE8D9B5);
-            g.fill(poleX + 1, top + 5, poleX + Math.max(6, size / 3), top + Math.max(9, size / 3),
-                    realmColor);
+        boolean renderedLeader = false;
+        if ("army".equals(marker.type) && commanderBody != null && commanderBody.isAlive()) {
+            g.enableScissor(left + 2, top + 2, left + size - 2, top + size - 2);
+            try {
+                InventoryScreen.renderEntityInInventoryFollowsMouse(g,
+                        left + 2, top + 2, left + size - 2, top + size - 2,
+                        Math.max(10, size / 2), 0.0F, (float) (mx - x), (float) (my - y), commanderBody);
+                renderedLeader = true;
+            } catch (RuntimeException rendererFailure) {
+                // A modded entity renderer may be unavailable during a client reload; retain the strategic fallback.
+            } finally {
+                g.disableScissor();
+            }
         }
-        int textWidth = font.width(symbol);
-        g.drawString(font, symbol, x - textWidth / 2 + ("army".equals(marker.type) ? 2 : 0),
-                y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
+        if (!renderedLeader) {
+            if ("army".equals(marker.type)) {
+                // A compact commander standard, not a stack of individual troop markers.
+                int poleX = left + Math.max(5, size / 5);
+                g.fill(poleX, top + 5, poleX + 1, top + size - 5, 0xFFE8D9B5);
+                g.fill(poleX + 1, top + 5, poleX + Math.max(6, size / 3), top + Math.max(9, size / 3),
+                        realmColor);
+            }
+            int textWidth = font.width(symbol);
+            g.drawString(font, symbol, x - textWidth / 2 + ("army".equals(marker.type) ? 2 : 0),
+                    y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
+        }
         if (selected || hovered) {
             g.renderOutline(left - 2, top - 2, size + 4, size + 4,
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
         }
     }
     private void drawMarkers(GuiGraphics g, int mx, int my) {
+        Map<String, LivingEntity> leaderBodies = new HashMap<>();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null) {
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof LivingEntity living && living.isAlive())
+                    leaderBodies.put(entity.getUUID().toString(), living);
+            }
+        }
         for (Markers.Marker marker : ClientState.markers.list()) {
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
             if (point[0] < -20 || point[1] < BAR - 20 || point[0] > width + 20 || point[1] > height + 20) continue;
-            drawStrategicMarker(g, marker, point[0], point[1], mx, my);
+            String leaderUuid = markerValue(marker.desc, "leaderEntity");
+            drawStrategicMarker(g, marker, point[0], point[1], mx, my,
+                    leaderBodies.get(leaderUuid));
             if (zoom > 0.9 || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12) {
                 String label = marker.name;
                 if ("army".equals(marker.type)) {
@@ -779,7 +810,6 @@ public class MapScreen extends Screen {
             drawDiamond(g, point[0], point[1], w.rgb);
             g.drawString(font, w.name, (int) point[0] + 7, (int) point[1] - 4, 0xFF9CF2E8);
         }
-        Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             double[] point = blockToScreen(mc.player.getX(), mc.player.getZ());
             g.fill((int) point[0] - 3, (int) point[1] - 3, (int) point[0] + 3, (int) point[1] + 3, 0xFFFFFFFF);
