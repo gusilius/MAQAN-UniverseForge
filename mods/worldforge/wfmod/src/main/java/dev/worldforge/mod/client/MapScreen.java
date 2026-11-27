@@ -727,7 +727,8 @@ public class MapScreen extends Screen {
             String uuid = markerValue(marker.desc, "leaderEntity");
             leader = leaderBodies().get(uuid);
         }
-        if (leader != null && leader.isAlive()) {
+        if (leader != null && !leader.isAlive()) leader = null;
+        if (leader != null) {
             g.enableScissor(x + 8, y + 10, x + 44, y + 46);
             try {
                 InventoryScreen.renderEntityInInventoryFollowsMouse(g,
@@ -779,7 +780,7 @@ public class MapScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth("Государство: " + realm, cardW - 16),
                     x + 8, y + 74, 0xFF9EADBF, false);
         else
-            g.drawString(font, "Выбрано · Esc — снять выбор", x + 8, y + 74, 0xFF77869A, false);
+            g.drawString(font, "Выбрано · клик по карте — сменить", x + 8, y + 74, 0xFF77869A, false);
     }
 
     private static String markerValue(String description, String key) {
