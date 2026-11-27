@@ -50,9 +50,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     /** 0 off, 1 biome, 2 elevation, 3 hydrography. */
     private int terrainLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
-    private enum RadarFilter { ALL, HOSTILE, PASSIVE, PLAYERS, OFF }
+    private enum RadarFilter { ALL, HOSTILE, PASSIVE, PLAYERS, OTHER, OFF }
     private RadarFilter radarFilter=RadarFilter.ALL;
-    private static final double RADAR_RANGE_BLOCKS=160.0;
+    private static final int[] RADAR_RANGES={64,160,320,640};
+    private int radarRangeIndex=1;
+    private double radarRangeBlocks(){return RADAR_RANGES[radarRangeIndex];}
     private static final int BACKGROUND=0xF0060B16;
 
     private record ControlBounds(int x, int y, int width) {}
@@ -174,9 +176,10 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     :switch(terrainLayer){case 1 -> "MAP: BIOME";case 2 -> "MAP: RELIEF";case 3 -> "MAP: WATER";default -> "MAP: OFF";})));
         }).bounds(terrain.x(),terrain.y(),terrain.width(),20).build());
         ControlBounds radar=controlBounds(8);
-        radarButton=addRenderableWidget(Button.builder(Component.literal("RADAR: ALL"),b->{
-            radarFilter=RadarFilter.values()[(radarFilter.ordinal()+1)%RadarFilter.values().length];
-            b.setMessage(Component.literal("RADAR: "+radarFilter.name()));
+        radarButton=addRenderableWidget(Button.builder(Component.literal(radarLabel()),b->{
+            if(hasShiftDown())radarRangeIndex=(radarRangeIndex+1)%RADAR_RANGES.length;
+            else radarFilter=RadarFilter.values()[(radarFilter.ordinal()+1)%RadarFilter.values().length];
+            b.setMessage(Component.literal(radarLabel()));
         }).bounds(radar.x(),radar.y(),radar.width(),20).build());
         updateDepthButtons();
     }
@@ -323,6 +326,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
     }
 
+    private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"m";}
+
     /** Live vanilla-world radar: only entities already tracked by the client are sampled. */
     private Entity renderEntityRadar(GuiGraphics g,int mouseX,int mouseY,NavigatorPlayerPosition player,
                                      int left,int top,int right,int bottom){
@@ -333,21 +338,29 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         double nearest=100.0;
         int drawn=0;
         for(Entity entity:mc.level.entitiesForRendering()){
-            if(entity==null||!entity.isAlive()||entity==mc.player||entity instanceof Player&&radarFilter==RadarFilter.HOSTILE)continue;
+            if(entity==null||!entity.isAlive()||entity==mc.player)continue;
             double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
             double distanceSq=dx*dx+dz*dz;
-            if(distanceSq>RADAR_RANGE_BLOCKS*RADAR_RANGE_BLOCKS)continue;
+            double radarRange=radarRangeBlocks();
+            if(distanceSq>radarRange*radarRange)continue;
             boolean hostile=entity instanceof Monster;
             boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
             boolean otherPlayer=entity instanceof Player;
+            boolean other=!hostile&&!passive&&!otherPlayer;
             if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
             if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
             if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
-            if(radarFilter==RadarFilter.ALL&&!hostile&&!passive&&!otherPlayer)continue;
+            if(radarFilter==RadarFilter.OTHER&&!other)continue;
             double[] point=project(entity.getX()/16.0,entity.getZ()/16.0,18.0*zoom,left,top,right,bottom,player);
             if(!insideMap(point[0],point[1],left,top,right,bottom))continue;
             int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
             int color=otherPlayer?0xFF55DDF2:hostile?0xFFFF6262:passive?0xFF8BDA91:0xFFFFC66D;
+            if(otherPlayer){
+                double yaw=Math.toRadians(entity.getYRot());
+                int hx=x-(int)Math.round(Math.sin(yaw)*7.0);
+                int hy=y+(int)Math.round(Math.cos(yaw)*7.0);
+                drawLine(g,x,y,hx,hy,0xFFEAFBFF);
+            }
             int radius=zoom>=1.5?4:3;
             g.fill(x-radius-2,y-radius-2,x+radius+3,y+radius+3,0xAA07101A);
             g.fill(x-radius,y-radius,x+radius+1,y+radius+1,color);
@@ -364,7 +377,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             }
             drawn++;
         }
-        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)RADAR_RANGE_BLOCKS+" blocks";
+        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)radarRange+" blocks · SHIFT+CLICK: RANGE";
         g.drawString(font,label,left+8,top+8,0xFF9BD7F1,false);
         return hovered;
     }
