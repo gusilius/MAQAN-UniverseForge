@@ -973,6 +973,14 @@ public final class PlatformShellScreen extends Screen {
         if (events.isEmpty()) g.drawString(font, "No events have been published yet", x + 12, rowY + 8, MUTED, false);
     }
 
+    private void closeTransientOverlays() {
+        settingsVisible = false;
+        workspaceManagerVisible = false;
+        notificationCenterVisible = false;
+        searchVisible = false;
+        contextMenuVisible = false;
+    }
+
     private boolean handleSettingsClick(double mx, double my) {
         int w=popupW(260),h=popupH(190),sx=popupX(settingsX,260,false),sy=popupY(settingsY,190,height-h-12);
         if(mx>=sx+w-28&&mx<sx+w&&my>=sy&&my<sy+26){settingsVisible=false;return true;}
@@ -1291,9 +1299,13 @@ public final class PlatformShellScreen extends Screen {
         if (button != 0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible
                 || searchVisible || contextMenuVisible)) return true;
         if (button == 1) {
+            Panel content = panels.get("content");
+            if (content == null || !content.visible
+                    || !WorkspaceUi.contains(mx, my, content.x, content.y, content.w, content.h)) return true;
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
             if (!contextActions.isEmpty()) {
+                closeTransientOverlays();
                 contextMenuX = (int) mx; contextMenuY = (int) my;
                 contextMenuVisible = true;
                 return true;
@@ -1372,13 +1384,15 @@ public final class PlatformShellScreen extends Screen {
         }
         if (my < uy(34)) {
             if (mx >= width - ux(88) && mx < width - ux(64)) {
-                workspaceManagerVisible = !workspaceManagerVisible;
-                notificationCenterVisible = false;
+                boolean open = !workspaceManagerVisible;
+                closeTransientOverlays();
+                workspaceManagerVisible = open;
                 return true;
             }
             if (mx >= width - ux(58) && mx < width - ux(38)) {
-                notificationCenterVisible = !notificationCenterVisible;
-                workspaceManagerVisible = false;
+                boolean open = !notificationCenterVisible;
+                closeTransientOverlays();
+                notificationCenterVisible = open;
                 return true;
             }
             if (mx >= width - ux(30) && mx < width - ux(6)) {
@@ -1420,7 +1434,12 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(mx < ux(58)) {
-            if(my >= height - uy(52)) { settingsVisible = !settingsVisible; return true; }
+            if(my >= height - uy(52)) {
+                boolean open = !settingsVisible;
+                closeTransientOverlays();
+                settingsVisible = open;
+                return true;
+            }
             for (int index = 0; index < 7; index++) {
                 if (!railHit(mx, my, index)) continue;
                 switch (index) {
@@ -1437,7 +1456,13 @@ public final class PlatformShellScreen extends Screen {
                             layoutWorkspace(); saveWorkspaceState();
                         }
                     }
-                    case 2 -> { searchVisible = !searchVisible; searchQuery = ""; searchResults = List.of(); }
+                    case 2 -> {
+                        boolean open = !searchVisible;
+                        closeTransientOverlays();
+                        searchVisible = open;
+                        searchQuery = "";
+                        searchResults = List.of();
+                    }
                     case 3 -> toggleWorkspacePanel("timeline");
                     case 4 -> openProfile(Profile.POLITICS);
                     case 5 -> openProfile(Profile.SETTLEMENTS);
@@ -1736,6 +1761,8 @@ public final class PlatformShellScreen extends Screen {
             handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
             return handled;
         }
+        if (draggingPopup == null && (settingsVisible || workspaceManagerVisible
+                || notificationCenterVisible || searchVisible || contextMenuVisible)) return true;
         if (draggingPopup != null) {
             int pw=draggingPopup.equals("manager")?360:draggingPopup.equals("notifications")?440:260;
             int ph=draggingPopup.equals("manager")?270:draggingPopup.equals("notifications")?300:190;
@@ -1779,6 +1806,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
+        boolean modalCaptured = settingsVisible || workspaceManagerVisible || notificationCenterVisible
+                || searchVisible || contextMenuVisible || draggingPopup != null;
         if (button == 0) {
             boolean changed=draggingPanel!=null||resizingPanel!=null||resizingSplitterPath!=null||draggingPopup!=null;
             if(draggingPanel!=null && panelDragMoved) applyPanelDrop(draggingPanel,(int)mx,(int)my);
@@ -1786,6 +1815,7 @@ public final class PlatformShellScreen extends Screen {
             if(changed){layoutWorkspace();saveWorkspaceState();}
         }
         boolean handled = super.mouseReleased(mx,my,button);
+        if (modalCaptured) return true;
         handled = forwardViewMouseReleased(mx, my, button) || handled;
         return handled;
     }
@@ -1865,21 +1895,26 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false; return true;
         }
         if (keyCode == GLFW.GLFW_KEY_K && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
-            searchVisible = true; searchQuery = ""; searchResults = List.of(); contextMenuVisible = false;
+            closeTransientOverlays();
+            searchVisible = true;
+            searchQuery = "";
+            searchResults = List.of();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_P
                 && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
                 == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
-            workspaceManagerVisible = !workspaceManagerVisible;
-            notificationCenterVisible = false;
+            boolean open = !workspaceManagerVisible;
+            closeTransientOverlays();
+            workspaceManagerVisible = open;
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_N
                 && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
                 == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
-            notificationCenterVisible = !notificationCenterVisible;
-            workspaceManagerVisible = false;
+            boolean open = !notificationCenterVisible;
+            closeTransientOverlays();
+            notificationCenterVisible = open;
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
