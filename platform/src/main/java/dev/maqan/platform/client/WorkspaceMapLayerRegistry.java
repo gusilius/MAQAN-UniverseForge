@@ -129,8 +129,10 @@ public final class WorkspaceMapLayerRegistry {
     public static void render(GuiGraphics graphics, int x, int y, int width, int height) {
         for (Layer layer : layers()) {
             if (!isVisible(layer.id())) continue;
+            float layerOpacity = opacity(layer.id());
+            if (layerOpacity <= 0f) continue;
             try {
-                layer.renderer().render(graphics, x, y, width, height, opacity(layer.id()));
+                layer.renderer().render(graphics, x, y, width, height, layerOpacity);
             } catch (RuntimeException error) {
                 VISIBILITY.put(layer.id(), false);
                 WorkspaceRuntime.publish(WorkspaceRuntime.Severity.WARNING,

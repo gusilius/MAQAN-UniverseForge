@@ -45,6 +45,20 @@ class WorkspaceMapLayerRegistryTest {
         assertEquals(20, WorkspaceMapLayerRegistry.order("test.base"));
     }
 
+
+    @Test
+    void zeroOpacitySkipsLayerRenderer() {
+        java.util.concurrent.atomic.AtomicInteger renders = new java.util.concurrent.atomic.AtomicInteger();
+        WorkspaceMapLayerRegistry.register(new WorkspaceMapLayerRegistry.Layer(
+                "test.transparent", "Transparent", "test", 0, true, 1f,
+                (g, x, y, w, h, opacity) -> renders.incrementAndGet()));
+        WorkspaceMapLayerRegistry.setOpacity("test.transparent", 0f);
+
+        WorkspaceMapLayerRegistry.render(null, 0, 0, 100, 100);
+
+        assertEquals(0, renders.get());
+    }
+
     @Test
     void rejectsOrderingUnknownLayers() {
         assertThrows(IllegalArgumentException.class, () -> WorkspaceMapLayerRegistry.setOrder("missing", 1));

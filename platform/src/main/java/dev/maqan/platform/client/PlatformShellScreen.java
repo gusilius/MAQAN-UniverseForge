@@ -1238,8 +1238,10 @@ public final class PlatformShellScreen extends Screen {
             if (y + 14 > p.y + p.h - 6) break;
             g.drawString(font, WorkspaceMapLayerRegistry.isVisible(layer.id()) ? "✓" : "—",
                     p.x + 12, y, WorkspaceTheme.ACCENT, false);
-            g.drawString(font, trimInspector(layer.label(), p.w - 118),
+            g.drawString(font, trimInspector(layer.label(), p.w - 142),
                     p.x + 28, y, TEXT, false);
+            g.drawString(font, "−", p.x + p.w - 112, y, MUTED, false);
+            g.drawString(font, "+", p.x + p.w - 94, y, MUTED, false);
             g.drawString(font, Math.round(WorkspaceMapLayerRegistry.opacity(layer.id()) * 100) + "%",
                     p.x + p.w - 70, y, MUTED, false);
             g.drawString(font, "↑", p.x + p.w - 34, y, MUTED, false);
@@ -1471,6 +1473,12 @@ public final class PlatformShellScreen extends Screen {
                     WorkspaceMapLayerRegistry.Layer layer = layers.get(layerIndex);
                     if (mx >= p.x + p.w - 42) {
                         WorkspaceMapLayerRegistry.move(layer.id(), mx < p.x + p.w - 20 ? -1 : 1);
+                    } else if (mx >= p.x + p.w - 116 && mx < p.x + p.w - 98) {
+                        WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                                Math.max(0f, WorkspaceMapLayerRegistry.opacity(layer.id()) - 0.05f));
+                    } else if (mx >= p.x + p.w - 98 && mx < p.x + p.w - 80) {
+                        WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                                Math.min(1f, WorkspaceMapLayerRegistry.opacity(layer.id()) + 0.05f));
                     } else {
                         WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
                     }
