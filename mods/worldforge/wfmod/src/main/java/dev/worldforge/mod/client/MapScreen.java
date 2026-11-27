@@ -555,7 +555,11 @@ public class MapScreen extends Screen {
     private void drawCartographicFrame(GuiGraphics g, int x, int y, int mapW, int mapH) {
         if (mapW <= 0 || mapH <= 0) return;
         g.enableScissor(0, 0, width, height);
-        g.fill(x - 7, y - 7, x + mapW + 7, y + mapH + 7, 0xFF342719);
+        // Fill only the four frame rails; never paint over the parchment map itself.
+        g.fill(x - 7, y - 7, x + mapW + 7, y - 4, 0xFF342719);
+        g.fill(x - 7, y + mapH + 4, x + mapW + 7, y + mapH + 7, 0xFF342719);
+        g.fill(x - 7, y - 4, x - 4, y + mapH + 4, 0xFF342719);
+        g.fill(x + mapW + 4, y - 4, x + mapW + 7, y + mapH + 4, 0xFF342719);
         g.renderOutline(x - 7, y - 7, mapW + 14, mapH + 14, 0xFF21180F);
         g.renderOutline(x - 5, y - 5, mapW + 10, mapH + 10, 0xFFB58A4B);
         g.renderOutline(x - 3, y - 3, mapW + 6, mapH + 6, 0xFF6D4D2D);
