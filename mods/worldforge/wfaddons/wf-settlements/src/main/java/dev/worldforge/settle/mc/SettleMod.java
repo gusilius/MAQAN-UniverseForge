@@ -498,12 +498,29 @@ public class SettleMod {
                 marker.id = "wf_settle:" + colony.s.id;
                 marker.name = colony.s.name == null || colony.s.name.isBlank() ? colony.s.id : colony.s.name;
                 String kind = colony.settlementType == null ? "" : colony.settlementType.toLowerCase(Locale.ROOT);
-                marker.type = kind.contains("village") ? "village"
+                dev.worldforge.mod.TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(colony.realmId);
+                boolean capital = false;
+                if (realm != null && map.titles != null && colony.provinceId > 0) {
+                    int highestTier = -1;
+                    for (String titleKey : realm.titleKeys) {
+                        dev.worldforge.mod.TitleData.Title title = map.titles.byKey(titleKey);
+                        if (title != null && title.tier > highestTier) highestTier = title.tier;
+                    }
+                    for (String titleKey : realm.titleKeys) {
+                        dev.worldforge.mod.TitleData.Title title = map.titles.byKey(titleKey);
+                        if (title != null && title.tier == highestTier && title.capProvince == colony.provinceId) {
+                            capital = true;
+                            break;
+                        }
+                    }
+                }
+                marker.type = capital ? "capital"
+                        : kind.contains("village") ? "village"
                         : kind.contains("castle") || kind.contains("fort") ? "castle"
-                        : kind.contains("port") || kind.contains("harbor") ? "port" : "settlement";
+                        : kind.contains("port") || kind.contains("harbor") ? "port"
+                        : kind.contains("city") || kind.contains("town") ? "city" : "settlement";
                 marker.x = colony.cx;
                 marker.z = colony.cz;
-                dev.worldforge.mod.TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(colony.realmId);
                 marker.rgb = realm == null ? 0xD8B66A : realm.rgb;
                 marker.desc = "settlementId=" + colony.s.id + ";population=" + colony.s.population()
                         + ";buildings=" + colony.s.buildings.size() + ";province=" + colony.provinceId
