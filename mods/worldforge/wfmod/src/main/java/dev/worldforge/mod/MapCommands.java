@@ -64,6 +64,34 @@ public final class MapCommands {
                                         return 0;
                                     }
                                 })))))
+                .then(Commands.literal("addat").then(Commands.argument("type", StringArgumentType.word())
+                        .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
+                        .then(Commands.argument("visual", StringArgumentType.word())
+                                .then(Commands.argument("x", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
+                                                    CommandSourceStack s = c.getSource();
+                                                    MapData m = data(s);
+                                                    if (m == null) return 0;
+                                                    String type = StringArgumentType.getString(c, "type");
+                                                    String visual = StringArgumentType.getString(c, "visual");
+                                                    try {
+                                                        Markers markers = EditorManager.markers(s.getServer(), m);
+                                                        Markers.Marker marker = markers.add(
+                                                                StringArgumentType.getString(c, "name"), type,
+                                                                IntegerArgumentType.getInteger(c, "x"),
+                                                                IntegerArgumentType.getInteger(c, "z"), 0xFFFFFF);
+                                                        markers.setVisualProfile(marker.id,
+                                                                "auto".equalsIgnoreCase(visual) ? "" : visual);
+                                                        s.sendSuccess(() -> Component.literal("Политический объект '"
+                                                                + marker.name + "' создан в " + marker.x + ", " + marker.z
+                                                                + " · визуал: " + ("auto".equalsIgnoreCase(visual) ? "автоматический" : visual)), true);
+                                                        return 1;
+                                                    } catch (IllegalArgumentException e) {
+                                                        s.sendFailure(Component.literal(e.getMessage()));
+                                                        return 0;
+                                                    }
+                                                })))))))
                 .then(Commands.literal("visual").then(Commands.argument("id", StringArgumentType.word())
                         .then(Commands.argument("profile", StringArgumentType.word()).executes(c -> {
                             CommandSourceStack s = c.getSource();
