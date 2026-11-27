@@ -566,8 +566,10 @@ public class MapScreen extends Screen {
         for (int[] corner : corners) {
             int cx = corner[0], cy = corner[1], sx = corner[2], sy = corner[3];
             g.fill(cx - 1, cy - 1, cx + 2, cy + 2, 0xFFFFD98B);
-            g.fill(cx + sx, cy, cx + sx * 5, cy + 1, 0xFF9B7544);
-            g.fill(cx, cy + sy, cx + 1, cy + sy * 5, 0xFF9B7544);
+            g.fill(Math.min(cx + sx, cx + sx * 5), cy,
+                    Math.max(cx + sx, cx + sx * 5) + 1, cy + 1, 0xFF9B7544);
+            g.fill(cx, Math.min(cy + sy, cy + sy * 5),
+                    cx + 1, Math.max(cy + sy, cy + sy * 5) + 1, 0xFF9B7544);
         }
         g.disableScissor();
     }
