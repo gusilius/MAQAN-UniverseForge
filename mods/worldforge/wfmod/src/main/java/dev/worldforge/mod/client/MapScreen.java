@@ -635,7 +635,7 @@ public class MapScreen extends Screen {
     private void drawLegend(GuiGraphics g) {
         String m = MapTextures.mode;
         TitleData d = MapTextures.titles;
-        if (!(MapImages.isProp(m) || MapImages.REALMS.equals(m))) return;
+        if (!(MapImages.isProp(m) || MapImages.REALMS.equals(m) || MapImages.isDip(m))) return;
         if (legendRev != ClientState.revision || !m.equals(legendMode)) {
             legendRev = ClientState.revision; legendMode = m;
             legendRgb.clear(); legendNames.clear(); legendArea.clear();
@@ -643,6 +643,18 @@ public class MapScreen extends Screen {
             if (MapImages.isProp(m)) {
                 MapImages.PropInfo pi = MapImages.propInfo(d, m.substring(2));
                 for (int i = 0; i < pi.vals.size(); i++) rows.add(new Object[]{pi.vals.get(i), pi.rgb[i], pi.area[i]});
+            } else if (MapImages.isDip(m)) {
+                TitleData.Realm focus = d.realms.get(m.substring(MapImages.DIP.length()));
+                if (focus != null) {
+                    Map<String, java.util.Set<String>> adjacency = dev.worldforge.mod.api.Diplomacy.adjacency(d);
+                    for (dev.worldforge.mod.api.Diplomacy.Rel relation : dev.worldforge.mod.api.Diplomacy.Rel.values()) {
+                        long area = 0;
+                        for (TitleData.Realm realm : d.realmList())
+                            if (dev.worldforge.mod.api.Diplomacy.relation(d, focus, realm, adjacency) == relation)
+                                area += realm.areaBlocks;
+                        if (area > 0) rows.add(new Object[]{relation.label, relation.rgb, area});
+                    }
+                }
             } else {
                 for (TitleData.Realm r : d.realmList()) if (r.overlord == null) rows.add(new Object[]{r.name, r.rgb, r.areaBlocks});
             }
@@ -656,7 +668,7 @@ public class MapScreen extends Screen {
         if (legendNames.isEmpty()) return;
         int w = 150, h = 22 + legendNames.size() * 12, x = 8, y = height - 34 - h;
         bevel(g, x, y, w, h, false);
-        g.drawString(font, MapImages.REALMS.equals(m) ? "Державы" : modeName(m), x + 8, y + 7, 0xFFF0C85A);
+        g.drawString(font, MapImages.REALMS.equals(m) ? "Державы" : MapImages.isDip(m) ? "Дипломатия" : modeName(m), x + 8, y + 7, 0xFFF0C85A);
         for (int i = 0; i < legendNames.size(); i++) {
             int ly = y + 20 + i * 12;
             g.fill(x + 8, ly, x + 18, ly + 9, 0xFF000000);
