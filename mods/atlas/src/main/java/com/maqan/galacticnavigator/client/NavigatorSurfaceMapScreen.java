@@ -63,6 +63,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     @Override protected void init(){
         viewModeButton=addRenderableWidget(Button.builder(Component.literal("VIEW: 2D"),b->{
             terrain3D=!terrain3D;
+            NavigatorPlatformSelectionBridge.setViewType(terrain3D?"DIORAMA_3D":"EXPLORATION");
             b.setMessage(Component.literal(terrain3D?"VIEW: 3D":"VIEW: 2D"));
         }).bounds(18,48,86,20).build());
         layerButton=addRenderableWidget(Button.builder(Component.literal("LAYER: SURFACE"),b->{
@@ -133,6 +134,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             centerChunkX=((int)Math.floor(player.x()))>>4;
             centerChunkZ=((int)Math.floor(player.z()))>>4;
         }
+        NavigatorPlatformSelectionBridge.publishViewport(dimension,
+                centerChunkX * 16.0, centerChunkZ * 16.0, zoom, cameraYaw, cameraPitch);
         double cell=18.0*zoom;
         List<NavigatorExplorationStore.ExploredChunk> chunks=NavigatorExplorationStore.chunks(dimension);
         if(!underground)refreshRouteIfPlayerMoved(player);
