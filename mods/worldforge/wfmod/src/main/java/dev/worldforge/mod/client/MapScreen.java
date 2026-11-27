@@ -1701,6 +1701,19 @@ public class MapScreen extends Screen {
             if (i < m.size()) { setMode(m.get(i)); return true; }
         }
         if (key == GLFW.GLFW_KEY_C) { centerOnPlayer(); return true; }
+        if (key == GLFW.GLFW_KEY_V) {
+            Markers.Marker visualTarget = null;
+            for (Markers.Marker marker : ClientState.markers.list()) {
+                if (selectedMarkerId.equals(marker.id)) { visualTarget = marker; break; }
+            }
+            if (visualTarget != null) {
+                Minecraft.getInstance().setScreen(new VisualCatalogScreen(this, visualTarget));
+            } else if (Minecraft.getInstance().player != null) {
+                Minecraft.getInstance().player.displayClientMessage(
+                        Component.literal("Сначала выберите политический объект или армию на карте"), true);
+            }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_B && MapTextures.ready()) {
             Minecraft mc = Minecraft.getInstance();
             double mxx = mc.mouseHandler.xpos() * width / mc.getWindow().getScreenWidth(), myy = mc.mouseHandler.ypos() * height / mc.getWindow().getScreenHeight();
