@@ -204,15 +204,39 @@ public final class ThemeManager {
                                                    int width, int height, String panelId) {
         initialize();
         if (!manifestValid || width <= 0 || height <= 0) return;
-        String element = switch (panelId) {
-            case "navigation", "settings" -> "lw";
-            case "inspector" -> "lp";
-            case "tools" -> "rp";
-            case "timeline" -> "rw";
-            default -> "lw";
-        };
+        // Blank frames are decorative only; live text and controls are rendered by the host.
+        String element = ("inspector".equals(panelId) || "tools".equals(panelId)) ? "rw" : "lw";
         Texture texture = TEXTURES.get(element);
-        if (texture != null) drawScaled(graphics, texture, x, y, width, height);
+        if (texture != null) drawNineSlice(graphics, texture, x, y, width, height, 48);
+    }
+
+    /**
+     * Preserve ornate source corners while stretching only the edges and center.
+     * The 48px source border corresponds to 24 logical pixels at sourceScale=2.
+     */
+    private static void drawNineSlice(GuiGraphics graphics, Texture texture,
+                                      int x, int y, int width, int height, int requestedBorder) {
+        int border = Math.max(1, Math.min(requestedBorder,
+                Math.min(texture.width(), texture.height()) / 3));
+        int targetX = Math.min(width / 2, Math.max(1, border / 2));
+        int targetY = Math.min(height / 2, Math.max(1, border / 2));
+        int[] sx = {0, border, texture.width() - border, texture.width()};
+        int[] sy = {0, border, texture.height() - border, texture.height()};
+        int[] dx = {x, x + targetX, x + width - targetX, x + width};
+        int[] dy = {y, y + targetY, y + height - targetY, y + height};
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 3; col++) {
+                int sw = sx[col + 1] - sx[col], sh = sy[row + 1] - sy[row];
+                int dw = dx[col + 1] - dx[col], dh = dy[row + 1] - dy[row];
+                if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) continue;
+                graphics.pose().pushPose();
+                graphics.pose().translate(dx[col], dy[row], 0.0D);
+                graphics.pose().scale(dw / (float) sw, dh / (float) sh, 1.0F);
+                graphics.blit(texture.location(), 0, 0, (float) sx[col], (float) sy[row],
+                        sw, sh, texture.width(), texture.height());
+                graphics.pose().popPose();
+            }
+        }
     }
 
     private static void drawScaled(GuiGraphics graphics, Texture texture,
