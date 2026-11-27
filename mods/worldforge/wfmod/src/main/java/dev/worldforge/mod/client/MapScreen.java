@@ -376,7 +376,8 @@ public class MapScreen extends Screen {
                 bounds[1] = Math.max(bounds[1], sl.x + sl.size);
             }
             for (var entry : rows.entrySet()) {
-                int y = entry.getKey(),[] = entry.getValue();
+                int y = entry.getKey();
+                int[] bounds = entry.getValue();
                 if (mx >= bounds[0] - 6 && mx <= bounds[1] + 6 && my >= y - 6 && my <= y + 34) return true;
             }
         }
