@@ -88,8 +88,19 @@ public final class MarkerCreateScreen extends Screen {
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + rowH;
             g.fill(x, y, x + cardW, y + rowH, selected ? 0xFF66502F : hover ? 0xFF51402B : 0xFF30271F);
             g.renderOutline(x, y, cardW, rowH, selected ? 0xFFE5BD76 : 0xFF806342);
-            g.drawString(font, entry.displayName(), x + 8, y + 7, 0xFFFFE0A0, false);
-            g.drawString(font, entry.id(), x + 8, y + 22, 0xFFB6A58B, false);
+            ResourceLocation preview = ResourceLocation.tryParse(entry.previewTexture());
+            if (preview != null) {
+                g.blit(preview, x + 7, y + 9, 0, 0, 24, 24, 24, 24);
+            } else {
+                ResourceLocation itemId = ResourceLocation.tryParse(entry.profile().mapItem());
+                if (itemId != null) {
+                    var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(itemId);
+                    if (item.isPresent() && !item.get().getDefaultInstance().isEmpty())
+                        g.renderItem(item.get().getDefaultInstance(), x + 11, y + 12);
+                }
+            }
+            g.drawString(font, entry.displayName(), x + 38, y + 7, 0xFFFFE0A0, false);
+            g.drawString(font, entry.id(), x + 38, y + 22, 0xFFB6A58B, false);
         }
         g.disableScissor();
 
@@ -160,8 +171,16 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        scroll = Math.max(0, Math.min(scroll + (delta < 0 ? 1 : -1),
-                Math.max(0, (choices.size() + 1) / 2 - 1)));
+        int panelW = Math.min(620, width - 24), panelH = Math.min(470, height - 24);
+        int left = (width - panelW) / 2, top = (height - panelH) / 2;
+        int listY = top + 163, listBottom = top + panelH - 87;
+        if (mouseX < left + 10 || mouseX >= left + panelW - 10
+                || mouseY < listY || mouseY >= listBottom)
+            return super.mouseScrolled(mouseX, mouseY, delta);
+        int cols = panelW >= 450 ? 2 : 1, rowH = 44, gap = 6;
+        int rows = (choices.size() + cols - 1) / cols;
+        int visibleRows = Math.max(1, (listBottom - listY) / (rowH + gap));
+        scroll = Math.max(0, Math.min(scroll + (delta < 0 ? 1 : -1), Math.max(0, rows - visibleRows)));
         return true;
     }
 
