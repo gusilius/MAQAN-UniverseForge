@@ -287,7 +287,11 @@ public final class CommandScreen extends Screen {
 
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
-    private int inspectY() { return settlementOpen ? 148 : 34; }
+    private int settlementSummaryHeight() { return height < 250 ? 40 : 106; }
+    private int inspectY() { return settlementOpen ? 34 + settlementSummaryHeight() + 8 : 34; }
+    private int inspectorRowsFit() {
+        return Math.max(1, Math.min(8, (height - inspectY() - 28) / INSPECT_ROW));
+    }
 
     private boolean inspectAt(double x,double y) {
         List<String> ids=CommandMode.selected();
@@ -299,8 +303,7 @@ public final class CommandScreen extends Screen {
         }
         if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
         int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
-        if(row<0||row>=Math.min(8,ids.size()))return false;
-        if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
+        if(row<0||row>=Math.min(inspectorRowsFit(),ids.size()))return false;
         String id=ids.get(row);
         for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
             if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
@@ -313,13 +316,14 @@ public final class CommandScreen extends Screen {
 
     private void drawSettlementPanel(GuiGraphics g) {
         if (settlement == null) return;
-        int x = 4, y = 34, w = 250, h = 106;
+        int x = 4, y = 34, w = 250, h = settlementSummaryHeight();
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
         g.drawString(font, "ПОСЕЛЕНИЕ · " + settlement.name, x + 6, y + 5, 0xFFE6C875, false);
         String pop = "Жители " + settlement.workers.size() + " / жильё " + settlement.housing()
                 + " · настроение " + settlement.approval() + " · здания " + settlement.buildings.size();
         g.drawString(font, font.plainSubstrByWidth(pop, w - 12), x + 6, y + 17, 0xFFD7DCE8, false);
+        if (h < 60) return;
         int rx = x + 6, ry = y + 31, col = 0;
         for (var entry : settlement.defs.resourceNames.entrySet()) {
             String text = entry.getValue() + " " + (int) settlement.amount(entry.getKey());
@@ -399,7 +403,7 @@ public final class CommandScreen extends Screen {
                 return;
             }
         }
-        int rows=Math.min(8,ids.size());
+        int rows=Math.min(inspectorRowsFit(),ids.size());
         int h=24+rows*INSPECT_ROW;
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
@@ -446,7 +450,7 @@ public final class CommandScreen extends Screen {
             }
             row++;
         }
-        if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
+        if(ids.size()>rows)g.drawString(font,"Ещё "+(ids.size()-rows)+" · прокрутите выбор",
                 INSPECT_X+6,inspectY()+h-10,0xFF9EA4B5,false);
     }
 
@@ -873,7 +877,9 @@ public final class CommandScreen extends Screen {
             g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
-        if (!embeddedInMaqan) drawSelection(g, h);
+        // The unit inspector is the detailed selection surface. Suppress the legacy
+        // aggregate box while units are selected so the two panels cannot overlap.
+        if (!embeddedInMaqan && CommandMode.selected().isEmpty()) drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
         if (!embeddedInMaqan) drawZoomSlider(g);
