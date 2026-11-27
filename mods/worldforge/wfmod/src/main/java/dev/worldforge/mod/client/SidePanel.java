@@ -125,10 +125,11 @@ final class SidePanel {
             hits.add(new Hit(rx, y, RAIL, RAIL, () -> { if (open && tab == ft) open = false; else show(ft); }));
         }
         if (!open) return;
-        pw = WIDTH;
+        pw = Math.min(WIDTH, Math.max(100, host.width() - RAIL - GAP - 16));
         px = rx - GAP - pw;
         py = 8;
-        ph = Math.max(150, host.panelBottom() - py);
+        int availableBottom = Math.min(host.panelBottom(), host.height() - 8);
+        ph = Math.max(34, Math.min(availableBottom - py, host.height() - py - 8));
         MapScreen.bevel(g, px, py, pw, ph, false);
         g.drawString(host.font(), tab.title.toUpperCase(), px + 8, py + 7, GOLD);
         g.fill(px, py + 19, px + pw, py + 21, 0xFF000000);
