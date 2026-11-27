@@ -667,24 +667,40 @@ public class MapScreen extends Screen {
 
     private void drawLabels(GuiGraphics g) {
         if (MapImages.TERRAIN.equals(MapTextures.mode)) return;
-        List<double[]> taken = new ArrayList<>();
+        // Spatial occupancy replaces the old all-pairs collision scan. Label placement
+        // stays bounded when a large political world contains thousands of provinces.
+        final int cell = 48;
+        java.util.Set<Long> occupied = new java.util.HashSet<>();
+        int left = Math.max(0, (int) Math.floor(camX));
+        int top = Math.max(BAR, (int) Math.floor(camY));
+        int right = Math.min(width, (int) Math.ceil(camX + MapTextures.w * zoom));
+        int bottom = Math.min(height, (int) Math.ceil(camY + MapTextures.h * zoom));
+        if (right <= left || bottom <= top) return;
+        g.enableScissor(left, top, right, bottom);
         for (MapTextures.Label l : MapTextures.labels) {
-            double size = Math.min(26, Math.sqrt(l.areaPx) * zoom * 0.14 + 2);
+            double size = Math.min(26, Math.sqrt(Math.max(0, l.areaPx)) * zoom * 0.14 + 2);
             if (size < 8) continue;
             double sx = camX + l.px * zoom, sy = camY + (l.py - 4 / zoom) * zoom;
-            if (sx < -100 || sy < -20 || sx > width + 100 || sy > height + 20) continue;
+            if (sx < left - 100 || sy < top - 20 || sx > right + 100 || sy > bottom + 20) continue;
             double scale = size / 9.0, w = font.width(l.text) * scale, h = size;
-            double[] box = {sx - w / 2, sy - h / 2, sx + w / 2, sy + h / 2};
-            boolean clash = false;
-            for (double[] b : taken) if (!(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3])) { clash = true; break; }
-            if (clash) continue;
-            taken.add(box);
+            double x0=sx-w/2.0,x1=sx+w/2.0,y0=sy-h/2.0,y1=sy+h/2.0;
+            int gx0=(int)Math.floor(x0/cell),gx1=(int)Math.floor(x1/cell);
+            int gy0=(int)Math.floor(y0/cell),gy1=(int)Math.floor(y1/cell);
+            boolean clash=false;
+            for(int gy=gy0;gy<=gy1&&!clash;gy++)for(int gx=gx0;gx<=gx1;gx++){
+                long key=((long)gx<<32)^(gy&0xffffffffL);
+                if(occupied.contains(key)){clash=true;break;}
+            }
+            if(clash)continue;
+            for(int gy=gy0;gy<=gy1;gy++)for(int gx=gx0;gx<=gx1;gx++)
+                occupied.add(((long)gx<<32)^(gy&0xffffffffL));
             g.pose().pushPose();
-            g.pose().translate((float) sx, (float) sy, 0f);
-            g.pose().scale((float) scale, (float) scale, 1f);
-            g.drawCenteredString(font, l.text, 0, -4, 0xFFF4ECD2);
+            g.pose().translate((float)sx,(float)sy,0f);
+            g.pose().scale((float)scale,(float)scale,1f);
+            g.drawCenteredString(font,l.text,0,-4,0xFFF4ECD2);
             g.pose().popPose();
         }
+        g.disableScissor();
     }
 
     private void drawDiamond(GuiGraphics g, double sx, double sy, int rgb) {
@@ -1037,7 +1053,18 @@ public class MapScreen extends Screen {
     private void drawMarkers(GuiGraphics g, int mx, int my) {
         Minecraft mc = Minecraft.getInstance();
         Map<String, LivingEntity> leaderBodies = leaderBodies();
-        for (Markers.Marker marker : ClientState.markers.list()) {
+        List<Markers.Marker> visibleMarkers = new ArrayList<>(ClientState.markers.list());
+        visibleMarkers.sort(Comparator.comparingInt(marker -> {
+            if (marker.id.equals(selectedMarkerId)) return -5;
+            if ("capital".equals(marker.type)) return 0;
+            if ("army".equals(marker.type)) return 1;
+            if ("city".equals(marker.type) || "settlement".equals(marker.type)) return 2;
+            return 3;
+        }));
+        java.util.Set<Long> labelCells = new java.util.HashSet<>();
+        final int labelCellSize = 64;
+        int labelBudget = 96;
+        for (Markers.Marker marker : visibleMarkers) {
             if (militaryView && !("army".equals(marker.type) || "castle".equals(marker.type)
                     || "fort".equals(marker.type) || "capital".equals(marker.type)
                     || "city".equals(marker.type) || "settlement".equals(marker.type)
@@ -1048,15 +1075,26 @@ public class MapScreen extends Screen {
             String leaderUuid = markerValue(marker.desc, "leaderEntity");
             drawStrategicMarker(g, marker, point[0], point[1], mx, my,
                     leaderBodies.get(leaderUuid));
-            if (zoom > 1.15 || marker.id.equals(selectedMarkerId)
-                    || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12) {
+            boolean selected = marker.id.equals(selectedMarkerId);
+            boolean hovered = Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12;
+            if ((zoom > 1.15 || selected || hovered) && labelBudget > 0) {
                 String label = marker.name;
                 if ("army".equals(marker.type)) {
                     String commander = markerValue(marker.desc, "commander").trim();
                     if (!commander.isEmpty()) label = commander;
                 }
-                g.drawString(font, label, (int) point[0] + 11, (int) point[1] - 4,
-                        marker.id.equals(selectedMarkerId) ? 0xFFFFD66B : 0xFFFFFFFF);
+                int lx=(int)point[0]+11,ly=(int)point[1]-4;
+                int gx0=Math.floorDiv(lx,labelCellSize),gx1=Math.floorDiv(lx+font.width(label),labelCellSize);
+                int gy0=Math.floorDiv(ly,labelCellSize),gy1=Math.floorDiv(ly+font.lineHeight,labelCellSize);
+                boolean clash=false;
+                for(int gy=gy0;gy<=gy1&&!clash;gy++)for(int gx=gx0;gx<=gx1;gx++)
+                    if(labelCells.contains(((long)gx<<32)^(gy&0xffffffffL))){clash=true;break;}
+                if(!clash||selected||hovered){
+                    for(int gy=gy0;gy<=gy1;gy++)for(int gx=gx0;gx<=gx1;gx++)
+                        labelCells.add(((long)gx<<32)^(gy&0xffffffffL));
+                    g.drawString(font,label,lx,ly,selected?0xFFFFD66B:hovered?0xFFFFE6B0:0xFFFFFFFF);
+                    labelBudget--;
+                }
             }
         }
         for (Waypoints.Wp w : Waypoints.LIST) {
