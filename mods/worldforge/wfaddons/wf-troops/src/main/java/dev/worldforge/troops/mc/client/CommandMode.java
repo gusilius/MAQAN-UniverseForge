@@ -74,6 +74,7 @@ public final class CommandMode {
     private static CameraType prevCamera = CameraType.FIRST_PERSON;
     private static Marker camEntity;
     private static double groundY;
+    private static boolean groundInitialized;
     private static long lastFrame;
     private static CameraRig.View lastView = CameraRig.View.SKY;
 
@@ -339,7 +340,8 @@ public final class CommandMode {
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
-        groundY = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, mc.player.blockPosition().getX(), mc.player.blockPosition().getZ());
+        groundY = mc.player.getY();
+        groundInitialized = false;
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
         frame(mc);
@@ -377,6 +379,7 @@ public final class CommandMode {
         if (view == null || hostedCommandView != view || !active) return;
         Minecraft mc = Minecraft.getInstance();
         active = false;
+        groundInitialized = false;
         lastView = RIG.view;
         SEL.clear();
         hostedCommandView = null;
@@ -421,16 +424,22 @@ public final class CommandMode {
         net.minecraft.core.BlockPos focusProbe = new net.minecraft.core.BlockPos(gx,
                 mc.player.blockPosition().getY(), gz);
         if (mc.level.hasChunkAt(focusProbe)) {
-            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
-            // Heightmap returns the first free Y above the surface. Snap on first valid
-            // sample, then damp subsequent terrain changes without retaining stale Y.
-            if (!Double.isFinite(groundY) || Math.abs(groundY - mc.player.getY()) < 0.01 && lastFrame == 0L)
-                groundY = target;
-            else groundY += (target - groundY) * Math.min(1, dt * 10);
+            // MOTION_BLOCKING includes leaves and solid canopy. Using NO_LEAVES here
+            // placed the focus under dense forests and produced a camera boom through
+            // the canopy/terrain when changing presets.
+            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, gx, gz);
+            if (Double.isFinite(target)) {
+                if (!groundInitialized) {
+                    groundY = target;
+                    groundInitialized = true;
+                } else {
+                    groundY += (target - groundY) * Math.min(1, dt * 12);
+                }
+            }
         } else {
-            // Keep the camera anchored to the player's known safe height when the focus
-            // moves into an unloaded edge; do not query/load distant chunks.
-            groundY = Math.max(groundY, mc.player.getY());
+            // Never force-load an edge chunk. Hold the last safe focus height and
+            // keep the camera above the player's current eye level until it is sampled.
+            groundY = Math.max(groundY, mc.player.getY() + 1.0);
         }
 
         double[] p = RIG.position(groundY);
@@ -458,11 +467,13 @@ public final class CommandMode {
         net.minecraft.core.BlockPos cameraProbe = new net.minecraft.core.BlockPos(cameraX,
                 mc.player.blockPosition().getY(), cameraZ);
         if (mc.level.hasChunkAt(cameraProbe)) {
-            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING,
                     cameraX, cameraZ);
             p[1] = CameraRig.keepAboveTerrain(p[1], cameraTerrain);
         } else {
-            p[1] = Math.max(p[1], mc.player.getY() + 2.0);
+            // A missing destination sample must not let the camera sink below
+            // the already validated focus surface near a loaded-chunk boundary.
+            p[1] = Math.max(p[1], groundY + CameraRig.TERRAIN_CLEARANCE);
         }
 
         camEntity.setPos(p[0], p[1], p[2]);

@@ -176,6 +176,17 @@ public final class ThemeManager {
         return selectedTheme;
     }
 
+    /** Theme-owned accent used by the Java interaction layer as well as texture chrome. */
+    public static synchronized int accentColor() {
+        initialize();
+        return switch (selectedTheme) {
+            case "iron" -> 0xFFB6C5D2;
+            case "grim" -> 0xFFB87952;
+            case "elf" -> 0xFF9BCB9B;
+            default -> 0xFFD7B56D;
+        };
+    }
+
     public static String[] themes() { return THEMES.clone(); }
 
     public static boolean isSupported(String value) {
