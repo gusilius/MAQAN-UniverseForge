@@ -1016,6 +1016,10 @@ public class MapScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         Map<String, LivingEntity> leaderBodies = leaderBodies();
         for (Markers.Marker marker : ClientState.markers.list()) {
+            if (militaryView && !("army".equals(marker.type) || "castle".equals(marker.type)
+                    || "fort".equals(marker.type) || "capital".equals(marker.type)
+                    || "city".equals(marker.type) || "settlement".equals(marker.type)
+                    || "caravan".equals(marker.type) || "port".equals(marker.type))) continue;
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
             if (point[0] < -20 || point[1] < BAR - 20 || point[0] > width + 20 || point[1] > height + 20) continue;
