@@ -717,7 +717,11 @@ public class MapScreen extends Screen {
         boolean selected = marker.id.equals(selectedMarkerId);
         boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
         String symbol = switch (marker.type == null ? "other" : marker.type) {
-            case "army" -> "A";
+            case "army" -> {
+                String commander = markerValue(marker.desc, "commander").trim();
+                yield commander.isEmpty() ? "A"
+                        : commander.substring(0, commander.offsetByCodePoints(0, 1)).toUpperCase(java.util.Locale.ROOT);
+            }
             case "capital" -> "★";
             case "city" -> "C";
             case "village", "settlement" -> "V";
@@ -759,9 +763,15 @@ public class MapScreen extends Screen {
             double[] point = blockToScreen(marker.x, marker.z);
             if (point[0] < -20 || point[1] < BAR - 20 || point[0] > width + 20 || point[1] > height + 20) continue;
             drawStrategicMarker(g, marker, point[0], point[1], mx, my);
-            if (zoom > 0.9 || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12)
-                g.drawString(font, marker.name, (int) point[0] + 11, (int) point[1] - 4,
+            if (zoom > 0.9 || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12) {
+                String label = marker.name;
+                if ("army".equals(marker.type)) {
+                    String commander = markerValue(marker.desc, "commander").trim();
+                    if (!commander.isEmpty()) label = commander;
+                }
+                g.drawString(font, label, (int) point[0] + 11, (int) point[1] - 4,
                         marker.id.equals(selectedMarkerId) ? 0xFFFFD66B : 0xFFFFFFFF);
+            }
         }
         for (Waypoints.Wp w : Waypoints.LIST) {
             double[] point = blockToScreen(w.x, w.z);
