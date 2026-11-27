@@ -727,6 +727,30 @@ public class MapScreen extends Screen {
                 g.fill(x - 6, y + 2, x - 3, y + 5, 0xFF333B48);
                 g.fill(x + 2, y + 2, x + 5, y + 5, 0xFF333B48);
             }
+            case "capital" -> {
+                g.fill(x - 7, y + 3, x + 7, y + 6, color);
+                g.fill(x - 6, y - 2, x - 3, y + 3, 0xFFE8D6A8);
+                g.fill(x - 1, y - 5, x + 2, y + 3, 0xFFE8D6A8);
+                g.fill(x + 4, y - 2, x + 7, y + 3, 0xFFE8D6A8);
+                g.fill(x - 7, y - 7, x - 4, y - 4, color);
+                g.fill(x - 1, y - 9, x + 2, y - 6, color);
+                g.fill(x + 4, y - 7, x + 7, y - 4, color);
+            }
+            case "city" -> {
+                g.fill(x - 7, y - 1, x + 7, y + 6, color);
+                g.fill(x - 6, y - 6, x - 2, y - 1, 0xFFE7D8B8);
+                g.fill(x + 1, y - 7, x + 6, y - 1, 0xFFD9C49B);
+                g.fill(x - 1, y - 3, x + 1, y + 6, color);
+                g.fill(x - 4, y + 2, x - 2, y + 4, 0xFF26313D);
+                g.fill(x + 3, y + 2, x + 5, y + 4, 0xFF26313D);
+            }
+            case "village" -> {
+                g.fill(x - 7, y + 2, x + 7, y + 6, color);
+                g.fill(x - 6, y - 3, x - 1, y + 2, 0xFFE7D8B8);
+                g.fill(x - 7, y - 5, x, y - 3, color);
+                g.fill(x + 2, y - 2, x + 7, y + 2, 0xFFD9C49B);
+                g.fill(x + 1, y - 4, x + 8, y - 2, color);
+            }
             case "castle" -> {
                 g.fill(x - 6, y - 2, x + 6, y + 6, color);
                 g.fill(x - 7, y - 7, x - 3, y + 1, color);
