@@ -189,35 +189,48 @@ public final class CommandScreen extends Screen {
         boolean hit(double px, double py) { return px >= x && px < x + w && py >= y && py < y + BTN_H; }
     }
 
+    private int commandButtonWidth() {
+        // Eight controls must remain reachable even at the smallest supported GUI scale.
+        return Math.max(18, Math.min(BTN_W, (width - 8 - 14) / 8));
+    }
+
     private List<Btn> buttons() {
         List<Btn> l = new ArrayList<>();
-        int x = width - 4 - BTN_W;
-        l.add(new Btn("Выход (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Стройка (B)", x, 4, BTN_W, buildOpen, this::toggleBuild));
-        x -= BTN_W + 4;
-        l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
-        x -= BTN_W + 4;
-        l.add(new Btn("RTS", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY,
+        int buttonWidth = commandButtonWidth();
+        boolean compact = buttonWidth < 52;
+        int gap = 2;
+        int x = width - 4 - buttonWidth;
+        l.add(new Btn(compact ? "×" : "Выход (R)", x, 4, buttonWidth, false, () -> CommandMode.exit(minecraft)));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "B" : "Стройка (B)", x, 4, buttonWidth, buildOpen, this::toggleBuild));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "Y" : "Участки (Y)", x, 4, buttonWidth, workMode >= 0, this::cycleWorkMode));
+        x -= buttonWidth + gap;
+        l.add(new Btn("RTS", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.SKY,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.SKY)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS,
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "ISO" : "Изометрия", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.TACTICS,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.TACTICS)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "F" : "Свободная", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.FREE,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.FREE)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Сверху", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TOP_DOWN,
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "TOP" : "Сверху", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.TOP_DOWN,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.TOP_DOWN)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Политика", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.STRATEGIC,
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "POL" : "Политика", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.STRATEGIC,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.STRATEGIC)));
         return l;
     }
 
     private int panelX() { return width - PANEL_W - 4; }
     private int panelY() { return 26; }
-    private int panelH() { return Math.max(80, height - 26 - 90); }
+    private int panelH() {
+        // The embedded settlement minimap owns the lower-right corner. Keep the build
+        // panel above it instead of drawing controls underneath an opaque minimap.
+        int bottomReserve = embeddedInMaqan ? 112 : 90;
+        return Math.max(64, Math.min(Math.max(64, height - 34), height - 26 - bottomReserve));
+    }
 
     private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }
 
@@ -230,7 +243,8 @@ public final class CommandScreen extends Screen {
     }
 
     boolean overPanel(double px, double py) {
-        if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
+        if (py >= 4 && py < 4 + BTN_H + 2
+                && px >= width - 4 - 8 * commandButtonWidth() - 14) return true;
         if (overMiniMap(px, py)) return true;
         if (!embeddedInMaqan && onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
@@ -250,7 +264,7 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
+    private int rowsFit() { return Math.max(1, (panelH() - 86) / ROW); }
 
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
