@@ -159,14 +159,26 @@ public final class MapImages {
         return 0xFF000000 | (rr << 16) | (gg << 8) | bb;
     }
 
-    /** Warm parchment substrate for political and title maps; source terrain detail remains visible. */
-    private static int parchmentBase(int c, int x, int y) {
+    /**
+     * Aged vellum substrate. Terrain luminance is retained as subtle relief tint,
+     * while deterministic multi-scale grain, fibres and edge ageing give the map
+     * a hand-made cartographic surface without external texture dependencies.
+     */
+    private static int parchmentBase(int c, int x, int y, int w, int h) {
         int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
         int luminance = (r * 30 + g * 59 + b * 11) / 100;
-        int grain = Math.floorMod(x * 73428767 ^ y * 912931 ^ (x * y * 31), 7) - 3;
-        int paperR = clamp(190 + luminance / 5 + grain);
-        int paperG = clamp(163 + luminance / 6 + grain);
-        int paperB = clamp(119 + luminance / 8 + grain);
+        int hash = x * 73428767 ^ y * 912931 ^ (x * y * 31);
+        int coarse = Math.floorMod(hash ^ (x >> 3) * 19349663 ^ (y >> 3) * 83492791, 9) - 4;
+        int fine = Math.floorMod(hash >>> 7, 5) - 2;
+        int fibre = Math.floorMod(x * 13 + y * 7, 173) == 0 ? -7
+                : Math.floorMod(x * 5 - y * 11, 257) == 0 ? 5 : 0;
+        int fleck = Math.floorMod(hash ^ (hash >>> 11), 997) == 0 ? -12 : 0;
+        int edge = Math.min(Math.min(x, w - 1 - x), Math.min(y, h - 1 - y));
+        int edgeBand = Math.max(8, Math.min(w, h) / 18);
+        int age = edge < edgeBand ? (int) Math.round((1.0 - edge / (double) edgeBand) * 11.0) : 0;
+        int paperR = clamp(191 + luminance / 6 + coarse + fine + fibre + fleck - age);
+        int paperG = clamp(166 + luminance / 7 + coarse + fine + fibre + fleck - age);
+        int paperB = clamp(126 + luminance / 9 + coarse + fine + fibre + fleck - age / 2);
         return 0xFF000000 | (paperR << 16) | (paperG << 8) | paperB;
     }
 
@@ -269,6 +281,12 @@ public final class MapImages {
         for (int i = 0; i < img.length; i++) if (e[i]) img[i] = mix(img[i], EDGE, a);
     }
 
+    /** Warm ink rather than pure black keeps political borders legible on vellum. */
+    private static void inkEdges(int[] img, boolean[] edges, int ink, double strength) {
+        for (int i = 0; i < img.length; i++)
+            if (edges[i]) img[i] = mix(img[i], ink, strength);
+    }
+
     /** terrain: основа, остальные режимы: заливка цветом титулов или государств, границы. */
     public static int[] render(TitleData d, int[] terrain, String mode) {
         int w = d.w, h = d.h;
@@ -309,7 +327,7 @@ public final class MapImages {
         for (int z = 0, i = 0; z < h; z++) {
             for (int x = 0; x < w; x++, i++) {
                 int l = lab[i], t = terrain[i];
-                int paper = parchmentBase(t, x, z);
+                int paper = parchmentBase(t, x, z, w, h);
                 if (l == 0) { img[i] = paper; continue; }
                 int c = color[l];
                 if (realms && over[l] > 0 && pattern(pat[l], x, z)) c = color[over[l]];
@@ -330,29 +348,31 @@ public final class MapImages {
             innerGlow(img, lab, w, h, 3, 0.22);
             innerGlow(img, top, w, h, 7, 0.45);
             edges(lab, w, h, e, false);
-            darken(img, e, 0.45);
+            inkEdges(img, e, 0xFF725438, 0.34);
             boolean[] e2 = new boolean[w * h];
             edges(top, w, h, e2, true);
-            darken(img, e2, 0.7);
+            inkEdges(img, e2, 0xFF38271D, 0.78);
+            // A restrained warm edge catches the light like an engraved atlas border.
+            inkEdges(img, e2, 0xFFC19A5B, 0.16);
         } else if (prop) {
             innerGlow(img, lab, w, h, 4, 0.3);
             int[] low = labels(d, d.tiers.get(Math.min(1, d.tiers.size() - 1)).key);
             edges(low, w, h, e, false);
-            darken(img, e, 0.22);
+            inkEdges(img, e, 0xFF806344, 0.22);
             e = new boolean[w * h];
             edges(lab, w, h, e, true);
-            darken(img, e, 0.75);
+            inkEdges(img, e, 0xFF493326, 0.72);
         } else {
             int ti = tierIndex(d, mode);
             innerGlow(img, lab, w, h, ti > 0 ? 6 : 3, ti > 0 ? 0.42 : 0.25);
             if (ti > 0) {
                 int[] low = labels(d, d.tiers.get(ti - 1).key);
                 edges(low, w, h, e, false);
-                darken(img, e, 0.35);
+                inkEdges(img, e, 0xFF806344, 0.28);
                 e = new boolean[w * h];
             }
             edges(lab, w, h, e, true);
-            darken(img, e, ti > 0 ? 0.85 : 0.6);
+            inkEdges(img, e, 0xFF493326, ti > 0 ? 0.76 : 0.58);
         }
         return img;
     }
