@@ -1007,9 +1007,12 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, trimInspector(selected.summary(), p.w - 24),
                     left, p.y + 192, TEXT, false);
         }
+        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
+        int actionCount = Math.min(3, actions.size());
+        int actionTop = p.y + p.h - actionCount * 23 - 8;
         int y = p.y + 210;
         for (WorkspaceRuntime.InspectorField field : WorkspaceRuntime.inspect(selected)) {
-            if (y + 24 > p.y + p.h - 8) break;
+            if (y + 24 > (actionCount > 0 ? actionTop - 5 : p.y + p.h - 8)) break;
             if (!field.section().isBlank()) {
                 g.drawString(font, trimInspector(field.section().toUpperCase(java.util.Locale.ROOT), p.w - 24),
                         left, y, CYAN, false);
@@ -1020,9 +1023,35 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, trimInspector(field.value(), p.w - 24), left, y, TEXT, false);
             y += 16;
         }
-        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
-        if (!actions.isEmpty() && y + 12 < p.y + p.h)
-            g.drawString(font, actions.size() + " CONTEXT ACTIONS · RIGHT CLICK", left, y, CYAN, false);
+        for (int i = 0; i < actionCount; i++) {
+            WorkspaceRuntime.Action action = actions.get(i);
+            int top = actionTop + i * 23;
+            g.fill(left, top, right, top + 20, 0xAA171D28);
+            g.fill(left, top, left + 2, top + 20, CYAN);
+            g.drawString(font, trimInspector(action.label(), p.w - 42), left + 9, top + 6, TEXT, false);
+            g.drawString(font, "›", right - 10, top + 5, CYAN, false);
+        }
+        if (actions.size() > actionCount && actionCount > 0)
+            g.drawString(font, "+" + (actions.size() - actionCount) + " ещё · ПКМ", left, actionTop - 11, MUTED, false);
+    }
+
+    private boolean executeInspectorActionAt(double mx, double my, Panel panel) {
+        PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
+        if (selection == null) return false;
+        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selection);
+        int count = Math.min(3, actions.size());
+        if (count == 0) return false;
+        int top = panel.y + panel.h - count * 23 - 8;
+        if (mx < panel.x + 10 || mx >= panel.x + panel.w - 10
+                || my < top || my >= top + count * 23) return false;
+        int index = (int) ((my - top) / 23);
+        if (index < 0 || index >= count) return false;
+        WorkspaceRuntime.Action action = actions.get(index);
+        if (WorkspaceRuntime.executeAction(action.id(), selection)) {
+            WorkspaceRuntime.publish(WorkspaceRuntime.Severity.SUCCESS, action.providerId(),
+                    "ui-action", action.label(), selection.entityId(), selection.worldId());
+        }
+        return true;
     }
 
     private String trimInspector(String value, int maxWidth) {
@@ -1270,6 +1299,7 @@ public final class PlatformShellScreen extends Screen {
                     return true;
                 }
             }
+            if (p.id.equals("inspector") && executeInspectorActionAt(mx, my, p)) return true;
             if(p.id.equals("navigation")) {
                 int top = navigationViewportTop(p);
                 int bottom = navigationViewportBottom(p);
