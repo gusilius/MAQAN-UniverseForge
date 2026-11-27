@@ -214,6 +214,16 @@ public final class PlatformShellScreen extends Screen {
                                 new WorkspaceDockTree.Panel("tools")), 0)));
     }
 
+    /** Convert reference-skin coordinates to the current Minecraft GUI-scaled viewport. */
+    private int ux(double logicalX) { return (int) Math.round(logicalX * width / ThemeManager.REFERENCE_WIDTH); }
+    private int uy(double logicalY) { return (int) Math.round(logicalY * height / ThemeManager.REFERENCE_HEIGHT); }
+    private int railTop(int index) { return uy(46 + index * 61); }
+    private int railBottom(int index) { return uy(46 + index * 61 + 56); }
+    private boolean railHit(double mouseX, double mouseY, int index) {
+        return mouseX >= 0 && mouseX < ux(58)
+                && mouseY >= railTop(index) && mouseY < railBottom(index);
+    }
+
     private boolean compactViewport() { return width < 900 || height < 520; }
     private boolean compactTopbar() { return width < 720; }
     private int profileStartX() { return compactTopbar() ? 48 : Math.max(178,width/2-112); }
@@ -753,18 +763,24 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawRail(GuiGraphics g, int mx, int my) {
-        String[] icons = {"☷", "◈", "⌕", "◷"};
-        String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
+        // The left-column PNG already contains seven tactile icon buttons.
+        // Highlights and hit regions use the same reference-space geometry as that texture.
+        String[] tips = {"Module catalogue", "Object inspector", "Global search",
+                "Timeline / chronicle", "Political workspace", "Settlement workspace", "RTS command workspace"};
         boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
-                panels.get("tools").visible, panels.get("timeline").visible};
-        for (int i=0;i<icons.length;i++) {
-            int y=49+i*40;
-            if (active[i]) g.fill(5,y-5,39,y+25,0x443A9FB5);
-            g.drawCenteredString(font, icons[i], 22, y+3, active[i] ? CYAN : MUTED);
-            if(mx<44 && my>=y-5 && my<y+25) g.renderTooltip(font, Component.literal(tips[i]), mx, my);
+                searchVisible, panels.get("timeline").visible, profile == Profile.POLITICS,
+                profile == Profile.SETTLEMENTS, profile == Profile.RTS};
+        for (int i = 0; i < tips.length; i++) {
+            int top = railTop(i), bottom = railBottom(i);
+            if (active[i]) g.fill(ux(5), top + uy(5), ux(53), bottom - uy(5), 0x443A9FB5);
+            if (mx >= 0 && mx < ux(58) && my >= top && my < bottom)
+                g.renderTooltip(font, Component.literal(tips[i]), mx, my);
         }
-        g.drawCenteredString(font, "⚙", 22, height-25, settingsVisible ? CYAN : MUTED);
-        if(mx<44 && my>=height-42) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
+        int settingsTop = height - uy(52);
+        if (settingsVisible) g.fill(ux(5), settingsTop, ux(53), height - uy(4), 0x443A9FB5);
+        g.drawCenteredString(font, "⚙", ux(29), height - uy(25), settingsVisible ? CYAN : MUTED);
+        if (mx < ux(58) && my >= settingsTop)
+            g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
     }
 
     private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
@@ -1225,26 +1241,33 @@ public final class PlatformShellScreen extends Screen {
             }
             return true;
         }
-        if(mx<44) {
-            if(my>=height-44) { settingsVisible=!settingsVisible; return true; }
-            int index=(int)((my-44)/40);
-            if(index==0 && profile==Profile.COSMOS && embeddedView!=null) {
-                invokeAtlasRailAction("toggleListPanel"); return true;
-            }
-            if(index==1 && profile==Profile.COSMOS && embeddedView!=null) {
-                invokeAtlasRailAction("toggleInfoPanel"); return true;
-            }
-            if(index==0) { toggleWorkspacePanel("navigation"); return true; }
-            if(index==1) {
-                if (panels.get("inspector").visible) toggleWorkspacePanel("inspector");
-                else { hiddenPanels.remove("inspector"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "inspector"); layoutWorkspace(); saveWorkspaceState(); }
+        if(mx < ux(58)) {
+            if(my >= height - uy(52)) { settingsVisible = !settingsVisible; return true; }
+            for (int index = 0; index < 7; index++) {
+                if (!railHit(mx, my, index)) continue;
+                switch (index) {
+                    case 0 -> {
+                        if (profile == Profile.COSMOS && embeddedView != null) invokeAtlasRailAction("toggleListPanel");
+                        else toggleWorkspacePanel("navigation");
+                    }
+                    case 1 -> {
+                        if (profile == Profile.COSMOS && embeddedView != null) invokeAtlasRailAction("toggleInfoPanel");
+                        else if (panels.get("inspector").visible) toggleWorkspacePanel("inspector");
+                        else {
+                            hiddenPanels.remove("inspector");
+                            workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "inspector");
+                            layoutWorkspace(); saveWorkspaceState();
+                        }
+                    }
+                    case 2 -> { searchVisible = !searchVisible; searchQuery = ""; searchResults = List.of(); }
+                    case 3 -> toggleWorkspacePanel("timeline");
+                    case 4 -> openProfile(Profile.POLITICS);
+                    case 5 -> openProfile(Profile.SETTLEMENTS);
+                    case 6 -> openProfile(Profile.RTS);
+                    default -> { }
+                }
                 return true;
             }
-            if(index==2) {
-                hiddenPanels.remove("tools"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "tools");
-                layoutWorkspace(); saveWorkspaceState(); return true;
-            }
-            if(index==3) { toggleWorkspacePanel("timeline"); return true; }
             return true;
         }
         if(settingsVisible) {
