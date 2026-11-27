@@ -36,6 +36,7 @@ public class MapScreen extends Screen {
     private static long leaderIndexTick = Long.MIN_VALUE;
     private static Map<String, LivingEntity> leaderBodyIndex = Map.of();
     private boolean embeddedInMaqan;
+    private boolean militaryView;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
     private double camX, camY, zoom;
@@ -311,7 +312,7 @@ public class MapScreen extends Screen {
         PlatformWorkspaceBridge.publishMapViewport(
                 (centerPixelX - MapTextures.w * 0.5) * mapBpp,
                 (centerPixelZ - MapTextures.h * 0.5) * mapBpp, zoom,
-                MapImages.TERRAIN.equals(ClientState.mode) ? "GEOGRAPHIC" : "POLITICAL");
+                militaryView ? "MILITARY" : MapImages.TERRAIN.equals(ClientState.mode) ? "GEOGRAPHIC" : "POLITICAL");
         int mxp = (int) camX, myp = (int) camY, mw = (int) (MapTextures.w * zoom), mh = (int) (MapTextures.h * zoom);
         g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);                 // тень под картой
         g.pose().pushPose();
@@ -423,17 +424,19 @@ public class MapScreen extends Screen {
     private record MapTypeButton(String id, String label, int width) {}
 
     private List<MapTypeButton> mapTypeButtons() {
-        boolean compact = width < 440;
-        boolean micro = width < 300;
+        boolean compact = width < 620;
+        boolean micro = width < 360;
         return List.of(
                 new MapTypeButton("political", micro ? "P" : compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
-                new MapTypeButton("exploration", micro ? "E" : compact ? "EXP" : "EXPLORATION", mapTypeButtonWidth(96)),
-                new MapTypeButton("diorama", compact ? "3D" : "DIORAMA 3D", mapTypeButtonWidth(82)));
+                new MapTypeButton("geographic", micro ? "G" : compact ? "GEO" : "GEOGRAPHIC", mapTypeButtonWidth(88)),
+                new MapTypeButton("military", micro ? "M" : compact ? "MIL" : "MILITARY", mapTypeButtonWidth(78)),
+                new MapTypeButton("exploration", micro ? "E" : compact ? "EXP" : "EXPLORE", mapTypeButtonWidth(82)),
+                new MapTypeButton("diorama", "3D", mapTypeButtonWidth(64)));
     }
 
     private int mapTypeButtonWidth(int preferred) {
         int availableWidth = panel.isOpen() ? panel.leftEdge() - 16 : width - 58;
-        int available = Math.max(12, (availableWidth - MAP_TYPE_GAP * 2) / 3);
+        int available = Math.max(10, (availableWidth - MAP_TYPE_GAP * 4) / 5);
         return Math.min(preferred, available);
     }
 
@@ -455,9 +458,12 @@ public class MapScreen extends Screen {
         int y = MAP_TYPE_BAR_Y;
         for (MapTypeButton button : mapTypeButtons()) {
             int right = x + button.width();
-            boolean active = button.id().equals("political")
-                    ? !MapImages.TERRAIN.equals(ClientState.mode)
-                    : button.id().equals("exploration") && MapImages.TERRAIN.equals(ClientState.mode);
+            boolean active = switch (button.id()) {
+                case "political" -> !militaryView && !MapImages.TERRAIN.equals(ClientState.mode);
+                case "geographic" -> !militaryView && MapImages.TERRAIN.equals(ClientState.mode);
+                case "military" -> militaryView;
+                default -> false;
+            };
             boolean hover = mx >= x && mx < right && my >= y && my < y + MAP_TYPE_BAR_H;
             bevel(g, x, y, button.width(), MAP_TYPE_BAR_H, !active);
             if (active) g.fill(x + 3, y + MAP_TYPE_BAR_H - 3, right - 3, y + MAP_TYPE_BAR_H - 1, 0xFFF0C85A);
@@ -476,9 +482,10 @@ public class MapScreen extends Screen {
             int right = x + button.width();
             if (mx >= x && mx < right) {
                 switch (button.id()) {
-                    case "political" -> setMode(MapImages.REALMS);
+                    case "political" -> { militaryView = false; setMode(MapImages.REALMS); }
+                    case "geographic" -> { militaryView = false; setMode(MapImages.TERRAIN); }
+                    case "military" -> { militaryView = true; setMode(MapImages.TERRAIN); }
                     case "exploration" -> openExplorationMap();
-
                     case "diorama" -> openDioramaView();
                     default -> { return false; }
                 }
@@ -528,7 +535,7 @@ public class MapScreen extends Screen {
     }
 
     private void drawPlate(GuiGraphics g) {
-        String t = modeName(ClientState.mode);
+        String t = militaryView ? "Военная карта" : modeName(ClientState.mode);
         String sub = MapTextures.w + "x" + MapTextures.h + " px · " + Math.round(MapTextures.w * bpp() / 1000) + "x" + Math.round(MapTextures.h * bpp() / 1000) + " км";
         int w = Math.max(font.width(t) * 3 / 2, font.width(sub)) + 20;
         bevel(g, 8, 8, w, 34, false);
@@ -841,6 +848,10 @@ public class MapScreen extends Screen {
         Markers.Marker best = null;
         double bestDistance = Double.MAX_VALUE;
         for (Markers.Marker marker : ClientState.markers.list()) {
+            if (militaryView && !("army".equals(marker.type) || "castle".equals(marker.type)
+                    || "fort".equals(marker.type) || "capital".equals(marker.type)
+                    || "city".equals(marker.type) || "settlement".equals(marker.type)
+                    || "caravan".equals(marker.type) || "port".equals(marker.type))) continue;
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
             WorldObjectVisualCatalog.Profile profile = WorldObjectVisualCatalog.resolve(marker);
@@ -937,20 +948,48 @@ public class MapScreen extends Screen {
         }
         if (!renderedLeader) {
             if ("army".equals(marker.type)) {
-                int poleX = left + Math.max(5, size / 5);
-                g.fill(poleX, top + 5, poleX + 1, top + size - 5, 0xFFE8D9B5);
-                g.fill(poleX + 1, top + 5, poleX + Math.max(6, size / 3), top + Math.max(9, size / 3),
-                        realmColor);
+                drawArmyMiniature(g, x, y, size, realmColor, marker);
+            } else {
+                int textWidth = font.width(symbol);
+                g.drawString(font, symbol, x - textWidth / 2,
+                        y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
             }
-            int textWidth = font.width(symbol);
-            g.drawString(font, symbol, x - textWidth / 2,
-                    y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
         }
         if (selected || hovered) {
             g.renderOutline(left - 2, top - 2, size + 4, size + 4,
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
         }
     }
+    /** Small animated field figurine used only when no real commander model/asset is available. */
+    private void drawArmyMiniature(GuiGraphics g, double screenX, double screenY, int size,
+                                   int realmColor, Markers.Marker marker) {
+        Minecraft mc = Minecraft.getInstance();
+        boolean moving = "true".equalsIgnoreCase(markerValue(marker.desc, "moving"));
+        int phase = moving && mc.level != null ? (int) ((mc.level.getGameTime() / 7L) & 1L) : 0;
+        float scale = Math.max(0.72f, Math.min(1.65f, size / 25.0f));
+        g.pose().pushPose();
+        g.pose().translate((float) screenX, (float) screenY, 0.0f);
+        g.pose().scale(scale, scale, 1.0f);
+        // Ground shadow and boots.
+        g.fill(-9, 8, 9, 11, 0x55301810);
+        g.fill(-4 + phase * 3, 5, -1 + phase * 3, 10, 0xFF30251E);
+        g.fill(1 - phase * 3, 5, 4 - phase * 3, 10, 0xFF30251E);
+        // Mail/coat, head and helmet.
+        g.fill(-4, -3, 4, 6, realmColor);
+        g.fill(-3, -8, 3, -2, 0xFFC79B70);
+        g.fill(-4, -10, 4, -7, 0xFFD7C08B);
+        g.fill(-2, -12, 3, -10, 0xFF8D7447);
+        // Shield bearing the army's actual realm colour and a simple metal rim.
+        g.fill(-9, -3, -5, 5, 0xFFE0C995);
+        g.fill(-8, -2, -6, 4, realmColor);
+        // Spear and a small moving pennant.
+        g.fill(6, -13, 7, 8, 0xFFD8C9A5);
+        int flagShift = moving ? phase : 0;
+        g.fill(7, -12, 13 + flagShift, -7, realmColor);
+        g.fill(7, -12, 13 + flagShift, -11, 0xFFFFD778);
+        g.pose().popPose();
+    }
+
     private static Map<String, LivingEntity> leaderBodies() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) {
