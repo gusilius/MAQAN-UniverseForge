@@ -195,11 +195,20 @@ public final class CommandScreen extends Screen {
         x -= BTN_W + 4;
         l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
         x -= BTN_W + 4;
-        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.RIG.setView(CameraRig.View.SKY)));
+        l.add(new Btn("RTS", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.SKY)));
         x -= BTN_W + 4;
-        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.RIG.setView(CameraRig.View.TACTICS)));
+        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.TACTICS)));
         x -= BTN_W + 4;
-        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.RIG.setView(CameraRig.View.FREE)));
+        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.FREE)));
+        x -= BTN_W + 4;
+        l.add(new Btn("Сверху", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TOP_DOWN,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.TOP_DOWN)));
+        x -= BTN_W + 4;
+        l.add(new Btn("Политика", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.STRATEGIC,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.STRATEGIC)));
         return l;
     }
 

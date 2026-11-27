@@ -8,6 +8,9 @@ import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
 import com.maqan.galacticnavigator.navigation.NavigatorTerritory;
 import com.maqan.galacticnavigator.navigation.NavigatorTerritoryStore;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -72,6 +75,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
     @Override
     protected void init() {
         com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.reload();
+        com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.ensureLiveFeed();
         addRenderableWidget(Button.builder(Component.literal("ROTATE −"), b -> yaw -= Math.PI / 12.0)
                 .bounds(18, 44, 82, 20).build());
         addRenderableWidget(Button.builder(Component.literal("ROTATE +"), b -> yaw += Math.PI / 12.0)
@@ -301,15 +305,61 @@ public final class NavigatorTerrain3DScreen extends Screen {
             }
         }
         for (var feature : com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.features(dimension)) {
+            if ("administrative_title".equals(feature.kind) && zoom < 1.15) continue;
             double[] point = project(feature.x, feature.z, feature.y, centerX, centerZ, centerY,
                     cos, sin, pitch, tile, originX, originY, viewMode);
             int x = (int) Math.round(point[0]), y = (int) Math.round(point[1]);
             if (x < left || x > right || y < top || y > bottom) continue;
             int color = feature.color == 0 ? worldForgeFeatureColor(feature.kind) : feature.color;
-            g.fill(x - 5, y - 5, x + 6, y + 6, 0xE608111C);
-            g.fill(x - 3, y - 3, x + 4, y + 4, color);
-            g.drawString(font, feature.name, x + 7, y - 4, color, false);
+            ResourceLocation itemId = worldForgeFeatureItem(feature.kind, feature.subtype);
+            boolean renderedItem = false;
+            if (itemId != null) {
+                ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
+                if (!stack.isEmpty()) {
+                    int iconSize = Math.max(10, Math.min(26, (int) Math.round(15 * Math.sqrt(zoom))));
+                    g.fill(x - iconSize / 2 - 2, y - iconSize / 2 - 2,
+                            x + iconSize / 2 + 2, y + iconSize / 2 + 2, 0xC908111C);
+                    g.pose().pushPose();
+                    g.pose().translate(x - iconSize / 2.0F, y - iconSize / 2.0F, 0.0F);
+                    float scale = iconSize / 16.0F;
+                    g.pose().scale(scale, scale, 1.0F);
+                    g.renderItem(stack, 0, 0);
+                    g.pose().popPose();
+                    renderedItem = true;
+                }
+            }
+            if (!renderedItem) {
+                g.fill(x - 5, y - 5, x + 6, y + 6, 0xE608111C);
+                g.fill(x - 3, y - 3, x + 4, y + 4, color);
+            }
+            if (zoom > 0.85 || "region_capital".equals(feature.kind))
+                g.drawString(font, feature.name, x + 9, y - 4, color, false);
         }
+    }
+
+    private static ResourceLocation worldForgeFeatureItem(String kind, String subtype) {
+        String item = null;
+        if ("marker".equals(kind)) {
+            item = switch (subtype == null ? "" : subtype.toLowerCase(java.util.Locale.ROOT)) {
+                case "capital" -> "minecraft:gold_block";
+                case "city" -> "minecraft:bricks";
+                case "settlement", "village" -> "minecraft:oak_planks";
+                case "castle" -> "minecraft:stone_bricks";
+                case "port" -> "minecraft:barrel";
+                case "mine" -> "minecraft:iron_pickaxe";
+                case "temple" -> "minecraft:chiseled_stone_bricks";
+                case "ruin" -> "minecraft:mossy_stone_bricks";
+                case "camp" -> "minecraft:campfire";
+                case "caravan" -> "minecraft:chest";
+                case "army" -> "minecraft:shield";
+                default -> "minecraft:compass";
+            };
+        } else if ("region_capital".equals(kind)) {
+            item = "minecraft:compass";
+        } else if ("administrative_title".equals(kind)) {
+            item = "minecraft:gold_block";
+        }
+        return item == null ? null : ResourceLocation.tryParse(item);
     }
 
     private static int worldForgeFeatureColor(String kind) {

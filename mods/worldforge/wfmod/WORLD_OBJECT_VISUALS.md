@@ -1,18 +1,16 @@
 # Shared world-object visual profiles
 
-This shared visual identity layer is consumed by the political-map marker renderer and is the
-stable profile contract for RTS inspection and Diorama adapters. A profile is presentation
-metadata only: it never creates a second settlement, army, structure or Character.
+One profile is the presentation identity shared by the political map, RTS and Diorama. It is
+metadata only and never creates a second settlement, army, structure or Character.
 
-## Registration and resolution
+## Registration
 
 - Built-in semantic profiles: capital, city, settlement, village, castle, port, mine, temple,
   ruin, camp, caravan, army and other.
-- Resource-pack profiles: `assets/<namespace>/worldforge/visuals/*.json`.
-- Runtime integrations: `WorldObjectVisualCatalog.register(Profile)`.
-- Resolution order: explicit marker `visual` override, semantic marker `type`, safe `other` fallback.
-- Existing marker JSON remains compatible; `visual` is optional. Provider-owned snapshots need
-  no changes. Only designated army markers are shown; ordinary NPCs/workers are not promoted.
+- Resource packs: `assets/<namespace>/worldforge/visuals/*.json`.
+- Mods can register profiles through `WorldObjectVisualCatalog.register(Profile)`.
+- Marker resolution: explicit marker `visual` override, semantic `type`, then safe fallback.
+- Legacy marker saves remain valid. Ordinary workers are not promoted to strategic markers.
 
 ## Manifest
 
@@ -23,6 +21,7 @@ metadata only: it never creates a second settlement, army, structure or Characte
   "icon": "castle",
   "mapScale": 42,
   "mapTexture": "maqan:textures/worldmap/citadel.png",
+  "mapItem": "minecraft:stone_bricks",
   "rtsModel": "maqan:world/citadel.glb",
   "dioramaModel": "maqan:world/citadel.glb",
   "iconLod": 0.0,
@@ -30,14 +29,18 @@ metadata only: it never creates a second settlement, army, structure or Characte
 }
 ```
 
-Missing map textures automatically fall back to vector symbols. `rtsModel` and `dioramaModel`
-are stable asset references for view adapters; `mapScale` and LOD thresholds keep scale policy
-consistent across views. Mods should map their registered structure/block/entity identifiers to
-profiles rather than introducing duplicate gameplay entities.
+The political map uses a profile texture when supplied; otherwise it renders the profile's actual
+Minecraft item/block model through the native item renderer (gold capital, brick city, timber
+village, stone castle, barrel port, shield army, and so on). Army commanders retain their live
+Minecraft entity renderer. Diorama uses the same semantic item-model family for exported
+WorldForge features over its explored-terrain 3D surface.
 
-## Implementation boundary
+## Current rendering boundary
 
-Profile discovery, reload, marker override, optional map texture and vector fallback are wired.
-The wf-people GLB parser decodes mesh/skin/animation source data, but shared GPU model rendering,
-skeletal playback, structure scene placement and full RTS/Diorama model integration are not yet
-implemented. The manifest fields do not claim otherwise.
+Map textures and item models are live map rendering paths. The Diorama uses actual captured
+terrain with isometric/top-down camera, terrain styles, and WorldForge political overlays; it
+now draws block/item models for strategic feature anchors. The `rtsModel` and `dioramaModel`
+fields reserve custom GLB model assets for the full mesh renderer. The current GLB parser and
+CPU animation sampler do not yet provide GPU mesh upload/skinning or full building placement.
+No custom GLB models are bundled in this repository yet; missing assets therefore use native
+Minecraft item/block model fallbacks rather than invisible placeholders.

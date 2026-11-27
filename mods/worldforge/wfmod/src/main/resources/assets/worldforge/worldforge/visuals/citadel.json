@@ -4,6 +4,7 @@
   "icon": "castle",
   "mapScale": 42,
   "mapTexture": "",
+  "mapItem": "minecraft:stone_bricks",
   "rtsModel": "maqan:world/citadel.glb",
   "dioramaModel": "maqan:world/citadel.glb",
   "iconLod": 0.0,

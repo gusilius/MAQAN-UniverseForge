@@ -49,3 +49,22 @@ class CameraRigTest {
         assertEquals(0.0, CameraRig.keepAboveTerrain(10, 12) - 14.25, 1.0e-9);
     }
 }
+
+    @Test
+    void cameraPresetsTransitionSmoothlyAcrossAllFiveViews() {
+        CameraRig rig = new CameraRig();
+        rig.start(0, 0, 0, CameraRig.View.SKY);
+        rig.cycle();
+        assertEquals(CameraRig.View.TACTICS, rig.view);
+        assertNotEquals(CameraRig.View.TACTICS.pitch, rig.pitch, 1.0e-6);
+        for (int i = 0; i < 120; i++) rig.updateTransition(1.0 / 60.0);
+        assertEquals(CameraRig.View.TACTICS.pitch, rig.pitch, 0.03);
+        rig.cycle();
+        assertEquals(CameraRig.View.FREE, rig.view);
+        for (int i = 0; i < 120; i++) rig.updateTransition(1.0 / 60.0);
+        rig.cycle();
+        assertEquals(CameraRig.View.TOP_DOWN, rig.view);
+        for (int i = 0; i < 120; i++) rig.updateTransition(1.0 / 60.0);
+        rig.cycle();
+        assertEquals(CameraRig.View.STRATEGIC, rig.view);
+    }

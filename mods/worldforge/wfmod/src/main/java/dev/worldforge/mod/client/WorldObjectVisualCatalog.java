@@ -25,11 +25,12 @@ public final class WorldObjectVisualCatalog extends SimplePreparableReloadListen
     private static volatile Map<String, Profile> profiles = BUILT_INS;
 
     public record Profile(String id, String category, String icon, float mapScale,
-                          String mapTexture, String rtsModel, String dioramaModel,
+                          String mapTexture, String mapItem, String rtsModel, String dioramaModel,
                           float iconLod, float modelLod) {
         public Profile {
             id = clean(id); category = clean(category); icon = clean(icon);
-            mapTexture = clean(mapTexture); rtsModel = clean(rtsModel); dioramaModel = clean(dioramaModel);
+            mapTexture = clean(mapTexture); mapItem = clean(mapItem);
+            rtsModel = clean(rtsModel); dioramaModel = clean(dioramaModel);
             if (id.isBlank() || category.isBlank() || icon.isBlank())
                 throw new IllegalArgumentException("visual profile id/category/icon are required");
             if (!Float.isFinite(mapScale) || mapScale < 12 || mapScale > 96)
@@ -85,10 +86,12 @@ public final class WorldObjectVisualCatalog extends SimplePreparableReloadListen
                                 mapTexture = "";
                             }
                         }
+                        String mapItem = string(json, "mapItem", "");
+                        if (!mapItem.isBlank() && ResourceLocation.tryParse(mapItem) == null) mapItem = "";
                         String rtsModel = string(json, "rtsModel", "");
                         Profile profile = new Profile(id, string(json, "category", "world-object"),
                                 string(json, "icon", "other"), number(json, "mapScale", 34),
-                                mapTexture, rtsModel, string(json, "dioramaModel", rtsModel),
+                                mapTexture, mapItem, rtsModel, string(json, "dioramaModel", rtsModel),
                                 number(json, "iconLod", 0), number(json, "modelLod", 2));
                         loaded.put(profile.id(), profile);
                     } catch (Exception failure) {
@@ -125,23 +128,24 @@ public final class WorldObjectVisualCatalog extends SimplePreparableReloadListen
     }
     private static Map<String, Profile> builtIns() {
         Map<String, Profile> result = new LinkedHashMap<>();
-        add(result, "capital", "settlement", "capital", 44);
-        add(result, "city", "settlement", "city", 38);
-        add(result, "settlement", "settlement", "settlement", 32);
-        add(result, "village", "settlement", "village", 29);
-        add(result, "castle", "fortification", "castle", 38);
-        add(result, "port", "infrastructure", "port", 32);
-        add(result, "mine", "industry", "mine", 28);
-        add(result, "temple", "civic", "temple", 31);
-        add(result, "ruin", "landmark", "ruin", 28);
-        add(result, "camp", "mobile-object", "camp", 27);
-        add(result, "caravan", "mobile-object", "caravan", 27);
-        add(result, "army", "army", "army", 34);
-        add(result, "other", "world-object", "other", 26);
+        add(result, "capital", "settlement", "capital", 44, "minecraft:gold_block");
+        add(result, "city", "settlement", "city", 38, "minecraft:bricks");
+        add(result, "settlement", "settlement", "settlement", 32, "minecraft:oak_planks");
+        add(result, "village", "settlement", "village", 29, "minecraft:oak_planks");
+        add(result, "castle", "fortification", "castle", 38, "minecraft:stone_bricks");
+        add(result, "port", "infrastructure", "port", 32, "minecraft:barrel");
+        add(result, "mine", "industry", "mine", 28, "minecraft:iron_pickaxe");
+        add(result, "temple", "civic", "temple", 31, "minecraft:chiseled_stone_bricks");
+        add(result, "ruin", "landmark", "ruin", 28, "minecraft:mossy_stone_bricks");
+        add(result, "camp", "mobile-object", "camp", 27, "minecraft:campfire");
+        add(result, "caravan", "mobile-object", "caravan", 27, "minecraft:chest");
+        add(result, "army", "army", "army", 34, "minecraft:shield");
+        add(result, "other", "world-object", "other", 26, "minecraft:compass");
         return Collections.unmodifiableMap(result);
     }
-    private static void add(Map<String, Profile> into, String id, String category, String icon, float scale) {
-        Profile profile = new Profile("worldforge:" + id, category, icon, scale, "", "", "", 0, 2);
+    private static void add(Map<String, Profile> into, String id, String category, String icon,
+                            float scale, String mapItem) {
+        Profile profile = new Profile("worldforge:" + id, category, icon, scale, "", mapItem, "", "", 0, 2);
         into.put(profile.id(), profile);
     }
     private static void publish() {

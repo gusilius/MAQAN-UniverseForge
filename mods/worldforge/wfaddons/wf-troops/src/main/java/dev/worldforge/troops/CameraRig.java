@@ -78,7 +78,7 @@ public final class CameraRig {
     }
 
     public void cycle() {
-        setView(switch (view) {
+        transitionTo(switch (view) {
             case SKY -> View.TACTICS;
             case TACTICS -> View.FREE;
             case FREE -> View.TOP_DOWN;

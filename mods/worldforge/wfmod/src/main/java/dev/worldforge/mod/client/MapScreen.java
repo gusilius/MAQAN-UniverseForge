@@ -5,6 +5,8 @@ import dev.worldforge.mod.Markers;
 import dev.worldforge.mod.TitleData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -725,24 +727,23 @@ public class MapScreen extends Screen {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
         boolean selected = marker.id.equals(selectedMarkerId);
         boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
-        String symbol = switch (marker.type == null ? "other" : marker.type) {
-            case "army" -> {
-                String commander = markerValue(marker.desc, "commander").trim();
-                yield commander.isEmpty() ? "A"
-                        : commander.substring(0, commander.offsetByCodePoints(0, 1)).toUpperCase(java.util.Locale.ROOT);
-            }
+        WorldObjectVisualCatalog.Profile visual = WorldObjectVisualCatalog.resolve(marker);
+        String symbol = switch (visual.icon()) {
+            case "army" -> "⚑";
             case "capital" -> "★";
-            case "city" -> "C";
-            case "village", "settlement" -> "V";
-            case "castle" -> "F";
-            case "port" -> "P";
-            case "ruin" -> "R";
-            case "caravan" -> "K";
-            case "camp" -> "H";
-            case "temple", "mine" -> "T";
-            default -> "?";
+            case "city", "settlement" -> "⌂";
+            case "village" -> "⌂";
+            case "castle" -> "♜";
+            case "port" -> "⚓";
+            case "ruin" -> "⌑";
+            case "caravan" -> "◆";
+            case "camp" -> "⌃";
+            case "temple" -> "✥";
+            case "mine" -> "⛏";
+            default -> "◇";
         };
-        int size = Math.max(22, Math.min(42, (int) Math.round(34 * Math.sqrt(Math.max(0.25, zoom)))));
+        int size = Math.max(16, Math.min(48,
+                (int) Math.round(visual.mapScale() * Math.sqrt(Math.max(0.16, zoom)))));
         int left = x - size / 2, top = y - size / 2;
         int realmColor = 0xFF000000 | (marker.rgb & 0xFFFFFF);
         int border = selected ? 0xFFFFD66B : hovered ? 0xFFE9D28B : realmColor;
@@ -776,16 +777,31 @@ public class MapScreen extends Screen {
                 g.disableScissor();
             }
         }
+        if (!renderedLeader && !visual.mapItem().isBlank()) {
+            ResourceLocation itemId = ResourceLocation.tryParse(visual.mapItem());
+            if (itemId != null) {
+                ItemStack iconStack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
+                if (!iconStack.isEmpty()) {
+                    int iconSize = Math.max(12, Math.min(32, size - 6));
+                    g.pose().pushPose();
+                    g.pose().translate(x - iconSize / 2.0F, y - iconSize / 2.0F, 0.0F);
+                    float iconScale = iconSize / 16.0F;
+                    g.pose().scale(iconScale, iconScale, 1.0F);
+                    g.renderItem(iconStack, 0, 0);
+                    g.pose().popPose();
+                    renderedLeader = true;
+                }
+            }
+        }
         if (!renderedLeader) {
             if ("army".equals(marker.type)) {
-                // A compact commander standard, not a stack of individual troop markers.
                 int poleX = left + Math.max(5, size / 5);
                 g.fill(poleX, top + 5, poleX + 1, top + size - 5, 0xFFE8D9B5);
                 g.fill(poleX + 1, top + 5, poleX + Math.max(6, size / 3), top + Math.max(9, size / 3),
                         realmColor);
             }
             int textWidth = font.width(symbol);
-            g.drawString(font, symbol, x - textWidth / 2 + ("army".equals(marker.type) ? 2 : 0),
+            g.drawString(font, symbol, x - textWidth / 2,
                     y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
         }
         if (selected || hovered) {
@@ -825,7 +841,8 @@ public class MapScreen extends Screen {
             String leaderUuid = markerValue(marker.desc, "leaderEntity");
             drawStrategicMarker(g, marker, point[0], point[1], mx, my,
                     leaderBodies.get(leaderUuid));
-            if (zoom > 0.9 || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12) {
+            if (zoom > 1.15 || marker.id.equals(selectedMarkerId)
+                    || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12) {
                 String label = marker.name;
                 if ("army".equals(marker.type)) {
                     String commander = markerValue(marker.desc, "commander").trim();
