@@ -13,7 +13,13 @@ import com.maqan.galacticnavigator.navigation.WorldForgeMapGeometry;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
 import java.util.ArrayList;
 import java.util.Comparator;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -33,7 +39,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private boolean terrain3D;
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
-    private Button viewModeButton,refreshSnapshotButton;
+    private Button viewModeButton,refreshSnapshotButton,radarButton;
     private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton,terrainLayerButton;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
@@ -44,26 +50,29 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     /** 0 off, 1 biome, 2 elevation, 3 hydrography. */
     private int terrainLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
+    private enum RadarFilter { ALL, HOSTILE, PASSIVE, PLAYERS, OFF }
+    private RadarFilter radarFilter=RadarFilter.ALL;
+    private static final double RADAR_RANGE_BLOCKS=160.0;
     private static final int BACKGROUND=0xF0060B16;
 
     private record ControlBounds(int x, int y, int width) {}
 
-    private int controlRows() { return width >= 900 ? 1 : width >= 560 ? 2 : 3; }
+    private int controlRows() { return width >= 1040 ? 1 : width >= 620 ? 2 : 3; }
 
     private int mapViewportTop() { return 74 + (controlRows() - 1) * 24; }
 
     private ControlBounds controlBounds(int index) {
-        int[] fullX = {18, 110, 238, 306, 374, 482, 586, 744};
-        int[] fullW = {86, 124, 64, 64, 104, 96, 154, 94};
-        if (width >= 900) return new ControlBounds(fullX[index], 48, fullW[index]);
+        int[] fullX = {18, 110, 238, 306, 374, 482, 586, 744, 846};
+        int[] fullW = {86, 124, 64, 64, 104, 96, 154, 94, 112};
+        if (width >= 1040) return new ControlBounds(fullX[index], 48, fullW[index]);
 
-        boolean twoRows = width >= 560;
+        boolean twoRows = width >= 620;
         int[] rows = twoRows
-                ? new int[]{0, 0, 0, 0, 0, 0, 1, 1}
-                : new int[]{0, 0, 0, 0, 1, 1, 1, 2};
+                ? new int[]{0, 0, 0, 0, 0, 0, 1, 1, 1}
+                : new int[]{0, 0, 0, 0, 1, 1, 1, 2, 2};
         int[] baseWidths = twoRows
-                ? new int[]{72, 100, 50, 50, 82, 78, 130, 80}
-                : new int[]{60, 82, 44, 44, 70, 70, 110, 70};
+                ? new int[]{72, 100, 50, 50, 82, 78, 130, 80, 96}
+                : new int[]{60, 82, 44, 44, 70, 70, 110, 70, 82};
         int row = rows[index], count = 0, sum = 0;
         for (int i = 0; i < rows.length; i++) if (rows[i] == row) {
             count++;
@@ -164,6 +173,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     :(compact?new String[]{"OFF","BIOME","RELIEF","WATER"}[terrainLayer]
                     :switch(terrainLayer){case 1 -> "MAP: BIOME";case 2 -> "MAP: RELIEF";case 3 -> "MAP: WATER";default -> "MAP: OFF";})));
         }).bounds(terrain.x(),terrain.y(),terrain.width(),20).build());
+        ControlBounds radar=controlBounds(8);
+        radarButton=addRenderableWidget(Button.builder(Component.literal("RADAR: ALL"),b->{
+            radarFilter=RadarFilter.values()[(radarFilter.ordinal()+1)%RadarFilter.values().length];
+            b.setMessage(Component.literal("RADAR: "+radarFilter.name()));
+        }).bounds(radar.x(),radar.y(),radar.width(),20).build());
         updateDepthButtons();
     }
     private void updateDepthButtons(){
@@ -285,6 +299,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 ?project(player.x()/16.0,player.z()/16.0,cell,mapLeft,mapTop,mapRight,mapBottom,player)
                 :new double[]{(mapLeft+mapRight)/2.0+panX,(mapTop+mapBottom)/2.0+panY};
         int cx=(int)Math.round(playerPoint[0]),cy=(int)Math.round(playerPoint[1]);
+        Entity hoveredRadar=renderEntityRadar(g,mouseX,mouseY,player,mapLeft,mapTop,mapRight,mapBottom);
         drawPlayerMarker(g,cx,cy,player);
 
         g.fill(12,height-38,width-12,height-12,0xD9101C2B);
@@ -298,7 +313,62 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 surfaceRoute!=null&&!surfaceRoute.found()?0xFFFFB47A:0xFF8EA8BC,false);
         super.render(g,mouseX,mouseY,partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
+        if(hoveredRadar!=null){
+            List<Component> tooltip=new ArrayList<>();
+            tooltip.add(hoveredRadar.getDisplayName().copy().withStyle(net.minecraft.ChatFormatting.GOLD));
+            tooltip.add(Component.literal("Y "+(int)Math.floor(hoveredRadar.getY())
+                    +" · ΔY "+(player==null?0:(int)Math.round(hoveredRadar.getY()-player.y()))).withStyle(net.minecraft.ChatFormatting.GRAY));
+            if(player!=null)tooltip.add(Component.literal((int)Math.round(hoveredRadar.distanceTo(player))+" blocks").withStyle(net.minecraft.ChatFormatting.GRAY));
+            g.renderComponentTooltip(font,tooltip,mouseX,mouseY);
+        }
     }
+
+    /** Live vanilla-world radar: only entities already tracked by the client are sampled. */
+    private Entity renderEntityRadar(GuiGraphics g,int mouseX,int mouseY,NavigatorPlayerPosition player,
+                                     int left,int top,int right,int bottom){
+        if(radarFilter==RadarFilter.OFF||terrain3D||player==null||!dimension.equals(player.dimensionId()))return null;
+        Minecraft mc=Minecraft.getInstance();
+        if(mc.level==null)return null;
+        Entity hovered=null;
+        double nearest=100.0;
+        int drawn=0;
+        for(Entity entity:mc.level.entitiesForRendering()){
+            if(entity==null||!entity.isAlive()||entity==mc.player||entity instanceof Player&&radarFilter==RadarFilter.HOSTILE)continue;
+            double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+            double distanceSq=dx*dx+dz*dz;
+            if(distanceSq>RADAR_RANGE_BLOCKS*RADAR_RANGE_BLOCKS)continue;
+            boolean hostile=entity instanceof Monster;
+            boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+            boolean otherPlayer=entity instanceof Player;
+            if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+            if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+            if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+            if(radarFilter==RadarFilter.ALL&&!hostile&&!passive&&!otherPlayer)continue;
+            double[] point=project(entity.getX()/16.0,entity.getZ()/16.0,18.0*zoom,left,top,right,bottom,player);
+            if(!insideMap(point[0],point[1],left,top,right,bottom))continue;
+            int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
+            int color=otherPlayer?0xFF55DDF2:hostile?0xFFFF6262:passive?0xFF8BDA91:0xFFFFC66D;
+            int radius=zoom>=1.5?4:3;
+            g.fill(x-radius-2,y-radius-2,x+radius+3,y+radius+3,0xAA07101A);
+            g.fill(x-radius,y-radius,x+radius+1,y+radius+1,color);
+            int dy=(int)Math.round(entity.getY()-player.y());
+            if(Math.abs(dy)>=8){
+                String vertical=dy>0?"↑":"↓";
+                g.drawString(font,vertical,x+radius+2,y-font.lineHeight/2,0xFFECEBE4,false);
+            }
+            double hoverDx=mouseX-x,hoverDy=mouseY-y,hoverDistance=hoverDx*hoverDx+hoverDy*hoverDy;
+            if(hoverDistance<=nearest){nearest=hoverDistance;hovered=entity;}
+            if(zoom>=1.65&&drawn<36){
+                String name=entity.getType().getDescription().getString();
+                g.drawString(font,font.plainSubstrByWidth(name,64),x+radius+3,y+radius+1,0xFFDCE7EE,false);
+            }
+            drawn++;
+        }
+        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)RADAR_RANGE_BLOCKS+" blocks";
+        g.drawString(font,label,left+8,top+8,0xFF9BD7F1,false);
+        return hovered;
+    }
+
     /** Renders validated political and settlement layers from the active WorldForge dimension. */
     private void renderWorldForgeOverlay(GuiGraphics g,double cell,int left,int top,int right,int bottom,
                                          NavigatorPlayerPosition player){
