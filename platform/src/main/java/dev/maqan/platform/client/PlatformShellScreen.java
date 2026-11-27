@@ -551,7 +551,7 @@ public final class PlatformShellScreen extends Screen {
             WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        ThemeManager.renderChrome(g, width, height);
+        ThemeManager.renderChrome(g, width, height, profile == Profile.RTS || commandCameraActive());
         drawTopBar(g, mouseX, mouseY);
         drawRail(g, mouseX, mouseY);
         for (Panel p : panels.values())
@@ -1175,9 +1175,9 @@ public final class PlatformShellScreen extends Screen {
             }
             if (commandCameraActive() && width >= 480) {
                 int cameraX = cameraControlX();
-                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
-                    int index = (int) ((mx - cameraX) / 36);
-                    if (index >= 0 && index < 5) {
+                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 170) {
+                    int index = (int) ((mx - cameraX) / 34);
+                    if (index >= 0 && index < 5 && mx < cameraX + index * 34 + 30) {
                         setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"}[index]);
                         return true;
                     }

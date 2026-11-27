@@ -26,7 +26,7 @@ public final class ThemeManager {
     public static final int REFERENCE_WIDTH = 1368;
     public static final int REFERENCE_HEIGHT = 760;
     private static final String[] THEMES = {"royal", "iron", "grim", "elf"};
-    private static final String[] FRAME_ELEMENTS = {"top", "lcol", "rcol", "mm", "bot", "cor"};
+    private static final String[] FRAME_ELEMENTS = {"top", "lcol", "rcol", "mm", "cor"};
     private static final String[] ALL_ELEMENTS = {"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor", "lw", "rw"};
     private static final Map<String, Texture> TEXTURES = new LinkedHashMap<>();
     private static final Map<String, int[]> RECTANGLES = new LinkedHashMap<>();
@@ -184,20 +184,31 @@ public final class ThemeManager {
     }
 
     public static synchronized void renderChrome(GuiGraphics graphics, int width, int height) {
+        renderChrome(graphics, width, height, true);
+    }
+
+    /** Render the shared frame; the RTS console is intentionally absent outside command mode. */
+    public static synchronized void renderChrome(GuiGraphics graphics, int width, int height,
+                                                   boolean showRtsConsole) {
         initialize();
         if (!manifestValid || width <= 0 || height <= 0) return;
         float sx = width / (float) REFERENCE_WIDTH;
         float sy = height / (float) REFERENCE_HEIGHT;
         for (String element : FRAME_ELEMENTS) {
-            int[] rect = RECTANGLES.get(element);
-            Texture texture = TEXTURES.get(element);
-            if (rect == null || texture == null) continue;
-            int x = Math.round(rect[0] * sx);
-            int y = Math.round(rect[1] * sy);
-            int w = Math.max(1, Math.round((rect[2] - rect[0]) * sx));
-            int h = Math.max(1, Math.round((rect[3] - rect[1]) * sy));
-            drawScaled(graphics, texture, x, y, w, h);
+            drawChromeElement(graphics, element, sx, sy);
         }
+        if (showRtsConsole) drawChromeElement(graphics, "bot", sx, sy);
+    }
+
+    private static void drawChromeElement(GuiGraphics graphics, String element, float sx, float sy) {
+        int[] rect = RECTANGLES.get(element);
+        Texture texture = TEXTURES.get(element);
+        if (rect == null || texture == null) return;
+        int x = Math.round(rect[0] * sx);
+        int y = Math.round(rect[1] * sy);
+        int w = Math.max(1, Math.round((rect[2] - rect[0]) * sx));
+        int h = Math.max(1, Math.round((rect[3] - rect[1]) * sy));
+        drawScaled(graphics, texture, x, y, w, h);
     }
 
     public static synchronized void renderWindow(GuiGraphics graphics, int x, int y,
