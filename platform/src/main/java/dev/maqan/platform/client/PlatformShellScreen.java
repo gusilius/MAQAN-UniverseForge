@@ -574,7 +574,15 @@ public final class PlatformShellScreen extends Screen {
                     }
                 }
             }
-            if (!resolved) { panel.x = originalX; panel.y = originalY; }
+            if (!resolved) {
+                // Never leave two floating windows painted over one another just
+                // because a tiny viewport has no remaining collision-free slot.
+                panel.x = originalX;
+                panel.y = originalY;
+                panel.visible = false;
+                LOGGER.warn("Temporarily hiding floating MAQAN panel '{}' because the viewport has no free slot", panel.id);
+                continue;
+            }
             placed.add(panel);
         }
     }
