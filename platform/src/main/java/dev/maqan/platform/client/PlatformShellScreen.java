@@ -714,34 +714,34 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawTopBar(GuiGraphics g, int mx, int my) {
-        g.drawString(font, "M", 15, 12, CYAN, false);
-        g.fill(34, 9, 35, 25, EDGE);
+        g.drawString(font, "M", ux(15), uy(12), CYAN, false);
+        g.fill(ux(34), uy(9), ux(35), uy(25), EDGE);
         int x = profileStartX(), buttonWidth = profileButtonWidth(), buttonStep = profileButtonStep();
         for (Profile p : Profile.values()) {
             if (!profileAvailable(p)) continue;
             boolean active = p == profile;
-            g.fill(x, 5, x + buttonWidth, 29, active ? 0x553B9FB5 : 0x00101924);
-            if (active) g.fill(x, 28, x + buttonWidth, 30, CYAN);
-            g.drawCenteredString(font, p.icon, x + buttonWidth/2, 8, active ? CYAN : MUTED);
-            if (mx >= x && mx < x + buttonWidth && my >= 5 && my < 30)
+            g.fill(x, uy(5), x + buttonWidth, uy(29), active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, uy(28), x + buttonWidth, uy(30), CYAN);
+            g.drawCenteredString(font, p.icon, x + buttonWidth/2, uy(8), active ? CYAN : MUTED);
+            if (mx >= x && mx < x + buttonWidth && my >= uy(5) && my < uy(30))
                 g.renderTooltip(font, Component.literal(p.label), mx, my);
             x += buttonStep;
         }
         if (!compactTopbar())
-            g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
-        if (commandCameraActive() && width >= 480) {
+            g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", ux(46), uy(13), MUTED, false);
+        if (commandCameraActive() && width >= ux(480)) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"};
             String[] labels = {"RTS", "ISO", "FREE", "TOP", "POL"};
             int cameraX = cameraControlX();
-            if (!compactTopbar()) g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
+            if (!compactTopbar()) g.drawString(font, "CAM", cameraX - ux(28), uy(13), MUTED, false);
             for (int i = 0; i < ids.length; i++) {
-                int cameraButtonX = cameraX + i * 34;
+                int cameraButtonX = cameraX + i * ux(34);
                 boolean activeCamera = ids[i].equals(current);
-                g.fill(cameraButtonX, 5, cameraButtonX + 30, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
-                if (activeCamera) g.fill(cameraButtonX, 28, cameraButtonX + 30, 30, CYAN);
-                g.drawCenteredString(font, labels[i], cameraButtonX + 15, 13, activeCamera ? CYAN : TEXT);
-                if (mx >= cameraButtonX && mx < cameraButtonX + 30 && my >= 5 && my < 30)
+                g.fill(cameraButtonX, uy(5), cameraButtonX + ux(30), uy(29), activeCamera ? 0x663B9FB5 : SURFACE_ALT);
+                if (activeCamera) g.fill(cameraButtonX, uy(28), cameraButtonX + ux(30), uy(30), CYAN);
+                g.drawCenteredString(font, labels[i], cameraButtonX + ux(15), uy(13), activeCamera ? CYAN : TEXT);
+                if (mx >= cameraButtonX && mx < cameraButtonX + ux(30) && my >= uy(5) && my < uy(30))
                     g.renderTooltip(font, Component.literal(switch (ids[i]) {
                         case "SKY" -> "Классическая RTS-камера";
                         case "TACTICS" -> "Изометрическая тактическая камера";
@@ -751,16 +751,16 @@ public final class PlatformShellScreen extends Screen {
                     }), mx, my);
             }
         }
-        g.drawCenteredString(font, "▤", width - 76, 13, workspaceManagerVisible ? CYAN : MUTED);
-        g.drawCenteredString(font, "◷", width - 48, 13, notificationCenterVisible ? CYAN : MUTED);
-        g.drawCenteredString(font, "×", width - 18, 13, MUTED);
-        if (mx >= width - 88 && mx < width - 64 && my < 34)
+        g.drawCenteredString(font, "▤", width - ux(76), uy(13), workspaceManagerVisible ? CYAN : MUTED);
+        g.drawCenteredString(font, "◷", width - ux(48), uy(13), notificationCenterVisible ? CYAN : MUTED);
+        g.drawCenteredString(font, "×", width - ux(18), uy(13), MUTED);
+        if (mx >= width - ux(88) && mx < width - ux(64) && my < uy(34))
             g.renderTooltip(font, Component.literal("Workspace profiles"), mx, my);
-        if (mx >= width - 58 && mx < width - 38 && my < 34)
+        if (mx >= width - ux(58) && mx < width - ux(38) && my < uy(34))
             g.renderTooltip(font, Component.literal("Notifications and event history"), mx, my);
-        if (mx >= width - 30 && mx < width - 6 && my < 34)
+        if (mx >= width - ux(30) && mx < width - ux(6) && my < uy(34))
             g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
-        if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
+        if (mx >= ux(8) && mx < ux(30) && my < uy(34)) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
     }
 
     private void drawRail(GuiGraphics g, int mx, int my) {
