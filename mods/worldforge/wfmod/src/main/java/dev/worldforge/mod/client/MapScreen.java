@@ -306,6 +306,7 @@ public class MapScreen extends Screen {
         } else hoverProv = 0;
 
         drawPlate(g);
+        if (embeddedInMaqan) drawMapTypeBar(g, mx, my);
         drawLegend(g);
         drawOverview(g);
         if (!embeddedInMaqan) {
@@ -333,6 +334,8 @@ public class MapScreen extends Screen {
             Slot f = slots.get(0), l = slots.get(slots.size() - 1);
             if (mx >= f.x - 6 && mx <= l.x + l.size + 6 && my >= f.y - 6) return true;
         }
+        if (embeddedInMaqan && mx >= Math.max(8, width - mapTypeBarWidth() - 10)
+                && my >= MAP_TYPE_BAR_Y - 4 && my < MAP_TYPE_BAR_Y + MAP_TYPE_BAR_H + 4) return true;
         if (mx >= ovwX - 6 && my >= ovwY - 6 && ovwW > 0) return true;
         return panel.contains(mx, my);
     }
@@ -358,6 +361,85 @@ public class MapScreen extends Screen {
             if (on) g.renderOutline(sl.x - 2, sl.y - 2, sl.size + 4, sl.size + 4, 0xFFFFFFFF);
             MapIcons.draw(g, MapIcons.keyFor(sl.key, tiers), sl.x + 4, sl.y + 4, 20);
             g.drawString(font, String.valueOf(i + 1), sl.x + 3, sl.y + 2, 0xFFA6A8B3);
+        }
+    }
+
+    private static final int MAP_TYPE_BAR_Y = 8;
+    private static final int MAP_TYPE_BAR_H = 24;
+    private static final int MAP_TYPE_GAP = 4;
+
+    private record MapTypeButton(String id, String label, int width) {}
+
+    private List<MapTypeButton> mapTypeButtons() {
+        return List.of(new MapTypeButton("political", "POLITICAL", 78),
+                new MapTypeButton("exploration", "EXPLORATION", 96),
+                new MapTypeButton("diorama", "DIORAMA 3D", 82));
+    }
+
+    private int mapTypeBarWidth() {
+        return mapTypeButtons().stream().mapToInt(MapTypeButton::width).sum()
+                + MAP_TYPE_GAP * (mapTypeButtons().size() - 1);
+    }
+
+    private void drawMapTypeBar(GuiGraphics g, int mx, int my) {
+        int x = Math.max(8, width - mapTypeBarWidth() - 10);
+        int y = MAP_TYPE_BAR_Y;
+        for (MapTypeButton button : mapTypeButtons()) {
+            int right = x + button.width();
+            boolean active = button.id().equals("political")
+                    ? !MapImages.TERRAIN.equals(ClientState.mode)
+                    : button.id().equals("exploration") && MapImages.TERRAIN.equals(ClientState.mode);
+            boolean hover = mx >= x && mx < right && my >= y && my < y + MAP_TYPE_BAR_H;
+            bevel(g, x, y, button.width(), MAP_TYPE_BAR_H, !active);
+            if (active) g.fill(x + 3, y + MAP_TYPE_BAR_H - 3, right - 3, y + MAP_TYPE_BAR_H - 1, 0xFFF0C85A);
+            if (hover && !active) g.fill(x + 2, y + 2, right - 2, y + MAP_TYPE_BAR_H - 2, 0x24FFFFFF);
+            g.drawCenteredString(font, button.label(), x + button.width() / 2, y + 8,
+                    active ? 0xFFF0C85A : 0xFFE8E2D0);
+            x = right + MAP_TYPE_GAP;
+        }
+    }
+
+    private boolean handleMapTypeClick(double mx, double my) {
+        int x = Math.max(8, width - mapTypeBarWidth() - 10);
+        int y = MAP_TYPE_BAR_Y;
+        if (my < y || my >= y + MAP_TYPE_BAR_H) return false;
+        for (MapTypeButton button : mapTypeButtons()) {
+            int right = x + button.width();
+            if (mx >= x && mx < right) {
+                switch (button.id()) {
+                    case "political" -> setMode(MapImages.REALMS);
+                    case "exploration" -> {
+                        setMode(MapImages.TERRAIN);
+                        centerOnPlayer();
+                    }
+                    case "diorama" -> openDioramaView();
+                    default -> { return false; }
+                }
+                return true;
+            }
+            x = right + MAP_TYPE_GAP;
+        }
+        return false;
+    }
+
+    /**
+     * Reuse Atlas' real explored-terrain Diorama renderer. It draws only captured
+     * chunks and can overlay WorldForge territories; no chunks are force-loaded.
+     * Reflection keeps WorldForge usable when the optional Atlas module is absent.
+     */
+    private void openDioramaView() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        try {
+            Class<?> viewType = Class.forName("com.maqan.galacticnavigator.client.NavigatorTerrain3DScreen");
+            Object view = viewType.getConstructor(String.class, Screen.class)
+                    .newInstance(mc.level.dimension().location().toString(), this);
+            if (!(view instanceof Screen screen)) return;
+            Class<?> hostType = Class.forName("com.maqan.galacticnavigator.client.MaqanScreenHost");
+            hostType.getMethod("open", Minecraft.class, Screen.class).invoke(null, mc, screen);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            if (mc.player != null) mc.player.displayClientMessage(
+                    Component.literal("Diorama 3D недоступна: модуль Atlas не загружен"), true);
         }
     }
 
@@ -580,6 +662,7 @@ public class MapScreen extends Screen {
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
         if (panel.click(mx, my, button)) return true;
+        if (embeddedInMaqan && button == 0 && handleMapTypeClick(mx, my)) return true;
         if (!embeddedInMaqan && button == 0) for (Slot sl : slots) if (sl.hit(mx, my)) { setMode(sl.key); return true; }
         if (!MapTextures.ready()) return false;
         if (button == 0 && ovwW > 0 && mx >= ovwX && mx < ovwX + ovwW && my >= ovwY && my < ovwY + ovwH) {
