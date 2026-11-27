@@ -16,12 +16,14 @@ import java.util.Comparator;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import java.util.List;
 import java.util.Map;
@@ -401,6 +403,17 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             int radius=zoom>=1.5?4:3;
             g.fill(x-radius-2,y-radius-2,x+radius+3,y+radius+3,0xAA07101A);
             g.fill(x-radius,y-radius,x+radius+1,y+radius+1,color);
+            // At close zoom show actual vanilla mob/player models, not substitute pictograms.
+            if(zoom>=2.2&&drawn<8&&entity instanceof LivingEntity living){
+                g.enableScissor(left,top,right,bottom);
+                try{
+                    InventoryScreen.renderEntityInInventoryFollowsMouse(g,x,y,18,0.0F,0.0F,living);
+                }catch(RuntimeException rendererFailure){
+                    // Keep the category-colored radar dot if a modded entity renderer fails.
+                }finally{
+                    g.disableScissor();
+                }
+            }
             int dy=(int)Math.round(entity.getY()-player.y());
             if(Math.abs(dy)>=8){
                 String vertical=dy>0?"↑":"↓";
