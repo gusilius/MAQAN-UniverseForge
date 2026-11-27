@@ -29,6 +29,7 @@ public final class WorkspaceMapLayerRegistry {
     private static final Map<String, Layer> LAYERS = new ConcurrentHashMap<>();
     private static final Map<String, Boolean> VISIBILITY = new ConcurrentHashMap<>();
     private static final Map<String, Float> OPACITY = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> ORDER = new ConcurrentHashMap<>();
     private static final java.util.prefs.Preferences PREFS =
             java.util.prefs.Preferences.userNodeForPackage(WorkspaceMapLayerRegistry.class).node("map-layers");
 
@@ -42,12 +43,14 @@ public final class WorkspaceMapLayerRegistry {
         if (previous != null) LAYERS.put(layer.id(), layer);
         VISIBILITY.putIfAbsent(layer.id(), PREFS.getBoolean("visible." + layer.id(), layer.defaultVisible()));
         OPACITY.putIfAbsent(layer.id(), PREFS.getFloat("opacity." + layer.id(), layer.defaultOpacity()));
+        ORDER.putIfAbsent(layer.id(), PREFS.getInt("order." + layer.id(), layer.order()));
     }
 
     public static void unregister(String layerId) {
         LAYERS.remove(layerId);
         VISIBILITY.remove(layerId);
         OPACITY.remove(layerId);
+        ORDER.remove(layerId);
     }
 
     public static void unregisterProvider(String providerId) {
@@ -56,7 +59,8 @@ public final class WorkspaceMapLayerRegistry {
     }
 
     public static List<Layer> layers() {
-        return LAYERS.values().stream().sorted(Comparator.comparingInt(Layer::order)
+        return LAYERS.values().stream().sorted(Comparator
+                .comparingInt((Layer layer) -> ORDER.getOrDefault(layer.id(), layer.order()))
                 .thenComparing(Layer::label, String.CASE_INSENSITIVE_ORDER)).toList();
     }
 
@@ -92,6 +96,37 @@ public final class WorkspaceMapLayerRegistry {
         }
     }
 
+    /** Current user-defined compositing order. Lower values render first. */
+    public static int order(String layerId) {
+        Layer layer = LAYERS.get(layerId);
+        return layer == null ? Integer.MAX_VALUE : ORDER.getOrDefault(layerId, layer.order());
+    }
+
+    /** Persist a user-defined layer order without changing provider metadata. */
+    public static void setOrder(String layerId, int order) {
+        if (!LAYERS.containsKey(layerId)) throw new IllegalArgumentException("Unknown map layer: " + layerId);
+        ORDER.put(layerId, order);
+        try { PREFS.putInt("order." + layerId, order); PREFS.flush(); }
+        catch (java.util.prefs.BackingStoreException error) {
+            WorkspaceRuntime.publish(WorkspaceRuntime.Severity.WARNING, "platform", "map-layer",
+                    "Could not save map layer order", layerId, "");
+        }
+    }
+
+    /** Move a layer one position relative to the currently sorted stack. */
+    public static void move(String layerId, int direction) {
+        if (direction == 0) return;
+        List<Layer> stack = layers();
+        int index = -1;
+        for (int i = 0; i < stack.size(); i++) if (stack.get(i).id().equals(layerId)) { index = i; break; }
+        int target = index + Integer.signum(direction);
+        if (index < 0 || target < 0 || target >= stack.size()) return;
+        Layer other = stack.get(target);
+        int currentOrder = order(layerId), otherOrder = order(other.id());
+        setOrder(layerId, otherOrder);
+        setOrder(other.id(), currentOrder);
+    }
+
     public static void render(GuiGraphics graphics, int x, int y, int width, int height) {
         for (Layer layer : layers()) {
             if (!isVisible(layer.id())) continue;
@@ -110,5 +145,6 @@ public final class WorkspaceMapLayerRegistry {
         LAYERS.clear();
         VISIBILITY.clear();
         OPACITY.clear();
+        ORDER.clear();
     }
 }
