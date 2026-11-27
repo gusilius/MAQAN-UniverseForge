@@ -336,6 +336,7 @@ public class MapScreen extends Screen {
             drawCoords(g, mx, my);
         }
         panel.render(g, mx, my);
+        drawSelectedMarkerInspector(g);
         super.render(g, mx, my, pt);
         if (hoverProv > 0 && !overUi) {
             List<Component> tip = describe(hoverProv, false);
@@ -694,6 +695,91 @@ public class MapScreen extends Screen {
             if (!realm.isBlank()) lines.add(Component.literal("Государство: " + realm).withStyle(ChatFormatting.DARK_GRAY));
         }
         return lines;
+    }
+
+    /**
+     * Persistent inspection card for a selected strategic object. The card uses the same
+     * visual profile and live leader entity as the map symbol, so selecting an army does not
+     * degrade into a text-only entry when its commander is currently loaded.
+     */
+    private void drawSelectedMarkerInspector(GuiGraphics g) {
+        if (selectedMarkerId == null || selectedMarkerId.isBlank()) return;
+        Markers.Marker marker = null;
+        for (Markers.Marker candidate : ClientState.markers.list()) {
+            if (selectedMarkerId.equals(candidate.id)) { marker = candidate; break; }
+        }
+        if (marker == null) {
+            selectedMarkerId = "";
+            return;
+        }
+
+        int cardW = Math.min(218, Math.max(176, width - 24));
+        int cardH = 94;
+        int x = width - cardW - 12;
+        int y = 40;
+        bevel(g, x, y, cardW, cardH, false);
+        g.fill(x + 2, y + 2, x + cardW - 2, y + 4, 0xFFE2B85C);
+        g.fill(x + 7, y + 9, x + 45, y + 47, 0xFF111923);
+        g.renderOutline(x + 7, y + 9, 38, 38, 0xFF6E7888);
+
+        LivingEntity leader = null;
+        if ("army".equals(marker.type)) {
+            String uuid = markerValue(marker.desc, "leaderEntity");
+            leader = leaderBodies().get(uuid);
+        }
+        if (leader != null && leader.isAlive()) {
+            g.enableScissor(x + 8, y + 10, x + 44, y + 46);
+            try {
+                InventoryScreen.renderEntityInInventoryFollowsMouse(g,
+                        x + 26, y + 43, 17, 0.0F, 0.0F, leader);
+            } catch (RuntimeException rendererFailure) {
+                // Keep the stable item/vector fallback if a third-party entity renderer fails.
+                leader = null;
+            } finally {
+                g.disableScissor();
+            }
+        }
+        if (leader == null) {
+            WorldObjectVisualCatalog.Profile visual = WorldObjectVisualCatalog.resolve(marker);
+            String itemId = marker.visualItem == null || marker.visualItem.isBlank()
+                    ? visual.mapItem() : marker.visualItem.trim();
+            ResourceLocation parsed = ResourceLocation.tryParse(itemId);
+            if (parsed != null) {
+                ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(parsed));
+                if (!stack.isEmpty()) g.renderItem(stack, x + 17, y + 18);
+            } else {
+                g.drawCenteredString(font, "◇", x + 26, y + 22, 0xFFF0C85A);
+            }
+        }
+
+        int textX = x + 53;
+        int textW = cardW - 61;
+        String name = font.plainSubstrByWidth(marker.name, textW);
+        g.drawString(font, name, textX, y + 10, 0xFFFFD778, false);
+        String category = marker.type == null ? "world-object" : marker.type.toUpperCase(java.util.Locale.ROOT);
+        g.drawString(font, category, textX, y + 23, 0xFF9EADBF, false);
+        g.drawString(font, "X " + marker.x + "  Z " + marker.z, textX, y + 36, 0xFFCBD3DE, false);
+
+        String detail;
+        if ("army".equals(marker.type)) {
+            int men = markerInt(marker.desc, "men");
+            String commander = markerValue(marker.desc, "commander");
+            detail = men + " бойцов" + (commander.isBlank() ? "" : " · " + commander);
+        } else {
+            int population = markerInt(marker.desc, "population");
+            int buildings = markerInt(marker.desc, "buildings");
+            detail = population > 0 ? "Население: " + population
+                    : buildings > 0 ? "Зданий: " + buildings : markerValue(marker.desc, "realm");
+        }
+        if (detail == null || detail.isBlank()) detail = "Стратегический объект";
+        g.drawString(font, font.plainSubstrByWidth(detail, cardW - 16),
+                x + 8, y + 61, 0xFFE5E0D5, false);
+        String realm = markerValue(marker.desc, "realm");
+        if (!realm.isBlank() && !"army".equals(marker.type))
+            g.drawString(font, font.plainSubstrByWidth("Государство: " + realm, cardW - 16),
+                    x + 8, y + 74, 0xFF9EADBF, false);
+        else
+            g.drawString(font, "Выбрано · Esc — снять выбор", x + 8, y + 74, 0xFF77869A, false);
     }
 
     private static String markerValue(String description, String key) {
