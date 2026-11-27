@@ -338,8 +338,8 @@ public class MapScreen extends Screen {
         g.blit(MapTextures.id, 0, 0, 0f, 0f, MapTextures.w, MapTextures.h, MapTextures.w, MapTextures.h);
         if (ovId != null) g.blit(ovId, ovX, ovY, 0f, 0f, ovW, ovH, ovW, ovH);
         g.pose().popPose();
-        g.renderOutline(mxp - 2, myp - 2, mw + 4, mh + 4, 0xFF000000);                    // рамка: чёрный кант и золотая линия
-        g.renderOutline(mxp - 4, myp - 4, mw + 8, mh + 8, 0x8CF0C85A);
+        drawCartographicFrame(g, mxp, myp, mw, mh);
+        drawCompassRose(g, mxp, myp, mw, mh);
 
         drawLabels(g);
         drawMarkers(g, mx, my);
@@ -549,6 +549,42 @@ public class MapScreen extends Screen {
             if (mc.player != null) mc.player.displayClientMessage(
                     Component.literal("Diorama 3D недоступна: модуль Atlas не загружен"), true);
         }
+    }
+
+    /** Engraved vellum frame that visually separates the political atlas from the game UI. */
+    private void drawCartographicFrame(GuiGraphics g, int x, int y, int mapW, int mapH) {
+        if (mapW <= 0 || mapH <= 0) return;
+        g.enableScissor(0, 0, width, height);
+        g.fill(x - 7, y - 7, x + mapW + 7, y + mapH + 7, 0xFF342719);
+        g.renderOutline(x - 7, y - 7, mapW + 14, mapH + 14, 0xFF21180F);
+        g.renderOutline(x - 5, y - 5, mapW + 10, mapH + 10, 0xFFB58A4B);
+        g.renderOutline(x - 3, y - 3, mapW + 6, mapH + 6, 0xFF6D4D2D);
+        g.renderOutline(x - 1, y - 1, mapW + 2, mapH + 2, 0xFFE0C28A);
+        // Corner rivets and short engraved flourishes.
+        int[][] corners = {{x - 5, y - 5, 1, 1}, {x + mapW + 4, y - 5, -1, 1},
+                {x - 5, y + mapH + 4, 1, -1}, {x + mapW + 4, y + mapH + 4, -1, -1}};
+        for (int[] corner : corners) {
+            int cx = corner[0], cy = corner[1], sx = corner[2], sy = corner[3];
+            g.fill(cx - 1, cy - 1, cx + 2, cy + 2, 0xFFFFD98B);
+            g.fill(cx + sx, cy, cx + sx * 5, cy + 1, 0xFF9B7544);
+            g.fill(cx, cy + sy, cx + 1, cy + sy * 5, 0xFF9B7544);
+        }
+        g.disableScissor();
+    }
+
+    /** Small north rose, intentionally restrained so it never competes with realm labels. */
+    private void drawCompassRose(GuiGraphics g, int x, int y, int mapW, int mapH) {
+        if (mapW < 220 || mapH < 150) return;
+        int cx = x + mapW - 27, cy = y + 29;
+        g.fill(cx - 13, cy - 13, cx + 14, cy + 14, 0x66503B22);
+        g.renderOutline(cx - 13, cy - 13, 27, 27, 0xFFB58A4B);
+        g.fill(cx - 1, cy - 11, cx + 2, cy + 11, 0xFFE8D3A0);
+        g.fill(cx - 10, cy - 1, cx + 11, cy + 2, 0xFFE8D3A0);
+        g.fill(cx - 2, cy - 12, cx + 2, cy - 3, 0xFF8D3528);
+        g.fill(cx - 2, cy + 3, cx + 2, cy + 10, 0xFF4D3825);
+        g.fill(cx - 9, cy - 2, cx - 3, cy + 2, 0xFF4D3825);
+        g.fill(cx + 3, cy - 2, cx + 9, cy + 2, 0xFF4D3825);
+        g.drawCenteredString(font, "N", cx, cy - 23, 0xFFFFE5B0);
     }
 
     private void drawPlate(GuiGraphics g) {
