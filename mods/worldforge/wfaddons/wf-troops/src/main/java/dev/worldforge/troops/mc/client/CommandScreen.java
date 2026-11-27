@@ -498,7 +498,16 @@ public final class CommandScreen extends Screen {
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
-        if (button == 2) CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+        if (button == 2) {
+            if (hasShiftDown()) {
+                // Shift + middle drag pans the tactical map in screen space;
+                // plain middle drag remains the free-look orbit gesture.
+                CommandMode.RIG.pan(-dy * 0.01, -dx * 0.01, 1.0 / 60.0, false);
+                CommandMode.RIG.clamp(minecraft.player.getX(), minecraft.player.getZ());
+            } else {
+                CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+            }
+        }
         if (button == 0 && zoomDragging) setZoomFromMouse(x);
         return true;
     }

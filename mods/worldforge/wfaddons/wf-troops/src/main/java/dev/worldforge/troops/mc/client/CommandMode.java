@@ -516,6 +516,21 @@ public final class CommandMode {
             }
         }
 
+        // Final floor check after collision shortening. A wall hit may move the
+        // smoothed camera into a different terrain column, so validate that exact
+        // destination rather than trusting the pre-collision sample.
+        int finalX = net.minecraft.util.Mth.floor(cameraSmoothX);
+        int finalZ = net.minecraft.util.Mth.floor(cameraSmoothZ);
+        net.minecraft.core.BlockPos finalProbe = new net.minecraft.core.BlockPos(finalX,
+                mc.player.blockPosition().getY(), finalZ);
+        if (mc.level.hasChunkAt(finalProbe)) {
+            double finalFloor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    finalX, finalZ);
+            cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, finalFloor);
+        } else {
+            cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
+        }
+
         camEntity.setPos(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
         camEntity.xo = cameraSmoothX; camEntity.yo = cameraSmoothY; camEntity.zo = cameraSmoothZ;
         camEntity.xOld = cameraSmoothX; camEntity.yOld = cameraSmoothY; camEntity.zOld = cameraSmoothZ;
@@ -551,7 +566,11 @@ public final class CommandMode {
         }
 
         @SubscribeEvent
-        public void logout(ClientPlayerNetworkEvent.LoggingOut e) { active = false; firstPersonCommand = false; camEntity = null; SEL.clear(); }
+        public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+            active = false; firstPersonCommand = false; camEntity = null;
+            groundInitialized = false; cameraPositionInitialized = false;
+            hostedCommandView = null; SEL.clear();
+        }
 
         @SubscribeEvent
         public void interaction(InputEvent.InteractionKeyMappingTriggered e) {
