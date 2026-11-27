@@ -63,6 +63,10 @@ public class MapScreen extends Screen {
     private int heraldryRevision = Integer.MIN_VALUE;
     private Map<String, TitleData.Realm> realmsByName = Map.of();
     private int hiddenMarkerRevision = Integer.MIN_VALUE;
+    private int markerOrderRevision = Integer.MIN_VALUE;
+    private boolean markerOrderMilitary;
+    private String markerOrderSelection = "";
+    private List<Markers.Marker> markerOrder = List.of();
     private java.util.Set<String> hiddenArmyMarkerIds = java.util.Set.of();
     private int ovwX, ovwY, ovwW, ovwH;
 
@@ -1115,6 +1119,34 @@ public class MapScreen extends Screen {
         return leaderBodyIndex;
     }
 
+    private boolean markerBelongsToMilitaryView(Markers.Marker marker) {
+        return "army".equals(marker.type) || "castle".equals(marker.type)
+                || "fort".equals(marker.type) || "capital".equals(marker.type)
+                || "city".equals(marker.type) || "settlement".equals(marker.type)
+                || "caravan".equals(marker.type) || "port".equals(marker.type);
+    }
+
+    private List<Markers.Marker> orderedMarkers() {
+        if (markerOrderRevision != ClientState.revision || markerOrderMilitary != militaryView
+                || !markerOrderSelection.equals(selectedMarkerId)) {
+            List<Markers.Marker> visible = new ArrayList<>();
+            for (Markers.Marker marker : ClientState.markers.list())
+                if (!militaryView || markerBelongsToMilitaryView(marker)) visible.add(marker);
+            visible.sort(Comparator.comparingInt(marker -> {
+                if (marker.id.equals(selectedMarkerId)) return -5;
+                if ("capital".equals(marker.type)) return 0;
+                if ("army".equals(marker.type)) return 1;
+                if ("city".equals(marker.type) || "settlement".equals(marker.type)) return 2;
+                return 3;
+            }));
+            markerOrder = List.copyOf(visible);
+            markerOrderRevision = ClientState.revision;
+            markerOrderMilitary = militaryView;
+            markerOrderSelection = selectedMarkerId;
+        }
+        return markerOrder;
+    }
+
     private void drawMarkers(GuiGraphics g, int mx, int my) {
         Minecraft mc = Minecraft.getInstance();
         Map<String, LivingEntity> leaderBodies = leaderBodies();
@@ -1124,22 +1156,10 @@ public class MapScreen extends Screen {
         int clipBottom=Math.min(height-(embeddedInMaqan?0:BOTTOM),(int)Math.ceil(camY+MapTextures.h*zoom));
         if(clipRight<=clipLeft||clipBottom<=clipTop)return;
         g.enableScissor(clipLeft,clipTop,clipRight,clipBottom);
-        List<Markers.Marker> visibleMarkers = new ArrayList<>(ClientState.markers.list());
-        visibleMarkers.sort(Comparator.comparingInt(marker -> {
-            if (marker.id.equals(selectedMarkerId)) return -5;
-            if ("capital".equals(marker.type)) return 0;
-            if ("army".equals(marker.type)) return 1;
-            if ("city".equals(marker.type) || "settlement".equals(marker.type)) return 2;
-            return 3;
-        }));
         java.util.Set<Long> labelCells = new java.util.HashSet<>();
         final int labelCellSize = 64;
         int labelBudget = 96;
-        for (Markers.Marker marker : visibleMarkers) {
-            if (militaryView && !("army".equals(marker.type) || "castle".equals(marker.type)
-                    || "fort".equals(marker.type) || "capital".equals(marker.type)
-                    || "city".equals(marker.type) || "settlement".equals(marker.type)
-                    || "caravan".equals(marker.type) || "port".equals(marker.type))) continue;
+        for (Markers.Marker marker : orderedMarkers()) {
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
             if (point[0] < -20 || point[1] < BAR - 20 || point[0] > width + 20 || point[1] > height + 20) continue;
