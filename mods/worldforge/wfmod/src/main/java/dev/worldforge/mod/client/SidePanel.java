@@ -126,19 +126,20 @@ final class SidePanel {
             hits.add(new Hit(rx, y, RAIL, RAIL, () -> { if (open && tab == ft) open = false; else show(ft); }));
         }
         if (!open) return;
-        pw = Math.min(WIDTH, Math.max(100, Math.min(host.width() - RAIL - GAP - 16,
+        pw = Math.max(1, Math.min(WIDTH, Math.min(host.width() - RAIL - GAP - 16,
                 (int) Math.floor(host.width() * 0.35))));
-        px = rx - GAP - pw;
+        px = Math.max(0, Math.min(rx - GAP - pw, host.width() - pw));
         py = 8;
         int availableBottom = Math.min(host.panelBottom(), host.height() - 8);
-        ph = Math.max(34, Math.min(availableBottom - py, host.height() - py - 8));
+        ph = Math.max(1, Math.min(availableBottom - py, host.height() - py - 8));
         MapScreen.bevel(g, px, py, pw, ph, false);
         g.drawString(host.font(), tab.title.toUpperCase(), px + 8, py + 7, GOLD);
-        g.fill(px, py + 19, px + pw, py + 21, 0xFF000000);
+        g.fill(px, py + 19, px + pw, py + Math.min(21, ph), 0xFF000000);
         int bx = px + pw - 15, by = py + 5;
         g.drawString(host.font(), "x", bx + 3, by + 1, MUTED);
         hits.add(new Hit(bx, by, 11, 11, () -> open = false));
 
+        if (pw < 48 || ph < 36) return;
         int cx = px + 8, cy = py + 25, cw = pw - 16, ch = ph - 30;
         g.enableScissor(px + 1, cy - 2, px + pw - 1, py + ph - 1);
         int off = scroll.getOrDefault(tab, 0);

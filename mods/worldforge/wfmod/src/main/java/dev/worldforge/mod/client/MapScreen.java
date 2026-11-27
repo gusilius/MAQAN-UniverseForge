@@ -55,6 +55,7 @@ public class MapScreen extends Screen {
     private String pendingTarget = "";
     private long lastEditApply;
     private boolean dragOverview;
+    private boolean draggingMap;
     private String selectedMarkerId = "";
     private int hiddenMarkerRevision = Integer.MIN_VALUE;
     private java.util.Set<String> hiddenArmyMarkerIds = java.util.Set.of();
@@ -412,7 +413,7 @@ public class MapScreen extends Screen {
 
     private int mapTypeButtonWidth(int preferred) {
         int availableWidth = panel.isOpen() ? panel.leftEdge() - 16 : width - 58;
-        int available = Math.max(28, (availableWidth - MAP_TYPE_GAP * 2) / 3);
+        int available = Math.max(12, (availableWidth - MAP_TYPE_GAP * 2) / 3);
         return Math.min(preferred, available);
     }
 
@@ -1055,7 +1056,8 @@ public class MapScreen extends Screen {
             overviewTo(mx, my);
             return true;
         }
-        if (overUi((int) mx, (int) my)) return false;
+        if (overUi((int) mx, (int) my)) return true;
+        draggingMap = button == 0 || button == 1 || button == 2;
         if (button == 0 && !panel.editing()) {
             Markers.Marker marker = markerAt(mx, my);
             if (marker != null) {
@@ -1125,7 +1127,7 @@ public class MapScreen extends Screen {
             }
             return true;
         }
-        if (button == 0 || button == 1 || button == 2) {
+        if (draggingMap && (button == 0 || button == 1 || button == 2)) {
             camX += dx;
             camY += dy;
             return true;
@@ -1136,12 +1138,15 @@ public class MapScreen extends Screen {
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
         dragOverview = false;
+        draggingMap = false;
         return super.mouseReleased(mx, my, button);
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double delta) {
         if (panel.scrolled(mx, my, delta)) return true;
+        if (panel.contains(mx, my)) return true;
+        if (overUi((int) mx, (int) my)) return true;
         if (!MapTextures.ready()) return false;
         double nz = Math.max(0.2, Math.min(24, zoom * Math.exp(delta * 0.25)));
         camX = mx - (mx - camX) * nz / zoom;

@@ -223,7 +223,8 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int panelX() { return width - PANEL_W - 4; }
+    private int panelW() { return Math.max(1, Math.min(PANEL_W, width - 8)); }
+    private int panelX() { return Math.max(4, width - panelW() - 4); }
     private int panelY() { return 26; }
     private int panelH() {
         // The embedded settlement minimap owns the lower-right corner. The build
@@ -232,7 +233,7 @@ public final class CommandScreen extends Screen {
         return Math.max(3, height - panelY() - bottomReserve);
     }
 
-    private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }
+    private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + panelW() && py >= panelY() && py < panelY() + panelH(); }
 
     private boolean inSelPanel(double px, double py) { return px < 192 && py > height - 90; }
 
@@ -265,7 +266,7 @@ public final class CommandScreen extends Screen {
     }
 
     private int categoryRowCount() {
-        int left = panelX() + 6, right = panelX() + PANEL_W - 4;
+        int left = panelX() + 6, right = panelX() + panelW() - 4;
         int cursor = left, rows = 0;
         List<String> chips = new ArrayList<>();
         chips.add("");
@@ -514,7 +515,7 @@ public final class CommandScreen extends Screen {
         for (String c : chips) {
             String label = c.isEmpty() ? "Все" : catName(c);
             int w = font.width(label) + 8;
-            if (cx + w > panelX() + PANEL_W - 4) { cx = px; row++; }
+            if (cx + w > panelX() + panelW() - 4) { cx = px; row++; }
             int yy = cy + row * 12;
             if (x >= cx && x < cx + w && y >= yy && y < yy + 11) { cat = c; scroll = 0; picked = null; return; }
             cx += w + 3;
@@ -1015,7 +1016,7 @@ public final class CommandScreen extends Screen {
     }
 
     private void drawBuildPanel(GuiGraphics g, int mxi, int myi) {
-        int x = panelX(), y = panelY(), pw = PANEL_W, ph = panelH();
+        int x = panelX(), y = panelY(), pw = panelW(), ph = panelH();
         g.fill(x, y, x + pw, y + ph, 0xDD101018);
         g.fill(x, y, x + pw, y + 1, 0xFF6A5A30);
         g.enableScissor(x + 1, y + 1, x + pw - 1, y + ph - 1);
