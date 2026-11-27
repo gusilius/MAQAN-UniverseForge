@@ -408,10 +408,8 @@ public class MapScreen extends Screen {
             if (mx >= x && mx < right) {
                 switch (button.id()) {
                     case "political" -> setMode(MapImages.REALMS);
-                    case "exploration" -> {
-                        setMode(MapImages.TERRAIN);
-                        centerOnPlayer();
-                    }
+                    case "exploration" -> openExplorationMap();
+
                     case "diorama" -> openDioramaView();
                     default -> { return false; }
                 }
@@ -420,6 +418,23 @@ public class MapScreen extends Screen {
             x = right + MAP_TYPE_GAP;
         }
         return false;
+    }
+
+    /** Open the separate fog-of-war surface map backed by actually explored chunks. */
+    private void openExplorationMap() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        try {
+            Class<?> viewType = Class.forName("com.maqan.galacticnavigator.client.NavigatorSurfaceMapScreen");
+            Object view = viewType.getConstructor(String.class, Screen.class)
+                    .newInstance(mc.level.dimension().location().toString(), this);
+            if (!(view instanceof Screen screen)) return;
+            Class<?> hostType = Class.forName("com.maqan.galacticnavigator.client.MaqanScreenHost");
+            hostType.getMethod("open", Minecraft.class, Screen.class).invoke(null, mc, screen);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            if (mc.player != null) mc.player.displayClientMessage(
+                    Component.literal("Карта исследования недоступна: модуль Atlas не загружен"), true);
+        }
     }
 
     /**
