@@ -40,6 +40,53 @@ public final class MapCommands {
                                 return 0;
                             }
                         }))))
+                .then(Commands.literal("addwith").then(Commands.argument("type", StringArgumentType.word())
+                        .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
+                        .then(Commands.argument("visual", StringArgumentType.word())
+                                .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
+                                    CommandSourceStack s = c.getSource();
+                                    MapData m = data(s);
+                                    if (m == null) return 0;
+                                    String type = StringArgumentType.getString(c, "type");
+                                    String visual = StringArgumentType.getString(c, "visual");
+                                    try {
+                                        Markers.Marker mk = EditorManager.markers(s.getServer(), m).add(
+                                                StringArgumentType.getString(c, "name"), type,
+                                                (int) s.getPosition().x, (int) s.getPosition().z, 0xFFFFFF);
+                                        EditorManager.markers(s.getServer(), m).setVisualProfile(mk.id,
+                                                "auto".equalsIgnoreCase(visual) ? "" : visual);
+                                        s.sendSuccess(() -> Component.literal("Метка '" + mk.name
+                                                + "' добавлена · визуальный профиль: "
+                                                + (mk.visualProfile.isBlank() ? "автоматический" : mk.visualProfile)), true);
+                                        return 1;
+                                    } catch (IllegalArgumentException e) {
+                                        s.sendFailure(Component.literal(e.getMessage()));
+                                        return 0;
+                                    }
+                                })))))
+                .then(Commands.literal("visual").then(Commands.argument("id", StringArgumentType.word())
+                        .then(Commands.argument("profile", StringArgumentType.word()).executes(c -> {
+                            CommandSourceStack s = c.getSource();
+                            MapData m = data(s);
+                            if (m == null) return 0;
+                            Markers.Marker marker = EditorManager.markers(s.getServer(), m)
+                                    .find(StringArgumentType.getString(c, "id"));
+                            if (marker == null) {
+                                s.sendFailure(Component.literal("Метка не найдена"));
+                                return 0;
+                            }
+                            String profile = StringArgumentType.getString(c, "profile");
+                            if (!"auto".equalsIgnoreCase(profile)
+                                    && net.minecraft.resources.ResourceLocation.tryParse(profile) == null) {
+                                s.sendFailure(Component.literal("Профиль должен иметь формат namespace:id или auto"));
+                                return 0;
+                            }
+                            EditorManager.markers(s.getServer(), m).setVisualProfile(marker.id,
+                                    "auto".equalsIgnoreCase(profile) ? "" : profile);
+                            s.sendSuccess(() -> Component.literal("Визуальный профиль объекта обновлён: "
+                                    + (marker.visualProfile.isBlank() ? "автоматический" : marker.visualProfile)), true);
+                            return 1;
+                        }))))
                 .then(Commands.literal("remove").then(Commands.argument("id", StringArgumentType.greedyString()).executes(c -> {
                     CommandSourceStack s = c.getSource();
                     MapData m = data(s);
