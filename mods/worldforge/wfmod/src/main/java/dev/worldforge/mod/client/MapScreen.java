@@ -740,7 +740,7 @@ public class MapScreen extends Screen {
         int left = Math.max(0, (int) Math.floor(camX));
         int top = Math.max(BAR, (int) Math.floor(camY));
         int right = Math.min(width, (int) Math.ceil(camX + MapTextures.w * zoom));
-        int bottom = Math.min(height, (int) Math.ceil(camY + MapTextures.h * zoom));
+        int bottom = Math.min(height - (embeddedInMaqan ? 0 : BOTTOM), (int) Math.ceil(camY + MapTextures.h * zoom));
         if (right <= left || bottom <= top) return;
         g.enableScissor(left, top, right, bottom);
         for (MapTextures.Label l : MapTextures.labels) {
