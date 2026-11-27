@@ -145,5 +145,7 @@ public final class WorkspaceMapLayerRegistry {
         VISIBILITY.clear();
         OPACITY.clear();
         ORDER.clear();
+        try { PREFS.clear(); PREFS.flush(); }
+        catch (java.util.prefs.BackingStoreException ignored) { }
     }
 }
