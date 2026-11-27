@@ -216,7 +216,7 @@ public final class PlatformShellScreen extends Screen {
     private int profileStartX() { return compactTopbar() ? 48 : Math.max(178,width/2-112); }
     private int profileButtonWidth() { return compactTopbar() ? 28 : 48; }
     private int profileButtonStep() { return compactTopbar() ? 32 : 52; }
-    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+8 : width-252; }
+    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+8 : width-326; }
     /** Only the political overview suppresses the lower timeline; RTS keeps its command/order strip. */
     private boolean politicalCameraWorkspace() { return profile == Profile.POLITICS; }
     private WorkspaceDockTree.Node layoutRoot() {
@@ -453,14 +453,72 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void clampPanels() {
-        for (Panel p : panels.values()) if ("FLOAT".equals(p.dock)) {
-            int mw=Math.max(1,width-12), mh=Math.max(26,height-42);
-            p.w=Math.max(Math.min(140,mw),Math.min(p.w,mw));
-            p.h=Math.max(Math.min(54,mh),Math.min(p.h,mh));
-            int maxX=Math.max(4,width-p.w-4), maxY=Math.max(34,height-(p.minimized?26:p.h)-4);
-            p.x=Math.max(Math.min(44,maxX),Math.min(p.x,maxX));
-            p.y=Math.max(Math.min(38,maxY),Math.min(p.y,maxY));
+        List<Panel> floating = new ArrayList<>();
+        for (Panel p : panels.values()) {
+            if (!"FLOAT".equals(p.dock) || !p.visible) continue;
+            int mw = Math.max(1, width - 56), mh = Math.max(26, height - 44);
+            p.w = Math.max(Math.min(140, mw), Math.min(p.w, mw));
+            p.h = Math.max(Math.min(54, mh), Math.min(p.h, mh));
+            int visibleHeight = p.minimized ? 26 : p.h;
+            int maxX = Math.max(44, width - p.w - 4);
+            int maxY = Math.max(35, height - visibleHeight - 4);
+            p.x = Math.max(44, Math.min(p.x, maxX));
+            p.y = Math.max(35, Math.min(p.y, maxY));
+            floating.add(p);
         }
+
+        // Floating windows share one collision-free layer. Resolve saved/dragged
+        // positions deterministically, while keeping every rectangle in the viewport.
+        List<Panel> placed = new ArrayList<>();
+        for (Panel panel : floating) {
+            if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                placed.add(panel);
+                continue;
+            }
+            int originalX = panel.x, originalY = panel.y;
+            boolean resolved = false;
+            for (int ring = 1; ring <= 16 && !resolved; ring++) {
+                int step = 28 * ring;
+                int[][] candidates = {
+                        {originalX + step, originalY}, {originalX, originalY + step},
+                        {originalX - step, originalY}, {originalX, originalY - step},
+                        {originalX + step, originalY + step}, {originalX - step, originalY + step}
+                };
+                for (int[] candidate : candidates) {
+                    int maxX = Math.max(44, width - panel.w - 4);
+                    int maxY = Math.max(35, height - (panel.minimized ? 26 : panel.h) - 4);
+                    panel.x = Math.max(44, Math.min(candidate[0], maxX));
+                    panel.y = Math.max(35, Math.min(candidate[1], maxY));
+                    if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                        resolved = true;
+                        break;
+                    }
+                }
+            }
+            if (!resolved) {
+                // Compact fallback: cascade into the first free viewport slot.
+                int maxY = Math.max(35, height - (panel.minimized ? 26 : panel.h) - 4);
+                int maxX = Math.max(44, width - panel.w - 4);
+                for (int y = 35; y <= maxY && !resolved; y += 30) {
+                    for (int x = 44; x <= maxX; x += 30) {
+                        panel.x = x; panel.y = y;
+                        if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                            resolved = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!resolved) { panel.x = originalX; panel.y = originalY; }
+            placed.add(panel);
+        }
+    }
+
+    private static boolean overlaps(Panel a, Panel b) {
+        int ah = a.minimized ? 26 : a.h;
+        int bh = b.minimized ? 26 : b.h;
+        return a.x < b.x + b.w && a.x + a.w > b.x
+                && a.y < b.y + bh && a.y + ah > b.y;
     }
     private int popupW(int preferred) { return Math.max(1,Math.min(preferred,width-16)); }
     private int popupH(int preferred) { return Math.max(28,Math.min(preferred,height-42)); }
@@ -659,21 +717,23 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
         if (commandCameraActive() && width >= 480) {
             String current = commandCameraView();
-            String[] ids = {"SKY", "TACTICS", "FREE"};
-            String[] labels = {"STR", "ISO", "FREE"};
+            String[] ids = {"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"};
+            String[] labels = {"RTS", "ISO", "FREE", "TOP", "POL"};
             int cameraX = cameraControlX();
             if (!compactTopbar()) g.drawString(font, "CAM", cameraX - 28, 13, MUTED, false);
             for (int i = 0; i < ids.length; i++) {
-                int cameraButtonX = cameraX + i * 36;
+                int cameraButtonX = cameraX + i * 34;
                 boolean activeCamera = ids[i].equals(current);
-                g.fill(cameraButtonX, 5, cameraButtonX + 32, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
-                if (activeCamera) g.fill(cameraButtonX, 28, cameraButtonX + 32, 30, CYAN);
-                g.drawCenteredString(font, labels[i], cameraButtonX + 16, 13, activeCamera ? CYAN : TEXT);
-                if (mx >= cameraButtonX && mx < cameraButtonX + 32 && my >= 5 && my < 30)
+                g.fill(cameraButtonX, 5, cameraButtonX + 30, 29, activeCamera ? 0x663B9FB5 : SURFACE_ALT);
+                if (activeCamera) g.fill(cameraButtonX, 28, cameraButtonX + 30, 30, CYAN);
+                g.drawCenteredString(font, labels[i], cameraButtonX + 15, 13, activeCamera ? CYAN : TEXT);
+                if (mx >= cameraButtonX && mx < cameraButtonX + 30 && my >= 5 && my < 30)
                     g.renderTooltip(font, Component.literal(switch (ids[i]) {
-                        case "SKY" -> "Стратегический вид";
-                        case "TACTICS" -> "Изометрическая камера";
-                        default -> "Свободная камера";
+                        case "SKY" -> "Классическая RTS-камера";
+                        case "TACTICS" -> "Изометрическая тактическая камера";
+                        case "FREE" -> "Свободная Total War камера";
+                        case "TOP_DOWN" -> "Строгий вид сверху";
+                        default -> "Стратегический обзор";
                     }), mx, my);
             }
         }
@@ -1117,8 +1177,8 @@ public final class PlatformShellScreen extends Screen {
                 int cameraX = cameraControlX();
                 if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
                     int index = (int) ((mx - cameraX) / 36);
-                    if (index >= 0 && index < 3) {
-                        setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE"}[index]);
+                    if (index >= 0 && index < 5) {
+                        setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"}[index]);
                         return true;
                     }
                 }

@@ -1,54 +1,86 @@
 package dev.worldforge.troops;
 
 /**
- * Свободная камера командного режима: смотрит на точку фокуса на земле с заданного расстояния, наклона и курса.
- * Три вида: SKY (почти отвесно сверху, как в стратегии), TACTICS (под углом, видно бойцов), и сама камера перестаёт быть привязана к игроку.
- * Чистая математика: игровой слой только подставляет высоту земли и двигает камеру-сущность.
+ * Shared tactical camera rig. The focus point is on the terrain; the game adapter
+ * is responsible for sampling terrain and resolving the final camera position
+ * against loaded collision geometry.
  */
 public final class CameraRig {
     public enum View {
-        FREE("Свободная", 18, 8), TACTICS("Изометрия", 42, 16), SKY("Стратегия", 72, 34);
-        public final String title; public final double pitch, zoom;
-        View(String t, double p, double z) { title = t; pitch = p; zoom = z; }
+        FREE("Total War", 28, 28),
+        TACTICS("Изометрия", 55, 24),
+        SKY("RTS", 68, 34),
+        TOP_DOWN("Сверху", 88, 36),
+        STRATEGIC("Стратегия", 74, 48);
+
+        public final String title;
+        public final double pitch, zoom;
+        View(String title, double pitch, double zoom) {
+            this.title = title;
+            this.pitch = pitch;
+            this.zoom = zoom;
+        }
     }
 
-    public static final double MIN_ZOOM = 5, MAX_ZOOM = 70, MIN_PITCH = 25, MAX_PITCH = 88, BASE_SPEED = 0.9, EDGE = 14;
+    public static final double MIN_ZOOM = 6, MAX_ZOOM = 96;
+    public static final double MIN_PITCH = 16, MAX_PITCH = 88;
+    public static final double BASE_SPEED = 0.9, EDGE = 14;
+    public static final double TERRAIN_CLEARANCE = 2.25;
 
     public View view = View.SKY;
     public double fx, fz, yaw, pitch = View.SKY.pitch, zoom = View.SKY.zoom;
-    /** Радиус вокруг игрока, дальше которого камера не уходит: за ним клиент не видит мир (чанки не присланы). */
+    /** Client-side loaded-area leash; never force-load chunks for camera movement. */
     public double leash = 90;
 
-    public void start(double x, double z, double yawDeg, View v) { fx = x; fz = z; yaw = yawDeg; setView(v); }
+    public void start(double x, double z, double yawDeg, View v) {
+        fx = x;
+        fz = z;
+        yaw = yawDeg;
+        setView(v);
+    }
 
-    public void setView(View v) { view = v; pitch = v.pitch; zoom = v.zoom; }
+    public void setView(View v) {
+        if (v == null) return;
+        view = v;
+        pitch = v.pitch;
+        setZoom(v.zoom);
+    }
 
     public void cycle() {
         setView(switch (view) {
             case SKY -> View.TACTICS;
             case TACTICS -> View.FREE;
-            case FREE -> View.SKY;
+            case FREE -> View.TOP_DOWN;
+            case TOP_DOWN -> View.STRATEGIC;
+            case STRATEGIC -> View.SKY;
         });
     }
 
-    /** Сдвиг по экрану: forward/right в [-1,1]; скорость растёт с высотой, чтобы на большом приближении не ползти. */
+    /** Screen-relative movement, normalized to prevent diagonal speed boosts. */
     public void pan(double forward, double right, double dt, boolean fast) {
-        double sp = BASE_SPEED * (0.6 + zoom) * (fast ? 2.2 : 1) * dt * 8, r = Math.toRadians(yaw);
+        if (!Double.isFinite(forward) || !Double.isFinite(right) || !Double.isFinite(dt)) return;
+        double sp = BASE_SPEED * (0.6 + zoom * 0.55) * (fast ? 2.2 : 1)
+                * Math.max(0, Math.min(0.1, dt)) * 8;
+        double r = Math.toRadians(yaw);
         double len = Math.hypot(forward, right);
         if (len < 1e-9) return;
-        forward /= Math.max(1, len); right /= Math.max(1, len);
+        forward /= Math.max(1, len);
+        right /= Math.max(1, len);
         fx += (-Math.sin(r) * forward - Math.cos(r) * right) * sp;
         fz += (Math.cos(r) * forward - Math.sin(r) * right) * sp;
     }
 
-    /** Скролл у края экрана: вектор (right, forward) от -1 до 1, 0 в середине. */
     public static double[] edgeScroll(double mx, double my, int w, int h) {
-        double right = mx < EDGE ? -1 : mx > w - EDGE ? 1 : 0, fwd = my < EDGE ? 1 : my > h - EDGE ? -1 : 0;
+        double edge = Math.max(6, Math.min(20, Math.min(w, h) * 0.018));
+        double right = mx < edge ? -1 : mx > w - edge ? 1 : 0;
+        double fwd = my < edge ? 1 : my > h - edge ? -1 : 0;
         return new double[]{right, fwd};
     }
 
     public void rotate(double dYaw, double dPitch) {
+        if (!Double.isFinite(dYaw) || !Double.isFinite(dPitch)) return;
         yaw = (yaw + dYaw) % 360;
+        if (yaw < 0) yaw += 360;
         pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch + dPitch));
     }
 
@@ -57,20 +89,37 @@ public final class CameraRig {
         zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, distance));
     }
 
-    public void zoomBy(double steps) { setZoom(zoom * Math.pow(0.88, steps)); }
-
-    public void focusOn(double x, double z) { fx = x; fz = z; }
-
-    /** Не даёт уйти от игрока дальше leash. */
-    public void clamp(double px, double pz) {
-        double d = Math.hypot(fx - px, fz - pz);
-        if (d > leash) { fx = px + (fx - px) / d * leash; fz = pz + (fz - pz) / d * leash; }
+    public void zoomBy(double steps) {
+        if (Double.isFinite(steps)) setZoom(zoom * Math.pow(0.88, steps));
     }
 
-    /** Позиция камеры {x, y, z} при высоте земли в фокусе groundY. */
+    public void focusOn(double x, double z) {
+        if (Double.isFinite(x) && Double.isFinite(z)) { fx = x; fz = z; }
+    }
+
+    public void clamp(double px, double pz) {
+        double d = Math.hypot(fx - px, fz - pz);
+        if (Double.isFinite(d) && d > leash && d > 1e-9) {
+            fx = px + (fx - px) / d * leash;
+            fz = pz + (fz - pz) / d * leash;
+        }
+    }
+
+    /** Desired camera position above the focus terrain. */
     public double[] position(double groundY) {
         double p = Math.toRadians(pitch), r = Math.toRadians(yaw);
-        double back = Math.cos(p) * zoom;
-        return new double[]{fx + Math.sin(r) * back, groundY + Math.sin(p) * zoom, fz - Math.cos(r) * back};
+        double horizontal = Math.cos(p) * zoom;
+        return new double[]{
+                fx + Math.sin(r) * horizontal,
+                groundY + Math.sin(p) * zoom,
+                fz - Math.cos(r) * horizontal
+        };
+    }
+
+    /** Pure safety floor used by the Minecraft adapter after sampling terrain below the camera. */
+    public static double keepAboveTerrain(double cameraY, double terrainY) {
+        if (!Double.isFinite(cameraY)) cameraY = terrainY + TERRAIN_CLEARANCE;
+        if (!Double.isFinite(terrainY)) return cameraY;
+        return Math.max(cameraY, terrainY + TERRAIN_CLEARANCE);
     }
 }

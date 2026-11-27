@@ -339,7 +339,7 @@ public final class CommandMode {
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
-        groundY = mc.player.getY();
+        groundY = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, mc.player.blockPosition().getX(), mc.player.blockPosition().getZ());
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
         frame(mc);
@@ -417,12 +417,54 @@ public final class CommandMode {
         boolean fast = InputConstants.isKeyDown(win, GLFW.GLFW_KEY_LEFT_SHIFT);
         RIG.pan(fwd, right, dt, fast);
         RIG.clamp(mc.player.getX(), mc.player.getZ());
-        int gx = (int) Math.floor(RIG.fx), gz = (int) Math.floor(RIG.fz);
-        if (mc.level.hasChunkAt(new net.minecraft.core.BlockPos(gx, 64, gz))) {
+        int gx = net.minecraft.util.Mth.floor(RIG.fx), gz = net.minecraft.util.Mth.floor(RIG.fz);
+        net.minecraft.core.BlockPos focusProbe = new net.minecraft.core.BlockPos(gx,
+                mc.player.blockPosition().getY(), gz);
+        if (mc.level.hasChunkAt(focusProbe)) {
             double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
-            groundY += (target - groundY) * Math.min(1, dt * 6);
+            // Heightmap returns the first free Y above the surface. Snap on first valid
+            // sample, then damp subsequent terrain changes without retaining stale Y.
+            if (!Double.isFinite(groundY) || Math.abs(groundY - mc.player.getY()) < 0.01 && lastFrame == 0L)
+                groundY = target;
+            else groundY += (target - groundY) * Math.min(1, dt * 10);
+        } else {
+            // Keep the camera anchored to the player's known safe height when the focus
+            // moves into an unloaded edge; do not query/load distant chunks.
+            groundY = Math.max(groundY, mc.player.getY());
         }
+
         double[] p = RIG.position(groundY);
+        if (!Double.isFinite(p[0]) || !Double.isFinite(p[1]) || !Double.isFinite(p[2])) return;
+
+        // Resolve the camera boom against loaded terrain/blocks. The ray starts just
+        // above the focus point and ends at the desired camera position; on collision
+        // shorten the boom rather than letting the view pass through a hill or cliff.
+        Vec3 focusEye = new Vec3(RIG.fx, groundY + 1.25, RIG.fz);
+        Vec3 desired = new Vec3(p[0], p[1], p[2]);
+        Vec3 boom = desired.subtract(focusEye);
+        if (boom.lengthSqr() > 1.0e-4) {
+            HitResult obstruction = mc.level.clip(new ClipContext(focusEye, desired,
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+            if (obstruction.getType() == HitResult.Type.BLOCK) {
+                Vec3 safe = obstruction.getLocation().subtract(boom.normalize().scale(1.4));
+                p[0] = safe.x; p[1] = safe.y; p[2] = safe.z;
+            }
+        }
+
+        // The boom ray alone cannot protect against a camera point on a higher ridge.
+        // Sample the destination column only if its chunk is already present.
+        int cameraX = net.minecraft.util.Mth.floor(p[0]);
+        int cameraZ = net.minecraft.util.Mth.floor(p[2]);
+        net.minecraft.core.BlockPos cameraProbe = new net.minecraft.core.BlockPos(cameraX,
+                mc.player.blockPosition().getY(), cameraZ);
+        if (mc.level.hasChunkAt(cameraProbe)) {
+            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    cameraX, cameraZ);
+            p[1] = CameraRig.keepAboveTerrain(p[1], cameraTerrain);
+        } else {
+            p[1] = Math.max(p[1], mc.player.getY() + 2.0);
+        }
+
         camEntity.setPos(p[0], p[1], p[2]);
         camEntity.xo = p[0]; camEntity.yo = p[1]; camEntity.zo = p[2];
         camEntity.xOld = p[0]; camEntity.yOld = p[1]; camEntity.zOld = p[2];
