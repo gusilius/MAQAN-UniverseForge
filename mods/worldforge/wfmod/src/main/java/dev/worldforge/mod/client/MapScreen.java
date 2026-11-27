@@ -60,6 +60,8 @@ public class MapScreen extends Screen {
     private boolean draggingMap;
     private int mapDragButton = -1;
     private String selectedMarkerId = "";
+    private int heraldryRevision = Integer.MIN_VALUE;
+    private Map<String, TitleData.Realm> realmsByName = Map.of();
     private int hiddenMarkerRevision = Integer.MIN_VALUE;
     private java.util.Set<String> hiddenArmyMarkerIds = java.util.Set.of();
     private int ovwX, ovwY, ovwW, ovwH;
@@ -666,11 +668,70 @@ public class MapScreen extends Screen {
         return MapTextures.titles.provinceIdAtPixel(p[0], p[1]);
     }
 
+    private void refreshHeraldryIndex() {
+        if (heraldryRevision == ClientState.revision) return;
+        Map<String, TitleData.Realm> index = new HashMap<>();
+        if (MapTextures.titles != null) {
+            for (TitleData.Realm realm : MapTextures.titles.realmList()) {
+                if (realm != null && realm.name != null && !realm.name.isBlank())
+                    index.put(realm.name, realm);
+            }
+        }
+        realmsByName = Map.copyOf(index);
+        heraldryRevision = ClientState.revision;
+    }
+
+    /** Procedural heraldic fallback: crisp shield, field division and charge from realm identity. */
+    private void drawHeraldicShield(GuiGraphics g, int x, int y, TitleData.Realm realm) {
+        int primary = 0xFF000000 | (realm.rgb & 0xFFFFFF);
+        Object secondaryValue = realm.props.get("heraldry.secondary_color");
+        int secondary = primary ^ 0x005A6470;
+        if (secondaryValue instanceof String value && value.matches("#[0-9a-fA-F]{6}")) {
+            try { secondary = 0xFF000000 | Integer.parseInt(value.substring(1), 16); }
+            catch (NumberFormatException ignored) { /* deterministic palette fallback */ }
+        }
+        int seed = realm.id == null ? realm.name.hashCode() : realm.id.hashCode();
+        g.fill(x + 2, y, x + 10, y + 2, 0xFFE8D3A0);
+        g.fill(x + 1, y + 2, x + 11, y + 8, 0xFFE8D3A0);
+        g.fill(x + 2, y + 8, x + 10, y + 11, 0xFFE8D3A0);
+        g.fill(x + 4, y + 11, x + 8, y + 13, 0xFFE8D3A0);
+        g.fill(x + 3, y + 1, x + 9, y + 2, primary);
+        g.fill(x + 2, y + 2, x + 10, y + 8, primary);
+        g.fill(x + 3, y + 8, x + 9, y + 10, primary);
+        g.fill(x + 4, y + 10, x + 8, y + 11, primary);
+        if ((seed & 1) == 0) {
+            g.fill(x + 6, y + 2, x + 10, y + 8, secondary);
+        } else {
+            g.fill(x + 2, y + 6, x + 10, y + 8, secondary);
+        }
+        int charge = 0xFFFFE7B0;
+        switch (Math.floorMod(seed, 4)) {
+            case 0 -> {
+                g.fill(x + 5, y + 3, x + 7, y + 8, charge);
+                g.fill(x + 3, y + 5, x + 9, y + 7, charge);
+            }
+            case 1 -> {
+                g.fill(x + 4, y + 3, x + 8, y + 5, charge);
+                g.fill(x + 5, y + 5, x + 7, y + 8, charge);
+            }
+            case 2 -> {
+                g.fill(x + 4, y + 3, x + 8, y + 7, charge);
+                g.fill(x + 5, y + 7, x + 7, y + 9, charge);
+            }
+            default -> {
+                g.fill(x + 5, y + 3, x + 7, y + 9, charge);
+                g.fill(x + 3, y + 5, x + 9, y + 7, charge);
+            }
+        }
+    }
+
     private void drawLabels(GuiGraphics g) {
         if (MapImages.TERRAIN.equals(MapTextures.mode)) return;
         // Spatial occupancy replaces the old all-pairs collision scan. Label placement
         // stays bounded when a large political world contains thousands of provinces.
         final int cell = 48;
+        boolean showHeraldry = MapImages.REALMS.equals(MapTextures.mode) || MapImages.isDip(MapTextures.mode);
+        if (showHeraldry) refreshHeraldryIndex();
         java.util.Set<Long> occupied = new java.util.HashSet<>();
         int left = Math.max(0, (int) Math.floor(camX));
         int top = Math.max(BAR, (int) Math.floor(camY));
@@ -684,7 +745,8 @@ public class MapScreen extends Screen {
             double sx = camX + l.px * zoom, sy = camY + (l.py - 4 / zoom) * zoom;
             if (sx < left - 100 || sy < top - 20 || sx > right + 100 || sy > bottom + 20) continue;
             double scale = size / 9.0, w = font.width(l.text) * scale, h = size;
-            double x0=sx-w/2.0,x1=sx+w/2.0,y0=sy-h/2.0,y1=sy+h/2.0;
+            TitleData.Realm realm = showHeraldry ? realmsByName.get(l.text) : null;
+            double x0=sx-w/2.0-(realm!=null?16.0:0.0),x1=sx+w/2.0,y0=sy-h/2.0,y1=sy+h/2.0;
             int gx0=(int)Math.floor(x0/cell),gx1=(int)Math.floor(x1/cell);
             int gy0=(int)Math.floor(y0/cell),gy1=(int)Math.floor(y1/cell);
             boolean clash=false;
@@ -700,6 +762,8 @@ public class MapScreen extends Screen {
             g.pose().scale((float)scale,(float)scale,1f);
             g.drawCenteredString(font,l.text,0,-4,0xFFF4ECD2);
             g.pose().popPose();
+            if (realm != null && size >= 12)
+                drawHeraldicShield(g,(int)Math.round(sx-w/2.0-14.0),(int)Math.round(sy-7.0),realm);
         }
         g.disableScissor();
     }
