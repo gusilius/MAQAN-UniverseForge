@@ -27,6 +27,10 @@ public final class CameraRig {
     public static final double BASE_SPEED = 0.9, EDGE = 14;
     public static final double TERRAIN_CLEARANCE = 2.25;
 
+    /** Serializable client camera state; contains no Minecraft objects or chunk references. */
+    public record Snapshot(View view, double fx, double fz, double yaw,
+                           double pitch, double zoom, double leash) {}
+
     public View view = View.SKY;
     public double fx, fz, yaw, pitch = View.SKY.pitch, zoom = View.SKY.zoom;
     private double targetPitch = View.SKY.pitch, targetZoom = View.SKY.zoom;
@@ -134,6 +138,32 @@ public final class CameraRig {
             fx = px + (fx - px) / d * leash;
             fz = pz + (fz - pz) / d * leash;
         }
+    }
+
+    public Snapshot snapshot() {
+        return new Snapshot(view, fx, fz, yaw, pitch, zoom, leash);
+    }
+
+    /** Restore a validated camera state without starting an animated preset transition. */
+    public boolean restore(Snapshot saved) {
+        if (saved == null || saved.view() == null
+                || !Double.isFinite(saved.fx()) || !Double.isFinite(saved.fz())
+                || !Double.isFinite(saved.yaw()) || !Double.isFinite(saved.pitch())
+                || !Double.isFinite(saved.zoom()) || !Double.isFinite(saved.leash())
+                || saved.zoom() < MIN_ZOOM || saved.zoom() > MAX_ZOOM
+                || saved.pitch() < MIN_PITCH || saved.pitch() > MAX_PITCH
+                || saved.leash() < 8 || saved.leash() > 512) return false;
+        view = saved.view();
+        fx = saved.fx();
+        fz = saved.fz();
+        yaw = ((saved.yaw() % 360) + 360) % 360;
+        pitch = saved.pitch();
+        zoom = saved.zoom();
+        leash = saved.leash();
+        targetPitch = pitch;
+        targetZoom = zoom;
+        transitioning = false;
+        return true;
     }
 
     /** Desired camera position above the focus terrain. */
