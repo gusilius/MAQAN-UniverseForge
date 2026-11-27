@@ -24,7 +24,6 @@ import java.util.List;
  */
 public class MapScreen extends Screen {
     private static final int BAR = 0, BOTTOM = 46;
-    private static final ResourceLocation STRATEGIC_MARKERS = new ResourceLocation("worldforge", "textures/gui/map/strategic_markers.png");
     private boolean embeddedInMaqan;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
@@ -708,28 +707,51 @@ public class MapScreen extends Screen {
     }
 
     private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
+        int x = (int) Mat    /**
+     * Draws strategic map symbols with native GUI primitives. This deliberately avoids an
+     * optional texture atlas: a missing atlas must never turn every strategic object into a
+     * broken-texture square. The symbol remains crisp at every GUI scale.
+     */
+    private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
         boolean selected = marker.id.equals(selectedMarkerId);
         boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
-        int icon = switch (marker.type == null ? "other" : marker.type) {
-            case "army" -> 0;
-            case "capital" -> 1;
-            case "city" -> 2;
-            case "village", "settlement" -> 3;
-            case "castle" -> 4;
-            case "port" -> 5;
-            case "ruin" -> 6;
-            case "caravan" -> 7;
-            case "camp" -> 8;
-            case "temple", "mine" -> 9;
-            default -> 2;
+        String symbol = switch (marker.type == null ? "other" : marker.type) {
+            case "army" -> "A";
+            case "capital" -> "★";
+            case "city" -> "C";
+            case "village", "settlement" -> "V";
+            case "castle" -> "F";
+            case "port" -> "P";
+            case "ruin" -> "R";
+            case "caravan" -> "K";
+            case "camp" -> "H";
+            case "temple", "mine" -> "T";
+            default -> "?";
         };
-        int size = Math.max(28, Math.min(56, (int) Math.round(40 * Math.sqrt(Math.max(0.25, zoom)))));
-        int u = (icon % 5) * 64, v = (icon / 5) * 64;
-        g.blit(STRATEGIC_MARKERS, x - size / 2, y - size / 2, u, v, size, size, 320, 128);
-        if (selected || hovered)
-            g.renderOutline(x - size / 2 - 2, y - size / 2 - 2, size + 4, size + 4,
+        int size = Math.max(22, Math.min(42, (int) Math.round(34 * Math.sqrt(Math.max(0.25, zoom)))));
+        int left = x - size / 2, top = y - size / 2;
+        int realmColor = 0xFF000000 | (marker.rgb & 0xFFFFFF);
+        int border = selected ? 0xFFFFD66B : hovered ? 0xFFE9D28B : realmColor;
+        g.fill(left, top, left + size, top + size, 0xE91A1D24);
+        g.fill(left + 2, top + 2, left + size - 2, top + 4, realmColor);
+        g.fill(left + 2, top + size - 4, left + size - 2, top + size - 2, realmColor);
+        g.renderOutline(left, top, size, size, border);
+
+        if ("army".equals(marker.type)) {
+            // A compact commander standard, not a stack of individual troop markers.
+            int poleX = left + Math.max(5, size / 5);
+            g.fill(poleX, top + 5, poleX + 1, top + size - 5, 0xFFE8D9B5);
+            g.fill(poleX + 1, top + 5, poleX + Math.max(6, size / 3), top + Math.max(9, size / 3),
+                    realmColor);
+        }
+        int textWidth = font.width(symbol);
+        g.drawString(font, symbol, x - textWidth / 2 + ("army".equals(marker.type) ? 2 : 0),
+                y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
+        if (selected || hovered) {
+            g.renderOutline(left - 2, top - 2, size + 4, size + 4,
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
+        }
     }
     private void drawMarkers(GuiGraphics g, int mx, int my) {
         for (Markers.Marker marker : ClientState.markers.list()) {
