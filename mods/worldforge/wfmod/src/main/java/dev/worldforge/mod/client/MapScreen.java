@@ -44,6 +44,7 @@ public class MapScreen extends Screen {
     private String pendingTarget = "";
     private long lastEditApply;
     private boolean dragOverview;
+    private String selectedMarkerId = "";
     private int ovwX, ovwY, ovwW, ovwH;
 
     private static final class Slot {
@@ -327,6 +328,14 @@ public class MapScreen extends Screen {
             List<Component> tip = describe(hoverProv, false);
             if (!tip.isEmpty()) g.renderComponentTooltip(font, tip, mx, my);
         }
+        Markers.Marker hoveredMarker = markerAt(mx, my);
+        if (hoveredMarker != null && !overUi) {
+            List<Component> tip = new ArrayList<>();
+            tip.add(Component.literal(hoveredMarker.name).withStyle(ChatFormatting.GOLD));
+            if (hoveredMarker.desc != null && !hoveredMarker.desc.isBlank())
+                tip.add(Component.literal(hoveredMarker.desc.replace(';', ' ')).withStyle(ChatFormatting.GRAY));
+            g.renderComponentTooltip(font, tip, mx, my);
+        }
         if (!embeddedInMaqan) for (Slot sl : slots) if (sl.hit(mx, my)) g.renderTooltip(font, Component.literal(isCurrent(sl.key) ? modeName(sl.key) : (slots.indexOf(sl) + 1) + ": " + modeName(sl.key)), mx, my);
     }
 
@@ -602,24 +611,127 @@ public class MapScreen extends Screen {
         g.fill(x - 3, y - 3, x + 3, y + 3, c);
     }
 
+    private boolean hiddenArmyMarker(Markers.Marker army) {
+        if (!"army".equals(army.type)) return false;
+        for (Markers.Marker object : ClientState.markers.list()) {
+            if (!("city".equals(object.type) || "settlement".equals(object.type)
+                    || "village".equals(object.type) || "capital".equals(object.type)
+                    || "castle".equals(object.type))) continue;
+            long dx = (long) army.x - object.x, dz = (long) army.z - object.z;
+            if (dx * dx + dz * dz <= 32L * 32L) return true;
+        }
+        return false;
+    }
+
+    private Markers.Marker markerAt(double mx, double my) {
+        Markers.Marker best = null;
+        double bestDistance = 13.0 * 13.0;
+        for (Markers.Marker marker : ClientState.markers.list()) {
+            if (hiddenArmyMarker(marker)) continue;
+            double[] point = blockToScreen(marker.x, marker.z);
+            double dx = point[0] - mx, dy = point[1] - my;
+            double distance = dx * dx + dy * dy;
+            if (distance <= bestDistance) { bestDistance = distance; best = marker; }
+        }
+        return best;
+    }
+
+    private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
+        int x = (int) Math.round(sx), y = (int) Math.round(sy);
+        int size = zoom < 0.55 ? 11 : zoom < 1.1 ? 15 : 19;
+        int color = 0xFF000000 | (marker.rgb & 0xFFFFFF);
+        boolean selected = marker.id.equals(selectedMarkerId);
+        boolean hovered = Math.abs(mx - x) <= 13 && Math.abs(my - y) <= 13;
+        g.fill(x - size / 2 - 2, y - size / 2 - 2, x + size / 2 + 2, y + size / 2 + 2,
+                selected || hovered ? 0xFFE9D28B : 0xD90B1019);
+        g.renderOutline(x - size / 2 - 2, y - size / 2 - 2, size + 4, size + 4,
+                selected ? 0xFFFFD66B : hovered ? 0xFFE9D28B : 0xFF697386);
+        int left = x - size / 2, top = y - size / 2;
+        switch (marker.type == null ? "other" : marker.type) {
+            case "army" -> {
+                // Field army: commander/horse silhouette plus a realm-coloured standard.
+                g.fill(x - 1, top, x + 1, y + 5, 0xFFE6D7B8);
+                g.fill(x + 1, top + 1, x + 6, top + 4, color);
+                g.fill(x - 5, y - 3, x + 4, y + 3, 0xFFB7C0CC);
+                g.fill(x - 3, y - 6, x, y - 3, 0xFFE7C9A0);
+                g.fill(x - 6, y + 2, x - 3, y + 5, 0xFF333B48);
+                g.fill(x + 2, y + 2, x + 5, y + 5, 0xFF333B48);
+            }
+            case "castle" -> {
+                g.fill(x - 6, y - 2, x + 6, y + 6, color);
+                g.fill(x - 7, y - 7, x - 3, y + 1, color);
+                g.fill(x + 3, y - 7, x + 7, y + 1, color);
+                g.fill(x - 1, y - 4, x + 2, y + 6, 0xFFE9DFC8);
+                g.fill(x - 7, y - 8, x - 3, y - 6, 0xFFE9DFC8);
+                g.fill(x + 3, y - 8, x + 7, y - 6, 0xFFE9DFC8);
+            }
+            case "port" -> {
+                g.fill(x - 7, y + 2, x + 7, y + 5, color);
+                g.fill(x - 5, y, x + 5, y + 2, 0xFFB7C9D8);
+                g.fill(x - 1, y - 7, x + 1, y + 1, 0xFFE9DFC8);
+                g.fill(x + 1, y - 6, x + 5, y - 2, color);
+            }
+            case "ruin" -> {
+                g.fill(x - 6, y - 5, x - 3, y + 6, color);
+                g.fill(x + 3, y - 2, x + 6, y + 6, color);
+                g.fill(x - 3, y + 3, x + 3, y + 6, color);
+                g.fill(x - 5, y - 7, x - 1, y - 5, 0xFFE9DFC8);
+            }
+            case "camp" -> {
+                g.fill(x - 7, y + 4, x + 7, y + 6, color);
+                g.fill(x - 5, y - 3, x, y + 4, 0xFFE2C58D);
+                g.fill(x, y - 3, x + 5, y + 4, 0xFFB88B55);
+                g.fill(x - 1, y + 1, x + 2, y + 4, 0xFF252B34);
+            }
+            case "temple" -> {
+                g.fill(x - 7, y + 4, x + 7, y + 6, color);
+                g.fill(x - 6, y - 5, x + 6, y - 3, color);
+                for (int dx = -5; dx <= 5; dx += 5) g.fill(x + dx - 1, y - 3, x + dx + 1, y + 4, 0xFFE8E0CE);
+            }
+            case "mine" -> {
+                g.fill(x - 6, y - 5, x - 4, y + 5, color);
+                g.fill(x - 5, y - 5, x + 5, y - 3, color);
+                g.fill(x + 3, y - 3, x + 5, y + 5, color);
+                g.fill(x - 3, y - 1, x + 4, y + 1, 0xFFE7D8B8);
+            }
+            case "caravan" -> {
+                g.fill(x - 6, y - 4, x + 5, y + 3, color);
+                g.fill(x - 4, y + 3, x - 1, y + 6, 0xFFE7D8B8);
+                g.fill(x + 2, y + 3, x + 5, y + 6, 0xFFE7D8B8);
+                g.fill(x - 1, y - 7, x + 1, y - 4, 0xFFE7D8B8);
+            }
+            default -> {
+                // Settlement/city: clustered roofs and a central keep.
+                g.fill(x - 7, y + 1, x + 7, y + 6, color);
+                g.fill(x - 6, y - 4, x - 1, y + 1, 0xFFE7D8B8);
+                g.fill(x + 2, y - 5, x + 6, y + 1, 0xFFD9C49B);
+                g.fill(x - 2, y - 7, x + 2, y + 6, color);
+                g.fill(x - 1, y + 1, x + 1, y + 4, 0xFF26313D);
+            }
+        }
+    }
+
     private void drawMarkers(GuiGraphics g, int mx, int my) {
-        for (Markers.Marker m : ClientState.markers.list()) {
-            double[] s = blockToScreen(m.x, m.z);
-            if (s[0] < -10 || s[1] < BAR - 10 || s[0] > width + 10 || s[1] > height + 10) continue;
-            drawDiamond(g, s[0], s[1], 0xFFD24A);
-            if (zoom > 0.9 || Math.abs(mx - s[0]) < 8 && Math.abs(my - s[1]) < 8) g.drawString(font, m.name, (int) s[0] + 7, (int) s[1] - 4, 0xFFFFFFFF);
+        for (Markers.Marker marker : ClientState.markers.list()) {
+            if (hiddenArmyMarker(marker)) continue;
+            double[] point = blockToScreen(marker.x, marker.z);
+            if (point[0] < -20 || point[1] < BAR - 20 || point[0] > width + 20 || point[1] > height + 20) continue;
+            drawStrategicMarker(g, marker, point[0], point[1], mx, my);
+            if (zoom > 0.9 || Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12)
+                g.drawString(font, marker.name, (int) point[0] + 11, (int) point[1] - 4,
+                        marker.id.equals(selectedMarkerId) ? 0xFFFFD66B : 0xFFFFFFFF);
         }
         for (Waypoints.Wp w : Waypoints.LIST) {
-            double[] s = blockToScreen(w.x, w.z);
-            if (s[0] < -10 || s[1] < BAR - 10 || s[0] > width + 10 || s[1] > height + 10) continue;
-            drawDiamond(g, s[0], s[1], w.rgb);
-            g.drawString(font, w.name, (int) s[0] + 7, (int) s[1] - 4, 0xFF9CF2E8);
+            double[] point = blockToScreen(w.x, w.z);
+            if (point[0] < -10 || point[1] < BAR - 10 || point[0] > width + 10 || point[1] > height + 10) continue;
+            drawDiamond(g, point[0], point[1], w.rgb);
+            g.drawString(font, w.name, (int) point[0] + 7, (int) point[1] - 4, 0xFF9CF2E8);
         }
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
-            double[] s = blockToScreen(mc.player.getX(), mc.player.getZ());
-            g.fill((int) s[0] - 3, (int) s[1] - 3, (int) s[0] + 3, (int) s[1] + 3, 0xFFFFFFFF);
-            g.fill((int) s[0] - 2, (int) s[1] - 2, (int) s[0] + 2, (int) s[1] + 2, 0xFFFF3B3B);
+            double[] point = blockToScreen(mc.player.getX(), mc.player.getZ());
+            g.fill((int) point[0] - 3, (int) point[1] - 3, (int) point[0] + 3, (int) point[1] + 3, 0xFFFFFFFF);
+            g.fill((int) point[0] - 2, (int) point[1] - 2, (int) point[0] + 2, (int) point[1] + 2, 0xFFFF3B3B);
         }
     }
 
@@ -693,6 +805,16 @@ public class MapScreen extends Screen {
             return true;
         }
         if (overUi((int) mx, (int) my)) return false;
+        if (button == 0 && !panel.editing()) {
+            Markers.Marker marker = markerAt(mx, my);
+            if (marker != null) {
+                selectedMarkerId = marker.id;
+                PlatformWorkspaceBridge.publish("worldforge", marker.id, marker.type,
+                        marker.name, marker.desc == null ? "" : marker.desc);
+                return true;
+            }
+            selectedMarkerId = "";
+        }
         int[] p = screenToPixel(mx, my);
         if (button == 0 && panel.editing()) {                      // редактор: клик = правка на сервере, Shift+клик = выбрать провинцию
             editAt(p, hasShiftDown());
