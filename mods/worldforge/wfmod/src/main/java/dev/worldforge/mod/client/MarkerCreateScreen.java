@@ -31,7 +31,9 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     protected void init() {
-        nameBox = new EditBox(font, width / 2 - 150, height / 2 - 110, 300, 20, Component.literal("Название объекта"));
+        int panelH = Math.min(470, height - 24);
+        int top = (height - panelH) / 2;
+        nameBox = new EditBox(font, width / 2 - 150, top + panelH - 56, 300, 20, Component.literal("Название объекта"));
         nameBox.setMaxLength(64);
         nameBox.setValue("Новый объект");
         nameBox.setHint(Component.literal("Название города, крепости, армии..."));
