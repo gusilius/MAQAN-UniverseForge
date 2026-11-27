@@ -1238,8 +1238,10 @@ public final class PlatformShellScreen extends Screen {
             if (y + 14 > p.y + p.h - 6) break;
             g.drawString(font, WorkspaceMapLayerRegistry.isVisible(layer.id()) ? "✓" : "—",
                     p.x + 12, y, WorkspaceTheme.ACCENT, false);
-            g.drawString(font, trimInspector(layer.label(), p.w - 44),
+            g.drawString(font, trimInspector(layer.label(), p.w - 78),
                     p.x + 28, y, TEXT, false);
+            g.drawString(font, "↑", p.x + p.w - 34, y, MUTED, false);
+            g.drawString(font, "↓", p.x + p.w - 18, y, MUTED, false);
             y += 16;
         }
     }
@@ -1465,7 +1467,11 @@ public final class PlatformShellScreen extends Screen {
                 int layerIndex = (int) ((my - (p.y + 122)) / 16);
                 if (layerIndex >= 0 && layerIndex < layers.size()) {
                     WorkspaceMapLayerRegistry.Layer layer = layers.get(layerIndex);
-                    WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
+                    if (mx >= p.x + p.w - 42) {
+                        WorkspaceMapLayerRegistry.move(layer.id(), mx < p.x + p.w - 20 ? -1 : 1);
+                    } else {
+                        WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
+                    }
                     saveWorkspaceState();
                     return true;
                 }
