@@ -42,7 +42,12 @@ public final class ClientHooks {
                 case WFNet.VIEW -> {
                     String all = new String(full, StandardCharsets.UTF_8);
                     int nl = all.indexOf('\n');
-                    if (nl > 0) ClientViews.open(all.substring(0, nl), all.substring(nl + 1));
+                    if (nl > 0) {
+                        String viewId = all.substring(0, nl);
+                        String payload = all.substring(nl + 1);
+                        if ("wf:clock".equals(viewId)) ClientClock.update(payload);
+                        else ClientViews.open(viewId, payload);
+                    }
                 }
                 case WFNet.ACTIONS -> ClientState.actions = ClientAction.parseList(new String(full, StandardCharsets.UTF_8));
                 case WFNet.TERRAIN_INFO -> onTerrainInfo(new String(full, StandardCharsets.UTF_8));
