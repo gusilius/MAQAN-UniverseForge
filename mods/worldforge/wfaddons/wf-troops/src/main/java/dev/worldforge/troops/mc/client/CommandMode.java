@@ -75,6 +75,8 @@ public final class CommandMode {
     private static Marker camEntity;
     private static double groundY;
     private static boolean groundInitialized;
+    private static boolean cameraPositionInitialized;
+    private static double cameraSmoothX, cameraSmoothY, cameraSmoothZ;
     private static long lastFrame;
     private static CameraRig.View lastView = CameraRig.View.SKY;
 
@@ -342,6 +344,7 @@ public final class CommandMode {
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
         groundY = mc.player.getY();
         groundInitialized = false;
+        cameraPositionInitialized = false;
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
         frame(mc);
@@ -380,6 +383,7 @@ public final class CommandMode {
         Minecraft mc = Minecraft.getInstance();
         active = false;
         groundInitialized = false;
+        cameraPositionInitialized = false;
         lastView = RIG.view;
         SEL.clear();
         hostedCommandView = null;
@@ -424,10 +428,9 @@ public final class CommandMode {
         net.minecraft.core.BlockPos focusProbe = new net.minecraft.core.BlockPos(gx,
                 mc.player.blockPosition().getY(), gz);
         if (mc.level.hasChunkAt(focusProbe)) {
-            // MOTION_BLOCKING includes leaves and solid canopy. Using NO_LEAVES here
-            // placed the focus under dense forests and produced a camera boom through
-            // the canopy/terrain when changing presets.
-            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, gx, gz);
+            // Anchor to terrain/building surfaces, not the top of a tree canopy.
+            // The boom ray below handles foliage and other intervening geometry.
+            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
             if (Double.isFinite(target)) {
                 if (!groundInitialized) {
                     groundY = target;
@@ -467,7 +470,7 @@ public final class CommandMode {
         net.minecraft.core.BlockPos cameraProbe = new net.minecraft.core.BlockPos(cameraX,
                 mc.player.blockPosition().getY(), cameraZ);
         if (mc.level.hasChunkAt(cameraProbe)) {
-            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING,
+            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     cameraX, cameraZ);
             p[1] = CameraRig.keepAboveTerrain(p[1], cameraTerrain);
         } else {
@@ -476,9 +479,46 @@ public final class CommandMode {
             p[1] = Math.max(p[1], groundY + CameraRig.TERRAIN_CLEARANCE);
         }
 
-        camEntity.setPos(p[0], p[1], p[2]);
-        camEntity.xo = p[0]; camEntity.yo = p[1]; camEntity.zo = p[2];
-        camEntity.xOld = p[0]; camEntity.yOld = p[1]; camEntity.zOld = p[2];
+        // Smooth the camera boom independently from the logical focus point.
+        // The first sample snaps to a safe location; later frames use an
+        // exponential response so motion remains stable at different frame rates.
+        if (!cameraPositionInitialized) {
+            cameraSmoothX = p[0]; cameraSmoothY = p[1]; cameraSmoothZ = p[2];
+            cameraPositionInitialized = true;
+        } else {
+            double blend = 1.0 - Math.exp(-Math.max(0.0, dt) * 16.0);
+            cameraSmoothX += (p[0] - cameraSmoothX) * blend;
+            cameraSmoothY += (p[1] - cameraSmoothY) * blend;
+            cameraSmoothZ += (p[2] - cameraSmoothZ) * blend;
+        }
+
+        int sx = net.minecraft.util.Mth.floor(cameraSmoothX);
+        int sz = net.minecraft.util.Mth.floor(cameraSmoothZ);
+        net.minecraft.core.BlockPos smoothProbe = new net.minecraft.core.BlockPos(sx,
+                mc.player.blockPosition().getY(), sz);
+        if (mc.level.hasChunkAt(smoothProbe)) {
+            double floor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sx, sz);
+            cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, floor);
+        } else {
+            cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
+        }
+
+        // Re-check the interpolated point: a smooth transition must not tunnel
+        // through a wall, cliff or building between two safe endpoints.
+        Vec3 smoothed = new Vec3(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
+        Vec3 smoothBoom = smoothed.subtract(focusEye);
+        if (smoothBoom.lengthSqr() > 1.0e-4) {
+            HitResult smoothObstruction = mc.level.clip(new ClipContext(focusEye, smoothed,
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+            if (smoothObstruction.getType() == HitResult.Type.BLOCK) {
+                Vec3 safe = smoothObstruction.getLocation().subtract(smoothBoom.normalize().scale(1.4));
+                cameraSmoothX = safe.x; cameraSmoothY = safe.y; cameraSmoothZ = safe.z;
+            }
+        }
+
+        camEntity.setPos(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
+        camEntity.xo = cameraSmoothX; camEntity.yo = cameraSmoothY; camEntity.zo = cameraSmoothZ;
+        camEntity.xOld = cameraSmoothX; camEntity.yOld = cameraSmoothY; camEntity.zOld = cameraSmoothZ;
         camEntity.setYRot((float) RIG.yaw); camEntity.setXRot((float) RIG.pitch);
         camEntity.yRotO = (float) RIG.yaw; camEntity.xRotO = (float) RIG.pitch;
     }

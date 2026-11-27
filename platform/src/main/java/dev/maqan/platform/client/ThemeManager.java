@@ -34,6 +34,7 @@ public final class ThemeManager {
     private static String selectedTheme = "royal";
     private static float sourceScale = 1.6F;
     private static int windowBorderPixels = 48;
+    private static int selectedAccent = 0xFFD7B56D;
     private static boolean initialized;
     private static boolean preferenceLoaded;
     private static boolean manifestValid;
@@ -98,6 +99,8 @@ public final class ThemeManager {
             }
 
             JsonObject activeSkin = skins.getAsJsonObject(selectedTheme);
+            selectedAccent = activeSkin.has("accent")
+                    ? parseAccent(activeSkin.get("accent").getAsString()) : 0xFFD7B56D;
             for (String element : CHROME_ELEMENTS) RECTANGLES.put(element, rectangle(activeSkin, element));
             loadAllTextures(mc, names, selectedTheme);
             manifestValid = true;
@@ -176,15 +179,18 @@ public final class ThemeManager {
         return selectedTheme;
     }
 
-    /** Theme-owned accent used by the Java interaction layer as well as texture chrome. */
+    /** Theme-owned accent loaded from the same skin manifest as its textures. */
     public static synchronized int accentColor() {
         initialize();
-        return switch (selectedTheme) {
-            case "iron" -> 0xFFB6C5D2;
-            case "grim" -> 0xFFB87952;
-            case "elf" -> 0xFF9BCB9B;
-            default -> 0xFFD7B56D;
-        };
+        return selectedAccent;
+    }
+
+    private static int parseAccent(String value) {
+        if (value == null) throw new IllegalStateException("Missing theme accent");
+        String hex = value.startsWith("#") ? value.substring(1) : value;
+        if (hex.length() != 6) throw new IllegalStateException("Theme accent must be #RRGGBB");
+        try { return 0xFF000000 | Integer.parseInt(hex, 16); }
+        catch (NumberFormatException error) { throw new IllegalStateException("Invalid theme accent", error); }
     }
 
     public static String[] themes() { return THEMES.clone(); }
@@ -275,8 +281,8 @@ public final class ThemeManager {
 
     private static void drawScaled(GuiGraphics graphics, Texture texture,
                                    int x, int y, int width, int height) {
-        // Texture PNGs are authored at sourceScale=2; fit the complete source
-        // image into the logical destination rectangle without cropping.
+        // Fit the complete texture into its manifest-defined logical rectangle.
+        // Transparent margins in the source PNG remain part of the authored skin.
         graphics.pose().pushPose();
         graphics.pose().translate(x, y, 0.0D);
         graphics.pose().scale(width / (float) texture.width(),
