@@ -1067,34 +1067,79 @@ public class MapScreen extends Screen {
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
         }
     }
-    /** Small animated field figurine used only when no real commander model/asset is available. */
+    /**
+     * Compact tactical formation miniature. At strategic zoom it collapses to a single
+     * readable standard-bearer; closer zoom reveals ranks, shields and marching animation.
+     * The marker remains a map representation only: it never creates duplicate game entities.
+     */
     private void drawArmyMiniature(GuiGraphics g, double screenX, double screenY, int size,
                                    int realmColor, Markers.Marker marker) {
         Minecraft mc = Minecraft.getInstance();
         boolean moving = "true".equalsIgnoreCase(markerValue(marker.desc, "moving"));
-        int phase = moving && mc.level != null ? (int) ((mc.level.getGameTime() / 7L) & 1L) : 0;
-        float scale = Math.max(0.72f, Math.min(1.65f, size / 25.0f));
+        int men = Math.max(0, markerInt(marker.desc, "men"));
+        int heading = parseMarkerHeading(markerValue(marker.desc, "heading"));
+        int phase = moving && mc.level != null ? (int) ((mc.level.getGameTime() / 6L) & 1L) : 0;
+        float scale = Math.max(0.72f, Math.min(1.8f, size / 25.0f));
         g.pose().pushPose();
         g.pose().translate((float) screenX, (float) screenY, 0.0f);
+        // Heading is quantized to eight directions to stay crisp at pixel scale.
+        g.pose().mulPose(com.mojang.math.Axis.ZP.rotationDegrees(heading));
         g.pose().scale(scale, scale, 1.0f);
-        // Ground shadow and boots.
-        g.fill(-9, 8, 9, 11, 0x55301810);
-        g.fill(-4 + phase * 3, 5, -1 + phase * 3, 10, 0xFF30251E);
-        g.fill(1 - phase * 3, 5, 4 - phase * 3, 10, 0xFF30251E);
-        // Mail/coat, head and helmet.
-        g.fill(-4, -3, 4, 6, realmColor);
-        g.fill(-3, -8, 3, -2, 0xFFC79B70);
-        g.fill(-4, -10, 4, -7, 0xFFD7C08B);
-        g.fill(-2, -12, 3, -10, 0xFF8D7447);
-        // Shield bearing the army's actual realm colour and a simple metal rim.
-        g.fill(-9, -3, -5, 5, 0xFFE0C995);
-        g.fill(-8, -2, -6, 4, realmColor);
-        // Spear and a small moving pennant.
-        g.fill(6, -13, 7, 8, 0xFFD8C9A5);
+
+        int figures = size < 22 ? 1 : size < 31 ? 3 : size < 42 ? 5 : 7;
+        if (men > 0 && men < 12) figures = Math.min(figures, 1);
+        int columns = figures <= 1 ? 1 : figures <= 3 ? 2 : 3;
+        int rows = (figures + columns - 1) / columns;
+        g.fill(-12, 9, 12, 12, 0x55301810);
+        int rank = 0;
+        for (int i = 0; i < figures; i++) {
+            int col = i % columns;
+            int row = i / columns;
+            int px = (col - (columns - 1) / 2) * 8;
+            int py = (row - (rows - 1) / 2) * 7 + 2;
+            int stride = moving ? (phase == 0 ? 1 : -1) : 0;
+            int leg = (i & 1) == 0 ? stride : -stride;
+            // Boots and alternating marching legs.
+            g.fill(px - 2 + leg, py + 3, px, py + 7, 0xFF30251E);
+            g.fill(px + 1 - leg, py + 3, px + 3, py + 7, 0xFF30251E);
+            // Mail/coat, head and helmet.
+            g.fill(px - 3, py - 2, px + 4, py + 4, realmColor);
+            g.fill(px - 2, py - 6, px + 3, py - 1, 0xFFC79B70);
+            g.fill(px - 3, py - 8, px + 4, py - 5, 0xFFD7C08B);
+            g.fill(px - 1, py - 10, px + 3, py - 8, 0xFF8D7447);
+            // Small shield and spear; silhouettes stay legible as the formation scales.
+            g.fill(px - 6, py - 1, px - 4, py + 4, 0xFFE0C995);
+            g.fill(px - 5, py, px - 4, py + 3, realmColor);
+            g.fill(px + 5, py - 10, px + 6, py + 5, 0xFFD8C9A5);
+            rank++;
+        }
+        // Command standard is anchored to the centre and remains visible at all zooms.
+        g.fill(7, -15, 8, 6, 0xFFD8C9A5);
         int flagShift = moving ? phase : 0;
-        g.fill(7, -12, 13 + flagShift, -7, realmColor);
-        g.fill(7, -12, 13 + flagShift, -11, 0xFFFFD778);
+        g.fill(8, -14, 15 + flagShift, -9, realmColor);
+        g.fill(8, -14, 15 + flagShift, -13, 0xFFFFD778);
+        g.fill(8, -9, 12, -7, 0xFFE0C995);
         g.pose().popPose();
+    }
+
+    private static int parseMarkerHeading(String raw) {
+        if (raw == null || raw.isBlank()) return 0;
+        try {
+            double degrees = Double.parseDouble(raw.trim());
+            return Math.floorMod((int) Math.round(degrees / 45.0) * 45, 360);
+        } catch (NumberFormatException ignored) {
+            return switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "north", "n" -> 0;
+                case "east", "e" -> 90;
+                case "south", "s" -> 180;
+                case "west", "w" -> 270;
+                case "north_east", "ne" -> 45;
+                case "south_east", "se" -> 135;
+                case "south_west", "sw" -> 225;
+                case "north_west", "nw" -> 315;
+                default -> 0;
+            };
+        }
     }
 
     private static Map<String, LivingEntity> leaderBodies() {
