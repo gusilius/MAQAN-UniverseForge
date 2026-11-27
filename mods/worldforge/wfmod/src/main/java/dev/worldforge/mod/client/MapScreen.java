@@ -24,6 +24,7 @@ import java.util.List;
  */
 public class MapScreen extends Screen {
     private static final int BAR = 0, BOTTOM = 46;
+    private static final ResourceLocation STRATEGIC_MARKERS = new ResourceLocation("worldforge", "textures/gui/map/strategic_markers.png");
     private boolean embeddedInMaqan;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
@@ -708,103 +709,28 @@ public class MapScreen extends Screen {
 
     private void drawStrategicMarker(GuiGraphics g, Markers.Marker marker, double sx, double sy, int mx, int my) {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
-        int size = zoom < 0.55 ? 11 : zoom < 1.1 ? 15 : 19;
-        int color = 0xFF000000 | (marker.rgb & 0xFFFFFF);
         boolean selected = marker.id.equals(selectedMarkerId);
-        boolean hovered = Math.abs(mx - x) <= 13 && Math.abs(my - y) <= 13;
-        g.fill(x - size / 2 - 2, y - size / 2 - 2, x + size / 2 + 2, y + size / 2 + 2,
-                selected || hovered ? 0xFFE9D28B : 0xD90B1019);
-        g.renderOutline(x - size / 2 - 2, y - size / 2 - 2, size + 4, size + 4,
-                selected ? 0xFFFFD66B : hovered ? 0xFFE9D28B : 0xFF697386);
-        int left = x - size / 2, top = y - size / 2;
-        switch (marker.type == null ? "other" : marker.type) {
-            case "army" -> {
-                // Field army: commander/horse silhouette plus a realm-coloured standard.
-                g.fill(x - 1, top, x + 1, y + 5, 0xFFE6D7B8);
-                g.fill(x + 1, top + 1, x + 6, top + 4, color);
-                g.fill(x - 5, y - 3, x + 4, y + 3, 0xFFB7C0CC);
-                g.fill(x - 3, y - 6, x, y - 3, 0xFFE7C9A0);
-                g.fill(x - 6, y + 2, x - 3, y + 5, 0xFF333B48);
-                g.fill(x + 2, y + 2, x + 5, y + 5, 0xFF333B48);
-            }
-            case "capital" -> {
-                g.fill(x - 7, y + 3, x + 7, y + 6, color);
-                g.fill(x - 6, y - 2, x - 3, y + 3, 0xFFE8D6A8);
-                g.fill(x - 1, y - 5, x + 2, y + 3, 0xFFE8D6A8);
-                g.fill(x + 4, y - 2, x + 7, y + 3, 0xFFE8D6A8);
-                g.fill(x - 7, y - 7, x - 4, y - 4, color);
-                g.fill(x - 1, y - 9, x + 2, y - 6, color);
-                g.fill(x + 4, y - 7, x + 7, y - 4, color);
-            }
-            case "city" -> {
-                g.fill(x - 7, y - 1, x + 7, y + 6, color);
-                g.fill(x - 6, y - 6, x - 2, y - 1, 0xFFE7D8B8);
-                g.fill(x + 1, y - 7, x + 6, y - 1, 0xFFD9C49B);
-                g.fill(x - 1, y - 3, x + 1, y + 6, color);
-                g.fill(x - 4, y + 2, x - 2, y + 4, 0xFF26313D);
-                g.fill(x + 3, y + 2, x + 5, y + 4, 0xFF26313D);
-            }
-            case "village" -> {
-                g.fill(x - 7, y + 2, x + 7, y + 6, color);
-                g.fill(x - 6, y - 3, x - 1, y + 2, 0xFFE7D8B8);
-                g.fill(x - 7, y - 5, x, y - 3, color);
-                g.fill(x + 2, y - 2, x + 7, y + 2, 0xFFD9C49B);
-                g.fill(x + 1, y - 4, x + 8, y - 2, color);
-            }
-            case "castle" -> {
-                g.fill(x - 6, y - 2, x + 6, y + 6, color);
-                g.fill(x - 7, y - 7, x - 3, y + 1, color);
-                g.fill(x + 3, y - 7, x + 7, y + 1, color);
-                g.fill(x - 1, y - 4, x + 2, y + 6, 0xFFE9DFC8);
-                g.fill(x - 7, y - 8, x - 3, y - 6, 0xFFE9DFC8);
-                g.fill(x + 3, y - 8, x + 7, y - 6, 0xFFE9DFC8);
-            }
-            case "port" -> {
-                g.fill(x - 7, y + 2, x + 7, y + 5, color);
-                g.fill(x - 5, y, x + 5, y + 2, 0xFFB7C9D8);
-                g.fill(x - 1, y - 7, x + 1, y + 1, 0xFFE9DFC8);
-                g.fill(x + 1, y - 6, x + 5, y - 2, color);
-            }
-            case "ruin" -> {
-                g.fill(x - 6, y - 5, x - 3, y + 6, color);
-                g.fill(x + 3, y - 2, x + 6, y + 6, color);
-                g.fill(x - 3, y + 3, x + 3, y + 6, color);
-                g.fill(x - 5, y - 7, x - 1, y - 5, 0xFFE9DFC8);
-            }
-            case "camp" -> {
-                g.fill(x - 7, y + 4, x + 7, y + 6, color);
-                g.fill(x - 5, y - 3, x, y + 4, 0xFFE2C58D);
-                g.fill(x, y - 3, x + 5, y + 4, 0xFFB88B55);
-                g.fill(x - 1, y + 1, x + 2, y + 4, 0xFF252B34);
-            }
-            case "temple" -> {
-                g.fill(x - 7, y + 4, x + 7, y + 6, color);
-                g.fill(x - 6, y - 5, x + 6, y - 3, color);
-                for (int dx = -5; dx <= 5; dx += 5) g.fill(x + dx - 1, y - 3, x + dx + 1, y + 4, 0xFFE8E0CE);
-            }
-            case "mine" -> {
-                g.fill(x - 6, y - 5, x - 4, y + 5, color);
-                g.fill(x - 5, y - 5, x + 5, y - 3, color);
-                g.fill(x + 3, y - 3, x + 5, y + 5, color);
-                g.fill(x - 3, y - 1, x + 4, y + 1, 0xFFE7D8B8);
-            }
-            case "caravan" -> {
-                g.fill(x - 6, y - 4, x + 5, y + 3, color);
-                g.fill(x - 4, y + 3, x - 1, y + 6, 0xFFE7D8B8);
-                g.fill(x + 2, y + 3, x + 5, y + 6, 0xFFE7D8B8);
-                g.fill(x - 1, y - 7, x + 1, y - 4, 0xFFE7D8B8);
-            }
-            default -> {
-                // Settlement/city: clustered roofs and a central keep.
-                g.fill(x - 7, y + 1, x + 7, y + 6, color);
-                g.fill(x - 6, y - 4, x - 1, y + 1, 0xFFE7D8B8);
-                g.fill(x + 2, y - 5, x + 6, y + 1, 0xFFD9C49B);
-                g.fill(x - 2, y - 7, x + 2, y + 6, color);
-                g.fill(x - 1, y + 1, x + 1, y + 4, 0xFF26313D);
-            }
-        }
+        boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
+        int icon = switch (marker.type == null ? "other" : marker.type) {
+            case "army" -> 0;
+            case "capital" -> 1;
+            case "city" -> 2;
+            case "village", "settlement" -> 3;
+            case "castle" -> 4;
+            case "port" -> 5;
+            case "ruin" -> 6;
+            case "caravan" -> 7;
+            case "camp" -> 8;
+            case "temple", "mine" -> 9;
+            default -> 2;
+        };
+        int size = Math.max(28, Math.min(56, (int) Math.round(40 * Math.sqrt(Math.max(0.25, zoom)))));
+        int u = (icon % 5) * 64, v = (icon / 5) * 64;
+        g.blit(STRATEGIC_MARKERS, x - size / 2, y - size / 2, u, v, size, size, 320, 128);
+        if (selected || hovered)
+            g.renderOutline(x - size / 2 - 2, y - size / 2 - 2, size + 4, size + 4,
+                    selected ? 0xFFFFD66B : 0xFFE9D28B);
     }
-
     private void drawMarkers(GuiGraphics g, int mx, int my) {
         for (Markers.Marker marker : ClientState.markers.list()) {
             if (hiddenArmyMarker(marker)) continue;
