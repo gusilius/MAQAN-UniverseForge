@@ -332,7 +332,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
     }
 
-    private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"m";}
+    private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"b";}
 
     /** Selects an entity already tracked by the client and publishes the same UUID to MAQAN's inspector. */
     private boolean selectRadarEntityAt(double mouseX,double mouseY){
@@ -799,7 +799,17 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         double unit=Math.max(1.0,Math.min(5.0,cell/16.0));
         double scale=Math.max(1.2,Math.min(8.0,cell/2.8));
         double originX=(left+right)/2.0+panX,originY=(top+bottom)/2.0+panY;
+        // Conservative radius in chunk-space: the projection rotates terrain, so a
+        // circular bound safely covers every visible corner without scanning all history.
+        double visibleRadius=(Math.hypot(right-left,bottom-top)+Math.hypot(panX,panY))
+                /Math.max(0.65,scale)+10.0;
+        int minChunkX=(int)Math.floor(centerChunkX-visibleRadius);
+        int maxChunkX=(int)Math.ceil(centerChunkX+visibleRadius);
+        int minChunkZ=(int)Math.floor(centerChunkZ-visibleRadius);
+        int maxChunkZ=(int)Math.ceil(centerChunkZ+visibleRadius);
         for(var chunk:chunks){
+            if(chunk.chunkX()<minChunkX||chunk.chunkX()>maxChunkX
+                    ||chunk.chunkZ()<minChunkZ||chunk.chunkZ()>maxChunkZ)continue;
             for(int z=0;z<16;z++)for(int x=0;x<16;x++){
                 int index=z*16+x;
                 double localX=(chunk.chunkX()-centerChunkX)+(x+0.5)/16.0;
