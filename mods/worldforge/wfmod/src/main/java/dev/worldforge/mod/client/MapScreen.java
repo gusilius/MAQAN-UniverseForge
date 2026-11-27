@@ -715,28 +715,70 @@ public class MapScreen extends Screen {
         g.fill(x + 2, y + 2, x + 10, y + 8, primary);
         g.fill(x + 3, y + 8, x + 9, y + 10, primary);
         g.fill(x + 4, y + 10, x + 8, y + 11, primary);
-        if ((seed & 1) == 0) {
-            g.fill(x + 6, y + 2, x + 10, y + 8, secondary);
-        } else {
-            g.fill(x + 2, y + 6, x + 10, y + 8, secondary);
+        String field = String.valueOf(realm.props.getOrDefault("heraldry.pattern", (seed & 1) == 0 ? "per_pale" : "per_fess"));
+        switch (field.toLowerCase(java.util.Locale.ROOT)) {
+            case "per_fess" -> g.fill(x + 2, y + 6, x + 10, y + 10, secondary);
+            case "quarterly" -> {
+                g.fill(x + 2, y + 2, x + 6, y + 6, secondary);
+                g.fill(x + 6, y + 6, x + 10, y + 10, secondary);
+            }
+            case "chevron" -> {
+                g.fill(x + 2, y + 3, x + 4, y + 5, secondary);
+                g.fill(x + 4, y + 5, x + 6, y + 7, secondary);
+                g.fill(x + 6, y + 5, x + 8, y + 7, secondary);
+                g.fill(x + 8, y + 3, x + 10, y + 5, secondary);
+            }
+            case "plain" -> { /* single-colour field */ }
+            default -> g.fill(x + 6, y + 2, x + 10, y + 8, secondary);
         }
         int charge = 0xFFFFE7B0;
-        switch (Math.floorMod(seed, 4)) {
-            case 0 -> {
-                g.fill(x + 5, y + 3, x + 7, y + 8, charge);
-                g.fill(x + 3, y + 5, x + 9, y + 7, charge);
-            }
-            case 1 -> {
-                g.fill(x + 4, y + 3, x + 8, y + 5, charge);
-                g.fill(x + 5, y + 5, x + 7, y + 8, charge);
-            }
-            case 2 -> {
-                g.fill(x + 4, y + 3, x + 8, y + 7, charge);
-                g.fill(x + 5, y + 7, x + 7, y + 9, charge);
-            }
-            default -> {
+        String emblem = String.valueOf(realm.props.getOrDefault("heraldry.charge", ""));
+        switch (emblem.toLowerCase(java.util.Locale.ROOT)) {
+            case "cross" -> {
                 g.fill(x + 5, y + 3, x + 7, y + 9, charge);
                 g.fill(x + 3, y + 5, x + 9, y + 7, charge);
+            }
+            case "eagle" -> {
+                g.fill(x + 2, y + 4, x + 5, y + 6, charge);
+                g.fill(x + 7, y + 4, x + 10, y + 6, charge);
+                g.fill(x + 4, y + 5, x + 8, y + 8, charge);
+                g.fill(x + 5, y + 3, x + 7, y + 5, charge);
+            }
+            case "lion" -> {
+                g.fill(x + 4, y + 3, x + 8, y + 8, charge);
+                g.fill(x + 3, y + 4, x + 5, y + 6, charge);
+                g.fill(x + 7, y + 4, x + 9, y + 6, charge);
+                g.fill(x + 6, y + 2, x + 8, y + 4, charge);
+            }
+            case "tree" -> {
+                g.fill(x + 5, y + 3, x + 7, y + 8, charge);
+                g.fill(x + 3, y + 4, x + 9, y + 6, charge);
+                g.fill(x + 4, y + 3, x + 8, y + 5, charge);
+            }
+            case "sword" -> {
+                g.fill(x + 6, y + 2, x + 7, y + 8, charge);
+                g.fill(x + 4, y + 6, x + 8, y + 7, charge);
+                g.fill(x + 5, y + 8, x + 8, y + 9, charge);
+            }
+            case "star" -> {
+                g.fill(x + 5, y + 2, x + 7, y + 9, charge);
+                g.fill(x + 3, y + 4, x + 9, y + 7, charge);
+            }
+            default -> {
+                switch (Math.floorMod(seed, 3)) {
+                    case 0 -> {
+                        g.fill(x + 5, y + 3, x + 7, y + 8, charge);
+                        g.fill(x + 3, y + 5, x + 9, y + 7, charge);
+                    }
+                    case 1 -> {
+                        g.fill(x + 4, y + 3, x + 8, y + 5, charge);
+                        g.fill(x + 5, y + 5, x + 7, y + 8, charge);
+                    }
+                    default -> {
+                        g.fill(x + 4, y + 3, x + 8, y + 7, charge);
+                        g.fill(x + 5, y + 7, x + 7, y + 9, charge);
+                    }
+                }
             }
         }
     }
