@@ -45,14 +45,19 @@ public final class PlatformWorkspaceBridge {
     }
 
     public static void publishMapViewport(double centerX, double centerZ, double zoom) {
+        publishMapViewport(centerX, centerZ, zoom, "POLITICAL");
+    }
+
+    public static void publishMapViewport(double centerX, double centerZ, double zoom, String viewTypeName) {
         try {
             Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceMapState");
             state.getMethod("setViewport", String.class, double.class, double.class,
                     double.class, double.class, double.class).invoke(null,
                     worldId(), centerX, centerZ, zoom, 0.0, 0.0);
             Class<?> viewType = Class.forName("dev.maqan.platform.client.WorkspaceMapState$ViewType");
-            Object political = Enum.valueOf((Class<? extends Enum>) viewType.asSubclass(Enum.class), "POLITICAL");
-            state.getMethod("setViewType", viewType).invoke(null, political);
+            String requested = viewTypeName == null ? "POLITICAL" : viewTypeName.trim().toUpperCase(java.util.Locale.ROOT);
+            Object selected = Enum.valueOf((Class<? extends Enum>) viewType.asSubclass(Enum.class), requested);
+            state.getMethod("setViewType", viewType).invoke(null, selected);
         } catch (ClassNotFoundException ignored) {
             // Optional host not installed.
         } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
