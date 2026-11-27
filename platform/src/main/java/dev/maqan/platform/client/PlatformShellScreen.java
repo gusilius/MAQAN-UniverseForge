@@ -246,8 +246,8 @@ public final class PlatformShellScreen extends Screen {
                 && mouseY >= railTop(index) && mouseY < railBottom(index);
     }
 
-    private boolean compactViewport() { return width < ux(900) || height < uy(520); }
-    private boolean compactTopbar() { return width < ux(720); }
+    private boolean compactViewport() { return width < 900 || height < 520; }
+    private boolean compactTopbar() { return width < 720; }
     private int profileStartX() { return compactTopbar() ? ux(48) : Math.max(ux(178),width/2-ux(112)); }
     private int profileButtonWidth() { return compactTopbar() ? ux(28) : ux(48); }
     private int profileButtonStep() { return compactTopbar() ? ux(32) : ux(52); }
@@ -828,7 +828,7 @@ public final class PlatformShellScreen extends Screen {
         if (!compactTopbar())
             g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", ux(46), uy(13), MUTED, false);
         int clockX = clockControlX();
-        if (width >= ux(720) && clockX > ux(48) && clockX + ux(180) < width - ux(92)) {
+        if (width >= 720 && clockX > ux(48) && clockX + ux(180) < width - ux(92)) {
             String date = worldClockDate();
             g.drawString(font, date, clockX, uy(13), TEXT, false);
             int controlsX = clockX + ux(86);
@@ -852,7 +852,7 @@ public final class PlatformShellScreen extends Screen {
                     && my >= uy(5) && my < uy(30))
                 g.renderTooltip(font, Component.literal("Недостаточно прав для управления временем"), mx, my);
         }
-        if (commandCameraActive() && width >= ux(480)) {
+        if (commandCameraActive() && width >= 480) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"};
             String[] labels = {"RTS", "ISO", "FREE", "TOP", "POL"};
