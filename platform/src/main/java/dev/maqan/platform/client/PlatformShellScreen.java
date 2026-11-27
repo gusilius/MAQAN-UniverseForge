@@ -139,8 +139,14 @@ public final class PlatformShellScreen extends Screen {
         // Selection is a world-level navigation context. Switching provider views must not erase it.
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
-        selectedCapabilityId = capability.id();
-        Screen previous = providerViews.put(capability.id(), view);
+        // MapScreen is the canonical political workspace even when opened through
+        // the generic worldforge.map capability. Keep one stable key so switching
+        // between profile tabs never falls back to the empty workspace preview.
+        String viewKey = "POLITICS".equals(capability.domain())
+                && "dev.worldforge.mod.client.MapScreen".equals(view.getClass().getName())
+                ? "worldforge.realms.politics" : capability.id();
+        selectedCapabilityId = viewKey;
+        Screen previous = providerViews.put(viewKey, view);
         if (previous != null && previous != view) previous.removed();
         if (width > 0 && height > 0) {
             layoutWorkspace();
@@ -195,6 +201,7 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (profile == Profile.COSMOS) ensureAtlasView();
+        if (profile == Profile.POLITICS) ensurePoliticalMapView();
         layoutWorkspace();
         clampPanels();
         initViewInContent(activeView());
@@ -353,6 +360,35 @@ public final class PlatformShellScreen extends Screen {
         } catch (Exception error) {
             LOGGER.warn("Unable to persist MAQAN workspace layout", error);
         }
+    }
+
+    /**
+     * Political mode is a map-first workspace. Reuse a map view already opened
+     * by either political or generic WorldForge navigation; otherwise mount the
+     * provider's real MapScreen in the central content panel.
+     */
+    private void ensurePoliticalMapView() {
+        Screen map = providerViews.get("worldforge.realms.politics");
+        if (map == null) {
+            map = providerViews.remove("worldforge.map");
+            if (map != null) providerViews.put("worldforge.realms.politics", map);
+        }
+        if (map == null) {
+            try {
+                Class<?> type = Class.forName("dev.worldforge.mod.client.MapScreen");
+                Object instance = type.getDeclaredConstructor().newInstance();
+                if (!(instance instanceof Screen screen)) return;
+                try { type.getMethod("setEmbeddedInMaqan", boolean.class).invoke(screen, true); }
+                catch (ReflectiveOperationException ignored) { }
+                providerViews.put("worldforge.realms.politics", screen);
+                map = screen;
+            } catch (ReflectiveOperationException | LinkageError unavailable) {
+                LOGGER.warn("Political map provider is unavailable; keeping the politics workspace fallback");
+                return;
+            }
+        }
+        selectedCapabilityId = "worldforge.realms.politics";
+        initViewInContent(map);
     }
 
     private void ensureAtlasView() {
@@ -1561,6 +1597,8 @@ public final class PlatformShellScreen extends Screen {
         if (next == Profile.COSMOS) {
             ensureAtlasView();
             if (embeddedView != null) initViewInContent(embeddedView);
+        } else if (next == Profile.POLITICS) {
+            ensurePoliticalMapView();
         } else {
             Screen view = providerViews.get(selectedCapabilityId);
             if (view != null) initViewInContent(view);
