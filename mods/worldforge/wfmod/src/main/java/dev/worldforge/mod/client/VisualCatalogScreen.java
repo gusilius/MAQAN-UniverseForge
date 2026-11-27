@@ -41,7 +41,7 @@ public final class VisualCatalogScreen extends Screen {
         g.renderOutline(left + 3, top + 3, panelW - 6, panelH - 6, 0xFF6D4D2D);
         g.drawString(font, "КАТАЛОГ ВИЗУАЛОВ", left + 16, top + 13, 0xFFFFD98B, false);
         g.drawString(font, markerName + " · " + markerType, left + 16, top + 29, 0xFFE0D0B4, false);
-        g.drawString(font, "V — выбор профиля · Esc — назад · профиль можно заменить позже",
+        g.drawString(font, "ЛКМ — выбрать · ↑/↓ — прокрутка · Enter — первый профиль · Esc — назад",
                 left + 16, top + 43, 0xFF9D927F, false);
 
         int autoY = top + 62;
@@ -139,8 +139,16 @@ public final class VisualCatalogScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        scroll = Math.max(0, Math.min(scroll + (delta < 0 ? 1 : -1),
-                Math.max(0, (choices.size() + 1) / 2 - 1)));
+        int panelW = Math.min(650, width - 28), panelH = Math.min(500, height - 28);
+        int left = (width - panelW) / 2, top = (height - panelH) / 2;
+        if (mouseX < left || mouseX >= left + panelW || mouseY < top || mouseY >= top + panelH)
+            return super.mouseScrolled(mouseX, mouseY, delta);
+        int contentTop = top + 97, contentBottom = top + panelH - 14;
+        int cols = panelW >= 440 ? 2 : 1;
+        int rowH = 54, gap = 6;
+        int rows = (choices.size() + cols - 1) / cols;
+        int visibleRows = Math.max(1, (contentBottom - contentTop) / (rowH + gap));
+        scroll = Math.max(0, Math.min(scroll + (delta < 0 ? 1 : -1), Math.max(0, rows - visibleRows)));
         return true;
     }
 
