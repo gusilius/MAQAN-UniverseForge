@@ -536,16 +536,16 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 centerX, centerZ, centerY, cos, sin, pitch, tile, originX, originY, viewMode));
         drawPolygonOutline(g, points, 0xFFFFD36B);
         for (double[] p : points) g.fill((int)p[0]-3,(int)p[1]-3,(int)p[0]+4,(int)p[1]+4,0xFFFFD36B);
-        g.drawString(font, "TERRITORY DRAFT: " + draftTerritory.size()
+        g.drawString(font, "DRAFT " + draftTerritory.size()
                 + " POINTS · ENTER SAVE · BACKSPACE UNDO · ESC CANCEL",
-                424, 74, 0xFFFFD36B, false);
+                24, Math.min(height - 54, mapTop + 12), 0xFFFFD36B, false);
     }
 
-    private static void fillPolygon(GuiGraphics g, List<double[]> points, int color) {
+    private void fillPolygon(GuiGraphics g, List<double[]> points, int color) {
         if (points.size() < 3 || (color >>> 24) == 0) return;
         double minY=Double.POSITIVE_INFINITY,maxY=Double.NEGATIVE_INFINITY;
         for (double[] p:points) { minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]); }
-        int top=Math.max(98,(int)Math.floor(minY)),bottom=Math.min(g.guiHeight()-42,(int)Math.ceil(maxY));
+        int top=Math.max(mapTop,(int)Math.floor(minY)),bottom=Math.min(height-42,(int)Math.ceil(maxY));
         for(int y=top;y<=bottom;y++) {
             List<Double> intersections=new ArrayList<>();
             for(int i=0,j=points.size()-1;i<points.size();j=i++) {
@@ -555,13 +555,14 @@ public final class NavigatorTerrain3DScreen extends Screen {
             }
             intersections.sort(Double::compare);
             for(int i=0;i+1<intersections.size();i+=2) {
-                int x1=(int)Math.ceil(intersections.get(i)),x2=(int)Math.floor(intersections.get(i+1));
+                int x1=Math.max(16,(int)Math.ceil(intersections.get(i)));
+                int x2=Math.min(width-16,(int)Math.floor(intersections.get(i+1)));
                 if(x2>=x1)g.fill(x1,y,x2+1,y+1,color);
             }
         }
     }
 
-    private static void drawPolygonOutline(GuiGraphics g,List<double[]> points,int color) {
+    private void drawPolygonOutline(GuiGraphics g,List<double[]> points,int color) {
         if(points.size()<2)return;
         for(int i=0;i<points.size();i++) {
             double[] a=points.get(i),b=points.get((i+1)%points.size());
@@ -569,7 +570,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
             for(int step=0;step<=steps;step++) {
                 double t=step/(double)steps;
                 int x=(int)Math.round(a[0]+(b[0]-a[0])*t),y=(int)Math.round(a[1]+(b[1]-a[1])*t);
-                g.fill(x-1,y-1,x+2,y+2,color);
+                if (x >= 16 && x < width - 16 && y >= mapTop && y < height - 42) g.fill(x-1,y-1,x+2,y+2,color);
             }
         }
     }
@@ -736,7 +737,8 @@ public final class NavigatorTerrain3DScreen extends Screen {
             addDraftVertex(mouseX, mouseY);
             return true;
         }
-        if ((button == 0 || button == 1) && mouseY >= 98 && mouseY <= height - 42) {
+        if ((button == 0 || button == 1) && mouseX >= 16 && mouseX < width - 16
+                && mouseY >= mapTop && mouseY < height - 42) {
             dragging = true; dragButton = button; lastMouseX = mouseX; lastMouseY = mouseY; return true;
         }
         return false;
@@ -769,7 +771,11 @@ public final class NavigatorTerrain3DScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        zoom = Math.max(0.35, Math.min(2.6, zoom * (delta > 0 ? 1.12 : 1.0 / 1.12)));
+        // Toolbar and footer must never steal map zoom input.
+        if (super.mouseScrolled(mouseX, mouseY, delta)) return true;
+        if (mouseX < 16 || mouseX >= width - 16 || mouseY < mapTop || mouseY >= height - 42) return false;
+        double factor = Math.pow(1.12, delta);
+        zoom = Math.max(0.35, Math.min(2.6, zoom * factor));
         return true;
     }
 
