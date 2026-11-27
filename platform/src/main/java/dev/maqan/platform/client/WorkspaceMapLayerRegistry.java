@@ -116,7 +116,7 @@ public final class WorkspaceMapLayerRegistry {
     /** Move a layer one position relative to the currently sorted stack. */
     public static void move(String layerId, int direction) {
         if (direction == 0) return;
-        List<Layer> stack = layers();
+        List<Layer> stack = new java.util.ArrayList<>(layers());
         int index = -1;
         for (int i = 0; i < stack.size(); i++) if (stack.get(i).id().equals(layerId)) { index = i; break; }
         int target = index + Integer.signum(direction);
