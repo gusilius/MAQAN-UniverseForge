@@ -566,13 +566,36 @@ public final class NavigatorTerrain3DScreen extends Screen {
         if(points.size()<2)return;
         for(int i=0;i<points.size();i++) {
             double[] a=points.get(i),b=points.get((i+1)%points.size());
-            int steps=Math.max(1,(int)Math.ceil(Math.max(Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1]))));
+            double[] clipped=clipSegment(a[0],a[1],b[0],b[1]);
+            if(clipped==null)continue;
+            int steps=Math.max(1,(int)Math.ceil(Math.max(
+                    Math.abs(clipped[2]-clipped[0]),Math.abs(clipped[3]-clipped[1]))));
             for(int step=0;step<=steps;step++) {
                 double t=step/(double)steps;
-                int x=(int)Math.round(a[0]+(b[0]-a[0])*t),y=(int)Math.round(a[1]+(b[1]-a[1])*t);
-                if (x >= 16 && x < width - 16 && y >= mapTop && y < height - 42) g.fill(x-1,y-1,x+2,y+2,color);
+                int x=(int)Math.round(clipped[0]+(clipped[2]-clipped[0])*t);
+                int y=(int)Math.round(clipped[1]+(clipped[3]-clipped[1])*t);
+                g.fill(x-1,y-1,x+2,y+2,color);
             }
         }
+    }
+
+    /** Liang-Barsky clipping prevents distant territory edges from causing huge off-screen loops. */
+    private double[] clipSegment(double x0,double y0,double x1,double y1) {
+        double dx=x1-x0,dy=y1-y0;
+        double[] p={-dx,dx,-dy,dy};
+        double[] q={x0-16,(width-17)-x0,y0-mapTop,(height-43)-y0};
+        double t0=0.0,t1=1.0;
+        for(int i=0;i<4;i++) {
+            if(Math.abs(p[i])<1.0e-9) {
+                if(q[i]<0)return null;
+                continue;
+            }
+            double t=q[i]/p[i];
+            if(p[i]<0)t0=Math.max(t0,t);
+            else t1=Math.min(t1,t);
+            if(t0>t1)return null;
+        }
+        return new double[]{x0+t0*dx,y0+t0*dy,x0+t1*dx,y0+t1*dy};
     }
 
     private void saveDraftTerritory() {
