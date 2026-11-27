@@ -1620,7 +1620,7 @@ public class MapScreen extends Screen {
             }
             return true;
         }
-        if (draggingMap && (button == 0 || button == 1 || button == 2)) {
+        if (draggingMap && button == mapDragButton && (button == 0 || button == 1 || button == 2)) {
             camX += dx;
             camY += dy;
             return true;
