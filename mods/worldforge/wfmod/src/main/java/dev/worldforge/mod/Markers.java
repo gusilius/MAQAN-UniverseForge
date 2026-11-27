@@ -23,6 +23,8 @@ public final class Markers {
     }
 
     private final List<Marker> list = new ArrayList<>();
+    /** Persisted overrides for provider-owned live objects (e.g. armies) that are not user markers. */
+    private final Map<String, String> visualOverrides = new LinkedHashMap<>();
     private boolean dirty;
 
     public List<Marker> list() { return list; }
@@ -54,16 +56,22 @@ public final class Markers {
         if (marker == null || marker.id == null || marker.id.isBlank()
                 || marker.name == null || marker.name.isBlank()
                 || marker.type == null || !TYPES.contains(marker.type)) return;
+        String override = visualOverrides.get(marker.id);
+        if (override != null) marker.visualProfile = override;
         list.add(marker);
     }
 
     /** Updates a marker's explicit visual profile; blank restores category-based automatic selection. */
     public boolean setVisualProfile(String id, String visualProfile) {
-        Marker marker = find(id);
-        if (marker == null) return false;
+        if (id == null || id.isBlank()) return false;
+        String markerId = id.trim();
         String normalized = visualProfile == null ? "" : visualProfile.trim();
-        if (normalized.length() > 128) throw new IllegalArgumentException("Слишком длинный идентификатор визуального профиля");
-        marker.visualProfile = normalized;
+        if (markerId.length() > 128 || normalized.length() > 128)
+            throw new IllegalArgumentException("Слишком длинный идентификатор визуального профиля или объекта");
+        Marker marker = find(markerId);
+        if (normalized.isBlank()) visualOverrides.remove(markerId);
+        else visualOverrides.put(markerId, normalized);
+        if (marker != null) marker.visualProfile = normalized;
         dirty = true;
         return true;
     }
@@ -93,6 +101,7 @@ public final class Markers {
         }
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("markers", out);
+        if (!visualOverrides.isEmpty()) root.put("visual_overrides", new LinkedHashMap<>(visualOverrides));
         return Json.write(root);
     }
 
@@ -101,6 +110,12 @@ public final class Markers {
         Markers ms = new Markers();
         if (json == null || json.isBlank()) return ms;
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
+        if (root.get("visual_overrides") instanceof Map<?, ?> overrides) {
+            for (Map.Entry<?, ?> entry : overrides.entrySet()) {
+                if (entry.getKey() instanceof String id && entry.getValue() instanceof String profile
+                        && !id.isBlank() && !profile.isBlank()) ms.visualOverrides.put(id, profile);
+            }
+        }
         for (Object o : (List<Object>) root.get("markers")) {
             Map<String, Object> e = (Map<String, Object>) o;
             Marker m = new Marker();
