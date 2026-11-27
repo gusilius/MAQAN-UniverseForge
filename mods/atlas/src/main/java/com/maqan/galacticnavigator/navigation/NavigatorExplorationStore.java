@@ -33,8 +33,11 @@ public final class NavigatorExplorationStore {
     private static final Gson GSON=new GsonBuilder().setPrettyPrinting().create();
     private static final Type MAP_TYPE=new TypeToken<Map<String,ExploredChunk>>(){}.getType();
     private static final Map<String,Map<String,ExploredChunk>> CACHE=new ConcurrentHashMap<>();
+    /** Immutable render snapshots avoid sorting the full exploration history every frame. */
+    private static final Map<String,List<ExploredChunk>> CHUNK_SNAPSHOTS=new ConcurrentHashMap<>();
     private static final Type LAYER_MAP_TYPE=new TypeToken<Map<String,ExploredLayer>>(){}.getType();
     private static final Map<String,Map<String,ExploredLayer>> LAYER_CACHE=new ConcurrentHashMap<>();
+    private static final Map<String,List<ExploredLayer>> LAYER_SNAPSHOTS=new ConcurrentHashMap<>();
     private NavigatorExplorationStore() {}
 
     private static String safe(String value) {
@@ -82,6 +85,7 @@ public final class NavigatorExplorationStore {
         chunks.put(key,new ExploredChunk(chunkX,chunkZ,surfaceY,
                 biome==null?"unknown":biome,mapColor,
                 previous==null?now:previous.firstVisited(),now,safeColors,safeHeights));
+        CHUNK_SNAPSHOTS.remove(dimension);
         save(dimension,chunks);
     }
 
@@ -110,6 +114,7 @@ public final class NavigatorExplorationStore {
         layers.put(key,new ExploredLayer(chunkX,chunkZ,sectionY,playerY,
                 biome==null?"unknown":biome,mapColor,
                 previous==null?now:previous.firstVisited(),now));
+        LAYER_SNAPSHOTS.remove(dimension);
         Path target=layerFile(dimension),temp=target.resolveSibling(target.getFileName()+".tmp");
         try{
             Files.createDirectories(target.getParent());
@@ -123,17 +128,17 @@ public final class NavigatorExplorationStore {
 
     public static synchronized List<ExploredLayer> layers(String dimension){
         if(dimension==null||dimension.isBlank())return List.of();
-        return layerData(dimension).values().stream()
+        return LAYER_SNAPSHOTS.computeIfAbsent(dimension,id->layerData(id).values().stream()
                 .sorted(Comparator.comparingInt(ExploredLayer::sectionY)
                         .thenComparingInt(ExploredLayer::chunkX).thenComparingInt(ExploredLayer::chunkZ))
-                .toList();
+                .toList());
     }
 
     public static synchronized List<ExploredChunk> chunks(String dimension) {
         if(dimension==null||dimension.isBlank())return List.of();
-        return data(dimension).values().stream()
+        return CHUNK_SNAPSHOTS.computeIfAbsent(dimension,id->data(id).values().stream()
                 .sorted(Comparator.comparingInt(ExploredChunk::chunkX).thenComparingInt(ExploredChunk::chunkZ))
-                .toList();
+                .toList());
     }
     public static synchronized boolean explored(String dimension,int chunkX,int chunkZ) {
         return data(dimension).containsKey(key(chunkX,chunkZ));
