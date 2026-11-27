@@ -226,10 +226,10 @@ public final class CommandScreen extends Screen {
     private int panelX() { return width - PANEL_W - 4; }
     private int panelY() { return 26; }
     private int panelH() {
-        // The embedded settlement minimap owns the lower-right corner. Keep the build
-        // panel above it instead of drawing controls underneath an opaque minimap.
+        // The embedded settlement minimap owns the lower-right corner. The build
+        // panel always ends above it, including very short GUI viewports.
         int bottomReserve = embeddedInMaqan ? 112 : 90;
-        return Math.max(64, Math.min(Math.max(64, height - 34), height - 26 - bottomReserve));
+        return Math.max(1, height - panelY() - bottomReserve);
     }
 
     private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }
@@ -264,7 +264,26 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int rowsFit() { return Math.max(1, (panelH() - 86) / ROW); }
+    private int categoryRowCount() {
+        int left = panelX() + 6, right = panelX() + PANEL_W - 4;
+        int cursor = left, rows = 0;
+        List<String> chips = new ArrayList<>();
+        chips.add("");
+        chips.addAll(categories());
+        for (String category : chips) {
+            String label = category.isEmpty() ? "Все" : catName(category);
+            int chipWidth = font.width(label) + 8;
+            if (cursor + chipWidth > right) { cursor = left; rows++; }
+            cursor += chipWidth + 3;
+        }
+        return rows + 1;
+    }
+
+    private int buildListY() { return panelY() + 28 + categoryRowCount() * 12 + 4; }
+
+    private int rowsFit() {
+        return Math.max(0, (panelY() + panelH() - buildListY() - 20) / ROW);
+    }
 
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
@@ -496,7 +515,7 @@ public final class CommandScreen extends Screen {
             if (x >= cx && x < cx + w && y >= yy && y < yy + 11) { cat = c; scroll = 0; picked = null; return; }
             cx += w + 3;
         }
-        int listY = cy + (row + 1) * 12 + 4;
+        int listY = buildListY();
         List<BuildGhost.Def> vis = visibleDefs();
         int i = (int) ((y - listY) / ROW) + scroll;
         if (y >= listY && i >= 0 && i < vis.size() && (y - listY) / ROW < rowsFit()) picked = vis.get(i);
@@ -993,8 +1012,9 @@ public final class CommandScreen extends Screen {
         int x = panelX(), y = panelY(), pw = PANEL_W, ph = panelH();
         g.fill(x, y, x + pw, y + ph, 0xDD101018);
         g.fill(x, y, x + pw, y + 1, 0xFF6A5A30);
+        g.enableScissor(x + 1, y + 1, x + pw - 1, y + ph - 1);
         g.drawString(font, buildError.isEmpty() ? "Стройка: " + (colName.isEmpty() ? "…" : colName) : buildError, x + 6, y + 5, buildError.isEmpty() ? 0xFFE6C875 : 0xFFFF8888, false);
-        if (!buildError.isEmpty()) return;
+        if (!buildError.isEmpty()) { g.disableScissor(); return; }
         StringBuilder st = new StringBuilder();
         for (var e : new TreeMap<>(stock).entrySet()) if (e.getValue() > 0 && st.length() < 60) st.append(st.length() > 0 ? " " : "").append(RES.getOrDefault(e.getKey(), e.getKey())).append(' ').append(e.getValue());
         g.drawString(font, font.plainSubstrByWidth(st.length() == 0 ? "Склад пуст" : st.toString(), pw - 12), x + 6, y + 16, 0xFFAAAAAA, false);
@@ -1012,7 +1032,7 @@ public final class CommandScreen extends Screen {
             g.drawString(font, label, cx + 4, yy + 2, on ? 0xFFDDFFCC : 0xFFBBBBBB, false);
             cx += cw + 3;
         }
-        int listY = cy + (row + 1) * 12 + 4;
+        int listY = buildListY();
         List<BuildGhost.Def> vis = visibleDefs();
         int fit = rowsFit();
         BuildGhost.Def hover = null;
@@ -1034,5 +1054,6 @@ public final class CommandScreen extends Screen {
             for (var e : info.cost().entrySet()) c.append(RES.getOrDefault(e.getKey(), e.getKey())).append(' ').append(e.getValue()).append("  ");
             g.drawString(font, font.plainSubstrByWidth(c.toString(), pw - 12), x + 6, y + ph - 12, 0xFFE6C875, false);
         }
+        g.disableScissor();
     }
 }
