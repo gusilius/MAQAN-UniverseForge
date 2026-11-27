@@ -38,10 +38,10 @@ class WorkspaceMapLayerRegistryTest {
         assertEquals("test.armies", WorkspaceMapLayerRegistry.layers().get(0).id());
         WorkspaceMapLayerRegistry.move("test.labels", -1);
 
-        assertEquals(java.util.List.of("test.labels", "test.armies", "test.base"),
+        assertEquals(java.util.List.of("test.armies", "test.labels", "test.base"),
                 WorkspaceMapLayerRegistry.layers().stream().map(WorkspaceMapLayerRegistry.Layer::id).toList());
-        assertEquals(0, WorkspaceMapLayerRegistry.order("test.labels"));
-        assertEquals(10, WorkspaceMapLayerRegistry.order("test.armies"));
+        assertEquals(0, WorkspaceMapLayerRegistry.order("test.armies"));
+        assertEquals(10, WorkspaceMapLayerRegistry.order("test.labels"));
         assertEquals(20, WorkspaceMapLayerRegistry.order("test.base"));
     }
 
