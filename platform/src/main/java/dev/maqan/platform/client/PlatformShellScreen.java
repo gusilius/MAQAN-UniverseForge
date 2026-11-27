@@ -666,6 +666,53 @@ public final class PlatformShellScreen extends Screen {
         }
     }
 
+    private String worldClockDate() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            Object value = clock.getMethod("date").invoke(null);
+            return value instanceof String text && !text.isBlank() ? text : "—";
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return "—";
+        }
+    }
+
+    private int worldClockSpeedIndex() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            return ((Number) clock.getMethod("speedIndex").invoke(null)).intValue();
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return -1;
+        }
+    }
+
+    private boolean worldClockPaused() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            return Boolean.TRUE.equals(clock.getMethod("paused").invoke(null));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    private boolean canControlWorldClock() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.player != null && (mc.hasSingleplayerServer() || mc.player.hasPermissions(2));
+    }
+
+    private int clockControlX() {
+        if (commandCameraActive()) return cameraControlX() - ux(188);
+        return profileStartX() + 4 * profileButtonStep() + ux(10);
+    }
+
+    private void sendWorldClockCommand(String command) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!canControlWorldClock() || mc.player == null || mc.player.connection == null) {
+            LOGGER.warn("World clock control requires trusted server permissions");
+            return;
+        }
+        mc.player.connection.sendCommand("wftime " + command);
+    }
+
     private String commandCameraView() {
         try {
             Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
@@ -729,6 +776,31 @@ public final class PlatformShellScreen extends Screen {
         }
         if (!compactTopbar())
             g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", ux(46), uy(13), MUTED, false);
+        int clockX = clockControlX();
+        if (width >= ux(720) && clockX > ux(48) && clockX + ux(180) < width - ux(92)) {
+            String date = worldClockDate();
+            g.drawString(font, date, clockX, uy(13), TEXT, false);
+            int controlsX = clockX + ux(86);
+            String[] clockLabels = {"Ⅱ", "1", "2", "4"};
+            int[] clockSpeeds = {0, 1, 2, 3};
+            int activeSpeed = worldClockSpeedIndex();
+            for (int i = 0; i < clockLabels.length; i++) {
+                int bx = controlsX + i * ux(23);
+                boolean activeClock = i == 0 ? worldClockPaused() : activeSpeed == clockSpeeds[i];
+                int color = activeClock ? CYAN : MUTED;
+                g.fill(bx, uy(5), bx + ux(20), uy(29), activeClock ? 0x553B9FB5 : SURFACE_ALT);
+                if (activeClock) g.fill(bx, uy(28), bx + ux(20), uy(30), CYAN);
+                g.drawCenteredString(font, clockLabels[i], bx + ux(10), uy(13), color);
+                if (mx >= bx && mx < bx + ux(20) && my >= uy(5) && my < uy(30)) {
+                    String tip = i == 0 ? "Пауза / продолжить время"
+                            : "Скорость мирового времени ×" + clockLabels[i];
+                    g.renderTooltip(font, Component.literal(tip), mx, my);
+                }
+            }
+            if (!canControlWorldClock() && mx >= controlsX && mx < controlsX + ux(92)
+                    && my >= uy(5) && my < uy(30))
+                g.renderTooltip(font, Component.literal("Недостаточно прав для управления временем"), mx, my);
+        }
         if (commandCameraActive() && width >= ux(480)) {
             String current = commandCameraView();
             String[] ids = {"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"};
@@ -1223,6 +1295,20 @@ public final class PlatformShellScreen extends Screen {
                 if (view != null) detachProviderView(view);
                 else onClose();
                 return true;
+            }
+            int clockX = clockControlX();
+            if (width >= ux(720) && clockX > ux(48) && clockX + ux(180) < width - ux(92)
+                    && my >= uy(5) && my < uy(30)) {
+                int controlsX = clockX + ux(86);
+                for (int i = 0; i < 4; i++) {
+                    int bx = controlsX + i * ux(23);
+                    if (mx >= bx && mx < bx + ux(20)) {
+                        if (i == 0) sendWorldClockCommand("toggle");
+                        else sendWorldClockCommand("speed " + i);
+                        return true;
+                    }
+                }
+                if (mx >= clockX && mx < controlsX) return true;
             }
             if (commandCameraActive() && width >= 480) {
                 int cameraX = cameraControlX();

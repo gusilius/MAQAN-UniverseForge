@@ -39,6 +39,12 @@ public class ClockTest {
         boolean invalidBudget = false;
         try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
         ok(invalidBudget, "zero processing budget is rejected");
+        GameClock previous = new GameClock();
+        previous.load("{\\"format\\":\\"wf-clock/2\\",\\"elapsed\\":5,\\"speed\\":3,\\"last\\":4,\\"start\\":300}");
+        ok(previous.speedName().equals("x5"), "wf-clock/2 save migrates old x5 speed index without changing speed");
+        previous.setSpeed(3);
+        ok(previous.speedName().equals("x4"), "new x4 speed is independently selectable");
+
         GameClock legacy = new GameClock();
         legacy.load("{\"format\":\"wf-clock/1\",\"elapsed\":5,\"speed\":1,\"last\":1,\"start\":300}");
         ok(legacy.dayNumber() == 5 && legacy.pull("legacy") == 0,
@@ -58,12 +64,16 @@ public class ClockTest {
         ok(c.paused() && c.elapsedDays() == e0 && c.multiplier() == 0, "на паузе время стоит");
         c.resume();
         ok(!c.paused() && c.speedName().equals("x1"), "возобновление на прежней скорости");
-        c.setSpeed(3);
+        c.setSpeed(4);
         c.pause(); c.resume();
         ok(c.speedName().equals("x5"), "скорость помнится после паузы");
         c.pull("t");
         c.advance(GameClock.TICKS_PER_DAY);
         ok(c.pull("t") == 5, "x5: день реального хода даёт 5 дней");
+        c.setSpeed(3);
+        c.pull("x4");
+        c.advance(GameClock.TICKS_PER_DAY);
+        ok(c.speedName().equals("x4") && c.pull("x4") == 4, "x4: день реального хода даёт 4 дня");
         c.faster(); ok(c.speedName().equals("x10"), "быстрее");
         c.faster(); ok(c.speedName().equals("x10"), "предел скорости");
         c.setSpeed(2); c.slower(); c.slower(); ok(c.speedName().equals("x1"), "медленнее не ниже x1 (паузу задают отдельно)");

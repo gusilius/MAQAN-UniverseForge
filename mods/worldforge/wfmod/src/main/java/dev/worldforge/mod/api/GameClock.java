@@ -11,8 +11,8 @@ import java.util.*;
 public final class GameClock {
     public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365;
     private static final int[] MONTH_LENGTHS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    public static final int[] SPEEDS = {0, 1, 2, 5, 10};
-    public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x5", "x10"};
+    public static final int[] SPEEDS = {0, 1, 2, 4, 5, 10};
+    public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x4", "x5", "x10"};
     public static final String[] MONTHS = {"Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря"};
 
     private double elapsed;                 // игровых дней с начала
@@ -144,7 +144,7 @@ public final class GameClock {
 
     public String toJson() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("format", "wf-clock/2"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
+        m.put("format", "wf-clock/3"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
         m.put("consumers", new TreeMap<>(pulled));
         Map<String, Long> durableCursors = new TreeMap<>();
         for (String consumer : durableConsumers) {
@@ -162,7 +162,9 @@ public final class GameClock {
         Map<String, Object> m = (Map<String, Object>) raw;
         Object format = m.get("format");
         boolean legacyFormat = "wf-clock/1".equals(format);
-        if (!legacyFormat && !"wf-clock/2".equals(format)) throw new IllegalArgumentException("Неверный формат часов");
+        boolean previousFormat = "wf-clock/2".equals(format);
+        if (!legacyFormat && !previousFormat && !"wf-clock/3".equals(format))
+            throw new IllegalArgumentException("Неверный формат часов");
         if (!(m.get("elapsed") instanceof Number elapsedValue)
                 || !(m.get("speed") instanceof Number speedValue)
                 || !(m.get("last") instanceof Number lastValue)
@@ -172,6 +174,12 @@ public final class GameClock {
         double nextElapsed = elapsedValue.doubleValue();
         int nextSpeed = speedValue.intValue();
         int nextLast = lastValue.intValue();
+        // wf-clock/2 used indices 3=x5 and 4=x10. wf-clock/3 inserts x4
+        // before them while preserving the actual speed represented by old saves.
+        if (previousFormat) {
+            if (nextSpeed >= 3) nextSpeed++;
+            if (nextLast >= 3) nextLast++;
+        }
         int nextStart = startValue.intValue();
         if (!Double.isFinite(nextElapsed) || nextElapsed < 0
                 || nextElapsed > (Integer.MAX_VALUE - (double) Math.max(1, nextStart)) * YEAR_DAYS)

@@ -56,7 +56,7 @@ public final class ClockService {
             if (ticks % 40 == 0) {
                 GameClock c = WorldForgeApi.clock();
                 java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-                m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("paused", c.paused());
+                m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("speedIndex", c.speedIndex()); m.put("paused", c.paused());
                 String json = Json.write(m);
                 for (net.minecraft.server.level.ServerPlayer sp : e.getServer().getPlayerList().getPlayers())
                     WFNet.sendView(sp, "wf:clock", json);

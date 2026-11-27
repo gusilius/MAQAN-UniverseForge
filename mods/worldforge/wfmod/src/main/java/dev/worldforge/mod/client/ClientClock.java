@@ -8,6 +8,7 @@ import java.util.Map;
 public final class ClientClock {
     private static String date = "";
     private static String speed = "";
+    private static int speedIndex = -1;
     private static boolean paused;
 
     private ClientClock() {}
@@ -18,6 +19,7 @@ public final class ClientClock {
             Map<String, Object> m = (Map<String, Object>) Json.parse(payload);
             date = String.valueOf(m.get("date"));
             speed = String.valueOf(m.get("speed"));
+            speedIndex = m.get("speedIndex") instanceof Number n ? n.intValue() : -1;
             paused = Boolean.TRUE.equals(m.get("paused"));
         } catch (RuntimeException ignored) { }
     }
@@ -25,5 +27,6 @@ public final class ClientClock {
     public static boolean known() { return !date.isEmpty(); }
     public static String date() { return date; }
     public static String speed() { return speed; }
+    public static int speedIndex() { return speedIndex; }
     public static boolean paused() { return paused; }
 }
