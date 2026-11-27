@@ -39,6 +39,7 @@ public final class NavigatorExplorationStore {
     private static final Type LAYER_MAP_TYPE=new TypeToken<Map<String,ExploredLayer>>(){}.getType();
     private static final Map<String,Map<String,ExploredLayer>> LAYER_CACHE=new ConcurrentHashMap<>();
     private static final Map<String,List<ExploredLayer>> LAYER_SNAPSHOTS=new ConcurrentHashMap<>();
+    private static final Map<String,NavigableMap<Integer,List<ExploredLayer>>> LAYER_X_INDEX=new ConcurrentHashMap<>();
     private NavigatorExplorationStore() {}
 
     private static String safe(String value) {
@@ -117,6 +118,7 @@ public final class NavigatorExplorationStore {
                 biome==null?"unknown":biome,mapColor,
                 previous==null?now:previous.firstVisited(),now));
         LAYER_SNAPSHOTS.remove(dimension);
+        LAYER_X_INDEX.remove(dimension);
         Path target=layerFile(dimension),temp=target.resolveSibling(target.getFileName()+".tmp");
         try{
             Files.createDirectories(target.getParent());
@@ -134,6 +136,25 @@ public final class NavigatorExplorationStore {
                 .sorted(Comparator.comparingInt(ExploredLayer::sectionY)
                         .thenComparingInt(ExploredLayer::chunkX).thenComparingInt(ExploredLayer::chunkZ))
                 .toList());
+    }
+
+    /** Spatially bounded vertical-discovery query for the underground map. */
+    public static synchronized List<ExploredLayer> layersInBounds(String dimension,int sectionY,
+            int minChunkX,int minChunkZ,int maxChunkX,int maxChunkZ) {
+        if(dimension==null||dimension.isBlank()||minChunkX>maxChunkX||minChunkZ>maxChunkZ)return List.of();
+        NavigableMap<Integer,List<ExploredLayer>> index=LAYER_X_INDEX.computeIfAbsent(dimension,id->{
+            NavigableMap<Integer,List<ExploredLayer>> grouped=new TreeMap<>();
+            for(ExploredLayer layer:layerData(id).values())
+                grouped.computeIfAbsent(layer.chunkX(),ignored->new ArrayList<>()).add(layer);
+            grouped.replaceAll((x,list)->List.copyOf(list));
+            return Collections.unmodifiableNavigableMap(grouped);
+        });
+        List<ExploredLayer> visible=new ArrayList<>();
+        for(List<ExploredLayer> column:index.subMap(minChunkX,true,maxChunkX,true).values())
+            for(ExploredLayer layer:column)
+                if(layer.sectionY()==sectionY&&layer.chunkZ()>=minChunkZ&&layer.chunkZ()<=maxChunkZ)
+                    visible.add(layer);
+        return List.copyOf(visible);
     }
 
     public static synchronized List<ExploredChunk> chunks(String dimension) {
