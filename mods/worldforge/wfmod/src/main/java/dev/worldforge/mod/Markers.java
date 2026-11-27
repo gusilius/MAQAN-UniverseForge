@@ -57,6 +57,17 @@ public final class Markers {
         list.add(marker);
     }
 
+    /** Updates a marker's explicit visual profile; blank restores category-based automatic selection. */
+    public boolean setVisualProfile(String id, String visualProfile) {
+        Marker marker = find(id);
+        if (marker == null) return false;
+        String normalized = visualProfile == null ? "" : visualProfile.trim();
+        if (normalized.length() > 128) throw new IllegalArgumentException("Слишком длинный идентификатор визуального профиля");
+        marker.visualProfile = normalized;
+        dirty = true;
+        return true;
+    }
+
     public boolean remove(String q) {
         Marker m = find(q);
         if (m == null) return false;
