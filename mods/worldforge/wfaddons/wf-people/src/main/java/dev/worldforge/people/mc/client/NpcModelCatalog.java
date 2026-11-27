@@ -30,7 +30,13 @@ public final class NpcModelCatalog extends SimplePreparableReloadListener<NpcMod
     private static final AtomicLong GENERATION = new AtomicLong();
     private static volatile Map<String, Definition> definitions = Map.of();
     private static volatile Map<String, GlbModelLoader.Model> decodedModels = Map.of();
-    private record Prepared(Map<String, Definition> definitions, Map<String, GlbModelLoader.Model> models) {}
+    /** Immutable hand-off from background resource preparation to the reload apply phase. */
+    public record Prepared(Map<String, Definition> definitions, Map<String, GlbModelLoader.Model> models) {
+        public Prepared {
+            definitions = Collections.unmodifiableMap(new LinkedHashMap<>(definitions));
+            models = Collections.unmodifiableMap(new LinkedHashMap<>(models));
+        }
+    }
 
     public record Definition(
             ResourceLocation id,
