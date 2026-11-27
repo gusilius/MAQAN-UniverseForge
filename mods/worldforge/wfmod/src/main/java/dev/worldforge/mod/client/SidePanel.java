@@ -62,6 +62,7 @@ final class SidePanel {
     // ------------------------------------------------------------------ состояние
 
     boolean isOpen() { return open; }
+    int leftEdge() { return px; }
 
     void toggle() { open = !open; }
 
@@ -125,7 +126,8 @@ final class SidePanel {
             hits.add(new Hit(rx, y, RAIL, RAIL, () -> { if (open && tab == ft) open = false; else show(ft); }));
         }
         if (!open) return;
-        pw = Math.min(WIDTH, Math.max(100, host.width() - RAIL - GAP - 16));
+        pw = Math.min(WIDTH, Math.max(100, Math.min(host.width() - RAIL - GAP - 16,
+                (int) Math.floor(host.width() * 0.42))));
         px = rx - GAP - pw;
         py = 8;
         int availableBottom = Math.min(host.panelBottom(), host.height() - 8);
