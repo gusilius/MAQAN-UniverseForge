@@ -15,6 +15,9 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.MapChunkGenerator;
+import dev.worldforge.mod.EditorManager;
+import dev.worldforge.mod.MapMarkerProviders;
+import dev.worldforge.mod.Markers;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.mod.economy.TreasuryLedger;
@@ -477,6 +480,38 @@ public class SettleMod {
 
     public SettleMod() {
         dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
+        MapMarkerProviders.register("wf_settle", (server, map) -> {
+            List<Markers.Marker> markers = new ArrayList<>();
+            for (Colony colony : COLONIES.values()) {
+                if (colony == null || colony.s == null || colony.s.id == null || colony.s.id.isBlank()) continue;
+                boolean belongsToMap = map.name.equals(colony.sourceMapId);
+                if (!belongsToMap && (colony.sourceMapId == null || colony.sourceMapId.isBlank())) {
+                    try {
+                        ServerLevel colonyLevel = colony.level(server);
+                        belongsToMap = colonyLevel != null && EditorManager.dataFor(colonyLevel) == map;
+                    } catch (RuntimeException ignored) {
+                        belongsToMap = false;
+                    }
+                }
+                if (!belongsToMap) continue;
+                Markers.Marker marker = new Markers.Marker();
+                marker.id = "wf_settle:" + colony.s.id;
+                marker.name = colony.s.name == null || colony.s.name.isBlank() ? colony.s.id : colony.s.name;
+                String kind = colony.settlementType == null ? "" : colony.settlementType.toLowerCase(Locale.ROOT);
+                marker.type = kind.contains("village") ? "village"
+                        : kind.contains("castle") || kind.contains("fort") ? "castle"
+                        : kind.contains("port") || kind.contains("harbor") ? "port" : "settlement";
+                marker.x = colony.cx;
+                marker.z = colony.cz;
+                dev.worldforge.mod.TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(colony.realmId);
+                marker.rgb = realm == null ? 0xD8B66A : realm.rgb;
+                marker.desc = "settlementId=" + colony.s.id + ";population=" + colony.s.population()
+                        + ";buildings=" + colony.s.buildings.size() + ";province=" + colony.provinceId
+                        + ";realm=" + (colony.realmId == null ? "" : colony.realmId);
+                markers.add(marker);
+            }
+            return markers;
+        });
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(bus);
         ENTITIES.register(bus);
