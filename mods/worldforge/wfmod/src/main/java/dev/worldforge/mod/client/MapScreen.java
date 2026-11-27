@@ -359,9 +359,14 @@ public class MapScreen extends Screen {
             Slot f = slots.get(0), l = slots.get(slots.size() - 1);
             if (mx >= f.x - 6 && mx <= l.x + l.size + 6 && my >= f.y - 6) return true;
         }
-        if (embeddedInMaqan && mx >= Math.max(8, width - mapTypeBarWidth() - 10)
+        if (embeddedInMaqan && mx >= mapTypeBarX() - 2
+                && mx < mapTypeBarX() + mapTypeBarWidth() + 2
                 && my >= MAP_TYPE_BAR_Y - 4 && my < MAP_TYPE_BAR_Y + MAP_TYPE_BAR_H + 4) return true;
-        if (mx >= ovwX - 6 && my >= ovwY - 6 && ovwW > 0) return true;
+        // The overview is a small viewport, not a full lower-right exclusion zone.
+        if (ovwW > 0 && mx >= ovwX - 6 && mx < ovwX + ovwW + 6
+                && my >= ovwY - 6 && my < ovwY + ovwH + 6) return true;
+        if (!selectedMarkerId.isBlank() && mx >= 8 && mx < 8 + Math.min(218, Math.max(176, width - 24))
+                && my >= 48 && my < 142) return true;
         return panel.contains(mx, my);
     }
 
@@ -396,9 +401,16 @@ public class MapScreen extends Screen {
     private record MapTypeButton(String id, String label, int width) {}
 
     private List<MapTypeButton> mapTypeButtons() {
-        return List.of(new MapTypeButton("political", "POLITICAL", 78),
-                new MapTypeButton("exploration", "EXPLORATION", 96),
-                new MapTypeButton("diorama", "DIORAMA 3D", 82));
+        boolean compact = width < 440;
+        return List.of(
+                new MapTypeButton("political", compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
+                new MapTypeButton("exploration", compact ? "EXPLORE" : "EXPLORATION", mapTypeButtonWidth(96)),
+                new MapTypeButton("diorama", compact ? "3D" : "DIORAMA 3D", mapTypeButtonWidth(82)));
+    }
+
+    private int mapTypeButtonWidth(int preferred) {
+        int available = Math.max(48, (width - 58) / 3);
+        return Math.min(preferred, available);
     }
 
     private int mapTypeBarWidth() {
@@ -406,8 +418,14 @@ public class MapScreen extends Screen {
                 + MAP_TYPE_GAP * (mapTypeButtons().size() - 1);
     }
 
+    private int mapTypeBarX() {
+        // Reserve the persistent side-panel rail on the right; controls must never
+        // be painted beneath it or become impossible to click.
+        return Math.max(8, width - mapTypeBarWidth() - 50);
+    }
+
     private void drawMapTypeBar(GuiGraphics g, int mx, int my) {
-        int x = Math.max(8, width - mapTypeBarWidth() - 10);
+        int x = mapTypeBarX();
         int y = MAP_TYPE_BAR_Y;
         for (MapTypeButton button : mapTypeButtons()) {
             int right = x + button.width();
@@ -425,7 +443,7 @@ public class MapScreen extends Screen {
     }
 
     private boolean handleMapTypeClick(double mx, double my) {
-        int x = Math.max(8, width - mapTypeBarWidth() - 10);
+        int x = mapTypeBarX();
         int y = MAP_TYPE_BAR_Y;
         if (my < y || my >= y + MAP_TYPE_BAR_H) return false;
         for (MapTypeButton button : mapTypeButtons()) {
@@ -715,8 +733,10 @@ public class MapScreen extends Screen {
 
         int cardW = Math.min(218, Math.max(176, width - 24));
         int cardH = 94;
-        int x = width - cardW - 12;
-        int y = 40;
+        // Keep the selected-object card away from the right-side province panel
+        // and the top-right map-mode switcher.
+        int x = 8;
+        int y = 48;
         bevel(g, x, y, cardW, cardH, false);
         g.fill(x + 2, y + 2, x + cardW - 2, y + 4, 0xFFE2B85C);
         g.fill(x + 7, y + 9, x + 45, y + 47, 0xFF111923);
