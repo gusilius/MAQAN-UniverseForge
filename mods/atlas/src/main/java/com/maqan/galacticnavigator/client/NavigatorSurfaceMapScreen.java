@@ -328,6 +328,43 @@ public final class NavigatorSurfaceMapScreen extends Screen {
 
     private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"m";}
 
+    /** Selects an entity already tracked by the client and publishes the same UUID to MAQAN's inspector. */
+    private boolean selectRadarEntityAt(double mouseX,double mouseY){
+        if(radarFilter==RadarFilter.OFF||terrain3D||underground)return false;
+        Minecraft mc=Minecraft.getInstance();
+        NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
+        if(mc.level==null||player==null||!dimension.equals(player.dimensionId()))return false;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
+        if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
+        double range=radarRangeBlocks(),best=100.0;
+        Entity nearest=null;
+        for(Entity entity:mc.level.entitiesForRendering()){
+            if(entity==null||!entity.isAlive()||entity==mc.player)continue;
+            double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+            if(dx*dx+dz*dz>range*range)continue;
+            boolean hostile=entity instanceof Monster;
+            boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+            boolean otherPlayer=entity instanceof Player;
+            boolean other=!hostile&&!passive&&!otherPlayer;
+            if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+            if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+            if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+            if(radarFilter==RadarFilter.OTHER&&!other)continue;
+            double[] point=project(entity.getX()/16.0,entity.getZ()/16.0,18.0*zoom,left,top,right,bottom,player);
+            double x=point[0]-mouseX,y=point[1]-mouseY,distance=x*x+y*y;
+            if(distance<best){best=distance;nearest=entity;}
+        }
+        if(nearest==null)return false;
+        String id=nearest.getUUID().toString();
+        String type=nearest.getType().toShortString();
+        String name=nearest.getDisplayName().getString();
+        int vertical=(int)Math.floor(nearest.getY()-player.y());
+        NavigatorPlatformSelectionBridge.publish("minecraft:entity/"+id,type,name,dimension,
+                "Entity UUID: "+id+" · Y offset: "+vertical+" · distance: "
+                        +(int)Math.round(nearest.distanceTo(mc.player))+" blocks");
+        return true;
+    }
+
     /** Live vanilla-world radar: only entities already tracked by the client are sampled. */
     private Entity renderEntityRadar(GuiGraphics g,int mouseX,int mouseY,NavigatorPlayerPosition player,
                                      int left,int top,int right,int bottom){
@@ -872,6 +909,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
         if(button==1&&selectWaypointAt(x,y))return true;
+        if(button==0&&selectRadarEntityAt(x,y))return true;
         if(button==0&&selectWorldForgeAt(x,y))return true;
         if((button==0||button==2)&&x>=18&&x<=width-18&&y>=mapViewportTop()&&y<=height-48){
             dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
