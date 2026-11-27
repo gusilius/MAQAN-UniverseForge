@@ -737,6 +737,15 @@ public class MapScreen extends Screen {
 
     /** Procedural heraldic fallback: crisp shield, field division and charge from realm identity. */
     private void drawHeraldicShield(GuiGraphics g, int x, int y, TitleData.Realm realm) {
+        Object textureValue = realm.props.get("heraldry.texture");
+        if (textureValue instanceof String asset && !asset.isBlank()) {
+            ResourceLocation assetId = ResourceLocation.tryParse(asset.trim());
+            if (assetId != null && Minecraft.getInstance().getResourceManager().getResource(assetId).isPresent()) {
+                g.fill(x + 1, y, x + 11, y + 13, 0xFFE8D3A0);
+                g.blit(assetId, x + 2, y + 1, 8, 11, 0, 0, 32, 32, 32, 32);
+                return;
+            }
+        }
         int primary = 0xFF000000 | (realm.rgb & 0xFFFFFF);
         Object secondaryValue = realm.props.get("heraldry.secondary_color");
         int secondary = primary ^ 0x005A6470;
