@@ -45,6 +45,8 @@ public class MapScreen extends Screen {
     private long lastEditApply;
     private boolean dragOverview;
     private String selectedMarkerId = "";
+    private int hiddenMarkerRevision = Integer.MIN_VALUE;
+    private java.util.Set<String> hiddenArmyMarkerIds = java.util.Set.of();
     private int ovwX, ovwY, ovwW, ovwH;
 
     private static final class Slot {
@@ -606,19 +608,49 @@ public class MapScreen extends Screen {
         g.fill(x - 3, y - 3, x + 3, y + 3, c);
     }
 
-    private boolean hiddenArmyMarker(Markers.Marker army) {
-        if (!"army".equals(army.type)) return false;
+    private void refreshHiddenArmyMarkers() {
+        if (hiddenMarkerRevision == ClientState.revision) return;
+        java.util.Set<Integer> occupiedProvinces = new java.util.HashSet<>();
+        java.util.Map<Long, List<Markers.Marker>> settlementCells = new java.util.HashMap<>();
         for (Markers.Marker object : ClientState.markers.list()) {
             if (!("city".equals(object.type) || "settlement".equals(object.type)
                     || "village".equals(object.type) || "capital".equals(object.type)
                     || "castle".equals(object.type))) continue;
-            int armyTitle = markerInt(army.desc, "title");
-            int objectProvince = markerInt(object.desc, "province");
-            if (armyTitle > 0 && objectProvince > 0 && armyTitle == objectProvince) return true;
-            long dx = (long) army.x - object.x, dz = (long) army.z - object.z;
-            if (dx * dx + dz * dz <= 32L * 32L) return true;
+            int province = markerInt(object.desc, "province");
+            if (province > 0) occupiedProvinces.add(province);
+            int cellX = Math.floorDiv(object.x, 32), cellZ = Math.floorDiv(object.z, 32);
+            long key = ((long) cellX << 32) ^ (cellZ & 0xffffffffL);
+            settlementCells.computeIfAbsent(key, ignored -> new ArrayList<>()).add(object);
         }
-        return false;
+        java.util.Set<String> hidden = new java.util.HashSet<>();
+        for (Markers.Marker army : ClientState.markers.list()) {
+            if (!"army".equals(army.type)) continue;
+            int title = markerInt(army.desc, "title");
+            if (title > 0 && occupiedProvinces.contains(title)) {
+                hidden.add(army.id);
+                continue;
+            }
+            int cellX = Math.floorDiv(army.x, 32), cellZ = Math.floorDiv(army.z, 32);
+            boolean garrisoned = false;
+            for (int dxCell = -1; dxCell <= 1 && !garrisoned; dxCell++) {
+                for (int dzCell = -1; dzCell <= 1 && !garrisoned; dzCell++) {
+                    long key = ((long) (cellX + dxCell) << 32) ^ ((cellZ + dzCell) & 0xffffffffL);
+                    for (Markers.Marker object : settlementCells.getOrDefault(key, List.of())) {
+                        long dx = (long) army.x - object.x, dz = (long) army.z - object.z;
+                        if (dx * dx + dz * dz <= 32L * 32L) { garrisoned = true; break; }
+                    }
+                }
+            }
+            if (garrisoned) hidden.add(army.id);
+        }
+        hiddenArmyMarkerIds = java.util.Set.copyOf(hidden);
+        hiddenMarkerRevision = ClientState.revision;
+    }
+
+    private boolean hiddenArmyMarker(Markers.Marker marker) {
+        if (!"army".equals(marker.type)) return false;
+        refreshHiddenArmyMarkers();
+        return hiddenArmyMarkerIds.contains(marker.id);
     }
 
     private static int markerInt(String description, String key) {
