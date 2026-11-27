@@ -72,77 +72,120 @@ public final class NavigatorTerrain3DScreen extends Screen {
         this.parent = parent;
     }
 
+    private int mapTop = 118;
+
+    private int[] toolbarCell(int index, int columns, int buttonWidth) {
+        int gap = 4;
+        int row = index / columns;
+        int column = index % columns;
+        return new int[]{18 + column * (buttonWidth + gap), 44 + row * 22, buttonWidth, 20};
+    }
+
     @Override
     protected void init() {
         com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.reload();
         com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.ensureLiveFeed();
-        addRenderableWidget(Button.builder(Component.literal("ROTATE −"), b -> yaw -= Math.PI / 12.0)
-                .bounds(18, 44, 82, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("ROTATE +"), b -> yaw += Math.PI / 12.0)
-                .bounds(104, 44, 82, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TILT −"), b -> pitch = Math.max(Math.toRadians(8), Math.min(Math.toRadians(78), pitch - Math.toRadians(5))))
-                .bounds(190, 44, 66, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TILT +"), b -> pitch = Math.max(Math.toRadians(8), Math.min(Math.toRadians(78), pitch + Math.toRadians(5))))
-                .bounds(260, 44, 66, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELIEF −"), b -> relief = Math.max(0.08, relief - 0.05))
-                .bounds(330, 44, 72, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELIEF +"), b -> relief = Math.min(0.8, relief + 0.05))
-                .bounds(406, 44, 72, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RESET"), b -> {
+
+        // One responsive toolbar grid replaces the old fixed pixel coordinates.
+        // At narrow widths controls wrap instead of overlapping or leaving the screen.
+        int columns = width >= 1180 ? 8 : width >= 900 ? 6 : width >= 620 ? 4 : width >= 360 ? 3 : 2;
+        int gap = 4;
+        int buttonWidth = Math.max(1, (width - 36 - (columns - 1) * gap) / columns);
+        int index = 0;
+
+        int[] b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("ROT −"), w -> yaw -= Math.PI / 12.0)
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("ROT +"), w -> yaw += Math.PI / 12.0)
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TILT −"), w -> pitch = Math.max(Math.toRadians(8),
+                Math.min(Math.toRadians(78), pitch - Math.toRadians(5))))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TILT +"), w -> pitch = Math.max(Math.toRadians(8),
+                Math.min(Math.toRadians(78), pitch + Math.toRadians(5))))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELIEF −"), w -> relief = Math.max(0.08, relief - 0.05))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELIEF +"), w -> relief = Math.min(0.8, relief + 0.05))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RESET"), w -> {
             yaw = Math.PI * 0.25; pitch = Math.toRadians(32); zoom = 1.0; relief = 0.28; panX = 0; panY = 0;
-        }).bounds(482, 44, 62, 20).build());
-        styleButton = addRenderableWidget(Button.builder(Component.literal("STYLE: NATURAL"), b -> {
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        styleButton = addRenderableWidget(Button.builder(Component.literal("STYLE"), w -> {
             mapStyle = MapStyle.values()[(mapStyle.ordinal() + 1) % MapStyle.values().length];
-            b.setMessage(Component.literal("STYLE: " + mapStyle.name().replace('_', ' ')));
-        }).bounds(550, 44, 132, 20).build());
-        viewButton = addRenderableWidget(Button.builder(Component.literal("VIEW: 3D"), b -> {
+            w.setMessage(Component.literal("STYLE: " + mapStyle.name().replace('_', ' ')));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        viewButton = addRenderableWidget(Button.builder(Component.literal("VIEW: 3D"), w -> {
             viewMode = viewMode == ViewMode.ISOMETRIC ? ViewMode.TOP_DOWN : ViewMode.ISOMETRIC;
-            b.setMessage(Component.literal(viewMode == ViewMode.ISOMETRIC ? "VIEW: 3D" : "VIEW: TOP"));
-        }).bounds(688, 44, 92, 20).build());
-        markerFilterButton = addRenderableWidget(Button.builder(Component.literal("MARKERS: ALL"), b -> {
+            w.setMessage(Component.literal(viewMode == ViewMode.ISOMETRIC ? "VIEW: 3D" : "VIEW: TOP"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        markerFilterButton = addRenderableWidget(Button.builder(Component.literal("MARKERS"), w -> {
             markerFilter = MarkerFilter.values()[(markerFilter.ordinal() + 1) % MarkerFilter.values().length];
-            b.setMessage(Component.literal("MARKERS: " + markerFilter.name()));
-        }).bounds(18, 68, 112, 20).build());
-        playerLayerButton = addRenderableWidget(Button.builder(Component.literal("PLAYER: ON"), b -> {
+            w.setMessage(Component.literal("MARKERS: " + markerFilter.name()));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        playerLayerButton = addRenderableWidget(Button.builder(Component.literal("PLAYER: ON"), w -> {
             showPlayer = !showPlayer;
-            b.setMessage(Component.literal("PLAYER: " + (showPlayer ? "ON" : "OFF")));
-        }).bounds(136, 68, 88, 20).build());
-        gridLayerButton = addRenderableWidget(Button.builder(Component.literal("GRID: ON"), b -> {
+            w.setMessage(Component.literal("PLAYER: " + (showPlayer ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        gridLayerButton = addRenderableWidget(Button.builder(Component.literal("GRID: ON"), w -> {
             showGrid = !showGrid;
-            b.setMessage(Component.literal("GRID: " + (showGrid ? "ON" : "OFF")));
-        }).bounds(230, 68, 78, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("LABELS: ON"), b -> {
+            w.setMessage(Component.literal("GRID: " + (showGrid ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("LABELS: ON"), w -> {
             showWaypointLabels = !showWaypointLabels;
-            b.setMessage(Component.literal("LABELS: " + (showWaypointLabels ? "ON" : "OFF")));
-        }).bounds(314, 68, 92, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TERRITORY: DRAW"), b -> {
+            w.setMessage(Component.literal("LABELS: " + (showWaypointLabels ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TERRITORY"), w -> {
             drawingTerritory = !drawingTerritory;
             draftTerritory.clear();
-            b.setMessage(Component.literal(drawingTerritory ? "DRAWING: ON" : "TERRITORY: DRAW"));
-        }).bounds(416, 68, 126, 20).build());
-        territoryNameField = new EditBox(font, 550, 68, 132, 20, Component.literal("Territory name"));
+            w.setMessage(Component.literal(drawingTerritory ? "DRAW: ON" : "TERRITORY"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        territoryNameField = new EditBox(font, b[0], b[1], b[2], b[3], Component.literal("Territory"));
         territoryNameField.setMaxLength(48);
         territoryNameField.setValue("New Territory");
         addRenderableWidget(territoryNameField);
-        territoryOwnerField = new EditBox(font, 688, 68, 120, 20, Component.literal("Owner"));
+        b = toolbarCell(index++, columns, buttonWidth);
+        territoryOwnerField = new EditBox(font, b[0], b[1], b[2], b[3], Component.literal("Owner"));
         territoryOwnerField.setMaxLength(48);
         territoryOwnerField.setValue("Unassigned");
         addRenderableWidget(territoryOwnerField);
-        addRenderableWidget(Button.builder(Component.literal("KIND: CLAIM"), b -> {
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("KIND: CLAIM"), w -> {
             territoryKind = NavigatorTerritory.Kind.values()[
                     (territoryKind.ordinal() + 1) % NavigatorTerritory.Kind.values().length];
-            b.setMessage(Component.literal("KIND: " + territoryKind.name()));
-        }).bounds(814, 68, 112, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("WORLDFORGE: ON"), b -> {
+            w.setMessage(Component.literal("KIND: " + territoryKind.name()));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("WORLDFORGE: ON"), w -> {
             showWorldForge = !showWorldForge;
-            b.setMessage(Component.literal("WORLDFORGE: " + (showWorldForge ? "ON" : "OFF")));
-        }).bounds(18, 92, 132, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELOAD WF DATA"), b -> {
+            w.setMessage(Component.literal("WORLDFORGE: " + (showWorldForge ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELOAD DATA"), w -> {
             boolean loaded = com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.reload();
-            b.setMessage(Component.literal(loaded ? "WF DATA: LOADED" : "WF: NO DATA"));
-        }).bounds(156, 92, 132, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("BACK"), b -> onClose())
-                .bounds(width - 92, 44, 74, 20).build());
+            w.setMessage(Component.literal(loaded ? "DATA: LOADED" : "NO DATA"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("BACK"), w -> onClose())
+                .bounds(b[0], b[1], b[2], b[3]).build());
+
+        int rows = (index + columns - 1) / columns;
+        mapTop = 44 + rows * 22 + 10;
+        updateDepthButtons();
     }
 
     @Override
@@ -157,7 +200,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
         MaqanUiTheme.panel(g,12,10,width-12,36);
         MaqanUiTheme.titleRight(g,font,"MAQAN  /  PLANETARY TERRAIN  /  " + (viewMode == ViewMode.ISOMETRIC ? "3D" : "TOP-DOWN"),dimension,width);
 
-        int left = 16, top = 118, right = width - 16, bottom = height - 42;
+        int left = 16, top = mapTop, right = width - 16, bottom = Math.max(mapTop, height - 42);
         g.fill(left, top, right, bottom, 0xC908111C);
         if (showGrid) {
             for (int x = left; x < right; x += 40) g.fill(x, top, x + 1, bottom, 0x183A6680);
@@ -689,7 +732,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (super.mouseClicked(mouseX, mouseY, button)) return true;
-        if (drawingTerritory && button == 0 && mouseY >= 98 && mouseY <= height - 42) {
+        if (drawingTerritory && button == 0 && mouseY >= mapTop && mouseY <= height - 42) {
             addDraftVertex(mouseX, mouseY);
             return true;
         }
@@ -755,7 +798,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 NavigatorExplorationStore.chunks(dimension),false);
         double centerY=player!=null&&dimension.equals(player.dimensionId())?player.y():
                 averageSurfaceHeight(NavigatorExplorationStore.chunks(dimension));
-        double tile=0.92*zoom, originX=width*0.5+panX,originY=(98+height-42)*0.5+panY+26;
+        double tile=0.92*zoom, originX=width*0.5+panX,originY=(mapTop+height-42)*0.5+panY+26;
         double sx=(mouseX-originX)/Math.max(0.001,tile),sy=(mouseY-originY)/Math.max(0.001,tile);
         double rx,rz;
         if(viewMode==ViewMode.TOP_DOWN) { rx=sx;rz=sy; }
