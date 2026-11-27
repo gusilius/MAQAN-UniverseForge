@@ -49,6 +49,7 @@ public final class PlatformSelectionContext {
                 && current.worldId().equals(world)
                 && current.summary().equals(details)) return;
         current = new Selection(provider, entityId, type, name, world, details, ++revision);
+        WorkspaceMapState.publishSelection(provider, entityId, type, name, world);
         WorkspaceRuntime.index(new WorkspaceRuntime.SearchEntry(
                 entityId, provider, type, name, world, details, java.util.List.of(type, provider)));
         WorkspaceRuntime.publish(WorkspaceRuntime.Severity.INFO, provider, "selection",
@@ -59,8 +60,10 @@ public final class PlatformSelectionContext {
         if (current == null) return;
         if (providerId == null || providerId.isBlank()
                 || providerId.equals(current.providerId())) {
+            String clearedProvider = current.providerId();
             current = null;
             revision++;
+            WorkspaceMapState.clearSelection(clearedProvider);
         }
     }
 
