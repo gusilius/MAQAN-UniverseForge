@@ -69,22 +69,21 @@ public final class MapCommands {
                             CommandSourceStack s = c.getSource();
                             MapData m = data(s);
                             if (m == null) return 0;
-                            Markers.Marker marker = EditorManager.markers(s.getServer(), m)
-                                    .find(StringArgumentType.getString(c, "id"));
-                            if (marker == null) {
-                                s.sendFailure(Component.literal("Метка не найдена"));
-                                return 0;
-                            }
+                            String markerId = StringArgumentType.getString(c, "id");
                             String profile = StringArgumentType.getString(c, "profile");
                             if (!"auto".equalsIgnoreCase(profile)
                                     && net.minecraft.resources.ResourceLocation.tryParse(profile) == null) {
                                 s.sendFailure(Component.literal("Профиль должен иметь формат namespace:id или auto"));
                                 return 0;
                             }
-                            EditorManager.markers(s.getServer(), m).setVisualProfile(marker.id,
+                            boolean updated = EditorManager.markers(s.getServer(), m).setVisualProfile(markerId,
                                     "auto".equalsIgnoreCase(profile) ? "" : profile);
-                            s.sendSuccess(() -> Component.literal("Визуальный профиль объекта обновлён: "
-                                    + (marker.visualProfile.isBlank() ? "автоматический" : marker.visualProfile)), true);
+                            if (!updated) {
+                                s.sendFailure(Component.literal("Не удалось сохранить визуальный профиль объекта"));
+                                return 0;
+                            }
+                            s.sendSuccess(() -> Component.literal("Визуальный профиль объекта " + markerId
+                                    + " обновлён: " + ("auto".equalsIgnoreCase(profile) ? "автоматический" : profile)), true);
                             return 1;
                         }))))
                 .then(Commands.literal("remove").then(Commands.argument("id", StringArgumentType.greedyString()).executes(c -> {
