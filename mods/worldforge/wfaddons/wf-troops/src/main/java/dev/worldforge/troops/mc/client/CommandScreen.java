@@ -290,7 +290,7 @@ public final class CommandScreen extends Screen {
     private int settlementSummaryHeight() { return height < 250 ? 40 : 106; }
     private int inspectY() { return settlementOpen ? 34 + settlementSummaryHeight() + 8 : 34; }
     private int inspectorRowsFit() {
-        return Math.max(1, Math.min(8, (height - inspectY() - 28) / INSPECT_ROW));
+        return Math.max(1, Math.min(8, (height - inspectY() - 42) / INSPECT_ROW));
     }
 
     private boolean inspectAt(double x,double y) {
@@ -404,7 +404,7 @@ public final class CommandScreen extends Screen {
             }
         }
         int rows=Math.min(inspectorRowsFit(),ids.size());
-        int h=24+rows*INSPECT_ROW;
+        int h=38+rows*INSPECT_ROW;
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
         g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,inspectY()+6,0xFFE6C875,false);
