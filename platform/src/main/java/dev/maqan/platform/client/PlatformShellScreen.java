@@ -973,11 +973,33 @@ public final class PlatformShellScreen extends Screen {
         if (events.isEmpty()) g.drawString(font, "No events have been published yet", x + 12, rowY + 8, MUTED, false);
     }
 
+    private boolean handleSettingsClick(double mx, double my) {
+        int w=popupW(260),h=popupH(190),sx=popupX(settingsX,260,false),sy=popupY(settingsY,190,height-h-12);
+        if(mx>=sx+w-28&&mx<sx+w&&my>=sy&&my<sy+26){settingsVisible=false;return true;}
+        if(mx>=sx&&mx<sx+w-28&&my>=sy&&my<sy+26){
+            draggingPopup="settings";pointerOffsetX=(int)mx-sx;pointerOffsetY=(int)my-sy;return true;
+        }
+        if(mx>=sx&&mx<sx+w&&my>=sy+32&&my<sy+59){ambientGrid=!ambientGrid;saveWorkspaceState();return true;}
+        if(mx>=sx&&mx<sx+w&&my>=sy+59&&my<sy+86){panelShadows=!panelShadows;saveWorkspaceState();return true;}
+        String[] themes=ThemeManager.themes();
+        int themeGap=4,themeWidth=Math.max(24,(w-20-themeGap*Math.max(0,themes.length-1))/Math.max(1,themes.length));
+        if(my>=sy+115&&my<sy+139&&mx>=sx+10&&mx<sx+w-10){
+            int index=(int)((mx-(sx+10))/(double)(themeWidth+themeGap));
+            if(index>=0&&index<themes.length&&ThemeManager.setTheme(themes[index])){
+                CYAN=ThemeManager.accentColor();saveWorkspaceState();
+            }
+            return true;
+        }
+        // Settings is modal: clicking outside closes it but never activates a control underneath.
+        settingsVisible=false;
+        return true;
+    }
+
     private void drawSettings(GuiGraphics g, int mx, int my) {
         int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
         ThemeManager.renderWindow(g,x,y,w,h,"settings");
-        // Keep the parchment/metal frame visible; only add a translucent title backing.
+        g.enableScissor(x,y,x+w,y+h);
         g.fill(x + 8, y + 6, x + w - 8, y + 22, 0x55101824);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
         g.drawString(font,"WORKSPACE / APPEARANCE",x+28,y+9,TEXT,false);
@@ -989,16 +1011,18 @@ public final class PlatformShellScreen extends Screen {
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
         g.drawString(font,"Interface theme",x+12,y+99,TEXT,false);
         String[] themes=ThemeManager.themes();
+        int themeGap=4, themeWidth=Math.max(24,(w-20-themeGap*Math.max(0,themes.length-1))/Math.max(1,themes.length));
         for(int i=0;i<themes.length;i++) {
-            int tx=x+10+i*61;
+            int tx=x+10+i*(themeWidth+themeGap);
             boolean selected=themes[i].equals(ThemeManager.selectedTheme());
-            g.fill(tx,y+115,tx+56,y+139,selected?0xAA3B879B:0xAA172330);
-            g.fill(tx,y+115,tx+56,y+117,selected?CYAN:EDGE);
-            g.drawCenteredString(font,themes[i].toUpperCase(java.util.Locale.ROOT),tx+28,y+124,selected?0xFFFFFFFF:TEXT);
+            g.fill(tx,y+115,tx+themeWidth,y+139,selected?0xAA3B879B:0xAA172330);
+            g.fill(tx,y+115,tx+themeWidth,y+117,selected?CYAN:EDGE);
+            g.drawCenteredString(font,themes[i].toUpperCase(java.util.Locale.ROOT),tx+themeWidth/2,y+124,selected?0xFFFFFFFF:TEXT);
         }
-        g.drawString(font,"Textures: "+(ThemeManager.isThemeLoaded()?"loaded":"fallback"),x+12,y+151,MUTED,false);
-        g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
+        if(h>145)g.drawString(font,"Textures: "+(ThemeManager.isThemeLoaded()?"loaded":"fallback"),x+12,y+151,MUTED,false);
+        if(h>168)g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
+        g.disableScissor();
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
@@ -1264,6 +1288,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
+        if (button != 0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible
+                || searchVisible || contextMenuVisible)) return true;
         if (button == 1) {
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
@@ -1337,6 +1363,7 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false;
             return true;
         }
+        if (settingsVisible && handleSettingsClick(mx, my)) return true;
         for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums())) {
             boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
                     ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
@@ -1420,25 +1447,6 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             return true;
-        }
-        if(settingsVisible) {
-            int sx=popupX(settingsX,260,false),sy=popupY(settingsY,190,height-202);
-            if(my>=sy&&my<sy+26&&mx>=sx&&mx<sx+232) { draggingPopup="settings"; pointerOffsetX=(int)mx-sx; pointerOffsetY=(int)my-sy; return true; }
-            if(mx>=sx+232&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
-            if(mx>=sx&&mx<=sx+260&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
-            if(mx>=sx&&mx<=sx+260&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
-            if(mx>=sx+8&&mx<sx+252&&my>=sy+115&&my<sy+139) {
-                int index=(int)((mx-(sx+10))/61.0D);
-                String[] themes=ThemeManager.themes();
-                if(index>=0&&index<themes.length) {
-                    if (ThemeManager.setTheme(themes[index])) {
-                        CYAN = ThemeManager.accentColor();
-                        saveWorkspaceState();
-                    }
-                }
-                return true;
-            }
-            if(mx>=sx&&mx<=sx+260&&my>=sy&&my<=sy+190) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
             int x=58;
@@ -1721,6 +1729,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
+        if(button!=0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible))
+            return true;
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
             handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
@@ -1782,12 +1792,15 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public boolean keyReleased(int keyCode,int scanCode,int modifiers) {
         boolean handled = super.keyReleased(keyCode,scanCode,modifiers);
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible)
+            return handled;
         if (activeView() != null)
             handled = activeView().keyReleased(keyCode,scanCode,modifiers) || handled;
         return handled;
     }
 
     @Override public boolean charTyped(char codePoint,int modifiers) {
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || contextMenuVisible) return true;
         if (searchVisible) {
             if (!Character.isISOControl(codePoint) && searchQuery.length() < 96) {
                 searchQuery += codePoint;
@@ -1802,6 +1815,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible)
+            return true;
         Panel toolsPanel = panels.get("tools");
         if (toolsPanel != null && toolsPanel.visible && !toolsPanel.minimized
                 && mouseX >= toolsPanel.x && mouseX <= toolsPanel.x + toolsPanel.w
@@ -1825,6 +1840,11 @@ public final class PlatformShellScreen extends Screen {
             int direction = delta > 0 ? -1 : 1;
             navigationScroll = Math.max(0, Math.min(navigationMaxScroll(nav), navigationScroll + direction * 2));
             return true;
+        }
+        for (Panel panel : panels.values()) {
+            if (panel.visible && !panel.id.equals("content")
+                    && WorkspaceUi.contains(mouseX, mouseY, panel.x, panel.y, panel.w,
+                    panel.minimized ? 26 : panel.h)) return true;
         }
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
         handled = forwardViewMouseScrolled(mouseX, mouseY, delta) || handled;
@@ -1869,6 +1889,7 @@ public final class PlatformShellScreen extends Screen {
             if (contextMenuVisible) { contextMenuVisible = false; return true; }
             onClose(); return true;
         }
+        if (workspaceManagerVisible || notificationCenterVisible || settingsVisible || contextMenuVisible) return true;
         if (keyCode == GLFW.GLFW_KEY_F6) {
             toggleWorkspacePanel("timeline");
             return true;

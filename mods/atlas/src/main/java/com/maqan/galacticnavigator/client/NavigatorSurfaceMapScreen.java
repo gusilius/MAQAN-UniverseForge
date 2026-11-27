@@ -46,6 +46,43 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
     private static final int BACKGROUND=0xF0060B16;
 
+    private record ControlBounds(int x, int y, int width) {}
+
+    private int controlRows() { return width >= 900 ? 1 : width >= 560 ? 2 : 3; }
+
+    private int mapViewportTop() { return 74 + (controlRows() - 1) * 24; }
+
+    private ControlBounds controlBounds(int index) {
+        int[] fullX = {18, 110, 238, 306, 374, 482, 586, 744};
+        int[] fullW = {86, 124, 64, 64, 104, 96, 154, 94};
+        if (width >= 900) return new ControlBounds(fullX[index], 48, fullW[index]);
+
+        boolean twoRows = width >= 560;
+        int[] rows = twoRows
+                ? new int[]{0, 0, 0, 0, 0, 0, 1, 1}
+                : new int[]{0, 0, 0, 0, 1, 1, 1, 2};
+        int[] baseWidths = twoRows
+                ? new int[]{72, 100, 50, 50, 82, 78, 130, 80}
+                : new int[]{60, 82, 44, 44, 70, 70, 110, 70};
+        int row = rows[index], count = 0, sum = 0;
+        for (int i = 0; i < rows.length; i++) if (rows[i] == row) {
+            count++;
+            sum += baseWidths[i];
+        }
+        int gap = 3;
+        int available = Math.max(1, width - 36 - gap * (count - 1));
+        double scale = Math.min(1.0, available / (double) Math.max(1, sum));
+        int x = 18;
+        for (int i = 0; i < index; i++) if (rows[i] == row)
+            x += Math.max(20, (int) Math.floor(baseWidths[i] * scale)) + gap;
+        int buttonWidth = Math.max(20, (int) Math.floor(baseWidths[index] * scale));
+        return new ControlBounds(x, 48 + row * 24, buttonWidth);
+    }
+
+    private int bottomActionWidth() {
+        return width >= 440 ? 148 : Math.max(44, (width - 52) / 2);
+    }
+
     public NavigatorSurfaceMapScreen(String dimension) { this(dimension,null); }
     public NavigatorSurfaceMapScreen(String dimension,Screen parent) {
         super(Component.literal("MAQAN · Surface Map"));
@@ -74,56 +111,59 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     }
 
     @Override protected void init(){
-        viewModeButton=addRenderableWidget(Button.builder(Component.literal("VIEW: 2D"),b->{
+        boolean micro=width<300, compact=width<560;
+        ControlBounds view=controlBounds(0), layer=controlBounds(1), down=controlBounds(2),
+                up=controlBounds(3), route=controlBounds(4), clear=controlBounds(5),
+                political=controlBounds(6), terrain=controlBounds(7);
+        viewModeButton=addRenderableWidget(Button.builder(Component.literal(micro?"V":compact?"VIEW":"VIEW: 2D"),b->{
             terrain3D=!terrain3D;
             NavigatorPlatformSelectionBridge.setViewType(terrain3D?"DIORAMA_3D":"EXPLORATION");
-            b.setMessage(Component.literal(terrain3D?"VIEW: 3D":"VIEW: 2D"));
-        }).bounds(18,48,86,20).build());
-        layerButton=addRenderableWidget(Button.builder(Component.literal("LAYER: SURFACE"),b->{
+            b.setMessage(Component.literal(micro?(terrain3D?"3D":"2D"):(compact?(terrain3D?"3D":"2D"):(terrain3D?"VIEW: 3D":"VIEW: 2D"))));
+        }).bounds(view.x(),view.y(),view.width(),20).build());
+        layerButton=addRenderableWidget(Button.builder(Component.literal(micro?"L":compact?"LAYER":"LAYER: SURFACE"),b->{
             underground=!underground;
-            b.setMessage(Component.literal(underground?"LAYER: UNDERGROUND":"LAYER: SURFACE"));
+            b.setMessage(Component.literal(micro?(underground?"U":"S"):(compact?(underground?"UNDER":"SURFACE"):(underground?"LAYER: UNDERGROUND":"LAYER: SURFACE"))));
             updateDepthButtons();
-        }).bounds(110,48,124,20).build());
+        }).bounds(layer.x(),layer.y(),layer.width(),20).build());
         depthDownButton=addRenderableWidget(Button.builder(Component.literal("DEPTH −"),b->{
             selectedSectionY--;updateDepthButtons();
-        }).bounds(238,48,64,20).build());
+        }).bounds(down.x(),down.y(),down.width(),20).build());
         depthUpButton=addRenderableWidget(Button.builder(Component.literal("DEPTH +"),b->{
             selectedSectionY++;updateDepthButtons();
-        }).bounds(306,48,64,20).build());
-        routeModeButton=addRenderableWidget(Button.builder(Component.literal("ROUTE: WALK"),b->{
+        }).bounds(up.x(),up.y(),up.width(),20).build());
+        routeModeButton=addRenderableWidget(Button.builder(Component.literal(micro?"R":compact?"ROUTE":"ROUTE: WALK"),b->{
             var modes=ExploredSurfaceRoutePlanner.Mode.values();
             routeMode=modes[(routeMode.ordinal()+1)%modes.length];
-            b.setMessage(Component.literal("ROUTE: "+routeMode.name()));
+            b.setMessage(Component.literal(micro?routeMode.name().substring(0,1):(compact?routeMode.name():"ROUTE: "+routeMode.name())));
             recalculateRoute();
-        }).bounds(374,48,104,20).build());
-        clearRouteButton=addRenderableWidget(Button.builder(Component.literal("CLEAR ROUTE"),b->{
+        }).bounds(route.x(),route.y(),route.width(),20).build());
+        clearRouteButton=addRenderableWidget(Button.builder(Component.literal(micro?"X":compact?"CLEAR":"CLEAR ROUTE"),b->{
             selectedWaypointId="";surfaceRoute=null;routeStartX=routeStartZ=Integer.MIN_VALUE;
-        }).bounds(482,48,96,20).build());
-        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal("POLITICAL: PROVINCES"),b->{
+        }).bounds(clear.x(),clear.y(),clear.width(),20).build());
+        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal(micro?"P":compact?"POL":"POLITICAL: PROVINCES"),b->{
             politicalLayer=(politicalLayer+1)%4;
-            b.setMessage(Component.literal(switch(politicalLayer){
-                case 0 -> "POLITICAL: PROVINCES";
-                case 1 -> "POLITICAL: REALMS";
-                case 2 -> "POLITICAL: BOTH";
-                default -> "POLITICAL: OFF";
-            }));
-        }).bounds(586,48,154,20).build());
-        refreshSnapshotButton=addRenderableWidget(Button.builder(Component.literal("REFRESH WORLD DATA"),b->{
+            b.setMessage(Component.literal(micro?new String[]{"P","R","B","P×"}[politicalLayer]
+                    :(compact?new String[]{"PROV","REALM","BOTH","OFF"}[politicalLayer]
+                    :switch(politicalLayer){case 0 -> "POLITICAL: PROVINCES";case 1 -> "POLITICAL: REALMS";case 2 -> "POLITICAL: BOTH";default -> "POLITICAL: OFF";})));
+        }).bounds(political.x(),political.y(),political.width(),20).build());
+        int bottomW=bottomActionWidth(), bottomY=height-68;
+        String refreshLabel=width<260?"SYNC":width<440?"REFRESH":"REFRESH WORLD DATA";
+        refreshSnapshotButton=addRenderableWidget(Button.builder(Component.literal(refreshLabel),b->{
             boolean loaded=NavigatorWorldForgeMapStore.reload();
-            b.setMessage(Component.literal(loaded?"WORLD DATA: UPDATED":"REFRESH FAILED · LAST GOOD KEPT"));
-        }).bounds(18,height-68,148,20).build());
-        addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
+            b.setMessage(Component.literal(loaded?(width<440?"UPDATED":"WORLD DATA: UPDATED"):(width<440?"FAILED":"REFRESH FAILED · LAST GOOD KEPT")));
+        }).bounds(18,bottomY,bottomW,20).build());
+        int planetX=width>=440?Math.max(18,width-190):18+bottomW+8;
+        int planetW=width>=440?172:bottomW;
+        String planetLabel=width<260?"3D":width<440?"3D MAP":"OPEN 3D PLANET MAP";
+        addRenderableWidget(Button.builder(Component.literal(planetLabel),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
-                .bounds(Math.max(18,width-190),height-68,172,20).build());
-        terrainLayerButton=addRenderableWidget(Button.builder(Component.literal("MAP: OFF"),b->{
+                .bounds(planetX,bottomY,planetW,20).build());
+        terrainLayerButton=addRenderableWidget(Button.builder(Component.literal(micro?"M":compact?"MAP":"MAP: OFF"),b->{
             terrainLayer=(terrainLayer+1)%4;
-            b.setMessage(Component.literal(switch(terrainLayer){
-                case 1 -> "MAP: BIOME";
-                case 2 -> "MAP: RELIEF";
-                case 3 -> "MAP: WATER";
-                default -> "MAP: OFF";
-            }));
-        }).bounds(744,48,94,20).build());
+            b.setMessage(Component.literal(micro?new String[]{"M","B","R","W"}[terrainLayer]
+                    :(compact?new String[]{"OFF","BIOME","RELIEF","WATER"}[terrainLayer]
+                    :switch(terrainLayer){case 1 -> "MAP: BIOME";case 2 -> "MAP: RELIEF";case 3 -> "MAP: WATER";default -> "MAP: OFF";})));
+        }).bounds(terrain.x(),terrain.y(),terrain.width(),20).build());
         updateDepthButtons();
     }
     private void updateDepthButtons(){
@@ -136,7 +176,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         MaqanUiTheme.panel(g,12,12,width-12,42);
         MaqanUiTheme.titleRight(g,font,"MAQAN  /  SURFACE CARTOGRAPHY",dimension,width);
 
-        int mapLeft=18,mapTop=74,mapRight=width-18,mapBottom=height-48;
+        int mapLeft=18,mapTop=mapViewportTop(),mapRight=width-18,mapBottom=height-48;
         g.fill(mapLeft,mapTop,mapRight,mapBottom,0xC908111C);
         for(int x=mapLeft;x<mapRight;x+=32)g.fill(x,mapTop,x+1,mapBottom,0x183A6680);
         for(int y=mapTop;y<mapBottom;y+=32)g.fill(mapLeft,y,mapRight,y+1,0x183A6680);
@@ -439,7 +479,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     /** Selects an imported WorldForge feature or territory and publishes its identity to MAQAN Inspector. */
     private boolean selectWorldForgeAt(double mouseX,double mouseY) {
         if(underground||terrain3D)return false;
-        int left=18,top=74,right=width-18,bottom=height-48;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
         WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
         if(snapshot==null)return false;
@@ -638,7 +678,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     }
     private boolean selectWaypointAt(double mouseX,double mouseY){
         NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
-        int mapLeft=18,mapTop=74,mapRight=width-18,mapBottom=height-48;
+        int mapLeft=18,mapTop=mapViewportTop(),mapRight=width-18,mapBottom=height-48;
         if(mouseX<mapLeft||mouseX>mapRight||mouseY<mapTop||mouseY>mapBottom||underground)return false;
         double cell=18.0*zoom,best=100.0;
         NavigatorWaypoint selected=null;
@@ -750,7 +790,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         if(super.mouseClicked(x,y,button))return true;
         if(button==1&&selectWaypointAt(x,y))return true;
         if(button==0&&selectWorldForgeAt(x,y))return true;
-        if((button==0||button==2)&&x>=18&&x<=width-18&&y>=74&&y<=height-48){
+        if((button==0||button==2)&&x>=18&&x<=width-18&&y>=mapViewportTop()&&y<=height-48){
             dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
         }
         return false;
@@ -767,7 +807,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     }
     @Override public boolean mouseScrolled(double x,double y,double delta){
         if (delta == 0) return false;
-        int left=18,top=74,right=width-18,bottom=height-48;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if (!insideMap(x,y,left,top,right,bottom)) return super.mouseScrolled(x,y,delta);
         double factor=delta>0?1.15:1.0/1.15;
         double nextZoom=Math.max(0.35,Math.min(4.0,zoom*factor));

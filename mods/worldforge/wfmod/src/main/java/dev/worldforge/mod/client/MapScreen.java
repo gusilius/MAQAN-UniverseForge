@@ -101,6 +101,7 @@ public class MapScreen extends Screen {
 
     // ---- доступ для боковой панели
     int width() { return width; }
+    int height() { return height; }
     net.minecraft.client.gui.Font font() { return font; }
     int selectedProv() { return selected; }
     int panelBottom() { return ovwW > 0 ? ovwY - 14 : height - BOTTOM - 20; }

@@ -229,7 +229,7 @@ public final class CommandScreen extends Screen {
         // The embedded settlement minimap owns the lower-right corner. The build
         // panel always ends above it, including very short GUI viewports.
         int bottomReserve = embeddedInMaqan ? 112 : 90;
-        return Math.max(1, height - panelY() - bottomReserve);
+        return Math.max(3, height - panelY() - bottomReserve);
     }
 
     private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }

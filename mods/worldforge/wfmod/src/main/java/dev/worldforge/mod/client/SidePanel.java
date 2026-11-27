@@ -127,7 +127,7 @@ final class SidePanel {
         }
         if (!open) return;
         pw = Math.min(WIDTH, Math.max(100, Math.min(host.width() - RAIL - GAP - 16,
-                (int) Math.floor(host.width() * 0.42))));
+                (int) Math.floor(host.width() * 0.35))));
         px = rx - GAP - pw;
         py = 8;
         int availableBottom = Math.min(host.panelBottom(), host.height() - 8);
