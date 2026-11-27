@@ -580,7 +580,6 @@ public final class PlatformShellScreen extends Screen {
                 panel.x = originalX;
                 panel.y = originalY;
                 panel.visible = false;
-                LOGGER.warn("Temporarily hiding floating MAQAN panel '{}' because the viewport has no free slot", panel.id);
                 continue;
             }
             placed.add(panel);
