@@ -224,7 +224,7 @@ public final class CommandScreen extends Screen {
     }
 
     private int panelW() { return Math.max(1, Math.min(PANEL_W, width - 8)); }
-    private int panelX() { return Math.max(4, width - panelW() - 4); }
+    private int panelX() { return Math.max(0, width - panelW() - 4); }
     private int panelY() { return 26; }
     private int panelH() {
         // The embedded settlement minimap owns the lower-right corner. The build
