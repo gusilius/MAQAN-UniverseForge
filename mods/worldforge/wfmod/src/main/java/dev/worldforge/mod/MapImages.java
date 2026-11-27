@@ -159,6 +159,21 @@ public final class MapImages {
         return 0xFF000000 | (rr << 16) | (gg << 8) | bb;
     }
 
+    /** Warm parchment substrate for political and title maps; source terrain detail remains visible. */
+    private static int parchmentBase(int c, int x, int y) {
+        int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+        int luminance = (r * 30 + g * 59 + b * 11) / 100;
+        int grain = Math.floorMod(x * 73428767 ^ y * 912931 ^ (x * y * 31), 7) - 3;
+        int paperR = clamp(190 + luminance / 5 + grain);
+        int paperG = clamp(163 + luminance / 6 + grain);
+        int paperB = clamp(119 + luminance / 8 + grain);
+        return 0xFF000000 | (paperR << 16) | (paperG << 8) | paperB;
+    }
+
+    private static int clamp(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
     private static boolean pattern(String kind, int x, int y) {
         if ("dots".equals(kind)) return x % 11 < 4 && y % 11 < 4;
         if ("cross".equals(kind)) return Math.floorMod(x - y, 14) < 4 || (x + y) % 14 < 4;
@@ -294,10 +309,12 @@ public final class MapImages {
         for (int z = 0, i = 0; z < h; z++) {
             for (int x = 0; x < w; x++, i++) {
                 int l = lab[i], t = terrain[i];
-                if (l == 0) { img[i] = t; continue; }
+                int paper = parchmentBase(t, x, z);
+                if (l == 0) { img[i] = paper; continue; }
                 int c = color[l];
                 if (realms && over[l] > 0 && pattern(pat[l], x, z)) c = color[over[l]];
-                img[i] = mix(mutedBase(t), c, alpha);
+                // Keep the terrain legible beneath political fills instead of painting opaque flat regions.
+                img[i] = mix(paper, c, realms ? 0.48 : 0.44);
             }
         }
         boolean[] e = new boolean[w * h];
