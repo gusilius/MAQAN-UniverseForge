@@ -216,7 +216,15 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 viewportCenterX, viewportCenterZ, zoom,
                 Math.toDegrees(cameraYaw), Math.toDegrees(cameraPitch));
         double cell=18.0*zoom;
-        List<NavigatorExplorationStore.ExploredChunk> chunks=NavigatorExplorationStore.chunks(dimension);
+        double projectionScale=terrain3D?Math.max(1.2,Math.min(8.0,cell/2.8)):cell;
+        double visibleRadius=(Math.hypot(mapRight-mapLeft,mapBottom-mapTop)+2.0*Math.hypot(panX,panY))
+                /Math.max(0.65,projectionScale)+10.0;
+        int minChunkX=(int)Math.floor(centerChunkX-visibleRadius);
+        int maxChunkX=(int)Math.ceil(centerChunkX+visibleRadius);
+        int minChunkZ=(int)Math.floor(centerChunkZ-visibleRadius);
+        int maxChunkZ=(int)Math.ceil(centerChunkZ+visibleRadius);
+        List<NavigatorExplorationStore.ExploredChunk> chunks=
+                NavigatorExplorationStore.chunksInBounds(dimension,minChunkX,minChunkZ,maxChunkX,maxChunkZ);
         if(!underground)refreshRouteIfPlayerMoved(player);
         List<NavigatorExplorationStore.ExploredLayer> layers=NavigatorExplorationStore.layers(dimension);
         int visibleCells=0;
@@ -313,7 +321,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
 
         g.fill(12,height-38,width-12,height-12,0xD9101C2B);
         g.drawString(font,(underground?"VISITED DEPTH CELLS: "+visibleCells+"  ·  SECTION Y "+selectedSectionY
-                :"EXPLORED SURFACE CHUNKS: "+chunks.size()),24,height-28,0xFFB6C7D8,false);
+                :"EXPLORED SURFACE CHUNKS: "+NavigatorExplorationStore.exploredCount(dimension)),24,height-28,0xFFB6C7D8,false);
         String routeLabel=surfaceRoute==null?"RIGHT-CLICK A WAYPOINT TO ROUTE"
                 :surfaceRoute.message()+"  ·  "+(surfaceRoute.found()
                     ?surfaceRoute.points().size()+" CHUNKS  ·  COST "+String.format(java.util.Locale.ROOT,"%.1f",surfaceRoute.cost())
