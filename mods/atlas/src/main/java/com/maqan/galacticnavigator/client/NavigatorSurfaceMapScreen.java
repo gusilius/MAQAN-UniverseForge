@@ -226,7 +226,9 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         List<NavigatorExplorationStore.ExploredChunk> chunks=
                 NavigatorExplorationStore.chunksInBounds(dimension,minChunkX,minChunkZ,maxChunkX,maxChunkZ);
         if(!underground)refreshRouteIfPlayerMoved(player);
-        List<NavigatorExplorationStore.ExploredLayer> layers=NavigatorExplorationStore.layers(dimension);
+        List<NavigatorExplorationStore.ExploredLayer> layers=underground
+                ?NavigatorExplorationStore.layersInBounds(dimension,selectedSectionY,
+                        minChunkX,minChunkZ,maxChunkX,maxChunkZ):List.of();
         int visibleCells=0;
         if(!underground&&!terrain3D){
             for(NavigatorExplorationStore.ExploredChunk chunk:chunks){
