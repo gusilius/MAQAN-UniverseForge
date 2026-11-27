@@ -329,13 +329,8 @@ public class MapScreen extends Screen {
             if (!tip.isEmpty()) g.renderComponentTooltip(font, tip, mx, my);
         }
         Markers.Marker hoveredMarker = markerAt(mx, my);
-        if (hoveredMarker != null && !overUi) {
-            List<Component> tip = new ArrayList<>();
-            tip.add(Component.literal(hoveredMarker.name).withStyle(ChatFormatting.GOLD));
-            if (hoveredMarker.desc != null && !hoveredMarker.desc.isBlank())
-                tip.add(Component.literal(hoveredMarker.desc.replace(';', ' ')).withStyle(ChatFormatting.GRAY));
-            g.renderComponentTooltip(font, tip, mx, my);
-        }
+        if (hoveredMarker != null && !overUi)
+            g.renderComponentTooltip(font, describeMarker(hoveredMarker), mx, my);
         if (!embeddedInMaqan) for (Slot sl : slots) if (sl.hit(mx, my)) g.renderTooltip(font, Component.literal(isCurrent(sl.key) ? modeName(sl.key) : (slots.indexOf(sl) + 1) + ": " + modeName(sl.key)), mx, my);
     }
 
@@ -617,10 +612,53 @@ public class MapScreen extends Screen {
             if (!("city".equals(object.type) || "settlement".equals(object.type)
                     || "village".equals(object.type) || "capital".equals(object.type)
                     || "castle".equals(object.type))) continue;
+            int armyTitle = markerInt(army.desc, "title");
+            int objectProvince = markerInt(object.desc, "province");
+            if (armyTitle > 0 && objectProvince > 0 && armyTitle == objectProvince) return true;
             long dx = (long) army.x - object.x, dz = (long) army.z - object.z;
             if (dx * dx + dz * dz <= 32L * 32L) return true;
         }
         return false;
+    }
+
+    private static int markerInt(String description, String key) {
+        if (description == null || key == null) return 0;
+        String prefix = key + "=";
+        for (String field : description.split(";")) {
+            if (!field.startsWith(prefix)) continue;
+            try { return Integer.parseInt(field.substring(prefix.length())); }
+            catch (NumberFormatException ignored) { return 0; }
+        }
+        return 0;
+    }
+
+    private static List<Component> describeMarker(Markers.Marker marker) {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal(marker.name).withStyle(ChatFormatting.GOLD));
+        if ("army".equals(marker.type)) {
+            int men = markerInt(marker.desc, "men");
+            String commander = markerValue(marker.desc, "commander");
+            lines.add(Component.literal("Полевая армия · " + men + " бойцов").withStyle(ChatFormatting.GRAY));
+            if (!commander.isBlank()) lines.add(Component.literal("Полководец: " + commander).withStyle(ChatFormatting.GRAY));
+            lines.add(Component.literal(markerValue(marker.desc, "moving").equals("true") ? "В движении" : "На позиции")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        } else {
+            int population = markerInt(marker.desc, "population");
+            int buildings = markerInt(marker.desc, "buildings");
+            if (population > 0) lines.add(Component.literal("Население: " + population).withStyle(ChatFormatting.GRAY));
+            if (buildings > 0) lines.add(Component.literal("Завершённых зданий: " + buildings).withStyle(ChatFormatting.GRAY));
+            String realm = markerValue(marker.desc, "realm");
+            if (!realm.isBlank()) lines.add(Component.literal("Государство: " + realm).withStyle(ChatFormatting.DARK_GRAY));
+        }
+        return lines;
+    }
+
+    private static String markerValue(String description, String key) {
+        if (description == null || key == null) return "";
+        String prefix = key + "=";
+        for (String field : description.split(";"))
+            if (field.startsWith(prefix)) return field.substring(prefix.length());
+        return "";
     }
 
     private Markers.Marker markerAt(double mx, double my) {
@@ -809,6 +847,7 @@ public class MapScreen extends Screen {
             Markers.Marker marker = markerAt(mx, my);
             if (marker != null) {
                 selectedMarkerId = marker.id;
+                centerOnBlock(marker.x, marker.z);
                 PlatformWorkspaceBridge.publish("worldforge", marker.id, marker.type,
                         marker.name, marker.desc == null ? "" : marker.desc);
                 return true;
