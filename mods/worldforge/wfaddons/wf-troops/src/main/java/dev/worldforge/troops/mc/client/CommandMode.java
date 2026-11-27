@@ -83,6 +83,8 @@ public final class CommandMode {
     private static CameraRig.View lastView = CameraRig.View.SKY;
     private static final Preferences CAMERA_PREFS =
             Preferences.userNodeForPackage(CommandMode.class).node("camera-state");
+    private static long lastCameraPersistNanos;
+    private static final long CAMERA_PERSIST_INTERVAL_NANOS = 10_000_000_000L;
 
     private static String cameraDimension(Minecraft mc) {
         return mc.level == null ? "" : mc.level.dimension().location().toString();
@@ -113,6 +115,7 @@ public final class CommandMode {
     }
 
     private static void persistCamera(Minecraft mc) {
+        if (mc == null || mc.player == null || mc.level == null) return;
         String dimension = cameraDimension(mc);
         if (dimension.isBlank()) return;
         CameraRig.Snapshot saved = RIG.snapshot();
@@ -125,7 +128,10 @@ public final class CommandMode {
         CAMERA_PREFS.putDouble("pitch." + key, saved.pitch());
         CAMERA_PREFS.putDouble("zoom." + key, saved.zoom());
         CAMERA_PREFS.putDouble("leash." + key, saved.leash());
-        try { CAMERA_PREFS.flush(); }
+        try {
+            CAMERA_PREFS.flush();
+            lastCameraPersistNanos = System.nanoTime();
+        }
         catch (BackingStoreException ignored) {
             // A failed preference write must never interrupt camera restoration or gameplay.
         }
@@ -485,6 +491,7 @@ public final class CommandMode {
     static void frame(Minecraft mc) {
         if (!active || camEntity == null || mc.player == null || mc.level == null) return;
         long now = System.nanoTime();
+        if (now - lastCameraPersistNanos >= CAMERA_PERSIST_INTERVAL_NANOS) persistCamera(mc);
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
         RIG.updateTransition(dt);
