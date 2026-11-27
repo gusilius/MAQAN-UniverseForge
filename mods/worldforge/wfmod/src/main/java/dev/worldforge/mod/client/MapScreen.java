@@ -365,7 +365,7 @@ public class MapScreen extends Screen {
         // The overview is a small viewport, not a full lower-right exclusion zone.
         if (ovwW > 0 && mx >= ovwX - 6 && mx < ovwX + ovwW + 6
                 && my >= ovwY - 6 && my < ovwY + ovwH + 6) return true;
-        if (!selectedMarkerId.isBlank() && mx >= 8 && mx < 8 + Math.min(218, Math.max(176, width - 24))
+        if (!selectedMarkerId.isBlank() && mx >= 8 && mx < 8 + Math.max(1, Math.min(218, width - 16))
                 && my >= 48 && my < 142) return true;
         return panel.contains(mx, my);
     }
@@ -404,8 +404,8 @@ public class MapScreen extends Screen {
         boolean compact = width < 440;
         boolean micro = width < 300;
         return List.of(
-                new MapTypeButton("political", compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
-                new MapTypeButton("exploration", compact ? "EXPLORE" : "EXPLORATION", mapTypeButtonWidth(96)),
+                new MapTypeButton("political", micro ? "P" : compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
+                new MapTypeButton("exploration", micro ? "E" : compact ? "EXP" : "EXPLORATION", mapTypeButtonWidth(96)),
                 new MapTypeButton("diorama", compact ? "3D" : "DIORAMA 3D", mapTypeButtonWidth(82)));
     }
 
@@ -735,7 +735,7 @@ public class MapScreen extends Screen {
             return;
         }
 
-        int cardW = Math.min(218, Math.max(176, width - 24));
+        int cardW = Math.max(1, Math.min(218, width - 16));
         int cardH = 94;
         // Keep the selected-object card away from the right-side province panel
         // and the top-right map-mode switcher.
