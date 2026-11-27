@@ -247,6 +247,16 @@ public class MapScreen extends Screen {
         return new int[]{(int) Math.floor((mx - camX) / zoom), (int) Math.floor((my - camY) / zoom)};
     }
 
+    /** True only for the visible map image; blank canvas must not capture map gestures. */
+    private boolean insideMapImage(double mx, double my) {
+        if (!MapTextures.ready() || zoom <= 0.0) return false;
+        double left = Math.max(0.0, camX);
+        double top = Math.max(0.0, camY);
+        double right = Math.min(width, camX + MapTextures.w * zoom);
+        double bottom = Math.min(height, camY + MapTextures.h * zoom);
+        return mx >= left && mx < right && my >= top && my < bottom;
+    }
+
     private void fit() {
         int bottomReserve = embeddedInMaqan ? 0 : BOTTOM;
         double zx = (width - 24) / (double) MapTextures.w, zy = (height - BAR - bottomReserve - 14) / (double) MapTextures.h;
@@ -1120,6 +1130,7 @@ public class MapScreen extends Screen {
             return true;
         }
         if (overUi((int) mx, (int) my)) return true;
+        if (!insideMapImage(mx, my)) return false;
         draggingMap = button == 0 || button == 1 || button == 2;
         mapDragButton = draggingMap ? button : -1;
         if (button == 0 && !panel.editing()) {
@@ -1214,7 +1225,7 @@ public class MapScreen extends Screen {
         if (panel.scrolled(mx, my, delta)) return true;
         if (panel.contains(mx, my)) return true;
         if (overUi((int) mx, (int) my)) return true;
-        if (!MapTextures.ready()) return false;
+        if (!insideMapImage(mx, my)) return false;
         double nz = Math.max(0.2, Math.min(24, zoom * Math.exp(delta * 0.25)));
         camX = mx - (mx - camX) * nz / zoom;
         camY = my - (my - camY) * nz / zoom;
