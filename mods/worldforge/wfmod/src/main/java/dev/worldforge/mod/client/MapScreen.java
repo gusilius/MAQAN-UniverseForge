@@ -56,6 +56,7 @@ public class MapScreen extends Screen {
     private long lastEditApply;
     private boolean dragOverview;
     private boolean draggingMap;
+    private int mapDragButton = -1;
     private String selectedMarkerId = "";
     private int hiddenMarkerRevision = Integer.MIN_VALUE;
     private java.util.Set<String> hiddenArmyMarkerIds = java.util.Set.of();
@@ -77,16 +78,24 @@ public class MapScreen extends Screen {
         slots.clear();
         List<String> modes = modes();
         int size = 28, gap = 3, sep = 8;
-        int total = 0, prevG = -1;
-        for (String k : modes) { int g = group(k); total += size + gap + (prevG >= 0 && g != prevG ? sep : 0); prevG = g; }
-        int x = (width - total) / 2, y = height - size - 10;
-        prevG = -1;
-        for (String k : modes) {
-            int g = group(k);
-            if (prevG >= 0 && g != prevG) x += sep;
-            prevG = g;
-            slots.add(new Slot(k, x, y, size));
-            x += size + gap;
+        int columns = Math.max(1, Math.min(modes.size(), (width - 24 + gap) / (size + gap + 1)));
+        int rows = Math.max(1, (modes.size() + columns - 1) / columns);
+        int y0 = Math.max(8, height - rows * size - (rows - 1) * 5 - 10);
+        for (int i = 0; i < modes.size(); i++) {
+            int row = i / columns, column = i % columns;
+            int rowCount = Math.min(columns, modes.size() - row * columns);
+            int rowWidth = rowCount * (size + gap) - gap;
+            int x = Math.max(8, (width - rowWidth) / 2);
+            int y = y0 + row * (size + 5);
+            // Preserve visual grouping while keeping every hit target inside the viewport.
+            int previousGroup = column == 0 ? -1 : group(modes.get(i - 1));
+            int currentGroup = group(modes.get(i));
+            if (column > 0 && previousGroup != currentGroup) x += Math.min(sep, Math.max(0, width - x - rowWidth));
+            for (int j = 0; j < column; j++) {
+                if (group(modes.get(row * columns + j)) != group(modes.get(row * columns + j + 1)))
+                    x += Math.min(sep, 4);
+            }
+            slots.add(new Slot(modes.get(i), x + column * (size + gap), y, size));
         }
         nameBox = new EditBox(font, width / 2 - 100, height - 78, 200, 18, Component.literal("Название"));
         nameBox.setMaxLength(32);
@@ -358,8 +367,18 @@ public class MapScreen extends Screen {
     private boolean overUi(int mx, int my) {
         if (!embeddedInMaqan && !slots.isEmpty()) {
             for (Slot sl : slots) if (sl.hit(mx, my)) return true;
-            Slot f = slots.get(0), l = slots.get(slots.size() - 1);
-            if (mx >= f.x - 6 && mx <= l.x + l.size + 6 && my >= f.y - 6) return true;
+            // Treat only the actual occupied row bands as UI; do not block the map
+            // in the empty rectangle between wrapped rows or beyond the last row.
+            java.util.Map<Integer, int[]> rows = new java.util.HashMap<>();
+            for (Slot sl : slots) {
+                int[] bounds = rows.computeIfAbsent(sl.y, ignored -> new int[]{sl.x, sl.x + sl.size});
+                bounds[0] = Math.min(bounds[0], sl.x);
+                bounds[1] = Math.max(bounds[1], sl.x + sl.size);
+            }
+            for (var entry : rows.entrySet()) {
+                int y = entry.getKey(),[] = entry.getValue();
+                if (mx >= bounds[0] - 6 && mx <= bounds[1] + 6 && my >= y - 6 && my <= y + 34) return true;
+            }
         }
         if (embeddedInMaqan && mx >= mapTypeBarX() - 2
                 && mx < mapTypeBarX() + mapTypeBarWidth() + 2
@@ -374,19 +393,19 @@ public class MapScreen extends Screen {
 
     private void drawHotbar(GuiGraphics g, int mx, int my) {
         if (slots.isEmpty()) return;
-        Slot f = slots.get(0), l = slots.get(slots.size() - 1);
-        bevel(g, f.x - 6, f.y - 6, l.x + l.size - f.x + 12, f.size + 12, true);
+        java.util.Map<Integer, int[]> rows = new java.util.HashMap<>();
+        for (Slot sl : slots) {
+            int[] bounds = rows.computeIfAbsent(sl.y, ignored -> new int[]{sl.x, sl.x + sl.size});
+            bounds[0] = Math.min(bounds[0], sl.x);
+            bounds[1] = Math.max(bounds[1], sl.x + sl.size);
+        }
+        for (int[] bounds : rows.values())
+            bevel(g, bounds[0] - 6, slots.stream().filter(sl -> sl.x >= bounds[0] && sl.x + sl.size <= bounds[1])
+                    .mapToInt(sl -> sl.y).findFirst().orElse(0) - 6, bounds[1] - bounds[0] + 12, 40, true);
         List<String> tiers = new ArrayList<>();
         if (ClientState.state != null) for (TitleData.Tier t : ClientState.state.titles.tiers) tiers.add(t.key);
-        int prevX = -1;
         for (int i = 0; i < slots.size(); i++) {
             Slot sl = slots.get(i);
-            if (prevX >= 0 && sl.x - prevX > sl.size + 4) {                                   // разделитель групп
-                int sx = sl.x - 6;
-                g.fill(sx, sl.y, sx + 2, sl.y + sl.size, 0xFF000000);
-                g.fill(sx + 2, sl.y, sx + 4, sl.y + sl.size, 0xFF5D5D66);
-            }
-            prevX = sl.x;
             boolean on = isCurrent(sl.key), hov = sl.hit(mx, my);
             bevel(g, sl.x, sl.y, sl.size, sl.size, !on);
             if (hov && !on) g.fill(sl.x + 2, sl.y + 2, sl.x + sl.size - 2, sl.y + sl.size - 2, 0x30FFFFFF);
@@ -1058,6 +1077,7 @@ public class MapScreen extends Screen {
         }
         if (overUi((int) mx, (int) my)) return true;
         draggingMap = button == 0 || button == 1 || button == 2;
+        mapDragButton = draggingMap ? button : -1;
         if (button == 0 && !panel.editing()) {
             Markers.Marker marker = markerAt(mx, my);
             if (marker != null) {
@@ -1137,8 +1157,11 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
-        dragOverview = false;
-        draggingMap = false;
+        if (dragOverview && button == 0) dragOverview = false;
+        if (draggingMap && button == mapDragButton) {
+            draggingMap = false;
+            mapDragButton = -1;
+        }
         return super.mouseReleased(mx, my, button);
     }
 
