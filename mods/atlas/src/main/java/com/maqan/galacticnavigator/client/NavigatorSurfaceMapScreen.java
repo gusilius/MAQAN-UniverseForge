@@ -58,6 +58,19 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             centerChunkZ=((int)Math.floor(p.z()))>>4;
             selectedSectionY=Math.floorDiv((int)Math.floor(p.y()),16);
         }
+        double[] savedViewport=NavigatorPlatformSelectionBridge.loadViewport(this.dimension);
+        if(savedViewport!=null){
+            zoom=Math.max(0.35,Math.min(4.0,savedViewport[2]));
+            double savedChunkX=savedViewport[0]/16.0;
+            double savedChunkZ=savedViewport[1]/16.0;
+            centerChunkX=(int)Math.floor(savedChunkX);
+            centerChunkZ=(int)Math.floor(savedChunkZ);
+            panX=(centerChunkX-savedChunkX)*18.0*zoom;
+            panY=(centerChunkZ-savedChunkZ)*18.0*zoom;
+            cameraYaw=Math.toRadians(savedViewport[3]);
+            cameraPitch=SurfaceTerrainProjection.clampPitch(Math.toRadians(savedViewport[4]));
+        }
+        NavigatorPlatformSelectionBridge.setViewType("EXPLORATION");
     }
 
     @Override protected void init(){
@@ -134,8 +147,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             centerChunkX=((int)Math.floor(player.x()))>>4;
             centerChunkZ=((int)Math.floor(player.z()))>>4;
         }
+        double viewportCenterX=(centerChunkX-panX/(18.0*zoom))*16.0;
+        double viewportCenterZ=(centerChunkZ-panY/(18.0*zoom))*16.0;
         NavigatorPlatformSelectionBridge.publishViewport(dimension,
-                centerChunkX * 16.0, centerChunkZ * 16.0, zoom, cameraYaw, cameraPitch);
+                viewportCenterX, viewportCenterZ, zoom,
+                Math.toDegrees(cameraYaw), Math.toDegrees(cameraPitch));
         double cell=18.0*zoom;
         List<NavigatorExplorationStore.ExploredChunk> chunks=NavigatorExplorationStore.chunks(dimension);
         if(!underground)refreshRouteIfPlayerMoved(player);
