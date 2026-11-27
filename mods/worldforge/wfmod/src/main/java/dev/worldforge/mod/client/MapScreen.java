@@ -1089,24 +1089,12 @@ public class MapScreen extends Screen {
                                       int mx, int my, LivingEntity commanderBody) {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
         boolean selected = marker.id.equals(selectedMarkerId);
-        boolean hovered = Math.abs(mx - x) <= 24 && Math.abs(my - y) <= 24;
         WorldObjectVisualCatalog.Profile visual = WorldObjectVisualCatalog.resolve(marker);
-        String symbol = switch (visual.icon()) {
-            case "army" -> "⚑";
-            case "capital" -> "★";
-            case "city", "settlement" -> "⌂";
-            case "village" -> "⌂";
-            case "castle" -> "♜";
-            case "port" -> "⚓";
-            case "ruin" -> "⌑";
-            case "caravan" -> "◆";
-            case "camp" -> "⌃";
-            case "temple" -> "✥";
-            case "mine" -> "⛏";
-            default -> "◇";
-        };
         int size = Math.max(16, Math.min(48,
                 (int) Math.round(visual.mapScale() * Math.sqrt(Math.max(0.16, zoom)))));
+        double hitRadius = Math.max(12.0, size * 0.62);
+        double hitDx = mx - x, hitDy = my - y;
+        boolean hovered = hitDx * hitDx + hitDy * hitDy <= hitRadius * hitRadius;
         int left = x - size / 2, top = y - size / 2;
         int realmColor = 0xFF000000 | (marker.rgb & 0xFFFFFF);
         int border = selected ? 0xFFFFD66B : hovered ? 0xFFE9D28B : realmColor;
@@ -1159,12 +1147,10 @@ public class MapScreen extends Screen {
             }
         }
         if (!renderedLeader) {
-            if ("army".equals(marker.type)) {
+            if ("army".equals(marker.type) || "army".equals(visual.icon())) {
                 drawArmyMiniature(g, x, y, size, realmColor, marker);
             } else {
-                int textWidth = font.width(symbol);
-                g.drawString(font, symbol, x - textWidth / 2,
-                        y - font.lineHeight / 2, selected ? 0xFFFFE7A0 : 0xFFF4F0E6, false);
+                drawSettlementMiniature(g, x, y, size, realmColor, visual.icon(), marker.type);
             }
         }
         if (selected || hovered) {
@@ -1172,6 +1158,135 @@ public class MapScreen extends Screen {
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
         }
     }
+    /**
+     * Architectural map miniatures drawn from vector primitives. These remain crisp at
+     * strategic zoom and communicate object class without relying on missing font glyphs.
+     */
+    private void drawSettlementMiniature(GuiGraphics g, int screenX, int screenY, int size,
+                                          int realmColor, String visualKind, String markerType) {
+        String kind = visualKind == null || visualKind.isBlank() ? markerType : visualKind;
+        int stone = 0xFFD5C29A, shadow = 0xFF46372A, roof = realmColor;
+        float scale = Math.max(0.72f, Math.min(1.85f, size / 25.0f));
+        g.pose().pushPose();
+        g.pose().translate(screenX, screenY, 0.0f);
+        g.pose().scale(scale, scale, 1.0f);
+        g.fill(-12, 9, 12, 12, 0x55301810);
+        switch (kind) {
+            case "capital" -> {
+                // Palace keep, paired towers and a small royal standard.
+                g.fill(-9, -2, 9, 9, shadow);
+                g.fill(-8, -5, 8, 8, stone);
+                g.fill(-12, -10, -5, 7, stone);
+                g.fill(5, -10, 12, 7, stone);
+                g.fill(-10, -12, -4, -9, roof);
+                g.fill(4, -12, 10, -9, roof);
+                g.fill(-3, -12, 4, 8, stone);
+                g.fill(-2, -15, 3, -12, roof);
+                g.fill(-1, -8, 2, 0, 0xFF33271D);
+                g.fill(7, -15, 8, -5, 0xFFD8C9A5);
+                g.fill(8, -15, 14, -11, roof);
+                g.fill(-6, 0, -4, 3, 0xFF80603A);
+                g.fill(4, 0, 6, 3, 0xFF80603A);
+            }
+            case "city", "settlement" -> {
+                // Walled town with a gatehouse and clustered roofs.
+                g.fill(-12, 1, 12, 9, stone);
+                g.fill(-10, -4, -3, 7, 0xFFB7A17B);
+                g.fill(-11, -7, -2, -3, roof);
+                g.fill(2, -7, 10, 7, 0xFFB7A17B);
+                g.fill(1, -10, 11, -6, roof);
+                g.fill(-2, -11, 3, 9, stone);
+                g.fill(-3, -14, 4, -10, roof);
+                g.fill(-1, 3, 2, 9, shadow);
+                g.fill(-12, 0, -9, 3, 0xFF80603A);
+                g.fill(9, 0, 12, 3, 0xFF80603A);
+            }
+            case "village" -> {
+                // One timber-and-thatch homestead.
+                g.fill(-9, -1, 9, 9, 0xFFB89A70);
+                g.fill(-11, -5, 0, 0, roof);
+                g.fill(-1, -8, 10, 0, 0xFF8C5A32);
+                g.fill(-2, 2, 2, 9, shadow);
+                g.fill(4, 2, 7, 5, 0xFF6B8A8D);
+                g.fill(-12, 8, 12, 10, 0xFF6F7047);
+            }
+            case "castle", "fort" -> {
+                // Compact fortified keep, crenellated curtain wall and gate.
+                g.fill(-12, -1, 12, 9, stone);
+                g.fill(-10, -11, -5, 8, 0xFFBBAA8B);
+                g.fill(5, -11, 10, 8, 0xFFBBAA8B);
+                g.fill(-11, -14, -4, -10, roof);
+                g.fill(4, -14, 11, -10, roof);
+                g.fill(-4, -7, 5, 8, stone);
+                g.fill(-5, -11, 6, -7, roof);
+                g.fill(-2, 2, 3, 9, shadow);
+                g.fill(-12, -3, -8, -1, 0xFF80603A);
+                g.fill(8, -3, 12, -1, 0xFF80603A);
+            }
+            case "port" -> {
+                // Warehouse and pier, with a mast and sail.
+                g.fill(-10, -4, 7, 7, stone);
+                g.fill(-11, -8, 8, -3, roof);
+                g.fill(8, -14, 9, 8, 0xFF684B30);
+                g.fill(9, -13, 15, -6, 0xFFE7D5AC);
+                g.fill(-12, 8, 13, 10, 0xFF557F91);
+                g.fill(-8, 10, -5, 12, 0xFF9C7848);
+                g.fill(2, 10, 5, 12, 0xFF9C7848);
+            }
+            case "mine" -> {
+                g.fill(-11, 2, 11, 9, 0xFF786D5D);
+                g.fill(-9, -5, -6, 4, shadow);
+                g.fill(6, -5, 9, 4, shadow);
+                g.fill(-10, -7, 10, -4, 0xFF9A835F);
+                g.fill(-2, -1, 3, 9, shadow);
+                g.fill(-1, -13, 1, -2, 0xFFD7C39B);
+                g.fill(-6, -9, 6, -7, 0xFFD7C39B);
+            }
+            case "temple" -> {
+                g.fill(-12, 6, 12, 9, stone);
+                g.fill(-10, -7, 10, 6, 0xFFE0D1AF);
+                for (int cx = -8; cx <= 8; cx += 8) g.fill(cx - 1, -6, cx + 2, 6, 0xFFB7A17B);
+                g.fill(-12, -9, 12, -6, roof);
+                g.fill(-7, -13, 7, -9, 0xFFE6D4A8);
+                g.fill(-1, -16, 2, -12, 0xFFFFD77A);
+            }
+            case "ruin" -> {
+                g.fill(-11, 4, 11, 9, stone);
+                g.fill(-10, -9, -6, 5, 0xFF8F8876);
+                g.fill(-10, -11, -5, -8, shadow);
+                g.fill(5, -5, 9, 6, 0xFF8F8876);
+                g.fill(-7, -1, -3, 4, shadow);
+                g.fill(1, 1, 5, 6, shadow);
+                g.fill(-12, 8, 12, 10, 0xFF6F7047);
+            }
+            case "caravan" -> {
+                // Pack animals and covered merchant wagon.
+                g.fill(-11, 0, 0, 7, 0xFF9C7547);
+                g.fill(-8, -5, -1, 1, 0xFFE1D0A8);
+                g.fill(-4, -8, 3, -4, roof);
+                g.fill(3, 2, 11, 7, 0xFF8A633E);
+                g.fill(4, -5, 10, 2, 0xFFD6C29A);
+                g.fill(5, -8, 10, -5, roof);
+                g.fill(-7, 7, -3, 10, shadow);
+                g.fill(6, 7, 10, 10, shadow);
+            }
+            case "camp" -> {
+                g.fill(-12, 7, 12, 10, 0xFF6F7047);
+                g.fill(-9, -7, 0, 7, 0xFFC6A36C);
+                g.fill(-10, -8, 1, -5, roof);
+                g.fill(1, -5, 10, 7, 0xFFB98E55);
+                g.fill(0, -7, 11, -4, 0xFF8A5A32);
+                g.fill(-1, 1, 2, 7, shadow);
+            }
+            default -> {
+                g.fill(-7, -7, 8, 8, stone);
+                g.renderOutline(-7, -7, 15, 15, roof);
+                g.fill(-2, -2, 3, 3, 0xFFFFD77A);
+            }
+        }
+        g.pose().popPose();
+    }
+
     /**
      * Compact tactical formation miniature. At strategic zoom it collapses to a single
      * readable standard-bearer; closer zoom reveals ranks, shields and marching animation.
@@ -1315,7 +1430,12 @@ public class MapScreen extends Screen {
             drawStrategicMarker(g, marker, point[0], point[1], mx, my,
                     leaderBodies.get(leaderUuid));
             boolean selected = marker.id.equals(selectedMarkerId);
-            boolean hovered = Math.abs(mx - point[0]) < 12 && Math.abs(my - point[1]) < 12;
+            WorldObjectVisualCatalog.Profile profile = WorldObjectVisualCatalog.resolve(marker);
+            double markerSize = Math.max(16.0, Math.min(48.0,
+                    profile.mapScale() * Math.sqrt(Math.max(0.16, zoom))));
+            double markerRadius = Math.max(12.0, markerSize * 0.62);
+            double markerDx = mx - point[0], markerDy = my - point[1];
+            boolean hovered = markerDx * markerDx + markerDy * markerDy <= markerRadius * markerRadius;
             if ((zoom > 1.15 || selected || hovered) && labelBudget > 0) {
                 String label = marker.name;
                 if ("army".equals(marker.type)) {
