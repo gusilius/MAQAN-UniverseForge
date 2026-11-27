@@ -248,6 +248,10 @@ public final class CommandScreen extends Screen {
                 && px >= width - 4 - 8 * commandButtonWidth() - 14) return true;
         if (overMiniMap(px, py)) return true;
         if (!embeddedInMaqan && onZoomSlider(px, py)) return true;
+        if (settlement != null && px >= 4 && px < 254
+                && py >= 34 && py < 34 + settlementSummaryHeight()) return true;
+        if (!CommandMode.selected().isEmpty() && px >= INSPECT_X && px < INSPECT_X + INSPECT_W
+                && py >= inspectY() && py < inspectY() + 96) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
     }
 
@@ -472,12 +476,18 @@ public final class CommandScreen extends Screen {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
+            // Consume clicks on every remaining UI surface before issuing world orders.
+            if (overPanel(x, y)) return true;
             if (picked != null) { place(shift); return true; }
             if (workMode >= 0) { workAreaDrag = true; dragging = true; dragX = x; dragY = y; return true; }
             dragging = true; dragX = x; dragY = y;
             return true;
         }
-        if (button == 2) { midDrag = true; return true; }
+        if (button == 2) {
+            if (overPanel(x, y)) return true;
+            midDrag = true;
+            return true;
+        }
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
             if (overPanel(x, y)) return true;
@@ -650,7 +660,8 @@ public final class CommandScreen extends Screen {
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
-        if (button == 2) {
+        if (button == 2 && !midDrag) return false;
+        if (button == 2 && midDrag) {
             if (hasShiftDown()) {
                 // Shift + middle drag pans the tactical map in screen space;
                 // plain middle drag remains the free-look orbit gesture.
