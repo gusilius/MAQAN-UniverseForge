@@ -343,6 +343,81 @@ CPU/GPU tile baking имеет контрольную проверку резу�
 
 Ограничение: эти миниатюры — процедурная 2D-картография, а не готовые 3D-ассеты поселений. Для AAA-финала нужны авторские модели/текстуры, несколько LOD, освещение и согласованная отрисовка в стратегической карте, RTS и Diorama.
 
+## 7.4 Единый расширяемый каталог визуальных объектов
+
+Цель каталога — не зашивать модели в код карты. Любой модуль или ресурс-пак должен добавлять визуальные варианты декларативно, а игрок — выбирать вариант при создании объекта или позднее.
+
+### Идентичность и совместимость
+
+`WorldObjectVisualCatalog` хранит визуальные профили с постоянными namespaced ID. Профиль содержит:
+- категорию и иконку;
+- масштаб карты, пороги icon/model LOD;
+- `mapTexture`, `mapItem`, `rtsModel`, `dioramaModel`;
+- имя и описание карточки каталога;
+- `previewTexture`;
+- `assetPack`, `rig`, `animationSet`;
+- теги и `compatibleTypes`;
+- доступность выбора и признак профиля по умолчанию.
+
+Каталог загружается из ресурсов по пути:
+
+```
+assets/<namespace>/worldforge/visuals/<profile-file>.json
+```
+
+Идентификатор в JSON обязан быть стабильным и namespaced, например `mykingdom:army.knight_guard`. Добавление нового варианта не требует менять switch в `MapScreen`: профиль попадает в общий каталог, а выбор ограничивается совместимыми типами.
+
+### Пример манифеста
+
+```json
+{
+  "id": "mykingdom:army.knight_guard",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Королевская гвардия",
+  "description": "Тяжёлая пехота со знаменем дома",
+  "mapScale": 40,
+  "mapTexture": "mykingdom:textures/map/knight_guard.png",
+  "previewTexture": "mykingdom:textures/catalog/knight_guard.png",
+  "mapItem": "minecraft:shield",
+  "rtsModel": "mykingdom:models/knight_guard.glb",
+  "dioramaModel": "mykingdom:models/knight_guard.glb",
+  "assetPack": "mykingdom:royal_army",
+  "rig": "mykingdom:humanoid_heavy",
+  "animationSet": "mykingdom:infantry",
+  "iconLod": 0,
+  "modelLod": 2,
+  "tags": ["infantry", "royal", "heavy"],
+  "compatibleTypes": ["army", "unit", "corps", "commander"],
+  "selectable": true,
+  "defaultForCategory": false
+}
+```
+
+### Игровой процесс
+
+- На политической карте клавиша `O` открывает создание объекта в координатах курсора.
+- Игрок выбирает тип объекта, вводит название и выбирает профиль или `Автоматически`.
+- Для уже выбранного объекта клавиша `V` открывает каталог совместимых профилей.
+- Для автоматического выбора сначала ищется профиль точного типа (`worldforge:city`, `worldforge:army`), затем профиль категории и общий fallback.
+- Список в каталоге показывает имя, ID, описание и предметный preview; выбор отправляется серверу, а не меняет только локальную картинку.
+- Команды `/worldforge marker addat <type> <visual> <x> <z> <name>`, `/worldforge marker addwith <type> <visual> <name>` и `/worldforge marker visual <id> <profile|auto>` обеспечивают тот же workflow для администраторов и сценариев.
+
+### Стабильность и динамические армии
+
+Явный визуальный профиль хранится рядом с политическими маркерами. Для provider-owned динамических объектов сохраняется отдельная таблица override по стабильному ID. Когда провайдер снова добавляет объект в snapshot через `Markers.addSnapshot`, override применяется к нему. Поэтому выбор визуала для армии или командира не требует превращать динамическую армию в отдельную пользовательскую метку и не создаёт дубликат игрового персонажа.
+
+Старые `markers.json` продолжают читаться: новые поля необязательны. Пустой профиль означает автоматический выбор.
+
+### Примеры, добавленные в репозиторий
+
+В ресурсах MAQAN добавлены профили:
+- `maqan:army.infantry`, `maqan:army.cavalry`, `maqan:army.siege`;
+- `maqan:commander.knight`, `maqan:commander.banneret`;
+- `maqan:city.walled`, `maqan:castle.royal`, `maqan:village.rural`.
+
+Это реальные записи каталога и варианты выбора с предметными preview. Они пока не содержат готовых GLB-моделей. Поля `rtsModel`, `dioramaModel`, `rig` и `animationSet` уже входят в контракт профиля, но полноценная загрузка GLB, skinning, animation playback и GPU-отрисовка для этих профилей ещё не подключены. Наличие ссылки в JSON нельзя считать доказательством отрисовки модели.
+
 ## 8. Запреты на ложную готовность
 
 - Растровая изометрическая карта не называется полноценной 3D-сценой.
