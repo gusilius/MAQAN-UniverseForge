@@ -30,6 +30,35 @@ public final class NavigatorPlatformSelectionBridge {
         }
     }
 
+    public static void publishViewport(String dimension, double centerX, double centerZ,
+                                       double zoom, double yaw, double pitch) {
+        try {
+            Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceMapState");
+            state.getMethod("setViewport", String.class, double.class, double.class,
+                    double.class, double.class, double.class).invoke(null,
+                    clean(dimension), centerX, centerZ, zoom, yaw, pitch);
+        } catch (ClassNotFoundException ignored) {
+            // Atlas remains independent from the optional MAQAN Platform.
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // A workspace bridge must never interrupt map rendering.
+        }
+    }
+
+    public static void setViewType(String typeName) {
+        if (typeName == null || typeName.isBlank()) return;
+        try {
+            Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceMapState");
+            Class<?> type = Class.forName("dev.maqan.platform.client.WorkspaceMapState$ViewType");
+            Object value = Enum.valueOf((Class<? extends Enum>) type.asSubclass(Enum.class),
+                    typeName.trim().toUpperCase(java.util.Locale.ROOT));
+            state.getMethod("setViewType", type).invoke(null, value);
+        } catch (ClassNotFoundException ignored) {
+            // Optional host not installed.
+        } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
+            // Unknown future map types are ignored by older host versions.
+        }
+    }
+
     public static void clear() {
         publish("", "", "", "", "");
     }
