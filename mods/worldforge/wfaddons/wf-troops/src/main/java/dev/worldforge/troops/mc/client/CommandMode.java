@@ -235,6 +235,40 @@ public final class CommandMode {
         return hit.getType() == HitResult.Type.MISS ? null : hit.getLocation();
     }
 
+    /**
+     * Zoom around the world point currently under the cursor. The view direction
+     * is unchanged by dolly zoom, so intersect its screen ray with the anchor
+     * plane after changing distance and shift the focus by the resulting delta.
+     */
+    static void zoomAtCursor(Minecraft mc, double sx, double sy, double steps) {
+        if (mc == null || mc.level == null || mc.player == null || invVp == null
+                || !Double.isFinite(steps) || Math.abs(steps) < 1.0e-6) {
+            if (Double.isFinite(steps)) RIG.zoomBy(steps);
+            return;
+        }
+        Vec3 anchor = groundAt(mc, sx, sy);
+        if (anchor == null) {
+            RIG.zoomBy(steps);
+            frame(mc);
+            return;
+        }
+        double[] ray = Projection.ray(invVp, sx, sy,
+                mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+        Vec3 direction = new Vec3(ray[0], ray[1], ray[2]);
+        RIG.zoomBy(steps);
+        double[] desired = RIG.position(groundY);
+        Vec3 origin = new Vec3(desired[0], desired[1], desired[2]);
+        if (Math.abs(direction.y) > 1.0e-5) {
+            double distance = (anchor.y - origin.y) / direction.y;
+            if (distance > 0.0 && distance < 512.0) {
+                Vec3 after = origin.add(direction.scale(distance));
+                RIG.focusOn(RIG.fx + anchor.x - after.x, RIG.fz + anchor.z - after.z);
+            }
+        }
+        RIG.clamp(mc.player.getX(), mc.player.getZ());
+        frame(mc);
+    }
+
     /** Exact block under the cursor; used for single-tree/single-vein orders rather than a nearby surface point. */
     static net.minecraft.core.BlockPos blockAt(Minecraft mc, double sx, double sy) {
         if (mc == null || mc.level == null || invVp == null) return null;

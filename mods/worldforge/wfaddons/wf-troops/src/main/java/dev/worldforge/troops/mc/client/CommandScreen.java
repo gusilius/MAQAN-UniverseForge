@@ -520,7 +520,11 @@ public final class CommandScreen extends Screen {
         if (buildOpen && inBuildPanel(x, y)) {
             int max = Math.max(0, visibleDefs().size() - rowsFit());
             scroll = Math.max(0, Math.min(max, scroll + (delta < 0 ? 1 : -1)));
-        } else CommandMode.RIG.zoomBy(delta);
+        } else if (overPanel(x, y)) {
+            return true; // UI surfaces consume the wheel; do not zoom the world behind them.
+        } else {
+            CommandMode.zoomAtCursor(minecraft, x, y, delta);
+        }
         return true;
     }
 
