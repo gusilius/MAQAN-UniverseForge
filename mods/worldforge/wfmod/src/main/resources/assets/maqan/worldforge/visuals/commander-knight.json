@@ -1,0 +1,22 @@
+{
+  "id": "maqan:commander.knight",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Командир · рыцарь",
+  "description": "Персональная миниатюра полководца в тяжёлых доспехах",
+  "mapScale": 38,
+  "mapItem": "minecraft:diamond_chestplate",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "army",
+    "commander"
+  ],
+  "tags": [
+    "commander",
+    "knight",
+    "hero"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}
