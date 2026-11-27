@@ -57,6 +57,10 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private static final int[] RADAR_RANGES={64,160,320,640};
     private int radarRangeIndex=1;
     private double radarRangeBlocks(){return RADAR_RANGES[radarRangeIndex];}
+    private Object radarCacheLevel;
+    private long radarCacheTick=Long.MIN_VALUE;
+    private String radarCacheKey="";
+    private List<Entity> radarCache=List.of();
     private static final int BACKGROUND=0xF0060B16;
 
     private record ControlBounds(int x, int y, int width) {}
@@ -373,11 +377,40 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         if(radarFilter==RadarFilter.OFF||terrain3D||player==null||!dimension.equals(player.dimensionId()))return null;
         Minecraft mc=Minecraft.getInstance();
         if(mc.level==null)return null;
+        String cacheKey=radarFilter.name()+":"+radarRangeIndex;
+        long gameTick=mc.level.getGameTime();
+        if(radarCacheLevel!=mc.level||!cacheKey.equals(radarCacheKey)
+                ||gameTick-radarCacheTick>=3L||gameTick<radarCacheTick){
+            List<Entity> candidates=new ArrayList<>();
+            double range=radarRangeBlocks(),rangeSq=range*range;
+            for(Entity entity:mc.level.entitiesForRendering()){
+                if(entity==null||!entity.isAlive()||entity==mc.player)continue;
+                double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+                if(dx*dx+dz*dz>rangeSq)continue;
+                boolean hostile=entity instanceof Monster;
+                boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+                boolean otherPlayer=entity instanceof Player;
+                boolean other=!hostile&&!passive&&!otherPlayer;
+                if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+                if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+                if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+                if(radarFilter==RadarFilter.OTHER&&!other)continue;
+                candidates.add(entity);
+            }
+            candidates.sort(Comparator.comparingDouble(entity->{
+                double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+                return dx*dx+dz*dz;
+            }));
+            radarCache=List.copyOf(candidates);
+            radarCacheLevel=mc.level;
+            radarCacheTick=gameTick;
+            radarCacheKey=cacheKey;
+        }
         Entity hovered=null;
         double nearest=100.0;
         int drawn=0;
-        for(Entity entity:mc.level.entitiesForRendering()){
-            if(entity==null||!entity.isAlive()||entity==mc.player)continue;
+        for(Entity entity:radarCache){
+            if(entity==null||!entity.isAlive())continue;
             double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
             double distanceSq=dx*dx+dz*dz;
             double radarRange=radarRangeBlocks();
