@@ -122,7 +122,7 @@ public final class WorldObjectVisualCatalog extends SimplePreparableReloadListen
         List<Entry> choices = choicesFor(objectType);
         if (choices.isEmpty()) return findEntry("worldforge:other");
         String category = categoryForType(clean(objectType).toLowerCase(Locale.ROOT));
-        Entry exactType = findEntry("worldforge:" + type);
+        Entry exactType = findEntry("worldforge:" + clean(objectType).toLowerCase(Locale.ROOT));
         if (exactType != null && choices.stream().anyMatch(e -> e.id().equals(exactType.id()))) return exactType;
         return choices.stream().filter(Entry::defaultForCategory).findFirst()
                 .orElseGet(() -> choices.stream().filter(e -> e.category().equals(category)).findFirst()
