@@ -377,7 +377,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             }
             drawn++;
         }
-        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)radarRange+" blocks · SHIFT+CLICK: RANGE";
+        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)radarRangeBlocks()+" blocks · SHIFT+CLICK: RANGE";
         g.drawString(font,label,left+8,top+8,0xFF9BD7F1,false);
         return hovered;
     }
