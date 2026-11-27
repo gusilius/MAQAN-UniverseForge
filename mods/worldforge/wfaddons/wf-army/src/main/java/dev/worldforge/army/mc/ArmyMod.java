@@ -69,6 +69,31 @@ public class ArmyMod {
             for (MapData m : WorldForgeMod.loadedMaps().values()) if (EditorManager.editorFor(m) == editor) return armies(m);
             return null;
         });
+        dev.worldforge.mod.MapMarkerProviders.register("wf_army", (server, map) -> {
+            if (map.titles == null) return List.of();
+            List<dev.worldforge.mod.Markers.Marker> markers = new ArrayList<>();
+            ArmyEngine engine = armies(map);
+            for (dev.worldforge.army.Army army : engine.armies.values()) {
+                if (army == null || army.men() <= 0 || army.location <= 0) continue;
+                dev.worldforge.mod.TitleData.Title location = map.titles.get(army.location);
+                if (location == null) continue;
+                dev.worldforge.mod.Markers.Marker marker = new dev.worldforge.mod.Markers.Marker();
+                marker.id = "wf_army:" + map.name + ":" + army.id;
+                marker.name = army.name == null || army.name.isBlank() ? "Армия " + army.id : army.name;
+                marker.type = "army";
+                marker.x = location.capX;
+                marker.z = location.capZ;
+                dev.worldforge.mod.TitleData.Realm realm = map.titles.realms.get(army.realm);
+                marker.rgb = realm == null ? location.rgb : realm.rgb;
+                marker.desc = "armyId=" + army.id + ";men=" + army.men()
+                        + ";realm=" + (army.realm == null ? "" : army.realm)
+                        + ";commander=" + (army.commander == null ? "" : army.commander)
+                        + ";commanderId=" + (army.commanderGlobalId == null ? "" : army.commanderGlobalId)
+                        + ";title=" + army.location + ";moving=" + army.moving();
+                markers.add(marker);
+            }
+            return markers;
+        });
     }
 
     /** Read-only strategic engines for cross-module world snapshots; ownership stays in wf-army. */

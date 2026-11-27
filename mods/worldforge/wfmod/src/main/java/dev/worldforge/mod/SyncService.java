@@ -69,7 +69,9 @@ public final class SyncService {
     }
 
     private static byte[] markerBytes(MinecraftServer server, MapData m) {
-        return EditorManager.markers(server, m).toJson().getBytes(StandardCharsets.UTF_8);
+        Markers snapshot = Markers.fromJson(EditorManager.markers(server, m).toJson());
+        for (Markers.Marker marker : MapMarkerProviders.collect(server, m)) snapshot.addSnapshot(marker);
+        return snapshot.toJson().getBytes(StandardCharsets.UTF_8);
     }
 
     @SubscribeEvent

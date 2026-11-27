@@ -11,7 +11,7 @@ import java.util.Map;
 
 /** Общие метки карты: города, замки, порты, руины и т.д. Хранятся в markers.json рядом с правками границ. Без зависимостей от Minecraft. */
 public final class Markers {
-    public static final List<String> TYPES = List.of("city", "castle", "port", "ruin", "camp", "temple", "mine", "other");
+    public static final List<String> TYPES = List.of("city", "settlement", "village", "capital", "castle", "port", "ruin", "camp", "temple", "mine", "army", "caravan", "other");
 
     public static final class Marker {
         public String id, name, type, desc = "";
@@ -43,6 +43,14 @@ public final class Markers {
         list.add(m);
         dirty = true;
         return m;
+    }
+
+    /** Provider-owned live marker added to an outgoing snapshot; does not dirty persisted user markers. */
+    public void addSnapshot(Marker marker) {
+        if (marker == null || marker.id == null || marker.id.isBlank()
+                || marker.name == null || marker.name.isBlank()
+                || marker.type == null || !TYPES.contains(marker.type)) return;
+        list.add(marker);
     }
 
     public boolean remove(String q) {
