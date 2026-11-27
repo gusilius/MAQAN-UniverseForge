@@ -45,6 +45,8 @@ import java.util.List;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.prefs.Preferences;
+import java.util.prefs.BackingStoreException;
 
 /**
  * Командный режим (R): камера отвязывается от игрока и летает над миром как в стратегии (вид «Сверху» и «Тактика»; Tab - переключить),
@@ -79,6 +81,55 @@ public final class CommandMode {
     private static double cameraSmoothX, cameraSmoothY, cameraSmoothZ;
     private static long lastFrame;
     private static CameraRig.View lastView = CameraRig.View.SKY;
+    private static final Preferences CAMERA_PREFS =
+            Preferences.userNodeForPackage(CommandMode.class).node("camera-state");
+
+    private static String cameraDimension(Minecraft mc) {
+        return mc.level == null ? "" : mc.level.dimension().location().toString();
+    }
+
+    private static String cameraKey(String dimension) {
+        return "d." + Integer.toUnsignedString(dimension.hashCode(), 16);
+    }
+
+    private static boolean restoreCamera(Minecraft mc) {
+        String dimension = cameraDimension(mc);
+        if (dimension.isBlank()) return false;
+        String key = cameraKey(dimension);
+        if (!dimension.equals(CAMERA_PREFS.get("dimension." + key, ""))) return false;
+        try {
+            CameraRig.View view = CameraRig.View.valueOf(CAMERA_PREFS.get("view." + key, ""));
+            CameraRig.Snapshot saved = new CameraRig.Snapshot(view,
+                    CAMERA_PREFS.getDouble("fx." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("fz." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("yaw." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("pitch." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("zoom." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("leash." + key, Double.NaN));
+            return RIG.restore(saved);
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static void persistCamera(Minecraft mc) {
+        String dimension = cameraDimension(mc);
+        if (dimension.isBlank()) return;
+        CameraRig.Snapshot saved = RIG.snapshot();
+        String key = cameraKey(dimension);
+        CAMERA_PREFS.put("dimension." + key, dimension);
+        CAMERA_PREFS.put("view." + key, saved.view().name());
+        CAMERA_PREFS.putDouble("fx." + key, saved.fx());
+        CAMERA_PREFS.putDouble("fz." + key, saved.fz());
+        CAMERA_PREFS.putDouble("yaw." + key, saved.yaw());
+        CAMERA_PREFS.putDouble("pitch." + key, saved.pitch());
+        CAMERA_PREFS.putDouble("zoom." + key, saved.zoom());
+        CAMERA_PREFS.putDouble("leash." + key, saved.leash());
+        try { CAMERA_PREFS.flush(); }
+        catch (BackingStoreException ignored) {
+            // A failed preference write must never interrupt camera restoration or gameplay.
+        }
+    }
 
     @SubscribeEvent
     public static void keys(RegisterKeyMappingsEvent e) {
@@ -376,6 +427,8 @@ public final class CommandMode {
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
+        if (!restoreCamera(mc)) RIG.focusOn(mc.player.getX(), mc.player.getZ());
+        lastView = RIG.view;
         groundY = mc.player.getY();
         groundInitialized = false;
         cameraPositionInitialized = false;
@@ -390,6 +443,7 @@ public final class CommandMode {
     static void exit(Minecraft mc) {
         if (!active) return;
         active = false; // Set first: removing the hosted view calls removed() synchronously.
+        persistCamera(mc);
         lastView = RIG.view;
         SEL.clear();
         CommandScreen hosted = hostedCommandView;
@@ -416,6 +470,7 @@ public final class CommandMode {
         if (view == null || hostedCommandView != view || !active) return;
         Minecraft mc = Minecraft.getInstance();
         active = false;
+        persistCamera(mc);
         groundInitialized = false;
         cameraPositionInitialized = false;
         lastView = RIG.view;
@@ -602,6 +657,7 @@ public final class CommandMode {
 
         @SubscribeEvent
         public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+            if (active) persistCamera(Minecraft.getInstance());
             active = false; firstPersonCommand = false; camEntity = null;
             groundInitialized = false; cameraPositionInitialized = false;
             hostedCommandView = null; SEL.clear();
