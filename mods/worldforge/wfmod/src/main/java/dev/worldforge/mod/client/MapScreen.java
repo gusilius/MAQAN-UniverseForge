@@ -1196,7 +1196,6 @@ public class MapScreen extends Screen {
         int columns = figures <= 1 ? 1 : figures <= 3 ? 2 : 3;
         int rows = (figures + columns - 1) / columns;
         g.fill(-12, 9, 12, 12, 0x55301810);
-        int rank = 0;
         for (int i = 0; i < figures; i++) {
             int col = i % columns;
             int row = i / columns;
@@ -1216,7 +1215,6 @@ public class MapScreen extends Screen {
             g.fill(px - 6, py - 1, px - 4, py + 4, 0xFFE0C995);
             g.fill(px - 5, py, px - 4, py + 3, realmColor);
             g.fill(px + 5, py - 10, px + 6, py + 5, 0xFFD8C9A5);
-            rank++;
         }
         // Command standard is anchored to the centre and remains visible at all zooms.
         g.fill(7, -15, 8, 6, 0xFFD8C9A5);
