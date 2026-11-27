@@ -402,6 +402,7 @@ public class MapScreen extends Screen {
 
     private List<MapTypeButton> mapTypeButtons() {
         boolean compact = width < 440;
+        boolean micro = width < 300;
         return List.of(
                 new MapTypeButton("political", compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
                 new MapTypeButton("exploration", compact ? "EXPLORE" : "EXPLORATION", mapTypeButtonWidth(96)),
@@ -409,7 +410,8 @@ public class MapScreen extends Screen {
     }
 
     private int mapTypeButtonWidth(int preferred) {
-        int available = Math.max(48, (width - 58) / 3);
+        int availableWidth = panel.isOpen() ? panel.leftEdge() - 16 : width - 58;
+        int available = Math.max(28, (availableWidth - MAP_TYPE_GAP * 2) / 3);
         return Math.min(preferred, available);
     }
 
@@ -421,7 +423,9 @@ public class MapScreen extends Screen {
     private int mapTypeBarX() {
         // Reserve the persistent side-panel rail on the right; controls must never
         // be painted beneath it or become impossible to click.
-        return Math.max(8, width - mapTypeBarWidth() - 50);
+        return panel.isOpen()
+                ? Math.max(8, panel.leftEdge() - mapTypeBarWidth() - 8)
+                : Math.max(8, width - mapTypeBarWidth() - 50);
     }
 
     private void drawMapTypeBar(GuiGraphics g, int mx, int my) {
