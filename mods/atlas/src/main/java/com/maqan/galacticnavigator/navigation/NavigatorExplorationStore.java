@@ -35,6 +35,7 @@ public final class NavigatorExplorationStore {
     private static final Map<String,Map<String,ExploredChunk>> CACHE=new ConcurrentHashMap<>();
     /** Immutable render snapshots avoid sorting the full exploration history every frame. */
     private static final Map<String,List<ExploredChunk>> CHUNK_SNAPSHOTS=new ConcurrentHashMap<>();
+    private static final Map<String,NavigableMap<Integer,List<ExploredChunk>>> CHUNK_X_INDEX=new ConcurrentHashMap<>();
     private static final Type LAYER_MAP_TYPE=new TypeToken<Map<String,ExploredLayer>>(){}.getType();
     private static final Map<String,Map<String,ExploredLayer>> LAYER_CACHE=new ConcurrentHashMap<>();
     private static final Map<String,List<ExploredLayer>> LAYER_SNAPSHOTS=new ConcurrentHashMap<>();
@@ -86,6 +87,7 @@ public final class NavigatorExplorationStore {
                 biome==null?"unknown":biome,mapColor,
                 previous==null?now:previous.firstVisited(),now,safeColors,safeHeights));
         CHUNK_SNAPSHOTS.remove(dimension);
+        CHUNK_X_INDEX.remove(dimension);
         save(dimension,chunks);
     }
 
@@ -139,6 +141,24 @@ public final class NavigatorExplorationStore {
         return CHUNK_SNAPSHOTS.computeIfAbsent(dimension,id->data(id).values().stream()
                 .sorted(Comparator.comparingInt(ExploredChunk::chunkX).thenComparingInt(ExploredChunk::chunkZ))
                 .toList());
+    }
+
+    /** Spatially bounded immutable view for map rendering; avoids scanning remote discoveries. */
+    public static synchronized List<ExploredChunk> chunksInBounds(String dimension,
+            int minChunkX,int minChunkZ,int maxChunkX,int maxChunkZ) {
+        if(dimension==null||dimension.isBlank()||minChunkX>maxChunkX||minChunkZ>maxChunkZ)return List.of();
+        NavigableMap<Integer,List<ExploredChunk>> index=CHUNK_X_INDEX.computeIfAbsent(dimension,id->{
+            NavigableMap<Integer,List<ExploredChunk>> grouped=new TreeMap<>();
+            for(ExploredChunk chunk:data(id).values())
+                grouped.computeIfAbsent(chunk.chunkX(),ignored->new ArrayList<>()).add(chunk);
+            grouped.replaceAll((x,list)->List.copyOf(list));
+            return Collections.unmodifiableNavigableMap(grouped);
+        });
+        List<ExploredChunk> visible=new ArrayList<>();
+        for(List<ExploredChunk> column:index.subMap(minChunkX,true,maxChunkX,true).values())
+            for(ExploredChunk chunk:column)
+                if(chunk.chunkZ()>=minChunkZ&&chunk.chunkZ()<=maxChunkZ)visible.add(chunk);
+        return List.copyOf(visible);
     }
     public static synchronized boolean explored(String dimension,int chunkX,int chunkZ) {
         return data(dimension).containsKey(key(chunkX,chunkZ));
