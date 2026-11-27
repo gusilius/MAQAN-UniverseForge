@@ -131,6 +131,7 @@ public final class PlatformShellScreen extends Screen {
 
     private boolean attachProviderView(CapabilityRegistry.Capability capability, Screen view) {
         if (capability == null || view == null) return false;
+        WorkspaceMapState.setViewType(mapViewType(view, capability));
         try {
             view.getClass().getMethod("setEmbeddedInMaqan", boolean.class).invoke(view, true);
         } catch (ReflectiveOperationException ignored) {
@@ -153,6 +154,20 @@ public final class PlatformShellScreen extends Screen {
             initViewInContent(view);
         }
         return true;
+    }
+
+    private static WorkspaceMapState.ViewType mapViewType(Screen view,
+                                                               CapabilityRegistry.Capability capability) {
+        String className = view.getClass().getName();
+        if (className.endsWith(".MapScreen")) return WorkspaceMapState.ViewType.POLITICAL;
+        if (className.endsWith(".NavigatorSurfaceMapScreen"))
+            return WorkspaceMapState.ViewType.EXPLORATION;
+        if (className.endsWith(".NavigatorTerrain3DScreen"))
+            return WorkspaceMapState.ViewType.DIORAMA_3D;
+        if (className.endsWith(".NavigatorScreen"))
+            return WorkspaceMapState.ViewType.NAVIGATION;
+        if ("POLITICS".equals(capability.domain())) return WorkspaceMapState.ViewType.POLITICAL;
+        return WorkspaceMapState.viewType();
     }
 
     /** True only while this exact provider view is the active content of the shared shell. */
