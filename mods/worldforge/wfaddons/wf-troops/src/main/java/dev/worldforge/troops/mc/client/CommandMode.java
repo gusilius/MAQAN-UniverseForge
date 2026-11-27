@@ -422,10 +422,10 @@ public final class CommandMode {
                 mc.player.blockPosition().getY(), gz);
         if (mc.level.hasChunkAt(focusProbe)) {
             double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
-            // Heightmap returns the first free Y above the surface. Snap on first valid
-            // sample, then damp subsequent terrain changes without retaining stale Y.
-            if (!Double.isFinite(groundY) || Math.abs(groundY - mc.player.getY()) < 0.01 && lastFrame == 0L)
-                groundY = target;
+            // Never interpolate upward through a hillside: when the focus moves
+            // onto higher terrain, raise the pivot immediately. Descending is damped
+            // so the camera remains above the lower surface throughout the transition.
+            if (!Double.isFinite(groundY) || target > groundY) groundY = target;
             else groundY += (target - groundY) * Math.min(1, dt * 10);
         } else {
             // Keep the camera anchored to the player's known safe height when the focus

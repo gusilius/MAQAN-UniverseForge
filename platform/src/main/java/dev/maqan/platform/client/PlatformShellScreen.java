@@ -1175,9 +1175,9 @@ public final class PlatformShellScreen extends Screen {
             }
             if (commandCameraActive() && width >= 480) {
                 int cameraX = cameraControlX();
-                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 166) {
-                    int index = (int) ((mx - cameraX) / 34);
-                    if (index >= 0 && index < 5 && mx < cameraX + index * 34 + 30) {
+                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 108) {
+                    int index = (int) ((mx - cameraX) / 36);
+                    if (index >= 0 && index < 5) {
                         setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"}[index]);
                         return true;
                     }
