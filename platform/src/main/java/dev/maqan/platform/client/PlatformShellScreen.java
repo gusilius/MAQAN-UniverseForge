@@ -1238,8 +1238,10 @@ public final class PlatformShellScreen extends Screen {
             if (y + 14 > p.y + p.h - 6) break;
             g.drawString(font, WorkspaceMapLayerRegistry.isVisible(layer.id()) ? "✓" : "—",
                     p.x + 12, y, WorkspaceTheme.ACCENT, false);
-            g.drawString(font, trimInspector(layer.label(), p.w - 78),
+            g.drawString(font, trimInspector(layer.label(), p.w - 118),
                     p.x + 28, y, TEXT, false);
+            g.drawString(font, Math.round(WorkspaceMapLayerRegistry.opacity(layer.id()) * 100) + "%",
+                    p.x + p.w - 70, y, MUTED, false);
             g.drawString(font, "↑", p.x + p.w - 34, y, MUTED, false);
             g.drawString(font, "↓", p.x + p.w - 18, y, MUTED, false);
             y += 16;
@@ -1785,6 +1787,20 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        Panel toolsPanel = panels.get("tools");
+        if (toolsPanel != null && toolsPanel.visible && !toolsPanel.minimized
+                && mouseX >= toolsPanel.x && mouseX <= toolsPanel.x + toolsPanel.w
+                && mouseY >= toolsPanel.y + 122 && mouseY < toolsPanel.y + toolsPanel.h - 4) {
+            int index = (int) ((mouseY - (toolsPanel.y + 122)) / 16);
+            List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
+            if (index >= 0 && index < layers.size()) {
+                WorkspaceMapLayerRegistry.Layer layer = layers.get(index);
+                float opacity = WorkspaceMapLayerRegistry.opacity(layer.id());
+                WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                        Math.max(0f, Math.min(1f, opacity + (delta > 0 ? 0.05f : -0.05f))));
+                return true;
+            }
+        }
         Panel nav = panels.get("navigation");
         if (nav != null && nav.visible && !nav.minimized
                 && mouseX >= nav.x && mouseX <= nav.x + nav.w
