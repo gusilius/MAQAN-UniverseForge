@@ -1,0 +1,22 @@
+{
+  "id": "maqan:commander.banneret",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Командир · знаменосец",
+  "description": "Командир с отдельным полковым знаменем",
+  "mapScale": 37,
+  "mapItem": "minecraft:shield",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "army",
+    "commander"
+  ],
+  "tags": [
+    "commander",
+    "banner",
+    "hero"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}
