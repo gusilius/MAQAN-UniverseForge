@@ -21,6 +21,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -1053,6 +1054,12 @@ public class MapScreen extends Screen {
     private void drawMarkers(GuiGraphics g, int mx, int my) {
         Minecraft mc = Minecraft.getInstance();
         Map<String, LivingEntity> leaderBodies = leaderBodies();
+        int clipLeft=Math.max(0,(int)Math.floor(camX));
+        int clipTop=Math.max(BAR,(int)Math.floor(camY));
+        int clipRight=Math.min(width,(int)Math.ceil(camX+MapTextures.w*zoom));
+        int clipBottom=Math.min(height-(embeddedInMaqan?0:BOTTOM),(int)Math.ceil(camY+MapTextures.h*zoom));
+        if(clipRight<=clipLeft||clipBottom<=clipTop)return;
+        g.enableScissor(clipLeft,clipTop,clipRight,clipBottom);
         List<Markers.Marker> visibleMarkers = new ArrayList<>(ClientState.markers.list());
         visibleMarkers.sort(Comparator.comparingInt(marker -> {
             if (marker.id.equals(selectedMarkerId)) return -5;
@@ -1108,6 +1115,7 @@ public class MapScreen extends Screen {
             g.fill((int) point[0] - 3, (int) point[1] - 3, (int) point[0] + 3, (int) point[1] + 3, 0xFFFFFFFF);
             g.fill((int) point[0] - 2, (int) point[1] - 2, (int) point[0] + 2, (int) point[1] + 2, 0xFFFF3B3B);
         }
+        g.disableScissor();
     }
 
     private List<Component> describe(int prov, boolean full) {
