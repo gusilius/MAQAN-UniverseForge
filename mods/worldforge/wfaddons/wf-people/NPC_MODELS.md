@@ -1,13 +1,10 @@
 # Custom NPC model assets
 
-The built-in NPC model catalog uses **binary glTF 2.0 (.glb)** at runtime. Keep the
-original Blockbench `.bbmodel` in the authoring/source-artifact area; do not ship it
-as the runtime mesh. A GLB can contain the mesh, skeleton, animation clips, materials,
-and embedded texture data in one binary asset.
+The built-in NPC model pipeline uses **binary glTF 2.0 (.glb)** at runtime. Keep the
+original Blockbench `.bbmodel` as the editable authoring source; ship the optimized
+GLB as the runtime mesh.
 
 ## Resource layout
-
-Place each profile under the `wf_people` resource namespace:
 
 ```text
 src/main/resources/assets/wf_people/
@@ -16,7 +13,7 @@ src/main/resources/assets/wf_people/
     model.glb
 ```
 
-A manifest is discovered automatically during Minecraft resource reload:
+Example manifest:
 
 ```json
 {
@@ -34,26 +31,23 @@ A manifest is discovered automatically during Minecraft resource reload:
 }
 ```
 
-The optional `texture` field may point to a separate resource, for example
-`textures/npc/orc_peon.png`. Prefer embedded GLB textures unless sharing a texture
-between several profiles is useful. The model path must resolve to an existing
-`.glb`; scale must be finite and in the range `(0, 8]`.
+Set canonical Character property `visual.model_profile` to the profile ID. A profile
+is visual metadata only: it must not create another Character, inventory, entity, or
+identity. Vanilla and third-party mobs keep their registered Minecraft/Forge renderers.
 
-## Character binding
+## Runtime pipeline status
 
-Set the canonical Character property `visual.model_profile` to the profile ID,
-for example `wf_people:orc_peon`. This is visual metadata only. It must never
-create a second Character, entity, inventory, or identity. The Character registry
-remains authoritative; the physical NPC entity remains the existing body binding.
+The resource reload listener discovers manifests and decodes GLB data off the render
+thread into CPU-side model structures: GLB v2 chunks; embedded buffer and accessor
+bounds/strides; triangle POSITION/NORMAL/UV/index data; optional JOINTS_0/WEIGHTS_0;
+node transforms; skin joints and inverse-bind matrices; animation samplers/channels;
+and PBR base color, metallic/roughness and texture indices.
 
-Vanilla and third-party mobs are not converted to this format: they continue to use
-their registered Minecraft/Forge entity renderers. Custom GLB profiles are for
-MAQAN-authored mesh characters.
+Decoded snapshots are available through `NpcModelCatalog.decoded(profileId)` and
+replace atomically on resource reload. Malformed assets are rejected with a warning
+without blocking other profiles.
 
-## Runtime status
-
-The current implementation provides resource-reload discovery, manifest parsing,
-resource existence checks, duplicate-ID rejection, immutable profile snapshots,
-and animation-name mapping. It does **not yet** decode GLB geometry, upload GPU
-buffers, skin meshes, or play animation clips. Until the GLB renderer stage is
-implemented, the existing humanoid NPC renderer remains the visual fallback.
+**Not yet implemented:** embedded image decoding into Minecraft textures, GPU buffer
+allocation, skinning/render submission, animation sampling/blending at runtime, and
+distance-based LOD. The existing humanoid NPC renderer remains the visual fallback.
+The CPU decoder performs no OpenGL calls and must not run from an entity render callback.

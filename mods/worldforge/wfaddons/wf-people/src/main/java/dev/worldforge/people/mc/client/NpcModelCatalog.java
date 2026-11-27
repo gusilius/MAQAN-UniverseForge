@@ -25,10 +25,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * selects visuals only. The GLB GPU/runtime renderer consumes these immutable definitions
  * in a later rendering stage; vanilla/modded entities continue using their own renderers.
  */
-public final class NpcModelCatalog extends SimplePreparableReloadListener<Map<String, NpcModelCatalog.Definition>> {
+public final class NpcModelCatalog extends SimplePreparableReloadListener<NpcModelCatalog.Prepared> {
     private static final String DIRECTORY = "models/npc";
     private static final AtomicLong GENERATION = new AtomicLong();
     private static volatile Map<String, Definition> definitions = Map.of();
+    private static volatile Map<String, GlbModelLoader.Model> decodedModels = Map.of();
+    private record Prepared(Map<String, Definition> definitions, Map<String, GlbModelLoader.Model> models) {}
 
     public record Definition(
             ResourceLocation id,
@@ -52,12 +54,22 @@ public final class NpcModelCatalog extends SimplePreparableReloadListener<Map<St
         return definitions;
     }
 
+    public static Optional<GlbModelLoader.Model> decoded(String id) {
+        if (id == null || id.isBlank()) return Optional.empty();
+        ResourceLocation key = ResourceLocation.tryParse(id);
+        return key == null ? Optional.empty() : Optional.ofNullable(decodedModels.get(key.toString()));
+    }
+
+    public static Map<String, GlbModelLoader.Model> decodedSnapshot() {
+        return decodedModels;
+    }
+
     public static long generation() {
         return GENERATION.get();
     }
 
     @Override
-    protected Map<String, Definition> prepare(ResourceManager manager, ProfilerFiller profiler) {
+    protected Prepared prepare(ResourceManager manager, ProfilerFiller profiler) {
         Map<String, Definition> loaded = new LinkedHashMap<>();
         Map<ResourceLocation, Resource> manifests = manager.listResources(
                 DIRECTORY, location -> location.getPath().endsWith("/model.json"));
@@ -66,7 +78,19 @@ public final class NpcModelCatalog extends SimplePreparableReloadListener<Map<St
                 .sorted(Map.Entry.comparingByKey())
                 .forEach(entry -> readDefinition(manager, entry.getKey(), entry.getValue(), loaded));
 
-        return Collections.unmodifiableMap(loaded);
+        Map<String, GlbModelLoader.Model> decoded = new LinkedHashMap<>();
+        for (Definition definition : loaded.values()) {
+            try {
+                GlbModelLoader.Model model = GlbModelLoader.load(manager, definition);
+                decoded.put(definition.id().toString(), model);
+                PeopleMod.LOGGER.info("wf_people: decoded GLB {} ({} vertices, {} triangles, {} clips)",
+                        definition.id(), model.vertexCount(), model.triangleCount(), model.animations().size());
+            } catch (Exception failure) {
+                PeopleMod.LOGGER.warn("wf_people: GLB decode failed for {}: {}",
+                        definition.id(), failure.getMessage());
+            }
+        }
+        return new Prepared(Collections.unmodifiableMap(loaded), Collections.unmodifiableMap(decoded));
     }
 
     private static void readDefinition(
@@ -148,10 +172,11 @@ public final class NpcModelCatalog extends SimplePreparableReloadListener<Map<St
     }
 
     @Override
-    protected void apply(Map<String, Definition> prepared, ResourceManager manager, ProfilerFiller profiler) {
-        definitions = prepared;
+    protected void apply(Prepared prepared, ResourceManager manager, ProfilerFiller profiler) {
+        definitions = prepared.definitions();
+        decodedModels = prepared.models();
         long generation = GENERATION.incrementAndGet();
-        PeopleMod.LOGGER.info("wf_people: loaded {} custom NPC model profiles (resource generation {})",
-                prepared.size(), generation);
+        PeopleMod.LOGGER.info("wf_people: loaded {} NPC profiles; decoded {} GLB assets (resource generation {})",
+                definitions.size(), decodedModels.size(), generation);
     }
 }
