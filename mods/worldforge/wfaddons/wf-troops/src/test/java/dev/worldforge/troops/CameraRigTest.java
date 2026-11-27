@@ -48,7 +48,6 @@ class CameraRigTest {
         assertEquals(64.0, Math.hypot(rig.fx, rig.fz), 1.0e-9);
         assertEquals(0.0, CameraRig.keepAboveTerrain(10, 12) - 14.25, 1.0e-9);
     }
-}
 
     @Test
     void cameraPresetsTransitionSmoothlyAcrossAllFiveViews() {
@@ -68,3 +67,4 @@ class CameraRigTest {
         rig.cycle();
         assertEquals(CameraRig.View.STRATEGIC, rig.view);
     }
+}
