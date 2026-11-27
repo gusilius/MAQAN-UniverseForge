@@ -706,13 +706,20 @@ public class MapScreen extends Screen {
 
     private Markers.Marker markerAt(double mx, double my) {
         Markers.Marker best = null;
-        double bestDistance = 13.0 * 13.0;
+        double bestDistance = Double.MAX_VALUE;
         for (Markers.Marker marker : ClientState.markers.list()) {
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
+            WorldObjectVisualCatalog.Profile profile = WorldObjectVisualCatalog.resolve(marker);
+            double size = Math.max(16, Math.min(48,
+                    profile.mapScale() * Math.sqrt(Math.max(0.16, zoom))));
+            double radius = Math.max(12, size * 0.62);
             double dx = point[0] - mx, dy = point[1] - my;
             double distance = dx * dx + dy * dy;
-            if (distance <= bestDistance) { bestDistance = distance; best = marker; }
+            if (distance <= radius * radius && distance < bestDistance) {
+                bestDistance = distance;
+                best = marker;
+            }
         }
         return best;
     }
@@ -726,7 +733,7 @@ public class MapScreen extends Screen {
                                       int mx, int my, LivingEntity commanderBody) {
         int x = (int) Math.round(sx), y = (int) Math.round(sy);
         boolean selected = marker.id.equals(selectedMarkerId);
-        boolean hovered = Math.abs(mx - x) <= 16 && Math.abs(my - y) <= 16;
+        boolean hovered = Math.abs(mx - x) <= 24 && Math.abs(my - y) <= 24;
         WorldObjectVisualCatalog.Profile visual = WorldObjectVisualCatalog.resolve(marker);
         String symbol = switch (visual.icon()) {
             case "army" -> "⚑";
@@ -777,8 +784,10 @@ public class MapScreen extends Screen {
                 g.disableScissor();
             }
         }
-        if (!renderedLeader && !visual.mapItem().isBlank()) {
-            ResourceLocation itemId = ResourceLocation.tryParse(visual.mapItem());
+        String itemVisual = marker.visualItem == null || marker.visualItem.isBlank()
+                ? visual.mapItem() : marker.visualItem.trim();
+        if (!renderedLeader && zoom >= visual.modelLod() && !itemVisual.isBlank()) {
+            ResourceLocation itemId = ResourceLocation.tryParse(itemVisual);
             if (itemId != null) {
                 ItemStack iconStack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
                 if (!iconStack.isEmpty()) {

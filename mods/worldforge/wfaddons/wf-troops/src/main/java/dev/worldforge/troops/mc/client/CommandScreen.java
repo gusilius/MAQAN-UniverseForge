@@ -14,6 +14,9 @@ import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
@@ -545,6 +548,20 @@ public final class CommandScreen extends Screen {
         return new MiniMapBounds((minX+maxX)*0.5,(minZ+maxZ)*0.5,Math.min(120/spanX,76/spanZ));
     }
 
+    private static String minimapBuildingItem(String category) {
+        if (category == null) return "minecraft:compass";
+        return switch (category.toLowerCase(Locale.ROOT)) {
+            case "housing" -> "minecraft:oak_door";
+            case "food" -> "minecraft:wheat";
+            case "industry" -> "minecraft:furnace";
+            case "storage" -> "minecraft:chest";
+            case "military" -> "minecraft:iron_sword";
+            case "trade" -> "minecraft:emerald";
+            case "civic" -> "minecraft:bell";
+            default -> "minecraft:compass";
+        };
+    }
+
     private void drawMiniMap(GuiGraphics g) {
         int x=miniMapX(),y=miniMapY(),w=136,h=94;
         g.fill(x-3,y-3,x+w+3,y+h+3,0xD810151D);
@@ -560,8 +577,25 @@ public final class CommandScreen extends Screen {
             int bz=oy+38+(int)Math.round((building.z-bounds.centerZ)*bounds.scale);
             int bw=Math.max(2,(int)Math.round(building.def.sizeX*bounds.scale));
             int bh=Math.max(2,(int)Math.round(building.def.sizeZ*bounds.scale));
-            g.fill(bx-bw/2,bz-bh/2,bx+bw/2+1,bz+bh/2+1,
-                    building.state==Building.State.DONE?0xFFB9A36A:0xFF687987);
+            g.fill(bx-bw/2-1,bz-bh/2-1,bx+bw/2+2,bz+bh/2+2,0xC8081018);
+            String itemId = minimapBuildingItem(building.def.category);
+            ResourceLocation item = ResourceLocation.tryParse(itemId);
+            ItemStack stack = item == null ? ItemStack.EMPTY
+                    : new ItemStack(BuiltInRegistries.ITEM.get(item));
+            if (!stack.isEmpty()) {
+                int iconSize = Math.max(6, Math.min(12, Math.max(bw, bh)));
+                g.pose().pushPose();
+                g.pose().translate(bx - iconSize / 2.0F, bz - iconSize / 2.0F, 0.0F);
+                float scale = iconSize / 16.0F;
+                g.pose().scale(scale, scale, 1.0F);
+                g.renderItem(stack, 0, 0);
+                g.pose().popPose();
+            } else {
+                g.fill(bx-bw/2,bz-bh/2,bx+bw/2+1,bz+bh/2+1,
+                        building.state==Building.State.DONE?0xFFB9A36A:0xFF687987);
+            }
+            if (building.state != Building.State.DONE)
+                g.renderOutline(bx-bw/2-1,bz-bh/2-1,Math.max(3,bw+2),Math.max(3,bh+2),0xFF79C9F2);
         }
         for(var worker:settlement.workers) {
             int wx=ox+60+(int)Math.round((worker.x-bounds.centerX)*bounds.scale);

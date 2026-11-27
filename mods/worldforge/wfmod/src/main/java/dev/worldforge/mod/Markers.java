@@ -17,6 +17,8 @@ public final class Markers {
         public String id, name, type, desc = "";
         /** Optional stable shared visual profile id; empty keeps type-based compatibility defaults. */
         public String visualProfile = "";
+        /** Optional registry item id used as the native 3D map/Diorama emblem. */
+        public String visualItem = "";
         public int x, z, rgb = 0xFFFFFF;
     }
 
@@ -75,6 +77,7 @@ public final class Markers {
             o.put("color", TitleData.hex(m.rgb));
             o.put("desc", m.desc);
             if (m.visualProfile != null && !m.visualProfile.isBlank()) o.put("visual", m.visualProfile);
+            if (m.visualItem != null && !m.visualItem.isBlank()) o.put("map_item", m.visualItem);
             out.add(o);
         }
         Map<String, Object> root = new LinkedHashMap<>();
@@ -98,6 +101,7 @@ public final class Markers {
             m.rgb = Integer.parseInt(((String) e.get("color")).substring(1), 16);
             m.desc = e.get("desc") == null ? "" : (String) e.get("desc");
             m.visualProfile = e.get("visual") == null ? "" : String.valueOf(e.get("visual"));
+            m.visualItem = e.get("map_item") == null ? "" : String.valueOf(e.get("map_item"));
             ms.list.add(m);
         }
         return ms;

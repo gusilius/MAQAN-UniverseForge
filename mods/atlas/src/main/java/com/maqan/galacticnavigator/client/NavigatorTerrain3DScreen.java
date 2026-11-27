@@ -146,6 +146,12 @@ public final class NavigatorTerrain3DScreen extends Screen {
     }
 
     @Override
+    public void tick() {
+        super.tick();
+        com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.ensureLiveFeed();
+    }
+
+    @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         MaqanUiTheme.backdrop(g,width,height);
         MaqanUiTheme.panel(g,12,10,width-12,36);
@@ -159,11 +165,20 @@ public final class NavigatorTerrain3DScreen extends Screen {
         }
 
         List<NavigatorExplorationStore.ExploredChunk> all = NavigatorExplorationStore.chunks(dimension);
+        var worldSnapshot = com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.current();
+        var worldTerrain = worldSnapshot == null ? null : worldSnapshot.terrainInDimension(dimension);
         NavigatorPlayerPosition player = NavigatorPlayerPositionTracker.current();
         boolean playerHere = player != null && dimension.equals(player.dimensionId());
-        double centerBlockX = playerHere ? player.x() : averageChunkCenter(all, true);
-        double centerBlockZ = playerHere ? player.z() : averageChunkCenter(all, false);
-        double centerHeight = playerHere ? player.y() : averageSurfaceHeight(all);
+        double terrainCenterX = worldTerrain == null ? 0
+                : worldTerrain.origin_x + worldTerrain.width * worldTerrain.step_pixels * worldTerrain.blocks_per_pixel * 0.5;
+        double terrainCenterZ = worldTerrain == null ? 0
+                : worldTerrain.origin_z + worldTerrain.height * worldTerrain.step_pixels * worldTerrain.blocks_per_pixel * 0.5;
+        double centerBlockX = playerHere ? player.x()
+                : !all.isEmpty() ? averageChunkCenter(all, true) : terrainCenterX;
+        double centerBlockZ = playerHere ? player.z()
+                : !all.isEmpty() ? averageChunkCenter(all, false) : terrainCenterZ;
+        double centerHeight = playerHere ? player.y()
+                : !all.isEmpty() ? averageSurfaceHeight(all) : averageSnapshotHeight(worldTerrain);
 
         // Cull by the actual viewport instead of silently limiting the atlas to
         // an arbitrary number of visited chunks.
@@ -241,6 +256,10 @@ public final class NavigatorTerrain3DScreen extends Screen {
                     halfW, halfH, color);
             rendered++;
         }
+        if (visible.isEmpty() && worldTerrain != null) {
+            rendered += renderSnapshotTerrainRaster(g, worldTerrain, centerBlockX, centerBlockZ,
+                    centerHeight, cos, sin, tile, originX, originY, left, top, right, bottom);
+        }
 
         // Waypoints use the same world-to-isometric transform as the terrain.
         for (NavigatorWaypoint waypoint : NavigatorWaypointStore.all()) {
@@ -277,12 +296,77 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 + "  ·  RELIEF " + String.format(java.util.Locale.ROOT, "%.2f", relief),
                 22, height - 25, 0xFFB6C7D8, false);
         g.drawString(font, "WF: " + com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.status(), 22, height - 13, 0xFF86C8B5, false);
-        g.drawString(font, (viewMode == ViewMode.ISOMETRIC ? "LEFT-DRAG: ROTATE · RIGHT-DRAG: TILT/ROTATE · " : "DRAG: PAN · ") + "WHEEL: ZOOM · ONLY EXPLORED TERRAIN",
+        g.drawString(font, (viewMode == ViewMode.ISOMETRIC ? "LEFT-DRAG: ROTATE · RIGHT-DRAG: TILT/ROTATE · " : "DRAG: PAN · ") + "WHEEL: ZOOM · WORLD MAP + EXPLORED DETAIL",
                 Math.max(22, width - 430), height - 25, 0xFF65D8F2, false);
         super.render(g, mouseX, mouseY, partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
     }
 
+
+    private static double averageSnapshotHeight(
+            com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot.Terrain terrain) {
+        if (terrain == null || terrain.heights == null || terrain.heights.length == 0) return 64;
+        long sum = 0;
+        for (int height : terrain.heights) sum += height;
+        return sum / (double) terrain.heights.length;
+    }
+
+    /** Draws the bounded authoritative WorldForge terrain raster when no explored chunks are visible. */
+    private int renderSnapshotTerrainRaster(GuiGraphics g,
+            com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot.Terrain terrain,
+            double centerX, double centerZ, double centerY, double cos, double sin,
+            double tile, double originX, double originY, int left, int top, int right, int bottom) {
+        if (terrain == null || terrain.sampleCount() <= 0) return 0;
+        double sampleBlocks = terrain.step_pixels * terrain.blocks_per_pixel;
+        if (!Double.isFinite(sampleBlocks) || sampleBlocks <= 0) return 0;
+        int stride = terrain.sampleCount() > 4096 ? (zoom < 0.75 ? 8 : zoom < 1.5 ? 4 : 2) : 1;
+        double cellBlocks = sampleBlocks * stride;
+        double visibleRadius = Math.max(width, height) / Math.max(0.12, tile * 0.5) * 0.8;
+        List<TerrainCell> cells = new ArrayList<>(Math.max(64, terrain.sampleCount() / (stride * stride)));
+        for (int z = 0; z < terrain.height; z += stride) for (int x = 0; x < terrain.width; x += stride) {
+            int index = z * terrain.width + x;
+            double worldX = terrain.sampleX(index), worldZ = terrain.sampleZ(index);
+            double dx = worldX - centerX, dz = worldZ - centerZ;
+            if (dx * dx + dz * dz > visibleRadius * visibleRadius) continue;
+            double rx = dx * cos - dz * sin, rz = dx * sin + dz * cos;
+            int height = terrain.heights[index];
+            int biome = terrain.biome_indices[index];
+            int color = biome >= 0 && terrain.biome_colors != null && biome < terrain.biome_colors.length
+                    ? terrain.biome_colors[biome] : 0xFF557A68;
+            color = 0xFF000000 | (color & 0x00FFFFFF);
+            if (terrain.river_values != null && index < terrain.river_values.length
+                    && terrain.river_values[index] > 0) color = 0xFF347FA8;
+            double vertical = (height - centerY) * relief;
+            double projectedX, projectedY, depth;
+            if (viewMode == ViewMode.TOP_DOWN) {
+                projectedX = originX + rx * tile;
+                projectedY = originY + rz * tile;
+                depth = vertical;
+            } else {
+                double pitchedDepth = rz * Math.sin(pitch) + vertical * Math.cos(pitch);
+                double pitchedY = rz * Math.cos(pitch) - vertical * Math.sin(pitch);
+                projectedX = originX + (rx - rz * Math.cos(pitch)) * tile * 0.72;
+                projectedY = originY + (rx * 0.34 + pitchedY * 0.34) * tile;
+                depth = rx + rz + pitchedDepth;
+            }
+            cells.add(new TerrainCell(projectedX, projectedY, height, color, depth));
+        }
+        cells.sort(Comparator.comparingDouble(TerrainCell::depth));
+        int halfW = Math.max(1, (int) Math.ceil(cellBlocks * tile
+                * (viewMode == ViewMode.TOP_DOWN ? 0.5 : 0.72)));
+        int halfH = Math.max(1, (int) Math.ceil(cellBlocks * tile
+                * (viewMode == ViewMode.TOP_DOWN ? 0.5 : 0.34)));
+        int rendered = 0;
+        for (TerrainCell cell : cells) {
+            if (cell.x() < left - halfW || cell.x() > right + halfW
+                    || cell.y() < top - halfH || cell.y() > bottom + halfH) continue;
+            int heightShade = clamp((int) Math.round((cell.height() - centerY) * 0.12), -26, 30);
+            drawDiamond(g, (int) Math.round(cell.x()), (int) Math.round(cell.y()),
+                    halfW, halfH, shade(cell.color(), heightShade));
+            rendered++;
+        }
+        return rendered;
+    }
 
     private void renderWorldForge(GuiGraphics g, double centerX, double centerZ, double centerY,
                                   double cos, double sin, double tile, double originX, double originY,
@@ -311,9 +395,9 @@ public final class NavigatorTerrain3DScreen extends Screen {
             int x = (int) Math.round(point[0]), y = (int) Math.round(point[1]);
             if (x < left || x > right || y < top || y > bottom) continue;
             int color = feature.color == 0 ? worldForgeFeatureColor(feature.kind) : feature.color;
-            ResourceLocation itemId = worldForgeFeatureItem(feature.kind, feature.subtype);
+            ResourceLocation itemId = worldForgeFeatureItem(feature.kind, feature.subtype, feature.attributes);
             boolean renderedItem = false;
-            if (itemId != null) {
+            if (itemId != null && zoom >= 0.9) {
                 ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
                 if (!stack.isEmpty()) {
                     int iconSize = Math.max(10, Math.min(26, (int) Math.round(15 * Math.sqrt(zoom))));
@@ -337,9 +421,17 @@ public final class NavigatorTerrain3DScreen extends Screen {
         }
     }
 
-    private static ResourceLocation worldForgeFeatureItem(String kind, String subtype) {
-        String item = null;
-        if ("marker".equals(kind)) {
+    private static ResourceLocation worldForgeFeatureItem(String kind, String subtype,
+                                                           java.util.Map<String, String> attributes) {
+        String item = attributes == null ? null : attributes.get("map_item");
+        if (item != null && !item.isBlank()) {
+            ResourceLocation custom = ResourceLocation.tryParse(item);
+            if (custom != null) return custom;
+            item = null;
+        }
+        String profile = attributes == null ? "" : attributes.getOrDefault("visual_profile", "");
+        if (profile.startsWith("worldforge:")) subtype = profile.substring("worldforge:".length());
+        if (item == null && "marker".equals(kind)) {
             item = switch (subtype == null ? "" : subtype.toLowerCase(java.util.Locale.ROOT)) {
                 case "capital" -> "minecraft:gold_block";
                 case "city" -> "minecraft:bricks";
@@ -354,9 +446,9 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 case "army" -> "minecraft:shield";
                 default -> "minecraft:compass";
             };
-        } else if ("region_capital".equals(kind)) {
+        } else if (item == null && "region_capital".equals(kind)) {
             item = "minecraft:compass";
-        } else if ("administrative_title".equals(kind)) {
+        } else if (item == null && "administrative_title".equals(kind)) {
             item = "minecraft:gold_block";
         }
         return item == null ? null : ResourceLocation.tryParse(item);
