@@ -299,17 +299,32 @@ public final class WorldForgeSnapshotExporter {
             }
         }
         
-        for (Markers.Marker marker : EditorManager.markers(server, map).list()) {
-            if (marker == null || marker.id == null || marker.id.isBlank()) continue;
-            BlockPos pos = generator.surfaceAt(marker.x, marker.z);
-            Map<String, String> attrs = new LinkedHashMap<>();
-            attrs.put("map_id", map.name);
-            attrs.put("marker_type", safe(marker.type));
-            attrs.put("description", safe(marker.desc));
-            features.add(feature("worldforge:" + dimensionId + ":" + map.name + ":marker:" + marker.id,
-                    "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
-                    marker.rgb, "", safe(marker.type), attrs));
-        }
+        // Persisted editor markers and live addon providers share the same Atlas feature path.
+        // This ensures commander/army/settlement anchors are exported without duplicate entities.
+        java.util.Set<String> exportedMarkerIds = new java.util.LinkedHashSet<>();
+        for (Markers.Marker marker : EditorManager.markers(server, map).list())
+            appendMarkerFeature(map, generator, dimensionId, marker, features, exportedMarkerIds);
+        for (Markers.Marker marker : MapMarkerProviders.collect(server, map))
+            appendMarkerFeature(map, generator, dimensionId, marker, features, exportedMarkerIds);
+    }
+
+    private static void appendMarkerFeature(MapData map, MapChunkGenerator generator,
+            String dimensionId, Markers.Marker marker, List<Object> features,
+            java.util.Set<String> exportedIds) {
+        if (marker == null || marker.id == null || marker.id.isBlank()
+                || marker.name == null || marker.name.isBlank()
+                || !Markers.TYPES.contains(marker.type)) return;
+        if (!exportedIds.add(marker.id)) return;
+        BlockPos pos = generator.surfaceAt(marker.x, marker.z);
+        Map<String, String> attrs = new LinkedHashMap<>();
+        attrs.put("map_id", map.name);
+        attrs.put("marker_type", safe(marker.type));
+        attrs.put("description", safe(marker.desc));
+        attrs.put("visual_profile", safe(marker.visualProfile));
+        attrs.put("map_item", safe(marker.visualItem));
+        features.add(feature("worldforge:" + dimensionId + ":" + map.name + ":marker:" + marker.id,
+                "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
+                marker.rgb, "", safe(marker.type), attrs));
     }
 
     /**
