@@ -16,6 +16,22 @@ import net.minecraft.server.level.ServerPlayer;
 public final class MapCommands {
     private MapCommands() {}
 
+    private static final java.util.List<String> VISUAL_HINTS = java.util.List.of(
+            "auto", "worldforge:capital", "worldforge:city", "worldforge:settlement",
+            "worldforge:village", "worldforge:castle", "worldforge:port", "worldforge:mine",
+            "worldforge:temple", "worldforge:ruin", "worldforge:camp", "worldforge:caravan",
+            "worldforge:army", "maqan:army.infantry", "maqan:army.cavalry",
+            "maqan:army.siege", "maqan:commander.knight", "maqan:commander.banneret",
+            "maqan:city.walled", "maqan:castle.royal", "maqan:village.rural");
+
+    private static com.mojang.brigadier.suggestion.SuggestionProvider<CommandSourceStack> visualSuggestions() {
+        return (context, builder) -> {
+            String remaining = builder.getRemaining().toLowerCase(java.util.Locale.ROOT);
+            for (String id : VISUAL_HINTS) if (id.startsWith(remaining)) builder.suggest(id);
+            return builder.buildFuture();
+        };
+    }
+
     private static MapData data(CommandSourceStack s) {
         MapData m = EditorManager.dataFor(s.getLevel());
         if (m == null) s.sendFailure(Component.literal("В этом измерении нет карты worldforge"));
@@ -42,7 +58,7 @@ public final class MapCommands {
                         }))))
                 .then(Commands.literal("addwith").then(Commands.argument("type", StringArgumentType.word())
                         .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
-                        .then(Commands.argument("visual", StringArgumentType.word())
+                        .then(Commands.argument("visual", StringArgumentType.word()).suggests(visualSuggestions())
                                 .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
                                     CommandSourceStack s = c.getSource();
                                     MapData m = data(s);
@@ -66,7 +82,7 @@ public final class MapCommands {
                                 })))))
                 .then(Commands.literal("addat").then(Commands.argument("type", StringArgumentType.word())
                         .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
-                        .then(Commands.argument("visual", StringArgumentType.word())
+                        .then(Commands.argument("visual", StringArgumentType.word()).suggests(visualSuggestions())
                                 .then(Commands.argument("x", IntegerArgumentType.integer())
                                         .then(Commands.argument("z", IntegerArgumentType.integer())
                                                 .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
@@ -93,7 +109,7 @@ public final class MapCommands {
                                                     }
                                                 })))))))
                 .then(Commands.literal("visual").then(Commands.argument("id", StringArgumentType.word())
-                        .then(Commands.argument("profile", StringArgumentType.word()).executes(c -> {
+                        .then(Commands.argument("profile", StringArgumentType.word()).suggests(visualSuggestions()).executes(c -> {
                             CommandSourceStack s = c.getSource();
                             MapData m = data(s);
                             if (m == null) return 0;
