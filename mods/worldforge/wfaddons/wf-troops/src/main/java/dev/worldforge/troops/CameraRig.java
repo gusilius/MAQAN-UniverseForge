@@ -29,6 +29,8 @@ public final class CameraRig {
 
     public View view = View.SKY;
     public double fx, fz, yaw, pitch = View.SKY.pitch, zoom = View.SKY.zoom;
+    private double targetPitch = View.SKY.pitch, targetZoom = View.SKY.zoom;
+    private boolean transitioning;
     /** Client-side loaded-area leash; never force-load chunks for camera movement. */
     public double leash = 90;
 
@@ -44,6 +46,31 @@ public final class CameraRig {
         view = v;
         pitch = v.pitch;
         setZoom(v.zoom);
+        targetPitch = pitch;
+        targetZoom = zoom;
+        transitioning = false;
+    }
+
+    /** Begin a damped camera-preset transition without teleporting the camera boom. */
+    public void transitionTo(View v) {
+        if (v == null) return;
+        view = v;
+        targetPitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, v.pitch));
+        targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom));
+        transitioning = true;
+    }
+
+    /** Frame-rate independent easing for pitch and boom length. */
+    public void updateTransition(double dt) {
+        if (!transitioning || !Double.isFinite(dt) || dt <= 0) return;
+        double blend = 1.0 - Math.exp(-Math.min(0.1, dt) * 7.5);
+        pitch += (targetPitch - pitch) * blend;
+        zoom += (targetZoom - zoom) * blend;
+        if (Math.abs(targetPitch - pitch) < 0.025 && Math.abs(targetZoom - zoom) < 0.025) {
+            pitch = targetPitch;
+            zoom = targetZoom;
+            transitioning = false;
+        }
     }
 
     public void cycle() {
@@ -82,11 +109,15 @@ public final class CameraRig {
         yaw = (yaw + dYaw) % 360;
         if (yaw < 0) yaw += 360;
         pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch + dPitch));
+        targetPitch = pitch;
+        transitioning = false;
     }
 
     public void setZoom(double distance) {
         if (!Double.isFinite(distance)) return;
         zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, distance));
+        targetZoom = zoom;
+        transitioning = false;
     }
 
     public void zoomBy(double steps) {

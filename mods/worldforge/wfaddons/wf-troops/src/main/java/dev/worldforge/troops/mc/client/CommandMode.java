@@ -110,7 +110,7 @@ public final class CommandMode {
     public static void setCommandCameraView(String name) {
         if (!active || name == null) return;
         try {
-            RIG.setView(CameraRig.View.valueOf(name.trim().toUpperCase(java.util.Locale.ROOT)));
+            RIG.transitionTo(CameraRig.View.valueOf(name.trim().toUpperCase(java.util.Locale.ROOT)));
             frame(Minecraft.getInstance());
         } catch (IllegalArgumentException ignored) {
             // Ignore stale or unsupported toolbar actions.
@@ -432,6 +432,7 @@ public final class CommandMode {
         long now = System.nanoTime();
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
+        RIG.updateTransition(dt);
         long win = mc.getWindow().getWindow();
         // Resolve the actual embedded command view; mc.screen is the MAQAN shell.
         CommandScreen commandScreen = mc.screen instanceof CommandScreen standalone
