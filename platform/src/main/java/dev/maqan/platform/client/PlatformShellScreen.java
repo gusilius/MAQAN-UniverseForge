@@ -55,6 +55,8 @@ public final class PlatformShellScreen extends Screen {
 
     private final Map<String, Panel> panels = new LinkedHashMap<>();
     private final java.util.Set<String> hiddenPanels = new java.util.LinkedHashSet<>();
+    // Panels hidden only because the current viewport cannot fit them without overlap.
+    private final java.util.Set<String> viewportSuppressedPanels = new java.util.LinkedHashSet<>();
     private Profile profile = Profile.COSMOS;
     private String selectedDomain = "COSMOS";
     private String selectedCapabilityId = "maqan.atlas.cosmos";
@@ -365,7 +367,7 @@ public final class PlatformShellScreen extends Screen {
                 prefs.putInt(key + "y", panel.y);
                 prefs.putInt(key + "w", panel.w);
                 prefs.putInt(key + "h", panel.h);
-                prefs.putBoolean(key + "visible", panel.visible);
+                prefs.putBoolean(key + "visible", panel.visible || viewportSuppressedPanels.contains(panel.id));
                 prefs.putBoolean(key + "minimized", panel.minimized);
                 prefs.putBoolean(key + "pinned", panel.pinned);
                 prefs.put(key + "dock", panel.dock);
@@ -518,6 +520,14 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void clampPanels() {
+        // Restore viewport-suppressed panels before recomputing placement. A larger
+        // window can then bring them back; intentional user-hidden panels stay hidden.
+        for (String id : new ArrayList<>(viewportSuppressedPanels)) {
+            Panel panel = panels.get(id);
+            if (panel != null && "FLOAT".equals(panel.dock) && !hiddenPanels.contains(id))
+                panel.visible = true;
+        }
+        viewportSuppressedPanels.clear();
         List<Panel> floating = new ArrayList<>();
         for (Panel p : panels.values()) {
             if (!"FLOAT".equals(p.dock) || !p.visible) continue;
@@ -580,6 +590,7 @@ public final class PlatformShellScreen extends Screen {
                 panel.x = originalX;
                 panel.y = originalY;
                 panel.visible = false;
+                viewportSuppressedPanels.add(panel.id);
                 continue;
             }
             placed.add(panel);
