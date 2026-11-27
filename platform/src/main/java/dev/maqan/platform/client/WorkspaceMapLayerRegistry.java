@@ -121,10 +121,9 @@ public final class WorkspaceMapLayerRegistry {
         for (int i = 0; i < stack.size(); i++) if (stack.get(i).id().equals(layerId)) { index = i; break; }
         int target = index + Integer.signum(direction);
         if (index < 0 || target < 0 || target >= stack.size()) return;
-        Layer other = stack.get(target);
-        int currentOrder = order(layerId), otherOrder = order(other.id());
-        setOrder(layerId, otherOrder);
-        setOrder(other.id(), currentOrder);
+        Layer moving = stack.remove(index);
+        stack.add(target, moving);
+        for (int i = 0; i < stack.size(); i++) setOrder(stack.get(i).id(), i * 10);
     }
 
     public static void render(GuiGraphics graphics, int x, int y, int width, int height) {
