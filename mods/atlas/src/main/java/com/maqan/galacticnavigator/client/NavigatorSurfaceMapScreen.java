@@ -356,12 +356,12 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
         if(nearest==null)return false;
         String id=nearest.getUUID().toString();
-        String type=nearest.getType().toShortString();
+        String type=nearest.getType().getDescription().getString();
         String name=nearest.getDisplayName().getString();
         int vertical=(int)Math.floor(nearest.getY()-player.y());
         NavigatorPlatformSelectionBridge.publish("minecraft:entity/"+id,type,name,dimension,
                 "Entity UUID: "+id+" · Y offset: "+vertical+" · distance: "
-                        +(int)Math.round(nearest.distanceTo(mc.player))+" blocks");
+                        +(int)Math.round(Math.hypot(nearest.getX()-player.x(),nearest.getZ()-player.z()))+" blocks");
         return true;
     }
 
