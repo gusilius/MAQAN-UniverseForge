@@ -830,7 +830,8 @@ public final class PlatformShellScreen extends Screen {
         int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
         ThemeManager.renderWindow(g,x,y,w,h,"settings");
-        g.fill(x,y,x+w,y+26,WorkspaceTheme.alpha(SURFACE_ALT,190));
+        // Keep the parchment/metal frame visible; only add a translucent title backing.
+        g.fill(x + 8, y + 6, x + w - 8, y + 22, 0x55101824);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
         g.drawString(font,"WORKSPACE / APPEARANCE",x+28,y+9,TEXT,false);
         g.drawCenteredString(font,"×",x+w-15,y+8,MUTED);
@@ -1255,7 +1256,12 @@ public final class PlatformShellScreen extends Screen {
             if(mx>=sx+8&&mx<sx+252&&my>=sy+115&&my<sy+139) {
                 int index=(int)((mx-(sx+10))/61.0D);
                 String[] themes=ThemeManager.themes();
-                if(index>=0&&index<themes.length) ThemeManager.setTheme(themes[index]);
+                if(index>=0&&index<themes.length) {
+                    if (ThemeManager.setTheme(themes[index])) {
+                        CYAN = ThemeManager.accentColor();
+                        saveWorkspaceState();
+                    }
+                }
                 return true;
             }
             if(mx>=sx&&mx<=sx+260&&my>=sy&&my<=sy+190) return true;
