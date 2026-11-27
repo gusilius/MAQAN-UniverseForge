@@ -318,7 +318,7 @@ public final class CommandScreen extends Screen {
         g.enableScissor(x + 5, y + 21, x + 77, y + h - 5);
         try {
             InventoryScreen.renderEntityInInventoryFollowsMouse(g,
-                    x + 5, y + 21, x + 77, y + h - 5, 34, 0.0F,
+                    x + 41, y + h - 5, 34,
                     (float) (mx - (x + 41)), (float) (my - (y + 55)), entity);
         } catch (RuntimeException rendererFailure) {
             g.drawCenteredString(font, "MODEL", x + 41, y + 55, 0xFF9EA4B5);

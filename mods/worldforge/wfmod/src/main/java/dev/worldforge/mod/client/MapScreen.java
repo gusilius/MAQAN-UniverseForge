@@ -752,7 +752,19 @@ public class MapScreen extends Screen {
         g.renderOutline(left, top, size, size, border);
 
         boolean renderedLeader = false;
-        if ("army".equals(marker.type) && commanderBody != null && commanderBody.isAlive()) {
+        if (!visual.mapTexture().isBlank()) {
+            ResourceLocation texture = ResourceLocation.tryParse(visual.mapTexture());
+            if (texture != null) {
+                try {
+                    g.blit(texture, left + 3, top + 3, size - 6, size - 6,
+                            0, 0, 32, 32, 32, 32);
+                    renderedLeader = true;
+                } catch (RuntimeException missingTexture) {
+                    // Keep the vector fallback if a resource disappears during a reload.
+                }
+            }
+        }
+        if (!renderedLeader && "army".equals(marker.type) && commanderBody != null && commanderBody.isAlive()) {
             g.enableScissor(left + 2, top + 2, left + size - 2, top + size - 2);
             try {
                 InventoryScreen.renderEntityInInventoryFollowsMouse(g,

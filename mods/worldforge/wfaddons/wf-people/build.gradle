@@ -45,6 +45,7 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     // Ядро WorldForge: только чистые классы (api, TitleData, TitleEditor, Json), поэтому деобфускация не нужна.
     compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar'])
     // Мягкая зависимость: мост к диалогам компилируется против jar wf_dialogue (tools/build-all.sh строит wf-dialogue раньше по алфавиту).
@@ -83,4 +84,9 @@ tasks.named('jar', Jar).configure {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }

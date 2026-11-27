@@ -15,6 +15,8 @@ public final class Markers {
 
     public static final class Marker {
         public String id, name, type, desc = "";
+        /** Optional stable shared visual profile id; empty keeps type-based compatibility defaults. */
+        public String visualProfile = "";
         public int x, z, rgb = 0xFFFFFF;
     }
 
@@ -72,6 +74,7 @@ public final class Markers {
             o.put("z", m.z);
             o.put("color", TitleData.hex(m.rgb));
             o.put("desc", m.desc);
+            if (m.visualProfile != null && !m.visualProfile.isBlank()) o.put("visual", m.visualProfile);
             out.add(o);
         }
         Map<String, Object> root = new LinkedHashMap<>();
@@ -94,6 +97,7 @@ public final class Markers {
             m.z = ((Number) e.get("z")).intValue();
             m.rgb = Integer.parseInt(((String) e.get("color")).substring(1), 16);
             m.desc = e.get("desc") == null ? "" : (String) e.get("desc");
+            m.visualProfile = e.get("visual") == null ? "" : String.valueOf(e.get("visual"));
             ms.list.add(m);
         }
         return ms;

@@ -1,0 +1,11 @@
+{
+  "id": "maqan:citadel",
+  "category": "fortification",
+  "icon": "castle",
+  "mapScale": 42,
+  "mapTexture": "",
+  "rtsModel": "maqan:world/citadel.glb",
+  "dioramaModel": "maqan:world/citadel.glb",
+  "iconLod": 0.0,
+  "modelLod": 2.0
+}
