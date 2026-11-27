@@ -1701,6 +1701,17 @@ public class MapScreen extends Screen {
             if (i < m.size()) { setMode(m.get(i)); return true; }
         }
         if (key == GLFW.GLFW_KEY_C) { centerOnPlayer(); return true; }
+        if (key == GLFW.GLFW_KEY_O && MapTextures.ready()) {
+            Minecraft mc = Minecraft.getInstance();
+            double mxx = mc.mouseHandler.xpos() * width / mc.getWindow().getScreenWidth();
+            double myy = mc.mouseHandler.ypos() * height / mc.getWindow().getScreenHeight();
+            int[] pixel = screenToPixel(mxx, myy);
+            TitleData mapData = MapTextures.titles;
+            int blockX = (int) Math.round((pixel[0] - mapData.w / 2.0) * mapData.bpp);
+            int blockZ = (int) Math.round((pixel[1] - mapData.h / 2.0) * mapData.bpp);
+            mc.setScreen(new MarkerCreateScreen(this, blockX, blockZ));
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_V) {
             Markers.Marker visualTarget = null;
             for (Markers.Marker marker : ClientState.markers.list()) {
