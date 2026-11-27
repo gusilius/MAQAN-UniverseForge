@@ -29,6 +29,10 @@ import java.util.Map;
  */
 public class MapScreen extends Screen {
     private static final int BAR = 0, BOTTOM = 46;
+    // A small UUID index is rebuilt at most once per five client ticks, never once per frame.
+    private static net.minecraft.client.multiplayer.ClientLevel leaderIndexLevel;
+    private static long leaderIndexTick = Long.MIN_VALUE;
+    private static Map<String, LivingEntity> leaderBodyIndex = Map.of();
     private boolean embeddedInMaqan;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
@@ -778,15 +782,30 @@ public class MapScreen extends Screen {
                     selected ? 0xFFFFD66B : 0xFFE9D28B);
         }
     }
-    private void drawMarkers(GuiGraphics g, int mx, int my) {
-        Map<String, LivingEntity> leaderBodies = new HashMap<>();
+    private static Map<String, LivingEntity> leaderBodies() {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level != null) {
+        if (mc.level == null) {
+            leaderIndexLevel = null;
+            leaderIndexTick = Long.MIN_VALUE;
+            leaderBodyIndex = Map.of();
+            return leaderBodyIndex;
+        }
+        long tick = mc.level.getGameTime();
+        if (leaderIndexLevel != mc.level || tick - leaderIndexTick >= 5L || tick < leaderIndexTick) {
+            Map<String, LivingEntity> indexed = new HashMap<>();
             for (Entity entity : mc.level.entitiesForRendering()) {
                 if (entity instanceof LivingEntity living && living.isAlive())
-                    leaderBodies.put(entity.getUUID().toString(), living);
+                    indexed.put(entity.getUUID().toString(), living);
             }
+            leaderBodyIndex = Map.copyOf(indexed);
+            leaderIndexLevel = mc.level;
+            leaderIndexTick = tick;
         }
+        return leaderBodyIndex;
+    }
+
+    private void drawMarkers(GuiGraphics g, int mx, int my) {
+        Map<String, LivingEntity> leaderBodies = leaderBodies();
         for (Markers.Marker marker : ClientState.markers.list()) {
             if (hiddenArmyMarker(marker)) continue;
             double[] point = blockToScreen(marker.x, marker.z);
