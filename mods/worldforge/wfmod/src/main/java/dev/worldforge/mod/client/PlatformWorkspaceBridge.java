@@ -44,6 +44,22 @@ public final class PlatformWorkspaceBridge {
         return mc.level == null ? "" : mc.level.dimension().location().toString();
     }
 
+    public static void publishMapViewport(double centerX, double centerZ, double zoom) {
+        try {
+            Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceMapState");
+            state.getMethod("setViewport", String.class, double.class, double.class,
+                    double.class, double.class, double.class).invoke(null,
+                    worldId(), centerX, centerZ, zoom, 0.0, 0.0);
+            Class<?> viewType = Class.forName("dev.maqan.platform.client.WorkspaceMapState$ViewType");
+            Object political = Enum.valueOf((Class<? extends Enum>) viewType.asSubclass(Enum.class), "POLITICAL");
+            state.getMethod("setViewType", viewType).invoke(null, political);
+        } catch (ClassNotFoundException ignored) {
+            // Optional host not installed.
+        } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
+            // Political map remains functional without the optional workspace state.
+        }
+    }
+
     /** Register an action that is shown in MAQAN's context menu for this provider's selection. */
     public static void registerAction(String id, String label, String providerId, Runnable action) {
         if (action == null) return;
