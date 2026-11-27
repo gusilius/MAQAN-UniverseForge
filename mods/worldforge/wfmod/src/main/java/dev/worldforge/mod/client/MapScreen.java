@@ -583,24 +583,36 @@ public class MapScreen extends Screen {
 
     /** Обзор: уменьшенная карта текущего режима с рамкой видимой области; клик и перетаскивание двигают вид. */
     private void drawOverview(GuiGraphics g) {
-        int ow = Math.min(170, Math.max(100, width / 6)), oh = (int) Math.round(ow * (double) MapTextures.h / MapTextures.w);
-        ovwW = ow; ovwH = oh; ovwX = width - ow - 14; ovwY = height - oh - 44;
+        // Fit the complete world into a bounded overview frame without stretching tall/narrow worlds.
+        double fit = Math.min(170.0 / MapTextures.w, 140.0 / MapTextures.h);
+        fit = Math.min(fit, Math.min((width - 28.0) / MapTextures.w, (height - 86.0) / MapTextures.h));
+        fit = Math.max(0.01, fit);
+        int ow = Math.max(1, (int) Math.round(MapTextures.w * fit));
+        int oh = Math.max(1, (int) Math.round(MapTextures.h * fit));
+        ovwW = ow; ovwH = oh; ovwX = width - ow - 14; ovwY = Math.max(38, height - oh - 44);
         bevel(g, ovwX - 4, ovwY - 4, ow + 8, oh + 8, true);
         g.fill(ovwX, ovwY, ovwX + ow, ovwY + oh, 0xFF0A0C12);
+        g.enableScissor(ovwX, ovwY, ovwX + ow, ovwY + oh);
         g.pose().pushPose();
         g.pose().translate(ovwX, ovwY, 0f);
-        float k = ow / (float) MapTextures.w;
-        g.pose().scale(k, k, 1f);
+        g.pose().scale((float) fit, (float) fit, 1f);
         g.blit(MapTextures.id, 0, 0, 0f, 0f, MapTextures.w, MapTextures.h, MapTextures.w, MapTextures.h);
         g.pose().popPose();
-        double x0 = Math.max(0, -camX / zoom), y0 = Math.max(0, -camY / zoom), x1 = Math.min(MapTextures.w, (width - camX) / zoom), y1 = Math.min(MapTextures.h, (height - camY) / zoom);
-        int rx = ovwX + (int) (x0 * k), ry = ovwY + (int) (y0 * k), rw = Math.max(3, (int) ((x1 - x0) * k)), rh = Math.max(3, (int) ((y1 - y0) * k));
+        g.disableScissor();
+        double x0 = Math.max(0, -camX / zoom), y0 = Math.max(0, -camY / zoom);
+        double x1 = Math.min(MapTextures.w, (width - camX) / zoom), y1 = Math.min(MapTextures.h, (height - camY) / zoom);
+        int rx = ovwX + (int) Math.floor(x0 * fit), ry = ovwY + (int) Math.floor(y0 * fit);
+        int rw = Math.max(3, (int) Math.ceil((x1 - x0) * fit)), rh = Math.max(3, (int) Math.ceil((y1 - y0) * fit));
+        g.enableScissor(ovwX, ovwY, ovwX + ow, ovwY + oh);
         g.renderOutline(rx - 1, ry - 1, rw + 2, rh + 2, 0xFF000000);
         g.renderOutline(rx, ry, rw, rh, 0xFFF0F0F0);
+        g.disableScissor();
     }
 
     private void overviewTo(double mx, double my) {
-        double px = (mx - ovwX) / ovwW * MapTextures.w, py = (my - ovwY) / ovwH * MapTextures.h;
+        if (ovwW <= 0 || ovwH <= 0) return;
+        double scale = Math.min(ovwW / (double) MapTextures.w, ovwH / (double) MapTextures.h);
+        double px = (mx - ovwX) / scale, py = (my - ovwY) / scale;
         px = Math.max(0, Math.min(MapTextures.w, px)); py = Math.max(0, Math.min(MapTextures.h, py));
         camX = width / 2.0 - px * zoom;
         camY = height / 2.0 - py * zoom;
