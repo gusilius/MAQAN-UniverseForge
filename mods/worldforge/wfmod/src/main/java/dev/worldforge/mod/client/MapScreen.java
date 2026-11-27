@@ -280,6 +280,12 @@ public class MapScreen extends Screen {
             return;
         }
         if (!fitted) fit();
+        double centerPixelX = (width * 0.5 - camX) / zoom;
+        double centerPixelZ = (height * 0.5 - camY) / zoom;
+        double mapBpp = bpp();
+        PlatformWorkspaceBridge.publishMapViewport(
+                (centerPixelX - MapTextures.w * 0.5) * mapBpp,
+                (centerPixelZ - MapTextures.h * 0.5) * mapBpp, zoom);
         int mxp = (int) camX, myp = (int) camY, mw = (int) (MapTextures.w * zoom), mh = (int) (MapTextures.h * zoom);
         g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);                 // тень под картой
         g.pose().pushPose();
