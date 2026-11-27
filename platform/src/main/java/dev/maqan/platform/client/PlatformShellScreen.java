@@ -27,7 +27,7 @@ public final class PlatformShellScreen extends Screen {
     private static final int EDGE = WorkspaceTheme.BORDER;
     private static final int TEXT = WorkspaceTheme.TEXT;
     private static final int MUTED = WorkspaceTheme.TEXT_MUTED;
-    private static final int CYAN = WorkspaceTheme.ACCENT;
+    private static int CYAN = WorkspaceTheme.ACCENT;
 
     private enum Profile {
         COSMOS("◎", "COSMOS", "maqan.atlas.cosmos"),
@@ -171,6 +171,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override protected void init() {
         ThemeManager.initialize();
+        CYAN = ThemeManager.accentColor();
         if (panels.isEmpty()) {
             panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
@@ -200,10 +201,12 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private WorkspaceDockTree.Node defaultWorkspaceTree() {
-        return new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 190,
+        // Match the supplied 1368x760 concept composition: left navigation,
+        // dominant center workspace, right inspector, and a 23% lower strip.
+        return new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 220,
                 new WorkspaceDockTree.Panel("navigation"),
-                new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 760,
-                        new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.VERTICAL, 820,
+                new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 690,
+                        new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.VERTICAL, 770,
                                 new WorkspaceDockTree.Panel("content"),
                                 new WorkspaceDockTree.Panel("timeline")),
                         new WorkspaceDockTree.Tabs(List.of(
@@ -854,8 +857,9 @@ public final class PlatformShellScreen extends Screen {
         int visibleH = p.minimized ? 26 : p.h;
         if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
         ThemeManager.renderWindow(g, p.x, p.y, p.w, visibleH, p.id);
-        g.fill(p.x,p.y,p.x+p.w,p.y+26,WorkspaceTheme.alpha(SURFACE_ALT, 190));
-        g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
+        // Do not paint an opaque title strip over the supplied frame art.
+        // A low-alpha backing keeps live text readable while preserving the skin.
+        g.fill(p.x + 8, p.y + 6, p.x + p.w - 8, p.y + 22, 0x55101824);
         String icon = panelIcon(p.id);
         g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
         if (p.id.equals("inspector") || p.id.equals("tools")) {
