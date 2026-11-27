@@ -756,8 +756,7 @@ public class MapScreen extends Screen {
             g.enableScissor(left + 2, top + 2, left + size - 2, top + size - 2);
             try {
                 InventoryScreen.renderEntityInInventoryFollowsMouse(g,
-                        left + 2, top + 2, left + size - 2, top + size - 2,
-                        Math.max(10, size / 2), 0.0F, (float) (mx - x), (float) (my - y), commanderBody);
+                        x, y, Math.max(10, size - 4), 0.0F, 0.0F, commanderBody);
                 renderedLeader = true;
             } catch (RuntimeException rendererFailure) {
                 // A modded entity renderer may be unavailable during a client reload; retain the strategic fallback.
@@ -805,6 +804,7 @@ public class MapScreen extends Screen {
     }
 
     private void drawMarkers(GuiGraphics g, int mx, int my) {
+        Minecraft mc = Minecraft.getInstance();
         Map<String, LivingEntity> leaderBodies = leaderBodies();
         for (Markers.Marker marker : ClientState.markers.list()) {
             if (hiddenArmyMarker(marker)) continue;
