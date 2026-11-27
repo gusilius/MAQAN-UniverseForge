@@ -86,6 +86,11 @@ public final class VisualCatalogScreen extends Screen {
     private void drawPreview(GuiGraphics g, WorldObjectVisualCatalog.Entry entry, int x, int y) {
         g.fill(x - 3, y - 3, x + 27, y + 27, 0xFF211A15);
         g.renderOutline(x - 3, y - 3, 30, 30, 0xFF927348);
+        ResourceLocation preview = ResourceLocation.tryParse(entry.previewTexture());
+        if (preview != null) {
+            g.blit(preview, x, y, 0, 0, 24, 24, 24, 24);
+            return;
+        }
         String item = entry.profile().mapItem();
         ResourceLocation id = ResourceLocation.tryParse(item);
         if (id != null) {
