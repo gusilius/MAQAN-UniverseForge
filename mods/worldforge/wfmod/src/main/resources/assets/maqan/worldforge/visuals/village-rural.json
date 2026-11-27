@@ -1,0 +1,22 @@
+{
+  "id": "maqan:village.rural",
+  "category": "settlement",
+  "icon": "village",
+  "displayName": "Деревня · сельская",
+  "description": "Небольшое поселение с деревянными домами",
+  "mapScale": 30,
+  "mapItem": "minecraft:hay_block",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "village",
+    "settlement"
+  ],
+  "tags": [
+    "village",
+    "rural",
+    "hamlet"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}
