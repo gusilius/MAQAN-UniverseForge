@@ -224,12 +224,12 @@ public final class PlatformShellScreen extends Screen {
                 && mouseY >= railTop(index) && mouseY < railBottom(index);
     }
 
-    private boolean compactViewport() { return width < 900 || height < 520; }
-    private boolean compactTopbar() { return width < 720; }
-    private int profileStartX() { return compactTopbar() ? 48 : Math.max(178,width/2-112); }
-    private int profileButtonWidth() { return compactTopbar() ? 28 : 48; }
-    private int profileButtonStep() { return compactTopbar() ? 32 : 52; }
-    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+8 : width-326; }
+    private boolean compactViewport() { return width < ux(900) || height < uy(520); }
+    private boolean compactTopbar() { return width < ux(720); }
+    private int profileStartX() { return compactTopbar() ? ux(48) : Math.max(ux(178),width/2-ux(112)); }
+    private int profileButtonWidth() { return compactTopbar() ? ux(28) : ux(48); }
+    private int profileButtonStep() { return compactTopbar() ? ux(32) : ux(52); }
+    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+ux(8) : width-ux(326); }
     /** Only the political overview suppresses the lower timeline; RTS keeps its command/order strip. */
     private boolean politicalCameraWorkspace() { return profile == Profile.POLITICS; }
     private WorkspaceDockTree.Node layoutRoot() {
@@ -237,18 +237,19 @@ public final class PlatformShellScreen extends Screen {
                 ? WorkspaceDockTree.remove(workspaceRoot, "timeline") : workspaceRoot;
     }
     private WorkspaceDockTree.Rect workspaceBounds() {
-        return new WorkspaceDockTree.Rect(44, 35, Math.max(1, width - 44), Math.max(1, height - 35));
+        return new WorkspaceDockTree.Rect(ux(44), uy(35), Math.max(1, width - ux(44)), Math.max(1, height - uy(35)));
     }
 
     /** Shared constraints for layout, splitter hit-testing and drag/drop geometry. */
     private Map<String, WorkspaceDockTree.MinimumSize> workspaceMinimums() {
-        double scale = Math.min(1.0, Math.min(width / 1920.0, height / 1080.0));
+        double scale = Math.min(1.0, Math.min(width / (double) ThemeManager.REFERENCE_WIDTH,
+                height / (double) ThemeManager.REFERENCE_HEIGHT));
         return Map.of(
-                "navigation", new WorkspaceDockTree.MinimumSize(Math.max(112, (int) (150 * scale)), Math.max(96, (int) (120 * scale))),
-                "content", new WorkspaceDockTree.MinimumSize(Math.max(180, (int) (220 * scale)), Math.max(120, (int) (160 * scale))),
-                "inspector", new WorkspaceDockTree.MinimumSize(Math.max(116, (int) (180 * scale)), Math.max(110, (int) (140 * scale))),
-                "tools", new WorkspaceDockTree.MinimumSize(Math.max(116, (int) (180 * scale)), Math.max(96, (int) (120 * scale))),
-                "timeline", new WorkspaceDockTree.MinimumSize(160, Math.max(56, (int) (64 * scale))));
+                "navigation", new WorkspaceDockTree.MinimumSize(Math.max(72, (int) (150 * scale)), Math.max(64, (int) (120 * scale))),
+                "content", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (220 * scale)), Math.max(84, (int) (160 * scale))),
+                "inspector", new WorkspaceDockTree.MinimumSize(Math.max(76, (int) (180 * scale)), Math.max(76, (int) (140 * scale))),
+                "tools", new WorkspaceDockTree.MinimumSize(Math.max(76, (int) (180 * scale)), Math.max(64, (int) (120 * scale))),
+                "timeline", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (160 * scale)), Math.max(40, (int) (64 * scale))));
     }
 
     private void layoutWorkspace() {
@@ -1206,18 +1207,18 @@ public final class PlatformShellScreen extends Screen {
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
             if (hit) { resizingSplitterPath = splitter.path(); return true; }
         }
-        if (my<34) {
-            if (mx >= width - 88 && mx < width - 64) {
+        if (my < uy(34)) {
+            if (mx >= width - ux(88) && mx < width - ux(64)) {
                 workspaceManagerVisible = !workspaceManagerVisible;
                 notificationCenterVisible = false;
                 return true;
             }
-            if (mx >= width - 58 && mx < width - 38) {
+            if (mx >= width - ux(58) && mx < width - ux(38)) {
                 notificationCenterVisible = !notificationCenterVisible;
                 workspaceManagerVisible = false;
                 return true;
             }
-            if (mx >= width - 30 && mx < width - 6) {
+            if (mx >= width - ux(30) && mx < width - ux(6)) {
                 Screen view = activeView();
                 if (view != null) detachProviderView(view);
                 else onClose();
@@ -1225,9 +1226,9 @@ public final class PlatformShellScreen extends Screen {
             }
             if (commandCameraActive() && width >= 480) {
                 int cameraX = cameraControlX();
-                if (my >= 5 && my < 30 && mx >= cameraX && mx < cameraX + 170) {
-                    int index = (int) ((mx - cameraX) / 34);
-                    if (index >= 0 && index < 5 && mx < cameraX + index * 34 + 30) {
+                if (my >= uy(5) && my < uy(30) && mx >= cameraX && mx < cameraX + ux(170)) {
+                    int index = (int) ((mx - cameraX) / Math.max(1, ux(34)));
+                    if (index >= 0 && index < 5 && mx < cameraX + index * ux(34) + ux(30)) {
                         setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"}[index]);
                         return true;
                     }
