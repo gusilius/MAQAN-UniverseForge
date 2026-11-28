@@ -115,7 +115,17 @@ public class WFNpc extends PathfinderMob {
         BlockPos target=new BlockPos(x,y,z);
         if(!level().hasChunkAt(target))return;
         commandedBlock=target;commandedBlockMode=mode;setTarget(null);
-        getNavigation().moveTo(x+0.5,y,z+0.5,1.0);
+        BlockPos approach=null;double best=Double.POSITIVE_INFINITY;
+        for(int[] d:new int[][]{{1,0},{-1,0},{0,1},{0,-1}}){
+            int ax=x+d[0],az=z+d[1];
+            if(!level().hasChunkAt(new BlockPos(ax,level().getMinBuildHeight()+1,az)))continue;
+            int ay=level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,ax,az);
+            BlockPos candidate=new BlockPos(ax,ay,az);
+            double distance=distanceToSqr(ax+0.5,ay,az+0.5);
+            if(distance<best){best=distance;approach=candidate;}
+        }
+        if(approach==null){commandedBlock=null;commandedBlockMode=0;return;}
+        getNavigation().moveTo(approach.getX()+0.5,approach.getY(),approach.getZ()+0.5,1.0);
     }
     private void tickCommandedBlock(ServerLevel level){
         if(commandedBlock==null)return;

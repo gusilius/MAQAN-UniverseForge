@@ -361,7 +361,9 @@ public final class CommandMode {
         double bd = Double.MAX_VALUE;
         for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) {
             if (!(en instanceof LivingEntity le) || !le.isAlive() || le == mc.player) continue;
-            if (!(le instanceof Enemy) && !(le instanceof TroopEntity && !selectable(mc, le))) continue;
+            boolean hostileNpc="wf_people:npc".equals(le.getType().builtInRegistryHolder().key().location().toString());
+            if (!(le instanceof Enemy) && !(le instanceof TroopEntity && !selectable(mc, le))
+                    && !(hostileNpc && !selectable(mc,le))) continue;
             double[] p = Projection.project(vp, le.getX() - cam.x, le.getY() + le.getBbHeight() * 0.5 - cam.y, le.getZ() - cam.z, w, h);
             if (p[2] <= 0) continue;
             double d = Math.hypot(p[0] - sx, p[1] - sy);

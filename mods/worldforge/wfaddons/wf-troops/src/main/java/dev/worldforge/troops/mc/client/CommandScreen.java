@@ -727,7 +727,7 @@ public final class CommandScreen extends Screen {
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
             if (overPanel(x, y)) return true;
-            if(ctrl&&minecraft.player!=null&&CommandMode.SEL.isSelected(minecraft.player.getUUID().toString())){
+            if(ctrl&&minecraft.player!=null&&!CommandMode.SEL.selected().isEmpty()){
                 net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,x,y);
                 if(target!=null){
                     String coordinates=target.getX()+","+target.getY()+","+target.getZ();
