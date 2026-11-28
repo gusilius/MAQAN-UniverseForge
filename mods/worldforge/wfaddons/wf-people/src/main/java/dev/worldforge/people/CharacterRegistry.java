@@ -3,14 +3,24 @@ package dev.worldforge.people;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.people.storage.CharacterRecordStore;
+import dev.worldforge.people.storage.CharacterEvictionGate;
 
 import java.util.*;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Все персонажи мира и их должности. Сохраняется целиком в JSON вместе с миром. Аддоны подписываются на события
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
+    private static final AtomicLong GLOBAL_MEMBERSHIP_REVISION = new AtomicLong();
+
+    /** Monotonic O(1) invalidation signal for cross-partition membership snapshots. */
+    public static long globalMembershipRevision() { return GLOBAL_MEMBERSHIP_REVISION.get(); }
     public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, MARRIAGE_DISSOLVED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
@@ -24,7 +34,185 @@ public final class CharacterRegistry {
         default void lifecycle(Character c, LifecycleEvent event) { }
     }
 
-    private final Map<String, Character> byId = new LinkedHashMap<>();
+    /**
+     * Canonical materialized objects. HashMap avoids LinkedHashMap's two extra per-entry
+     * order pointers; insertion order is held by the compact ID directory below.
+     */
+    private Map<String, Character> byId = new HashMap<>();
+    /** Append-only insertion-order directory. It stores IDs, never Character references. */
+    private List<String> orderedIds = new ArrayList<>();
+    /** Retained identity routing for evicted objects; values are compact strings only. */
+    private final Map<String, String> globalIdByLocalId = new HashMap<>();
+    /** Monotonic append counter; distinct from full identity-directory replacement. */
+    private long membershipAppendGeneration;
+    /** Changes only when restore replaces the ordered identity directory wholesale. */
+    private long membershipResetGeneration;
+    /** Sparse runtime pins: entries exist only while a caller holds an explicit lease. */
+    private final Map<String, Integer> activeAccessLeases = new HashMap<>();
+    /** Optional eviction work index; one compact token per recently released identity. */
+    private static final int MAX_EVICTION_CANDIDATES = 65_536;
+    private static final class EvictionCandidate {
+        final String localId;
+        final long eligibleAfterNanos;
+        EvictionCandidate previous;
+        EvictionCandidate next;
+        EvictionCandidate(String localId, long eligibleAfterNanos) {
+            this.localId = localId;
+            this.eligibleAfterNanos = eligibleAfterNanos;
+        }
+    }
+    private EvictionCandidate evictionCandidateHead;
+    private EvictionCandidate evictionCandidateTail;
+    private final Map<String, EvictionCandidate> evictionCandidateById = new HashMap<>();
+    /** Round-robin cursor for bounded seeding of already-materialized idle identities. */
+    private int evictionSeedCursor;
+    private final CharacterAccessService accessService = new CharacterAccessService(this);
+    /** Direct lookup for canonical world-wide identities used by social/family event fan-out. */
+    private final Map<String, String> byGlobalId = new HashMap<>();
+    /** Runtime dispatch queue; each deceased Character stores its durable recipient list and cursor. */
+    private final ArrayDeque<String> pendingBereavement = new ArrayDeque<>();
+    /** Reverse index for durable physical-body UUIDs; avoids scanning every Character on entity join. */
+    private final Map<String, String> entityOwnerByUuid = new HashMap<>();
+    /** Legacy villager UUID bindings are indexed separately so village reconciliation never scans the population. */
+    private final Map<String, String> legacyVillagerOwnerByUuid = new HashMap<>();
+    private final Map<String, String> legacyVillagerUuidByCharacterId = new HashMap<>();
+    /** Character-local body-kind lookup used without hydrating an evicted Character. */
+    private final Map<String, Map<String, String>> entityBindingsByCharacterId = new HashMap<>();
+    /** Sparse account-to-Character UUID index; it stores no Character references. */
+    private final Map<String, String> playerGlobalIdByAccount = new HashMap<>();
+    /** Reverse post index: succession and office queries must not scan the population. */
+    private final Map<String, LinkedHashSet<String>> characterIdsByPostPlace = new HashMap<>();
+    /** Exact role/place projection for bounded office-holder queries. */
+    private final Map<String, LinkedHashSet<String>> characterIdsByRolePlace = new HashMap<>();
+    /** Compact uniqueness projection; never requires hydrating every Character for court generation. */
+    private final Set<String> knownHouseNames = new HashSet<>();
+
+    /**
+     * Copies only the requested insertion-order window by indexed ID lookup.
+     * The returned batch is bounded by the caller's requested range.
+     */
+    public List<Character> range(int fromInclusive, int toExclusive) {
+        int size = orderedIds.size();
+        if (fromInclusive < 0 || toExclusive < fromInclusive || toExclusive > size)
+            throw new IndexOutOfBoundsException("range [" + fromInclusive + ", " + toExclusive + ") for size " + size);
+        if (fromInclusive == toExclusive) return List.of();
+        List<Character> result = new ArrayList<>(toExclusive - fromInclusive);
+        for (int index = fromInclusive; index < toExclusive; index++) {
+            String id = orderedIds.get(index);
+            Character character = resolveMaterialized(id);
+            if (character == null)
+                throw new ConcurrentModificationException("Character identity could not be hydrated during range capture: " + id);
+            result.add(character);
+        }
+        return result;
+    }
+
+    /**
+     * Creates a short-lived insertion-order iterator positioned after a durable local ID.
+     * Used only to recover a scheduler iterator invalidated by an append between ticks.
+     */
+    public Iterator<Character> iteratorAfter(String exclusiveId) {
+        int start = 0;
+        if (exclusiveId != null && !exclusiveId.isEmpty()) {
+            int anchor = orderedIds.indexOf(exclusiveId);
+            if (anchor < 0)
+                throw new IllegalStateException("Population cursor anchor is no longer in this registry: " + exclusiveId);
+            start = anchor + 1;
+        }
+        // Capture the synchronous traversal boundary. Appends do not invalidate this
+        // iterator or change its insertion order; a later pass will observe the new tail.
+        final int startIndex = start;
+        final int end = orderedIds.size();
+        return new Iterator<>() {
+            private int index = startIndex;
+            @Override public boolean hasNext() { return index < end; }
+            @Override public Character next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                String id = orderedIds.get(index++);
+                Character character = resolveMaterialized(id);
+                if (character == null)
+                    throw new ConcurrentModificationException("Character identity could not be hydrated during registry traversal: " + id);
+                return character;
+            }
+        };
+    }
+
+    /**
+     * Temporary key-only iterator for one synchronous traversal. Do not retain it across
+     * ticks: collection iterators can retain internal state. Long-lived population work
+     * must use idPage()/idAt() instead of retaining this iterator.
+     */
+    public Iterator<String> idIteratorAfter(String exclusiveId) {
+        int start = 0;
+        if (exclusiveId != null && !exclusiveId.isEmpty()) {
+            int anchor = orderedIds.indexOf(exclusiveId);
+            if (anchor < 0)
+                throw new IllegalStateException("Population ID cursor anchor is no longer in this registry: " + exclusiveId);
+            start = anchor + 1;
+        }
+        final int startIndex = start;
+        final int end = orderedIds.size();
+        return new Iterator<>() {
+            private int index = startIndex;
+            @Override public boolean hasNext() { return index < end; }
+            @Override public String next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                return orderedIds.get(index++);
+            }
+        };
+    }
+
+    /** Legacy compatibility snapshot; avoid for large populations because it is O(population) RAM. */
+    @Deprecated
+    public List<String> idSnapshot() {
+        return new ArrayList<>(orderedIds);
+    }
+
+    /**
+     * Copies at most {@code limit} IDs from the insertion-order directory in O(limit) time.
+     * No full-population snapshot or Character reference is created.
+     */
+    public List<String> idPage(int fromInclusive, int limit) {
+        if (fromInclusive < 0 || limit < 0 || fromInclusive > orderedIds.size())
+            throw new IndexOutOfBoundsException("invalid ID page");
+        int toExclusive = (int) Math.min((long) orderedIds.size(), (long) fromInclusive + limit);
+        if (fromInclusive == toExclusive) return List.of();
+        return new ArrayList<>(orderedIds.subList(fromInclusive, toExclusive));
+    }
+
+    /** O(1) insertion-order ID lookup for resumable scans without population-sized snapshots. */
+    public String idAt(int index) {
+        if (index < 0 || index >= orderedIds.size()) throw new IndexOutOfBoundsException(index);
+        return orderedIds.get(index);
+    }
+
+    /**
+     * Compatibility view over the ordered ID directory. Do not retain a second
+     * population-sized list of Character references; each value is resolved on demand.
+     */
+    private final List<Character> orderedView = Collections.unmodifiableList(new AbstractList<Character>() {
+        @Override public Character get(int index) {
+            if (index < 0 || index >= orderedIds.size()) throw new IndexOutOfBoundsException(index);
+            Character character = resolveMaterialized(orderedIds.get(index));
+            if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
+            return character;
+        }
+        @Override public int size() { return orderedIds.size(); }
+        @Override public Iterator<Character> iterator() {
+            final int end = orderedIds.size();
+            return new Iterator<>() {
+                private int index;
+                @Override public boolean hasNext() { return index < end; }
+                @Override public Character next() {
+                    if (!hasNext()) throw new NoSuchElementException();
+                    String id = orderedIds.get(index++);
+                    Character character = resolveMaterialized(id);
+                    if (character == null) throw new ConcurrentModificationException("Character directory is inconsistent");
+                    return character;
+                }
+            };
+        }
+    });
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -41,14 +229,18 @@ public final class CharacterRegistry {
         if (authority == value) authority = null;
     }
     private long revision;
+    /** Changes only when the ordered membership is replaced wholesale (e.g. save restore). */
+    private long membershipGeneration;
 
     private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
 
     private static final class MutationBatchState {
-        int depth;
-        boolean dirty;
-        final DomainMutationRevisions.Mutation mutation =
-                WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
+        final Deque<DomainMutationRevisions.Domain> scopes = new ArrayDeque<>();
+        final EnumMap<DomainMutationRevisions.Domain, DomainMutationRevisions.Mutation> mutations =
+                new EnumMap<>(DomainMutationRevisions.Domain.class);
+        final EnumSet<DomainMutationRevisions.Domain> dirty =
+                EnumSet.noneOf(DomainMutationRevisions.Domain.class);
+        final Set<CharacterRegistry> membershipChanged = Collections.newSetFromMap(new IdentityHashMap<>());
     }
 
     /**
@@ -57,17 +249,29 @@ public final class CharacterRegistry {
      */
     public static final class MutationBatch implements AutoCloseable {
         private final MutationBatchState state;
+        private final DomainMutationRevisions.Domain domain;
         private boolean closed;
-        private MutationBatch(MutationBatchState state) { this.state = state; }
+        private MutationBatch(MutationBatchState state, DomainMutationRevisions.Domain domain) {
+            this.state = state;
+            this.domain = domain;
+        }
         @Override public void close() {
             if (closed) return;
+            if (state.scopes.peek() != domain)
+                throw new IllegalStateException("Character mutation scopes must close in LIFO order");
             closed = true;
-            if (--state.depth == 0) {
+            state.scopes.pop();
+            if (state.scopes.isEmpty()) {
                 MUTATION_BATCH.remove();
                 try {
-                    if (state.dirty) state.mutation.commit();
+                    for (CharacterRegistry registry : state.membershipChanged) {
+                        registry.revision++;
+                        GLOBAL_MEMBERSHIP_REVISION.incrementAndGet();
+                    }
+                    for (DomainMutationRevisions.Domain dirtyDomain : state.dirty)
+                        state.mutations.get(dirtyDomain).commit();
                 } finally {
-                    state.mutation.close();
+                    for (DomainMutationRevisions.Mutation mutation : state.mutations.values()) mutation.close();
                 }
             }
         }
@@ -75,28 +279,370 @@ public final class CharacterRegistry {
 
     public static MutationBatch beginMutationBatch() {
         MutationBatchState state = MUTATION_BATCH.get();
-        if (state == null) {
-            state = new MutationBatchState();
-            MUTATION_BATCH.set(state);
-        }
-        state.depth++;
-        return new MutationBatch(state);
+        DomainMutationRevisions.Domain domain = state == null || state.scopes.isEmpty()
+                ? DomainMutationRevisions.Domain.CHARACTERS : state.scopes.peek();
+        return beginMutationBatch(domain);
+    }
+
+    public static MutationBatch beginMutationBatch(DomainMutationRevisions.Domain domain) {
+        Objects.requireNonNull(domain, "domain");
+        MutationBatchState state = MUTATION_BATCH.get();
+        if (state == null) { state = new MutationBatchState(); MUTATION_BATCH.set(state); }
+        state.mutations.computeIfAbsent(domain, key -> WorldForgeApi.revisions().begin(key));
+        state.scopes.push(domain);
+        return new MutationBatch(state, domain);
+    }
+
+    public static MutationBatch beginSocialMutationBatch() {
+        return beginMutationBatch(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
     }
 
     /** Records one authoritative Character write, coalescing it inside an owning operation. */
-    public static void recordCharacterMutation() { recordDomainMutation(); }
+    public static void recordCharacterMutation() {
+        // Most domain mutators are called inside a scoped lease. Dirty all active
+        // participants conservatively so no raw helper can silently bypass WAL admission.
+        CharacterAccessService.markCurrentLeasesDirty();
+        recordDomainMutation();
+    }
+
+    /** Exact-identity mutation signal for APIs that receive a Character directly. */
+    public static void recordCharacterMutation(Character character) {
+        if (character != null) character.markDirty();
+        recordCharacterMutation();
+    }
+
+    /** Marks the owning identity dirty for WAL persistence; no Character reference is retained. */
+    private void markCharacterDirty(Character character) {
+        if (character != null) {
+            indexHouseName(character);
+            accessService.markDirty(character.globalId);
+        }
+    }
+
+    private void indexHouseName(Character character) {
+        if (character != null && character.house != null && !character.house.isBlank())
+            knownHouseNames.add(character.house);
+    }
+
+    /** Snapshot of compact house-name metadata; does not resolve or hydrate Character objects. */
+    public synchronized Set<String> houseNamesSnapshot() {
+        return Set.copyOf(knownHouseNames);
+    }
 
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
 
+    /** Stable across appends; changes only when the registry's ordered population is replaced. */
+    public long membershipGeneration() { return membershipGeneration; }
+
+    /** Changes only when new identities are appended; existing cursor prefixes remain valid. */
+    public long membershipAppendGeneration() { return membershipAppendGeneration; }
+
+    /** Changes when a restore replaces the identity directory and invalidates all old offsets. */
+    public long membershipResetGeneration() { return membershipResetGeneration; }
+
     public void addListener(Listener l) { listeners.add(l); }
 
-    public Character get(String id) { return byId.get(id); }
+    /** @deprecated Unpinned compatibility reference; use acquire(id) and close its lease. */
+    @Deprecated
+    public Character get(String id) { return resolveMaterialized(id); }
 
-    /** Read-only view: callers must use registry operations so lifecycle events cannot be bypassed. */
-    public Collection<Character> all() { return Collections.unmodifiableCollection(byId.values()); }
+    /** Internal non-hydrating lookup used by the storage/access boundary. */
+    synchronized Character peekMaterialized(String localId) { return byId.get(localId); }
 
-    public int size() { return byId.size(); }
+    public synchronized String globalIdForLocalId(String localId) { return globalIdByLocalId.get(localId); }
+
+    /** Reverse UUID directory lookup; does not materialize or hydrate the Character object. */
+    public synchronized String localIdForGlobalId(String globalId) { return byGlobalId.get(globalId); }
+
+    private Character resolveMaterialized(String localId) {
+        Character current = byId.get(localId);
+        if (current != null) return current;
+        if (!globalIdByLocalId.containsKey(localId)) return null;
+        return accessService.hydrate(localId);
+    }
+
+    /**
+     * Removes only the Java object. Identity directory and compact reverse indexes stay
+     * resident so UUID routing, family links and insertion order remain stable.
+     * Caller must have migrated the relevant operation to scoped leases before enabling
+     * automatic eviction; legacy raw references cannot be revoked by Java.
+     */
+    public synchronized boolean evictMaterialized(String globalId) throws java.io.IOException {
+        String localId = byGlobalId.get(globalId);
+        if (localId == null || activeAccessLeases.containsKey(localId)) return false;
+        Character current = byId.get(localId);
+        if (current == null) return false;
+        if (!accessService.canEvict(globalId)) return false;
+        CharacterEvictionGate.Pin reservation = accessService.beginEviction(globalId);
+        if (reservation == null) return false;
+        boolean completed = false;
+        try {
+            // Avoid decoding large JSON payloads on the server thread for every eviction.
+            // The record is force-written before this generation becomes clean; its checksum
+            // and UUID are validated when it is actually rehydrated.
+            if (!accessService.hasAddressableCheckpoint(globalId)) return false;
+            if (!globalId.equals(current.globalId))
+                throw new java.io.IOException("Canonical Character UUID mismatch");
+            if (!byId.remove(localId, current)) return false;
+            if (!accessService.completeEviction(globalId, reservation)) {
+                byId.put(localId, current);
+                return false;
+            }
+            completed = true;
+            return true;
+        } finally {
+            if (!completed) reservation.close();
+        }
+    }
+
+    /**
+     * Acquires a scoped strong reference for operations that may overlap future eviction.
+     * Legacy get() remains for compatibility; new storage-aware code should prefer leases.
+     */
+    public synchronized CharacterAccessService.Lease acquire(String id) {
+        Character character = resolveMaterialized(id);
+        if (character == null) return null;
+        // A newly active access invalidates any queued idle candidate. Stale deque
+        // tokens are harmless and are discarded by identity comparison when polled.
+        removeEvictionCandidate(id);
+        activeAccessLeases.merge(id, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, id, character);
+    }
+
+    /** Resolves and pins a world-wide UUID atomically within this registry. */
+    public synchronized CharacterAccessService.Lease acquireGlobal(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        if (localId == null) return null;
+        Character character = resolveMaterialized(localId);
+        if (character == null) return null;
+        removeEvictionCandidate(localId);
+        activeAccessLeases.merge(localId, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, localId, character);
+    }
+
+    /** Pins a live physical representation without registering it as a mutation scope on the server thread. */
+    synchronized CharacterAccessService.Lease acquirePresenceGlobal(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        if (localId == null) return null;
+        Character character = resolveMaterialized(localId);
+        if (character == null) return null;
+        removeEvictionCandidate(localId);
+        activeAccessLeases.merge(localId, 1, Integer::sum);
+        return new CharacterAccessService.Lease(this, localId, character, false);
+    }
+
+    public CharacterAccessService access() { return accessService; }
+
+    synchronized void releaseAccess(String id) {
+        Integer count = activeAccessLeases.get(id);
+        if (count == null || count <= 0)
+            throw new IllegalStateException("Character access lease underflow for " + id);
+        if (count == 1) {
+            activeAccessLeases.remove(id);
+            enqueueEvictionCandidate(id, System.nanoTime());
+        } else activeAccessLeases.put(id, count - 1);
+    }
+
+    private void unlinkEvictionCandidate(EvictionCandidate candidate) {
+        if (candidate.previous == null) evictionCandidateHead = candidate.next;
+        else candidate.previous.next = candidate.next;
+        if (candidate.next == null) evictionCandidateTail = candidate.previous;
+        else candidate.next.previous = candidate.previous;
+        candidate.previous = null;
+        candidate.next = null;
+    }
+
+    private void removeEvictionCandidate(String localId) {
+        EvictionCandidate candidate = evictionCandidateById.remove(localId);
+        if (candidate != null) unlinkEvictionCandidate(candidate);
+    }
+
+    private void enqueueEvictionCandidate(String localId, long nowNanos) {
+        if (evictionCandidateById.containsKey(localId)
+                || evictionCandidateById.size() >= MAX_EVICTION_CANDIDATES) return;
+        EvictionCandidate candidate = new EvictionCandidate(localId, nowNanos);
+        candidate.previous = evictionCandidateTail;
+        if (evictionCandidateTail == null) evictionCandidateHead = candidate;
+        else evictionCandidateTail.next = candidate;
+        evictionCandidateTail = candidate;
+        evictionCandidateById.put(localId, candidate);
+    }
+
+    /**
+     * Returns at most {@code limit} identities idle for at least {@code minIdleNanos}.
+     * Work is driven by lease-release events; this method never scans the population.
+     * A full candidate index may omit hints safely: persistence/identity state is never lost.
+     */
+    public synchronized List<String> pollEvictionCandidates(int limit, long minIdleNanos) {
+        if (limit < 1 || minIdleNanos < 0) throw new IllegalArgumentException("Invalid eviction candidate budget");
+        List<String> result = new ArrayList<>(limit);
+        long now = System.nanoTime();
+        while (evictionCandidateHead != null && result.size() < limit) {
+            EvictionCandidate candidate = evictionCandidateHead;
+            if (now - candidate.eligibleAfterNanos < minIdleNanos)
+                break; // FIFO timestamps: later candidates cannot be older.
+            unlinkEvictionCandidate(candidate);
+            evictionCandidateById.remove(candidate.localId, candidate);
+            if (activeAccessLeases.containsKey(candidate.localId)) continue;
+            result.add(candidate.localId);
+        }
+        return List.copyOf(result);
+    }
+
+    /** Requeues a candidate after a conservative eviction refusal. */
+    public synchronized void requeueEvictionCandidate(String localId) {
+        if (localId != null && !localId.isBlank() && !activeAccessLeases.containsKey(localId))
+            enqueueEvictionCandidate(localId, System.nanoTime());
+    }
+
+    /**
+     * Seeds idle eviction hints from the materialized directory without scanning the whole
+     * population in one tick. The cursor advances even when the bounded hint queue is full;
+     * later passes wrap around and retry identities skipped under backpressure.
+     */
+    public synchronized int seedEvictionCandidates(int inspectionBudget) {
+        if (inspectionBudget < 1) throw new IllegalArgumentException("inspectionBudget must be positive");
+        int size = orderedIds.size();
+        if (size == 0) { evictionSeedCursor = 0; return 0; }
+        int inspected = Math.min(inspectionBudget, size);
+        int added = 0;
+        long now = System.nanoTime();
+        for (int i = 0; i < inspected; i++) {
+            if (evictionSeedCursor >= size) evictionSeedCursor = 0;
+            String localId = orderedIds.get(evictionSeedCursor++);
+            if (byId.containsKey(localId) && !activeAccessLeases.containsKey(localId)
+                    && !evictionCandidateById.containsKey(localId)
+                    && evictionCandidateById.size() < MAX_EVICTION_CANDIDATES) {
+                enqueueEvictionCandidate(localId, now);
+                added++;
+            }
+        }
+        return added;
+    }
+
+    public synchronized int evictionCandidateCount() { return evictionCandidateById.size(); }
+
+    public synchronized boolean isAccessPinned(String id) {
+        return activeAccessLeases.containsKey(id);
+    }
+
+    public synchronized int activeAccessLeaseCount() {
+        int total = 0;
+        for (int count : activeAccessLeases.values()) total += count;
+        return total;
+    }
+
+    /** Resolves a canonical global UUID without scanning the local registry. */
+    /** @deprecated Unpinned compatibility reference; use acquireGlobal(globalId). */
+    @Deprecated
+    public Character getByGlobalId(String globalId) { return characterByGlobalId(globalId); }
+
+    private Character characterByGlobalId(String globalId) {
+        if (globalId == null || globalId.isBlank()) return null;
+        String localId = byGlobalId.get(globalId);
+        return localId == null ? null : resolveMaterialized(localId);
+    }
+
+    /** Rebuilds the world-wide family projection once before a yearly life-cycle pass. */
+    public void prepareKinIndex(long day) {
+        CharacterAuthority current = authority;
+        if (current != null) current.rebuildFamilyIndex(day);
+    }
+
+    /** Returns bounded family candidates; callers still apply the canonical kinship predicate. */
+    public List<Character> kinCandidates(Character person) {
+        CharacterAuthority current = authority;
+        if (current == null) return List.of();
+        return current.kinCandidates(person);
+    }
+
+    /**
+     * Read-only append-only insertion-order view. Existing entries never move or disappear;
+     * callers may retain this view and process a captured size in bounded batches.
+     */
+    public List<Character> all() { return orderedView; }
+
+    public int size() { return orderedIds.size(); }
+
+    /** Exact indexed count; death and dismissal remove the corresponding post-index entries. */
+    public synchronized int holderCount(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return 0;
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        return ids == null ? 0 : ids.size();
+    }
+
+    /** Number of full Character objects currently resident in this registry. */
+    public int materializedSize() { return byId.size(); }
+
+    /** Compact UUID-only reverse post lookup; never hydrates a Character. */
+    public synchronized List<String> idsAtPlace(String place) {
+        if (place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByPostPlace.get(place);
+        return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
+    }
+
+    /** @deprecated Unpinned compatibility references; use idsAtPlace(place) and acquire(id). */
+    @Deprecated
+    public List<Character> holdersAtPlace(String place) {
+        if (place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByPostPlace.get(place);
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<Character> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Character character = resolveMaterialized(id);
+            if (character != null && character.alive) result.add(character);
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    private void indexPosts(Character character) {
+        for (Character.Post post : character.posts) indexPost(character, post);
+    }
+
+    private void unindexPosts(Character character) {
+        for (Character.Post post : character.posts) unindexPost(character, post);
+    }
+
+
+    private static String postIndexKey(String role, String place) {
+        return role.length() + ":" + role + place;
+    }
+
+    private void indexPost(Character character, Character.Post post) {
+        characterIdsByPostPlace.computeIfAbsent(post.place, ignored -> new LinkedHashSet<>()).add(character.id);
+        characterIdsByRolePlace.computeIfAbsent(postIndexKey(post.role, post.place), ignored -> new LinkedHashSet<>()).add(character.id);
+    }
+
+    private void unindexPost(Character character, Character.Post post) {
+        LinkedHashSet<String> byPlace = characterIdsByPostPlace.get(post.place);
+        if (byPlace != null) { byPlace.remove(character.id); if (byPlace.isEmpty()) characterIdsByPostPlace.remove(post.place); }
+        LinkedHashSet<String> byRolePlace = characterIdsByRolePlace.get(postIndexKey(post.role, post.place));
+        if (byRolePlace != null) { byRolePlace.remove(character.id); if (byRolePlace.isEmpty()) characterIdsByRolePlace.remove(postIndexKey(post.role, post.place)); }
+    }
+
+    /** Compact UUID/local-ID view for callers that must resolve holders through scoped leases. */
+    public synchronized List<String> holderIds(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        return ids == null || ids.isEmpty() ? List.of() : List.copyOf(ids);
+    }
+
+    /** @deprecated Unpinned compatibility references; use holderIds(role, place) and acquire(id). */
+    @Deprecated
+    public List<Character> holders(String role, String place) {
+        if (role == null || role.isBlank() || place == null || place.isBlank()) return List.of();
+        Set<String> ids = characterIdsByRolePlace.get(postIndexKey(role, place));
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<Character> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Character character = resolveMaterialized(id);
+            if (character != null && character.alive && character.has(role, place)) result.add(character);
+        }
+        return Collections.unmodifiableList(result);
+    }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
@@ -112,13 +658,21 @@ public final class CharacterRegistry {
         if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
         Character c = new Character("c" + next++, name);
         c.house = house == null ? "" : house;
+        indexHouseName(c);
         c.culture = culture == null ? "" : culture;
         c.gender = gender;
         c.birthYear = birthYear;
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        revision++;
+        if (!globalIdByLocalId.containsKey(c.id)) orderedIds.add(c.id);
+        byGlobalId.put(c.globalId, c.id);
+        globalIdByLocalId.put(c.id, c.globalId);
+        // Register the new identity directly; no population-wide scan is needed.
+        accessService.registerCreated(c);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.characterCreated(this, c);
+        markMembershipAppend();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
@@ -136,7 +690,9 @@ public final class CharacterRegistry {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
-        c.posts.add(new Character.Post(role, place));
+        Character.Post post = new Character.Post(role, place);
+        c.posts.add(post);
+        indexPost(c, post);
         for (Listener l : listeners) l.appointed(c, role, place);
         publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
     }
@@ -151,7 +707,11 @@ public final class CharacterRegistry {
 
     private void dismissBatched(String id, String role, String place, int year) {
         Character c = require(id);
-        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
+        Character.Post removedPost = null;
+        for (Character.Post post : c.posts)
+            if (post.role.equals(role) && post.place.equals(place)) { removedPost = post; break; }
+        if (removedPost != null && c.posts.remove(removedPost)) {
+            unindexPost(c, removedPost);
             for (Listener l : listeners) l.dismissed(c, role, place);
             publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
         }
@@ -175,33 +735,42 @@ public final class CharacterRegistry {
             }
             Object previousAge = character.props.put("population.age_years", age);
             if (!Objects.equals(previousAge, age)) changed = true;
-            if (changed && !lifecyclePublished) recordDomainMutation();
+            if (changed) {
+                markCharacterDirty(character);
+                if (!lifecyclePublished) recordDomainMutation();
+            }
         }
     }
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
-        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }
+        refreshLifeStages(orderedView, year);
     }
 
-    private void refreshLifeStagesBatched(int year) {
+    /** Refreshes only the supplied stable batch; safe for resumable server-tick processing. */
+    public void refreshLifeStages(Collection<Character> people, int year) {
+        if (people == null || people.isEmpty()) return;
+        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(people, year); }
+    }
+
+    private void refreshLifeStagesBatched(Collection<Character> people, int year) {
         boolean changed = false;
         boolean lifecyclePublished = false;
-        for (Character character : byId.values()) {
+        for (Character character : people) {
             if (!character.alive) continue;
+            boolean characterChanged = false;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
-            if (!Objects.equals(previous, current)) changed = true;
+            if (!Objects.equals(previous, current)) { changed = true; characterChanged = true; }
             if (previous instanceof String old && !old.equals(current)) {
                 emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
                 lifecyclePublished = true;
             }
             Object age = PopulationSimulation.age(character, year);
             Object previousAge = character.props.put("population.age_years", age);
-            if (!Objects.equals(previousAge, age)) changed = true;
+            if (!Objects.equals(previousAge, age)) { changed = true; characterChanged = true; }
+            if (characterChanged) markCharacterDirty(character);
         }
-        // publish() already advanced the lane for lifecycle changes; age-only refreshes
-        // still invalidate snapshots without counting the same character transition twice.
         if (changed && !lifecyclePublished) recordDomainMutation();
     }
 
@@ -301,11 +870,8 @@ public final class CharacterRegistry {
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
         String uuid = requireText(entityUuid, "entity UUID");
-        for (Character other : byId.values()) {
-            if (other == c) continue;
-            Object raw = other.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings && bindings.containsValue(uuid)) return false;
-        }
+        String previousOwner = entityOwnerByUuid.get(uuid);
+        if (previousOwner != null && !previousOwner.equals(c.id)) return false;
         Object raw = c.props.get("population.entity_bindings");
         Map<String, Object> bindings;
         if (raw instanceof Map<?, ?> map) {
@@ -314,8 +880,17 @@ public final class CharacterRegistry {
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
         if (Objects.equals(bindings.get(kind), uuid)) return true;
-        bindings.put(kind, uuid);
+        Object previousUuid = bindings.put(kind, uuid);
+        if (previousUuid instanceof String oldUuid && !oldUuid.equals(uuid)
+                && !bindings.containsValue(oldUuid)) {
+            entityOwnerByUuid.remove(oldUuid, c.id);
+            Map<String, String> indexed = entityBindingsByCharacterId.get(c.id);
+            if (indexed != null) indexed.remove(kind, oldUuid);
+        }
+        entityOwnerByUuid.put(uuid, c.id);
+        entityBindingsByCharacterId.computeIfAbsent(c.id, ignored -> new HashMap<>()).put(kind, uuid);
         c.props.put("population.entity_bindings", bindings);
+        markCharacterDirty(c);
         recordDomainMutation();
         return true;
     }
@@ -337,12 +912,104 @@ public final class CharacterRegistry {
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
+        if (!bindings.containsValue(uuid)) entityOwnerByUuid.remove(uuid, c.id);
+        Map<String, String> indexed = entityBindingsByCharacterId.get(c.id);
+        if (indexed != null) {
+            indexed.remove(kind, uuid);
+            if (indexed.isEmpty()) entityBindingsByCharacterId.remove(c.id);
+        }
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
+        markCharacterDirty(c);
         recordDomainMutation();
     }
 
-    private static void addGlobalChild(Character parent, String childGlobalId) {
+    /** Returns the canonical owner of a physical entity UUID, or null when it is unbound. */
+    public synchronized String entityBindingOwner(String entityUuid) {
+        if (entityUuid == null || entityUuid.isBlank()) return null;
+        String characterId = entityOwnerByUuid.get(entityUuid);
+        if (characterId == null) characterId = legacyVillagerOwnerByUuid.get(entityUuid);
+        return characterId == null ? null : globalIdByLocalId.get(characterId);
+    }
+
+    /** Returns a body UUID by canonical Character identity without materializing the Character. */
+    public synchronized String entityBindingUuidForGlobal(String globalId, String bodyKind) {
+        String localId = globalId == null ? null : localIdForGlobalId(globalId);
+        if (localId == null || bodyKind == null) return null;
+        Map<String, String> bindings = entityBindingsByCharacterId.get(localId);
+        return bindings == null ? null : bindings.get(bodyKind.toLowerCase(Locale.ROOT));
+    }
+
+    /** All currently indexed physical bodies for one canonical Character, ordered by body kind. */
+    public synchronized Map<String, String> entityBindingUuidsForGlobal(String globalId) {
+        String localId = globalId == null ? null : localIdForGlobalId(globalId);
+        if (localId == null) return Map.of();
+        Map<String, String> bindings = entityBindingsByCharacterId.get(localId);
+        return bindings == null || bindings.isEmpty()
+                ? Map.of() : Collections.unmodifiableMap(new TreeMap<>(bindings));
+    }
+
+    /** Indexes a persisted Genesis account binding by UUID without retaining the Character object. */
+    public synchronized void indexPlayerBinding(String localId, String accountUuid) {
+        String globalId = globalIdByLocalId.get(localId);
+        if (globalId == null) throw new IllegalArgumentException("Unknown Character local ID: " + localId);
+        String account = java.util.UUID.fromString(accountUuid).toString();
+        String previous = playerGlobalIdByAccount.putIfAbsent(account, globalId);
+        if (previous != null && !previous.equals(globalId))
+            throw new IllegalStateException("Player account is bound to multiple Characters: " + account);
+    }
+
+    public synchronized String playerGlobalIdForAccount(String accountUuid) {
+        if (accountUuid == null || accountUuid.isBlank()) return null;
+        try { return playerGlobalIdByAccount.get(java.util.UUID.fromString(accountUuid).toString()); }
+        catch (IllegalArgumentException invalid) { return null; }
+    }
+
+    private void removeEntityBindings(Character character) {
+        Object raw = character.props.get("population.entity_bindings");
+        if (raw instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, character.id);
+        entityBindingsByCharacterId.remove(character.id);
+        String legacyUuid = legacyVillagerUuidByCharacterId.remove(character.id);
+        if (legacyUuid != null) legacyVillagerOwnerByUuid.remove(legacyUuid, character.id);
+    }
+
+    private void indexEntityBindings(Character character) {
+        String previousLegacy = legacyVillagerUuidByCharacterId.get(character.id);
+        Object legacyRaw = character.props.get("minecraft.villager_uuid");
+        String legacyUuid = legacyRaw instanceof String value && !value.isBlank() ? value : null;
+        if (previousLegacy != null && !previousLegacy.equals(legacyUuid)) {
+            legacyVillagerOwnerByUuid.remove(previousLegacy, character.id);
+            legacyVillagerUuidByCharacterId.remove(character.id, previousLegacy);
+        }
+        if (legacyUuid != null) {
+            String legacyOwner = legacyVillagerOwnerByUuid.putIfAbsent(legacyUuid, character.id);
+            if (legacyOwner != null && !legacyOwner.equals(character.id))
+                throw new IllegalArgumentException("Legacy villager UUID " + legacyUuid
+                        + " is bound to multiple Characters: " + legacyOwner + " and " + character.id);
+            legacyVillagerUuidByCharacterId.put(character.id, legacyUuid);
+        }
+
+        Object raw = character.props.get("population.entity_bindings");
+        if (!(raw instanceof Map<?, ?> bindings)) {
+            entityBindingsByCharacterId.remove(character.id);
+            return;
+        }
+        Map<String, String> indexed = new HashMap<>();
+        for (Map.Entry<?, ?> entry : bindings.entrySet()) {
+            if (!(entry.getKey() instanceof String kind) || !(entry.getValue() instanceof String uuid)) continue;
+            String owner = entityOwnerByUuid.putIfAbsent(uuid, character.id);
+            if (owner != null && !owner.equals(character.id))
+                throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                        + " is bound to multiple Characters: " + owner + " and " + character.id);
+            indexed.put(kind.toLowerCase(Locale.ROOT), uuid);
+        }
+        if (indexed.isEmpty()) entityBindingsByCharacterId.remove(character.id);
+        else entityBindingsByCharacterId.put(character.id, indexed);
+    }
+
+    private static boolean addGlobalChild(Character parent, String childGlobalId) {
         Object raw = parent.props.get("family.children_global_ids");
         List<String> children = new ArrayList<>();
         if (raw instanceof List<?> list)
@@ -350,8 +1017,68 @@ public final class CharacterRegistry {
                 try { children.add(java.util.UUID.fromString(id).toString()); }
                 catch (IllegalArgumentException ignored) { /* discard malformed legacy extension entry */ }
             }
-        if (!children.contains(childGlobalId)) children.add(childGlobalId);
+        if (children.contains(childGlobalId)) return false;
+        children.add(childGlobalId);
         parent.props.put("family.children_global_ids", children);
+        return true;
+    }
+
+    /**
+     * Rebuilds the derived, reciprocal family indexes after replaying independent
+     * Character records. A record is intentionally self-contained; unlike a full
+     * registry snapshot, replaying one record cannot see its parent object yet.
+     * Run once after the complete checkpoint/WAL stream has been applied.
+     */
+    public void reconcileFamilyLinksAfterRecordRestore() {
+        boolean anyChanged = false;
+        for (Character child : orderedView) {
+            Character father = child.father == null || child.father.isBlank() ? null : byId.get(child.father);
+            Character mother = child.mother == null || child.mother.isBlank() ? null : byId.get(child.mother);
+            Character spouse = child.spouse == null || child.spouse.isBlank() ? null : byId.get(child.spouse);
+            boolean childChanged = false;
+            if (father != null) {
+                if (!Objects.equals(child.props.put("family.father_global_id", father.globalId), father.globalId))
+                    childChanged = true;
+                if (!father.children.contains(child.id)) {
+                    father.children.add(child.id);
+                    markCharacterDirty(father);
+                    anyChanged = true;
+                }
+                if (addGlobalChild(father, child.globalId)) {
+                    markCharacterDirty(father);
+                    anyChanged = true;
+                }
+            }
+            if (mother != null) {
+                if (!Objects.equals(child.props.put("family.mother_global_id", mother.globalId), mother.globalId))
+                    childChanged = true;
+                if (!mother.children.contains(child.id)) {
+                    mother.children.add(child.id);
+                    markCharacterDirty(mother);
+                    anyChanged = true;
+                }
+                if (addGlobalChild(mother, child.globalId)) {
+                    markCharacterDirty(mother);
+                    anyChanged = true;
+                }
+            }
+            if (spouse != null) {
+                if (!Objects.equals(child.props.put("family.spouse_global_id", spouse.globalId), spouse.globalId))
+                    childChanged = true;
+                if (spouse.spouse == null || spouse.spouse.isBlank()) {
+                    spouse.spouse = child.id;
+                    markCharacterDirty(spouse);
+                    anyChanged = true;
+                } else if (!child.id.equals(spouse.spouse))
+                    throw new IllegalStateException("Conflicting spouse links after Character record replay: "
+                            + child.globalId + " -> " + spouse.globalId + " but reverse link points to " + spouse.spouse);
+            }
+            if (childChanged) {
+                markCharacterDirty(child);
+                anyChanged = true;
+            }
+        }
+        if (anyChanged) recordDomainMutation();
     }
 
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
@@ -378,18 +1105,40 @@ public final class CharacterRegistry {
         while (history.size() > 64) history.remove(0);
         character.props.put("character.lifecycle.sequence", sequence);
         character.props.put("character.lifecycle.events", history);
+        markCharacterDirty(character);
         recordDomainMutation();
         for (Listener listener : listeners) listener.lifecycle(character, event);
     }
 
+    /** Records an append without invalidating already-processed insertion-order offsets. */
+    private void markMembershipAppend() {
+        membershipAppendGeneration++;
+        markMembershipMutation();
+    }
+
     /** Advances the shared lane after a canonical Character write has completed. */
-    private static void recordDomainMutation() {
+    private void markMembershipMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
         if (batch != null) {
-            batch.dirty = true;
+            batch.membershipChanged.add(this);
+            recordDomainMutation(DomainMutationRevisions.Domain.CHARACTERS);
+        } else { revision++; GLOBAL_MEMBERSHIP_REVISION.incrementAndGet(); }
+    }
+
+    private static void recordDomainMutation() {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null && !batch.scopes.isEmpty()) { batch.dirty.add(batch.scopes.peek()); return; }
+        commitDomainMutation();
+    }
+
+    private static void recordDomainMutation(DomainMutationRevisions.Domain domain) {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null && !batch.scopes.isEmpty()) {
+            batch.mutations.computeIfAbsent(domain, key -> WorldForgeApi.revisions().begin(key));
+            batch.dirty.add(domain);
             return;
         }
-        commitDomainMutation();
+        try (DomainMutationRevisions.Mutation mutation = WorldForgeApi.revisions().begin(domain)) { mutation.commit(); }
     }
 
     private static void commitDomainMutation() {
@@ -422,26 +1171,39 @@ public final class CharacterRegistry {
 
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
-        try (MutationBatch ignored = beginMutationBatch()) {
-            return killBatched(id);
+        String globalId = globalIdForLocalId(id);
+        if (globalId == null) throw new IllegalArgumentException("Нет персонажа " + id);
+        try (CharacterAccessService.Lease lease = access().acquire(id)) {
+            if (lease == null) throw new IllegalArgumentException("Нет персонажа " + id);
+            if (Boolean.TRUE.equals(lease.get().props.get("death.lifecycle.completed"))) return List.of();
         }
+        CharacterInventory.settleEstateById(authority, this, globalId);
+        @SuppressWarnings("unchecked")
+        List<Character.Post>[] result = new List[] { List.of() };
+        CharacterAccessService.mutateScoped(authority, this, List.of(globalId), people -> {
+            try (MutationBatch ignored = beginMutationBatch()) {
+                result[0] = killBatched(id);
+            }
+            return true;
+        });
+        return result[0];
     }
 
     private List<Character.Post> killBatched(String id) {
         Character c = require(id);
         if (c.alive) c.alive = false;
-        // A pending cross-registry transfer marker must be reconciled even when the estate
-        // was previously marked settled: the recipient partition may have reached disk first.
-        if (!Boolean.TRUE.equals(c.props.get("estate.settled"))
-                || c.props.containsKey("estate.transfer_pending")) {
-            CharacterInventory.settleEstate(authority, this, c);
-        }
+        // Estate succession was committed under UUID-ordered leases before entering this
+        // lifecycle callback. Keep its transfer markers until coordinated snapshots finalize.
         if (Boolean.TRUE.equals(c.props.get("death.lifecycle.completed"))) return List.of();
 
         List<Character.Post> vacated = new ArrayList<>(c.posts);
+        unindexPosts(c);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
-        c.props.remove("population.entity_bindings");
+        Object deathBindings = c.props.remove("population.entity_bindings");
+        if (deathBindings instanceof Map<?, ?> bindings)
+            for (Object uuid : bindings.values()) if (uuid instanceof String value)
+                entityOwnerByUuid.remove(value, c.id);
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         recordBereavement(c, deathYear);
         for (Listener l : listeners) l.died(c);
@@ -450,36 +1212,241 @@ public final class CharacterRegistry {
         return vacated;
     }
 
-    /** Family and trusted friends remember a death on their own canonical Character records. */
-    private void recordBereavement(Character deceased,int deathYear) {
-        if(Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
-        long minute=Math.max(0L,(long)deathYear*525600L);
-        for(Character survivor:byId.values()) {
-            if(survivor==deceased||!survivor.alive) continue;
-            int intensity=0;
-            if(deceased.spouse.equals(survivor.id)||survivor.spouse.equals(deceased.id)
-                    ||deceased.father.equals(survivor.id)||deceased.mother.equals(survivor.id)
-                    ||survivor.father.equals(deceased.id)||survivor.mother.equals(deceased.id)
-                    ||deceased.children.contains(survivor.id)||survivor.children.contains(deceased.id)) intensity=4;
-            else {
-                boolean sibling=(!deceased.father.isBlank()&&deceased.father.equals(survivor.father))
-                        ||(!deceased.mother.isBlank()&&deceased.mother.equals(survivor.mother));
-                if(sibling) intensity=3;
-                else {
-                    int relationship=relationshipScore(survivor,deceased.globalId);
-                    if(relationship>=70) intensity=3;
-                    else if(relationship>=35) intensity=2;
+    /**
+     * Death only prepares a bounded, durable recipient list. Applying memories is
+     * deliberately deferred to processPendingBereavementBatch().
+     */
+    private void recordBereavement(Character deceased, int deathYear) {
+        if (Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))
+                || deceased.props.containsKey("death.bereavement.recipients")) return;
+        LinkedHashSet<String> recipients = new LinkedHashSet<>();
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.spouse_global_id", deceased.spouse));
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.father_global_id", deceased.father));
+        addLivingCandidateGlobal(recipients, familyGlobalOrLegacy(deceased, "family.mother_global_id", deceased.mother));
+        Object globalChildren = deceased.props.get("family.children_global_ids");
+        if (globalChildren instanceof List<?> ids) for (Object value : ids) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            if (value instanceof String globalId) addLivingCandidateGlobal(recipients, globalId);
+        }
+        for (String childId : deceased.children) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidate(recipients, childId);
+        }
+        String fatherGlobal = familyGlobalOrLegacy(deceased, "family.father_global_id", deceased.father);
+        String motherGlobal = familyGlobalOrLegacy(deceased, "family.mother_global_id", deceased.mother);
+        addLivingSiblings(recipients, fatherGlobal);
+        if (recipients.size() < MAX_BEREAVEMENT_RECIPIENTS) addLivingSiblings(recipients, motherGlobal);
+
+        Object rawRelationships = deceased.props.get("social.relationships");
+        if (rawRelationships instanceof Map<?, ?> relationships) {
+            int inspected = 0;
+            for (Map.Entry<?, ?> entry : relationships.entrySet()) {
+                if (inspected++ >= MAX_BEREAVEMENT_RECIPIENTS
+                        || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+                if (!(entry.getKey() instanceof String globalId)
+                        || !(entry.getValue() instanceof Number score) || score.intValue() < 35) continue;
+                CharacterRegistry friendRegistry = authority == null ? this : authority.registryForGlobal(globalId);
+                if (friendRegistry == null) continue;
+                String localId = friendRegistry.localIdForGlobalId(globalId);
+                if (localId == null) continue;
+                try (CharacterAccessService.Lease lease = friendRegistry.access().acquire(localId)) {
+                    if (lease != null && lease.get().alive
+                            && relationshipScore(lease.get(), deceased.globalId) >= 35)
+                        recipients.add(globalId);
                 }
             }
-            if(intensity==0) continue;
-            String eventId="death:bereavement:"+deceased.globalId+":"+survivor.globalId;
-            CharacterDevelopment.recordExperience(survivor,CharacterDevelopment.Experience.BEREAVEMENT,
-                    eventId,"lost "+deceased.name,minute,intensity);
-            CharacterDevelopment.remember(survivor,eventId+":memory","bereavement",deceased.globalId,
-                    "death of "+deceased.name,-intensity*15,minute);
         }
-        deceased.props.put("death.bereavement.completed",true);
+        deceased.props.put("death.bereavement.recipients", new ArrayList<>(recipients));
+        deceased.props.put("death.bereavement.cursor", 0);
+        deceased.props.put("death.bereavement.year", deathYear);
+        pendingBereavement.addLast(deceased.globalId);
+        markCharacterDirty(deceased);
+        recordDomainMutation();
     }
+
+    private void addLivingSiblings(Set<String> recipients, String parentGlobalId) {
+        if (parentGlobalId == null || parentGlobalId.isBlank()
+                || recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
+        CharacterRegistry parentRegistry = authority == null ? this : authority.registryForGlobal(parentGlobalId);
+        if (parentRegistry == null) return;
+        String parentLocalId = parentRegistry.localIdForGlobalId(parentGlobalId);
+        if (parentLocalId == null) return;
+        List<String> childGlobalIds = new ArrayList<>();
+        try (CharacterAccessService.Lease lease = parentRegistry.access().acquire(parentLocalId)) {
+            if (lease == null) return;
+            for (String childLocalId : lease.get().children) {
+                String childGlobalId = parentRegistry.globalIdForLocalId(childLocalId);
+                if (childGlobalId != null) childGlobalIds.add(childGlobalId);
+            }
+            Object globalChildren = lease.get().props.get("family.children_global_ids");
+            if (globalChildren instanceof List<?> ids)
+                for (Object id : ids) if (id instanceof String value && !childGlobalIds.contains(value))
+                    childGlobalIds.add(value);
+        }
+        for (String childGlobalId : childGlobalIds) {
+            if (recipients.size() >= MAX_BEREAVEMENT_RECIPIENTS) break;
+            addLivingCandidateGlobal(recipients, childGlobalId);
+        }
+    }
+
+    private static final int MAX_BEREAVEMENT_RECIPIENTS = 256;
+    public static final int DEFAULT_BEREAVEMENT_BATCH_SIZE = 32;
+
+    private void addLivingCandidate(Set<String> candidates, String localId) {
+        addLivingCandidateGlobal(candidates, globalIdForLocalId(localId));
+    }
+
+    private void addLivingCandidateGlobal(Set<String> candidates, String globalId) {
+        if (globalId == null || globalId.isBlank() || candidates.size() >= MAX_BEREAVEMENT_RECIPIENTS) return;
+        CharacterRegistry owner = authority == null ? this : authority.registryForGlobal(globalId);
+        if (owner == null) return;
+        String localId = owner.localIdForGlobalId(globalId);
+        if (localId == null) return;
+        try (CharacterAccessService.Lease lease = owner.access().acquire(localId)) {
+            if (lease != null && lease.get().alive) candidates.add(globalId);
+        }
+    }
+
+    private String familyGlobalOrLegacy(Character character, String key, String legacyId) {
+        Object value = character.props.get(key);
+        if (value instanceof String globalId && !globalId.isBlank()) return globalId;
+        String local = legacyId == null || legacyId.isBlank() ? null : globalIdForLocalId(legacyId);
+        if (local != null && !local.isBlank()) return local;
+        String resolved = authority == null || legacyId == null || legacyId.isBlank()
+                ? null : authority.globalIdForLegacyId(legacyId);
+        return resolved == null || resolved.isBlank() ? "" : resolved;
+    }
+
+    /**
+     * Applies a bounded number of death consequences. The recipient list and cursor
+     * live in the deceased Character props, so WAL/checkpoint persistence resumes safely.
+     * Per-recipient event IDs make replay idempotent if a crash precedes cursor persistence.
+     */
+    public int processPendingBereavementBatch(int maxRecipients) {
+        if (maxRecipients < 1) throw new IllegalArgumentException("maxRecipients must be positive");
+        int processed = 0;
+        try (MutationBatch ignored = beginMutationBatch()) {
+            while (processed < maxRecipients && !pendingBereavement.isEmpty()) {
+                String deceasedGlobalId = pendingBereavement.peekFirst();
+                final List<String> recipients;
+                final int initialCursor;
+                final int deathYear;
+                final String deceasedName;
+                final String deceasedLocalId = localIdForGlobalId(deceasedGlobalId);
+                if (deceasedLocalId == null) {
+                    pendingBereavement.removeFirst();
+                    continue;
+                }
+                try (CharacterAccessService.Lease lease = access().acquire(deceasedLocalId)) {
+                    if (lease == null) {
+                        pendingBereavement.removeFirst();
+                        continue;
+                    }
+                    Character deceased = lease.get();
+                    Object rawRecipients = deceased.props.get("death.bereavement.recipients");
+                    if (!(rawRecipients instanceof List<?> raw)) {
+                        CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
+                            people.get(deceasedGlobalId).props.put("death.bereavement.completed", true);
+                            return true;
+                        });
+                        pendingBereavement.removeFirst();
+                        continue;
+                    }
+                    List<String> ids = new ArrayList<>(raw.size());
+                    for (Object value : raw) if (value instanceof String id && !id.isBlank()) ids.add(id);
+                    recipients = List.copyOf(ids);
+                    initialCursor = deceased.props.get("death.bereavement.cursor") instanceof Number n
+                            ? Math.max(0, n.intValue()) : 0;
+                    deathYear = deceased.props.get("death.bereavement.year") instanceof Number n ? n.intValue() : 0;
+                    deceasedName = deceased.name;
+                }
+                int cursor = initialCursor;
+                long minute = Math.max(0L, (long) deathYear * 525600L);
+                while (cursor < recipients.size() && processed < maxRecipients) {
+                    String survivorGlobalId = recipients.get(cursor);
+                    cursor++;
+                    processed++;
+                    final int committedCursor = cursor;
+                    CharacterRegistry survivorRegistry = authority == null ? this : authority.registryForGlobal(survivorGlobalId);
+                    String survivorLocalId = survivorRegistry == null ? null
+                            : survivorRegistry.localIdForGlobalId(survivorGlobalId);
+                    if (survivorLocalId == null || survivorGlobalId.equals(deceasedGlobalId)) {
+                        CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
+                            people.get(deceasedGlobalId).props.put("death.bereavement.cursor", committedCursor);
+                            return true;
+                        });
+                        continue;
+                    }
+                    CharacterAccessService.mutateScoped(authority, this,
+                            List.of(deceasedGlobalId, survivorGlobalId), people -> {
+                        Character deceased = people.get(deceasedGlobalId);
+                        Character survivor = people.get(survivorGlobalId);
+                        int intensity = 0;
+                        if (survivor.alive && !survivor.globalId.equals(deceased.globalId)) {
+                            boolean directFamily = deceased.globalId.equals(survivor.props.get("family.spouse_global_id"))
+                                    || deceased.globalId.equals(survivor.props.get("family.father_global_id"))
+                                    || deceased.globalId.equals(survivor.props.get("family.mother_global_id"))
+                                    || survivor.globalId.equals(deceased.props.get("family.spouse_global_id"))
+                                    || survivor.globalId.equals(deceased.props.get("family.father_global_id"))
+                                    || survivor.globalId.equals(deceased.props.get("family.mother_global_id"))
+                                    || listContainsGlobal(deceased.props.get("family.children_global_ids"), survivor.globalId)
+                                    || listContainsGlobal(survivor.props.get("family.children_global_ids"), deceased.globalId);
+                            if (directFamily) intensity = 4;
+                            else {
+                                boolean sibling = (!familyGlobalId(deceased, "family.father_global_id").isBlank()
+                                        && familyGlobalId(deceased, "family.father_global_id").equals(familyGlobalId(survivor, "family.father_global_id")))
+                                        || (!familyGlobalId(deceased, "family.mother_global_id").isBlank()
+                                        && familyGlobalId(deceased, "family.mother_global_id").equals(familyGlobalId(survivor, "family.mother_global_id")));
+                                if (sibling) intensity = 3;
+                                else {
+                                    int relationship = relationshipScore(survivor, deceased.globalId);
+                                    if (relationship >= 70) intensity = 3;
+                                    else if (relationship >= 35) intensity = 2;
+                                }
+                            }
+                        }
+                        if (intensity > 0) {
+                            String eventId = "death:bereavement:" + deceased.globalId + ":" + survivor.globalId;
+                            CharacterDevelopment.recordExperience(survivor, CharacterDevelopment.Experience.BEREAVEMENT,
+                                    eventId, "lost " + deceasedName, minute, intensity);
+                            CharacterDevelopment.remember(survivor, eventId + ":memory", "bereavement", deceased.globalId,
+                                    "death of " + deceasedName, -intensity * 15, minute);
+                        }
+                        deceased.props.put("death.bereavement.cursor", committedCursor);
+                        return true;
+                    });
+                }
+                if (cursor >= recipients.size()) {
+                    CharacterAccessService.mutateScoped(authority, this, List.of(deceasedGlobalId), people -> {
+                        Character deceased = people.get(deceasedGlobalId);
+                        deceased.props.put("death.bereavement.completed", true);
+                        deceased.props.remove("death.bereavement.recipients");
+                        deceased.props.remove("death.bereavement.cursor");
+                        deceased.props.remove("death.bereavement.year");
+                        return true;
+                    });
+                    pendingBereavement.removeFirst();
+                } else break;
+            }
+        }
+        return processed;
+    }
+
+    private static boolean listContainsGlobal(Object raw, String globalId) {
+        return raw instanceof List<?> values && values.contains(globalId);
+    }
+
+    /** Resolve canonical family UUIDs while retaining compatibility with legacy local parent IDs. */
+    private String familyGlobalId(Character character, String key) {
+        String legacyId = switch (key) {
+            case "family.father_global_id" -> character.father;
+            case "family.mother_global_id" -> character.mother;
+            default -> "";
+        };
+        return familyGlobalOrLegacy(character, key, legacyId);
+    }
+
+    public int pendingBereavementEvents() { return pendingBereavement.size(); }
 
     private static int relationshipScore(Character observer,String subjectGlobalId) {
         Object raw=observer.props.get("social.relationships");
@@ -488,12 +1455,8 @@ public final class CharacterRegistry {
         return value instanceof Number n?Math.max(-100,Math.min(100,n.intValue())):0;
     }
 
-    public List<Character> holders(String role, String place) {
-        List<Character> out = new ArrayList<>();
-        for (Character c : byId.values()) if (c.alive && c.has(role, place)) out.add(c);
-        return out;
-    }
-
+    /** @deprecated Unpinned compatibility reference; use holderIds(role, place) and acquire(id). */
+    @Deprecated
     public Character holder(String role, String place) {
         List<Character> l = holders(role, place);
         return l.isEmpty() ? null : l.get(0);
@@ -524,10 +1487,19 @@ public final class CharacterRegistry {
         clearDeceasedSpouse(y);
         if (!x.spouse.isEmpty()) throw new IllegalStateException(x.name + " уже состоит в браке");
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
+        String oldXSpouse = x.spouse;
+        String oldXSpouseGlobal = optionalFamilyId(x, "family.spouse_global_id");
+        String oldYSpouse = y.spouse;
+        String oldYSpouseGlobal = optionalFamilyId(y, "family.spouse_global_id");
         x.spouse = y.id;
         y.spouse = x.id;
         x.props.put("family.spouse_global_id", y.globalId);
         y.props.put("family.spouse_global_id", x.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) {
+            currentAuthority.familyChanged(x, oldXSpouse, oldXSpouseGlobal);
+            currentAuthority.familyChanged(y, oldYSpouse, oldYSpouseGlobal);
+        }
         emit(x, LifecycleKind.MARRIED, "", y.id, year);
         emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
@@ -535,14 +1507,24 @@ public final class CharacterRegistry {
     /** A deceased or missing spouse does not permanently prevent remarriage. */
     private void clearDeceasedSpouse(Character character) {
         if (character.spouse.isEmpty()) return;
-        Character spouse = byId.get(character.spouse);
+        Character spouse = resolveMaterialized(character.spouse);
         if (spouse != null && spouse.alive) return;
+        String previousSpouse = character.spouse;
+        String previousSpouseGlobal = optionalFamilyId(character, "family.spouse_global_id");
         if (spouse != null && character.id.equals(spouse.spouse)) {
+            String reciprocalPrevious = spouse.spouse;
+            String reciprocalGlobal = optionalFamilyId(spouse, "family.spouse_global_id");
             spouse.spouse = "";
             spouse.props.remove("family.spouse_global_id");
+            CharacterAuthority currentAuthority = authority;
+            if (currentAuthority != null)
+                currentAuthority.familyChanged(spouse, reciprocalPrevious, reciprocalGlobal);
         }
         character.spouse = "";
         character.props.remove("family.spouse_global_id");
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null)
+            currentAuthority.familyChanged(character, previousSpouse, previousSpouseGlobal);
     }
 
     /** Ends a reciprocal marriage while preserving both Character identities and family links. */
@@ -555,10 +1537,19 @@ public final class CharacterRegistry {
     private boolean divorceBatched(String firstId, String secondId, int year) {
         Character first = require(firstId), second = require(secondId);
         if (first == second || !first.id.equals(second.spouse) || !second.id.equals(first.spouse)) return false;
+        String firstPreviousGlobal = optionalFamilyId(first, "family.spouse_global_id");
+        String secondPreviousGlobal = optionalFamilyId(second, "family.spouse_global_id");
+        String firstPrevious = first.spouse;
+        String secondPrevious = second.spouse;
         first.spouse = "";
         second.spouse = "";
         first.props.remove("family.spouse_global_id");
         second.props.remove("family.spouse_global_id");
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) {
+            currentAuthority.familyChanged(first, firstPrevious, firstPreviousGlobal);
+            currentAuthority.familyChanged(second, secondPrevious, secondPreviousGlobal);
+        }
         first.props.remove("family.spouse_name");
         second.props.remove("family.spouse_name");
         emit(first, LifecycleKind.MARRIAGE_DISSOLVED, second.id, "", year);
@@ -587,154 +1578,384 @@ public final class CharacterRegistry {
         c.props.put("family.mother_global_id", mother.globalId);
         addGlobalChild(father, c.globalId);
         addGlobalChild(mother, c.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.familyChanged(c);
         CharacterDevelopment.inheritPsychology(c, father, mother, Math.max(0L, year * 525600L));
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
 
+    private static String optionalFamilyId(Character character, String key) {
+        Object value = character.props.get(key);
+        return value instanceof String id ? id : "";
+    }
+
     private Character require(String id) {
-        Character c = byId.get(id);
+        Character c = resolveMaterialized(id);
         if (c == null) throw new IllegalArgumentException("Нет персонажа " + id);
         return c;
     }
 
     // ------------------------------------------------------------------ сохранение
 
-    public String toJson() { return toJson(null); }
-
-    /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
-    public String toJson(Set<String> only) {
+    /**
+     * Encode one canonical Character using the exact wf-people/3 record schema.
+     * This is the record codec boundary used by incremental persistence; it deliberately
+     * retains global identity, family links, posts, traits and every extension property.
+     */
+    public String toJsonRecord(Character c) {
+        Objects.requireNonNull(c, "character");
+        if (byId.get(c.id) != c) throw new IllegalArgumentException("Character does not belong to this registry: " + c.id);
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", c.id); record.put("global_id", c.globalId); record.put("name", c.name);
+        record.put("house", c.house); record.put("culture", c.culture); record.put("gender", c.gender);
+        record.put("birth", c.birthYear); record.put("alive", c.alive);
+        record.put("father", c.father); record.put("mother", c.mother); record.put("spouse", c.spouse);
+        record.put("children", new ArrayList<Object>(c.children));
+        List<Object> posts = new ArrayList<>();
+        for (Character.Post post : c.posts) posts.add(new ArrayList<Object>(List.of(post.role, post.place)));
+        record.put("posts", posts);
+        record.put("traits", new ArrayList<Object>(c.traits));
+        record.put("props", new LinkedHashMap<>(c.props));
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/3");
+        root.put("format", "wf-people-record/1");
         root.put("schema_version", 3);
         root.put("next", next);
-        List<Object> list = new ArrayList<>();
-        for (Character c : byId.values()) {
-            if (only != null && !only.contains(c.id)) continue;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
-            m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father); m.put("mother", c.mother); m.put("spouse", c.spouse);
-            m.put("children", new ArrayList<Object>(c.children));
-            List<Object> posts = new ArrayList<>();
-            for (Character.Post p : c.posts) posts.add(new ArrayList<Object>(List.of(p.role, p.place)));
-            m.put("posts", posts);
-            m.put("traits", new ArrayList<Object>(c.traits));
-            m.put("props", c.props);
-            list.add(m);
-        }
-        root.put("characters", list);
+        root.put("character", record);
         return Json.write(root);
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Restore/replace one record from the incremental journal. The normal wf-people/1..3
+     * parser remains the sole validator/migrator, so the record codec cannot drift from
+     * the legacy identity rules. Callers must replay records in per-shard sequence order.
+     */
+    public void applyJsonRecord(String json, String identityNamespace) {
+        applyJsonRecord(json, identityNamespace, null);
+    }
+
+    /** Applies a WAL record while verifying its frame identity in the same parse pass. */
+    public void applyJsonRecord(String json, String identityNamespace, String expectedGlobalId) {
+        applyJsonRecord(json, identityNamespace, expectedGlobalId, false);
+    }
+
+    /**
+     * Applies a checkpoint record only when the legacy snapshot has no record for its local ID.
+     * The snapshot is committed before its addressable checkpoint, so an existing snapshot
+     * member is at least as new as this record. WAL replay remains unconditional and runs later.
+     */
+    public void applyJsonRecordIfAbsent(String json, String identityNamespace, String expectedGlobalId) {
+        applyJsonRecord(json, identityNamespace, expectedGlobalId, true);
+    }
+
+    private void applyJsonRecord(String json, String identityNamespace, String expectedGlobalId,
+                                 boolean onlyIfLocalIdAbsent) {
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
+                || !(root.get("character") instanceof Map<?, ?> rawCharacter))
+            throw new IllegalArgumentException("Invalid incremental Character record");
+        // A WAL/checkpoint frame contains exactly one Character. Cross-record ownership
+        // is checked against the canonical registry indexes below, so allocating two
+        // temporary owner HashMaps for every replayed NPC is redundant.
+        Character restored = decodeCharacter(rawCharacter, identityNamespace, null, null);
+        if (expectedGlobalId != null && !expectedGlobalId.equals(restored.globalId))
+            throw new IllegalArgumentException("Character WAL identity mismatch: frame="
+                    + expectedGlobalId + " payload=" + restored.globalId);
+
+        if (onlyIfLocalIdAbsent && byId.containsKey(restored.id)) return;
+        Character previous = byId.get(restored.id);
+        String globalOwnerId = byGlobalId.get(restored.globalId);
+        if (globalOwnerId != null && !globalOwnerId.equals(restored.id))
+            throw new IllegalArgumentException("Duplicate canonical global Character identity: " + restored.globalId);
+        Object rawBindings = restored.props.get("population.entity_bindings");
+        if (rawBindings instanceof Map<?, ?> bindings) {
+            for (Object rawUuid : bindings.values()) {
+                if (!(rawUuid instanceof String uuid)) continue; // decoder already validates the shape
+                String owner = entityOwnerByUuid.get(uuid);
+                if (owner != null && !owner.equals(restored.id))
+                    throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                            + " is already owned by Character " + owner);
+            }
+        }
+
+        if (previous != null) {
+            unindexPosts(previous);
+            removeEntityBindings(previous);
+            if (!previous.globalId.equals(restored.globalId)) {
+                byGlobalId.remove(previous.globalId, previous.id);
+                pendingBereavement.remove(previous.globalId);
+            }
+        }
+        byId.put(restored.id, restored);
+        indexHouseName(restored);
+        accessService.attachCharacter(restored);
+        if (!globalIdByLocalId.containsKey(restored.id)) orderedIds.add(restored.id);
+        globalIdByLocalId.put(restored.id, restored.globalId);
+        indexPosts(restored);
+        byGlobalId.put(restored.globalId, restored.id);
+        indexEntityBindings(restored);
+        int restoredNumericId = numericCharacterId(restored.id);
+        if (restoredNumericId >= 0 && restoredNumericId < Integer.MAX_VALUE)
+            next = Math.max(next, restoredNumericId + 1);
+        Object recipients = restored.props.get("death.bereavement.recipients");
+        if (!Boolean.TRUE.equals(restored.props.get("death.bereavement.completed"))
+                && recipients instanceof List<?> && !pendingBereavement.contains(restored.globalId))
+            pendingBereavement.addLast(restored.globalId);
+        CharacterAuthority currentAuthority = authority;
+        if (currentAuthority != null) currentAuthority.characterReplaced(this, previous, restored);
+        if (previous == null) markMembershipAppend();
+        recordDomainMutation();
+    }
+
+    public String toJson() { return toJson(null); }
+
+    /** Compatibility encoder for callers that explicitly require a String snapshot. */
+    public String toJson(Set<String> only) {
+        StringWriter output = new StringWriter();
+        try { writeJson(output, only); }
+        catch (IOException impossible) { throw new IllegalStateException("StringWriter unexpectedly failed", impossible); }
+        return output.toString();
+    }
+
+    /** Streams a canonical partition snapshot with temporary memory bounded to one Character record. */
+    public void writeJson(Writer writer) throws IOException { writeJson(writer, null); }
+
+    /** Streams either the complete partition or a selected set of local Character IDs. */
+    public void writeJson(Writer writer, Set<String> only) throws IOException {
+        Objects.requireNonNull(writer, "writer");
+        writer.write("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":");
+        Json.writeNumber(writer, next);
+        writer.write(",\"characters\":[");
+        boolean first = true;
+        for (String localId : orderedIds) {
+            if (only != null && !only.contains(localId)) continue;
+            if (!first) writer.write(',');
+            first = false;
+            Character c = byId.get(localId);
+            if (c == null) {
+                // An evicted identity is already durable. Copy its one-record checkpoint
+                // directly into the partition snapshot instead of hydrating it back into RAM.
+                writeEvictedCharacterRecord(writer, localId);
+                continue;
+            }
+            // Emit fields directly: do not allocate a per-Character Map or duplicate
+            // children/posts/traits collections during a large checkpoint.
+            writer.write('{');
+            Json.writeString(writer, "id"); writer.write(':'); Json.writeString(writer, c.id); writer.write(',');
+            Json.writeString(writer, "global_id"); writer.write(':'); Json.writeString(writer, c.globalId); writer.write(',');
+            Json.writeString(writer, "name"); writer.write(':'); Json.writeString(writer, c.name); writer.write(',');
+            Json.writeString(writer, "house"); writer.write(':'); Json.writeString(writer, c.house); writer.write(',');
+            Json.writeString(writer, "culture"); writer.write(':'); Json.writeString(writer, c.culture); writer.write(',');
+            Json.writeString(writer, "gender"); writer.write(':'); Json.writeString(writer, c.gender); writer.write(',');
+            Json.writeString(writer, "birth"); writer.write(':'); Json.writeNumber(writer, c.birthYear); writer.write(',');
+            Json.writeString(writer, "alive"); writer.write(':'); writer.write(Boolean.toString(c.alive)); writer.write(',');
+            Json.writeString(writer, "father"); writer.write(':'); Json.writeString(writer, c.father); writer.write(',');
+            Json.writeString(writer, "mother"); writer.write(':'); Json.writeString(writer, c.mother); writer.write(',');
+            Json.writeString(writer, "spouse"); writer.write(':'); Json.writeString(writer, c.spouse); writer.write(',');
+            Json.writeString(writer, "children"); writer.write(':'); Json.write(c.children, writer); writer.write(',');
+            Json.writeString(writer, "posts"); writer.write(':'); writer.write('[');
+            for (int postIndex = 0; postIndex < c.posts.size(); postIndex++) {
+                if (postIndex > 0) writer.write(',');
+                Character.Post post = c.posts.get(postIndex);
+                writer.write('['); Json.writeString(writer, post.role); writer.write(',');
+                Json.writeString(writer, post.place); writer.write(']');
+            }
+            writer.write(']'); writer.write(',');
+            Json.writeString(writer, "traits"); writer.write(':'); writer.write('[');
+            boolean firstTrait = true;
+            for (String trait : c.traits) {
+                if (!firstTrait) writer.write(',');
+                firstTrait = false;
+                Json.writeString(writer, trait);
+            }
+            writer.write(']'); writer.write(',');
+            Json.writeString(writer, "props"); writer.write(':'); Json.write(c.props, writer);
+            writer.write('}');
+        }
+        writer.write("]}");
+    }
+
+    /** Writes an evicted Character from its durable one-record checkpoint without materializing it. */
+    private void writeEvictedCharacterRecord(Writer writer, String localId) throws IOException {
+        String globalId = globalIdByLocalId.get(localId);
+        if (globalId == null || globalId.isBlank())
+            throw new IOException("Evicted Character has no global UUID directory entry: " + localId);
+        CharacterRecordStore.Record record = accessService.loadCheckpoint(globalId);
+        if (record == null || !globalId.equals(record.globalId()))
+            throw new IOException("Evicted Character has no matching durable checkpoint: " + globalId);
+        Object decoded = Json.parse(record.payloadUtf8());
+        if (!(decoded instanceof Map<?, ?> root)
+                || !"wf-people-record/1".equals(root.get("format"))
+                || !(root.get("character") instanceof Map<?, ?> character)
+                || !localId.equals(character.get("id"))
+                || !globalId.equals(character.get("global_id")))
+            throw new IOException("Evicted Character checkpoint identity/schema mismatch: " + globalId);
+        writer.write(Json.write(character));
+    }
+
+    /** Parses generated local IDs without compiling a regular expression per NPC. */
+    private static int numericCharacterId(String id) {
+        if (id == null || id.length() < 2 || id.charAt(0) != 'c') return -1;
+        for (int i = 1; i < id.length(); i++) {
+            char value = id.charAt(i);
+            if (value < '0' || value > '9') return -1;
+        }
+        try { return Integer.parseInt(id.substring(1)); }
+        catch (NumberFormatException ignored) { return -1; }
+    }
+
+    /**
+     * The single canonical record decoder shared by full snapshots and incremental WAL
+     * replay. Keeping one parser prevents the two persistence paths from drifting.
+     */
+    private static Character decodeCharacter(Map<?, ?> m, String identityNamespace,
+                                             Map<String, String> globalOwners,
+                                             Map<String, String> entityOwners) {
+        if (identityNamespace == null || identityNamespace.isBlank())
+            throw new IllegalArgumentException("identityNamespace is required");
+        String id = requiredString(m, "id");
+        String name = requiredString(m, "name");
+        if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
+        String globalId = optionalString(m, "global_id");
+        if (globalId.isBlank()) {
+            globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        } else {
+            try { globalId = java.util.UUID.fromString(globalId).toString(); }
+            catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex);
+            }
+        }
+        if (globalOwners != null) {
+            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
+            if (previousGlobalOwner != null)
+                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId
+                        + " (" + previousGlobalOwner + ", " + id + ")");
+        }
+        Character character = new Character(id, globalId, name);
+        character.house = optionalString(m, "house");
+        character.culture = optionalString(m, "culture");
+        character.gender = optionalString(m, "gender");
+        if (character.gender.isBlank()) character.gender = "m";
+        Object birth = m.get("birth");
+        if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
+        character.birthYear = birthNumber.intValue();
+        Object alive = m.get("alive");
+        if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
+        character.alive = (Boolean) alive;
+        character.father = optionalString(m, "father");
+        character.mother = optionalString(m, "mother");
+        character.spouse = optionalString(m, "spouse");
+
+        readStringList(m.get("children"), character.children, "children", id);
+        Object rawPosts = m.get("posts");
+        if (!(rawPosts instanceof List<?> posts)) throw new IllegalArgumentException("Повреждены должности персонажа " + id);
+        for (Object post : posts) {
+            if (!(post instanceof List<?> pair) || pair.size() != 2
+                    || !(pair.get(0) instanceof String role) || role.isBlank()
+                    || !(pair.get(1) instanceof String place) || place.isBlank())
+                throw new IllegalArgumentException("Повреждена должность персонажа " + id);
+            if (character.has(role, place)) throw new IllegalArgumentException("Повторная должность персонажа " + id);
+            character.posts.add(new Character.Post(role, place));
+        }
+        Object rawTraits = m.get("traits");
+        if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
+        // Character.traits is already a Set; use it for duplicate detection instead
+        // of allocating a second temporary HashSet for every decoded NPC.
+        for (Object trait : traits) {
+            if (!(trait instanceof String value) || value.isBlank() || !character.traits.add(value))
+                throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
+        }
+        Object props = m.get("props");
+        if (props != null) {
+            if (!(props instanceof Map<?, ?> properties))
+                throw new IllegalArgumentException("Повреждены свойства персонажа " + id);
+            for (Map.Entry<?, ?> entry : properties.entrySet()) {
+                if (!(entry.getKey() instanceof String key))
+                    throw new IllegalArgumentException("Некорректный ключ свойства " + id);
+                character.props.put(key, entry.getValue());
+            }
+        }
+        Object bindingsRaw = character.props.get("population.entity_bindings");
+        if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
+            throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
+        if (bindingsRaw instanceof Map<?, ?> bindings) {
+            for (Object bindingValue : bindings.values()) {
+                if (!(bindingValue instanceof String uuid) || uuid.isBlank())
+                    throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
+                if (entityOwners != null) {
+                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
+                    if (previousOwner != null && !previousOwner.equals(id))
+                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid
+                                + " привязан к двум персонажам: " + previousOwner + " и " + id);
+                }
+            }
+        }
+        return character;
+    }
+
     public void fromJson(String json) { fromJson(json, "legacy-unscoped"); }
 
-    /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
+    /** Loads legacy snapshots without retaining a second, whole-population JSON object tree. */
     public void fromJson(String json, String identityNamespace) {
+        fromJson(new java.io.StringReader(json == null ? "" : json), identityNamespace);
+    }
+
+    /**
+     * Streaming restore path for server saves. Only one decoded JSON Character record is
+     * temporary at a time; the canonical Character objects and indexes are staged separately
+     * and published only after the complete file has been validated.
+     */
+    public void fromJson(java.io.Reader reader, String identityNamespace) {
+        Objects.requireNonNull(reader, "reader");
         try (MutationBatch ignored = beginMutationBatch()) {
-            fromJsonBatched(json, identityNamespace);
+            fromJsonBatched(reader, identityNamespace);
         }
     }
 
-    private void fromJsonBatched(String json, String identityNamespace) {
-        if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
-        // Parse and validate into an isolated snapshot. Never destroy the live registry
-        // until the entire save has been accepted.
-        Object parsed = Json.parse(json == null ? "" : json);
-        if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
-        String format = raw.get("format") instanceof String f ? f : "";
-        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
-            throw new IllegalArgumentException("Неверный формат людей: " + format);
-        // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
-        // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
-        Object rawNext = raw.get("next");
-        if (!(rawNext instanceof Number nextNumber)) throw new IllegalArgumentException("Отсутствует счётчик персонажей");
-        long requestedNext = nextNumber.longValue();
-        if (requestedNext < 1 || requestedNext > Integer.MAX_VALUE) throw new IllegalArgumentException("Недопустимый счётчик персонажей");
-        if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
+    private void fromJsonBatched(java.io.Reader reader, String identityNamespace) {
+        if (identityNamespace == null || identityNamespace.isBlank())
+            throw new IllegalArgumentException("identityNamespace is required");
 
-        Map<String, Character> loaded = new LinkedHashMap<>();
+        // Stage the replacement directly in its final map and order directory.
+        // Copying a LinkedHashMap into a HashMap plus a second key list doubled
+        // population-sized references during restore at exactly the worst moment.
+        Map<String, Character> loaded = new HashMap<>();
+        List<String> loadedIds = new ArrayList<>();
         Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
-        int maxNumericId = 0;
-        for (Object value : entries) {
-            if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
-            String id = requiredString(m, "id");
-            String name = requiredString(m, "name");
-            if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
-            String globalId = optionalString(m, "global_id");
-            if (globalId.isBlank()) {
-                globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
-            } else {
-                try { globalId = java.util.UUID.fromString(globalId).toString(); }
-                catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex); }
-            }
-            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
-            if (previousGlobalOwner != null)
-                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId + " (" + previousGlobalOwner + ", " + id + ")");
-            Character c = new Character(id, globalId, name);
-            c.house = optionalString(m, "house");
-            c.culture = optionalString(m, "culture");
-            c.gender = optionalString(m, "gender");
-            if (c.gender.isBlank()) c.gender = "m";
-            Object birth = m.get("birth");
-            if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
-            c.birthYear = birthNumber.intValue();
-            Object alive = m.get("alive");
-            if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
-            c.alive = (Boolean) alive;
-            c.father = optionalString(m, "father");
-            c.mother = optionalString(m, "mother");
-            c.spouse = optionalString(m, "spouse");
-
-            readStringList(m.get("children"), c.children, "children", id);
-            Object rawPosts = m.get("posts");
-            if (!(rawPosts instanceof List<?> posts)) throw new IllegalArgumentException("Повреждены должности персонажа " + id);
-            for (Object post : posts) {
-                if (!(post instanceof List<?> pair) || pair.size() != 2
-                        || !(pair.get(0) instanceof String role) || role.isBlank()
-                        || !(pair.get(1) instanceof String place) || place.isBlank())
-                    throw new IllegalArgumentException("Повреждена должность персонажа " + id);
-                if (c.has(role, place)) throw new IllegalArgumentException("Повторная должность персонажа " + id);
-                c.posts.add(new Character.Post(role, place));
-            }
-            Object rawTraits = m.get("traits");
-            if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
-            Set<String> uniqueTraits = new HashSet<>();
-            for (Object trait : traits) {
-                if (!(trait instanceof String s) || s.isBlank() || !uniqueTraits.add(s))
-                    throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
-                c.traits.add(s);
-            }
-            Object props = m.get("props");
-            if (props != null) {
-                if (!(props instanceof Map<?, ?> p)) throw new IllegalArgumentException("Повреждены свойства персонажа " + id);
-                for (Map.Entry<?, ?> entry : p.entrySet()) {
-                    if (!(entry.getKey() instanceof String key)) throw new IllegalArgumentException("Некорректный ключ свойства " + id);
-                    c.props.put(key, entry.getValue());
-                }
-            }
-            Object bindingsRaw = c.props.get("population.entity_bindings");
-            if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
-                throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
-            if (bindingsRaw instanceof Map<?, ?> bindings) {
-                for (Object bindingValue : bindings.values()) {
-                    if (!(bindingValue instanceof String uuid) || uuid.isBlank())
-                        throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
-                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
-                    if (previousOwner != null && !previousOwner.equals(id))
-                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid + " привязан к двум персонажам: " + previousOwner + " и " + id);
-                }
-            }
-            if (loaded.putIfAbsent(id, c) != null) throw new IllegalArgumentException("Повторный ID персонажа: " + id);
-            if (id.matches("c[0-9]+")) {
-                try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(id.substring(1))); }
-                catch (NumberFormatException ignored) { /* non-allocatable legacy identifier */ }
-            }
+        int[] maxNumericId = {0};
+        Json.StreamedArray snapshot;
+        try {
+            snapshot = Json.readObjectArray(reader, "characters", value -> {
+                if (!(value instanceof Map<?, ?> record))
+                    throw new IllegalArgumentException("Повреждена запись персонажа");
+                Character character = decodeCharacter(record, identityNamespace, globalOwners, entityOwners);
+                if (loaded.putIfAbsent(character.id, character) != null)
+                    throw new IllegalArgumentException("Повторный ID персонажа: " + character.id);
+                loadedIds.add(character.id);
+                int numericId = numericCharacterId(character.id);
+                if (numericId >= 0) maxNumericId[0] = Math.max(maxNumericId[0], numericId);
+            });
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Не удалось потоково прочитать сохранение персонажей", ex);
         }
-        if (maxNumericId == Integer.MAX_VALUE) throw new IllegalArgumentException("Исчерпаны ID персонажей");
-        int safeNext = (int) Math.max(requestedNext, (long) maxNumericId + 1L);
+
+        Map<String, Object> root = snapshot.fields();
+        String format = root.get("format") instanceof String f ? f : "";
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
+            throw new IllegalArgumentException("Неверный формат людей: " + format);
+        Object rawNext = root.get("next");
+        if (!(rawNext instanceof Number nextNumber))
+            throw new IllegalArgumentException("Отсутствует счётчик персонажей");
+        long requestedNext = nextNumber.longValue();
+        if (requestedNext < 1 || requestedNext > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Недопустимый счётчик персонажей");
+        if (!snapshot.present()) throw new IllegalArgumentException("Отсутствует список персонажей");
+        if (maxNumericId[0] == Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Исчерпаны ID персонажей");
+        int safeNext = (int) Math.max(requestedNext, (long) maxNumericId[0] + 1L);
+
         // Upgrade legacy map-local family references to stable global UUID references.
         for (Character character : loaded.values()) {
             Character father = loaded.get(character.father);
@@ -750,12 +1971,57 @@ public final class CharacterRegistry {
             }
             if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
         }
-        byId.clear();
-        byId.putAll(loaded);
+
+        // A wholesale identity replacement cannot overlap scoped users. Old leases
+        // would still point at objects from the previous generation of this registry.
+        if (!activeAccessLeases.isEmpty())
+            throw new IllegalStateException("Cannot replace Character registry while scoped leases are active");
+        // Candidate hints belong to the previous identity generation and must not survive restore.
+        evictionCandidateHead = null;
+        evictionCandidateTail = null;
+        evictionCandidateById.clear();
+
+        // Publish only after every record, identity and entity binding has passed validation.
+        byId = loaded;
+        orderedIds = loadedIds;
+        for (Character character : loaded.values()) accessService.attachCharacter(character);
+        globalIdByLocalId.clear();
+        membershipResetGeneration++;
+        characterIdsByPostPlace.clear();
+        characterIdsByRolePlace.clear();
+        knownHouseNames.clear();
+        for (Character character : loaded.values()) { indexPosts(character); indexHouseName(character); }
+        byGlobalId.clear();
+        pendingBereavement.clear();
+        for (Character character : loaded.values()) {
+            byGlobalId.put(character.globalId, character.id);
+            globalIdByLocalId.put(character.id, character.globalId);
+            if (!Boolean.TRUE.equals(character.props.get("death.bereavement.completed"))
+                    && character.props.get("death.bereavement.recipients") instanceof List<?>)
+                pendingBereavement.addLast(character.globalId);
+        }
+        entityOwnerByUuid.clear();
+        entityOwnerByUuid.putAll(entityOwners);
+        legacyVillagerOwnerByUuid.clear();
+        legacyVillagerUuidByCharacterId.clear();
+        entityBindingsByCharacterId.clear();
+        for (Character character : loaded.values()) indexEntityBindings(character);
+        playerGlobalIdByAccount.clear();
+        for (Character character : loaded.values()) {
+            Object account = character.props.get("genesis.player_uuid");
+            if (account instanceof String value && !value.isBlank()) {
+                try { indexPlayerBinding(character.id, value); }
+                catch (IllegalArgumentException invalid) {
+                    // The partition loader reports malformed Genesis account bindings without
+                    // making an otherwise recoverable Character partition unreadable.
+                }
+            }
+        }
+        membershipGeneration++;
         next = safeNext;
-        revision++;
+        markMembershipMutation();
         recordDomainMutation();
-        for (Character character : byId.values()) {
+        for (Character character : orderedView) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);
         }

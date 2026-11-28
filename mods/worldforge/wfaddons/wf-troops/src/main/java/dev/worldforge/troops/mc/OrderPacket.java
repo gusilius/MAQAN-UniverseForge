@@ -12,7 +12,8 @@ import java.util.function.Supplier;
 /** Клиент -> сервер: приказ выделенным. requestId is generated once per client intent and reused for packet retries. */
 public record OrderPacket(int action, List<String> ids, int kind, double x, double z, String target,
                           boolean queue, int arg, String requestId) {
-    public static final int ORDER=0,FORMATION=1,STANCE=2,WORK=3,RELEASE=4,GROUP=5,BUILD_LIST=6,BUILD=7,WORK_STOP=8,WORK_HOLD=9,APPOINT=10,WORK_FOLLOW=11,WORK_AREA=12;
+    public static final int BODY_MOVE=0,BODY_ATTACK=1,BODY_CHOP=2,BODY_BUILD=3;
+    public static final int ORDER=0,FORMATION=1,STANCE=2,WORK=3,RELEASE=4,GROUP=5,BUILD_LIST=6,BUILD=7,WORK_STOP=8,WORK_HOLD=9,APPOINT=10,WORK_FOLLOW=11,WORK_AREA=12,PLAYER_BODY=13,NPC_TASK=14;
 
     /** Source-compatible constructor for existing UI and internal call sites. */
     public OrderPacket(int action, List<String> ids, int kind, double x, double z, String target, boolean queue, int arg) {
@@ -45,7 +46,26 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         try { UUID.fromString(requestId); } catch (RuntimeException ex) { return false; }
         java.util.HashSet<String> unique=new java.util.HashSet<>();
         for(String id:ids)if(id==null||id.isBlank()||id.length()>40||!unique.add(id))return false;
-        if(action<ORDER||action>WORK_AREA)return false;
+        if(action<ORDER||action>NPC_TASK)return false;
+        if(action==PLAYER_BODY){
+            if(ids.size()!=1||arg<0||arg>3)return false;
+            try{UUID.fromString(ids.get(0));}catch(RuntimeException ex){return false;}
+            if(arg==BODY_ATTACK){try{UUID.fromString(target);}catch(RuntimeException ex){return false;}}
+            if(arg==BODY_CHOP||arg==BODY_BUILD){
+                String[] parts=target.split(",",-1);if(parts.length!=3)return false;
+                try{int bx=Integer.parseInt(parts[0]),by=Integer.parseInt(parts[1]),bz=Integer.parseInt(parts[2]);
+                    if(Math.abs(bx)>30_000_000||Math.abs(bz)>30_000_000||by< -2048||by>4096)return false;
+                }catch(NumberFormatException ex){return false;}
+            }
+            if(arg==BODY_MOVE&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
+        }
+        if(action==NPC_TASK){
+            if(ids.isEmpty()||arg<1||arg>2)return false;
+            String[] parts=target.split(",",-1);if(parts.length!=3)return false;
+            try{int bx=Integer.parseInt(parts[0]),by=Integer.parseInt(parts[1]),bz=Integer.parseInt(parts[2]);
+                if(Math.abs(bx)>30_000_000||Math.abs(bz)>30_000_000||by< -2048||by>4096)return false;
+            }catch(NumberFormatException ex){return false;}
+        }
         if(action==APPOINT&&(arg< -1||arg>10))return false;
         if(action==ORDER){
             if(kind<0||kind>=dev.worldforge.troops.Squads.Kind.values().length)return false;
@@ -57,7 +77,7 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         }
         if(action==BUILD&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
         if(action==WORK_AREA&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000
-                ||kind<0||kind>4||arg< -1||arg>64))return false;
+                ||kind<0||kind>8||arg< -1||arg>64))return false;
         if((action==WORK||action==WORK_STOP||action==WORK_HOLD||action==BUILD_LIST)
                 &&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
         return true;

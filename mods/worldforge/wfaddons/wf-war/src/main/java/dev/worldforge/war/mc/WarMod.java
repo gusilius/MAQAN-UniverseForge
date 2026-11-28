@@ -163,7 +163,7 @@ public class WarMod {
         if (e.phase != TickEvent.Phase.END || actionPersistenceBlocked) return;
         ticks++;
         if (ticks % STEP != 0) return;
-        int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_war");
+        int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_war", 1);
         for (MapData m : WorldForgeMod.loadedMaps().values()) {
             if (m.titles == null) continue;
             WarEngine en = engine(m);

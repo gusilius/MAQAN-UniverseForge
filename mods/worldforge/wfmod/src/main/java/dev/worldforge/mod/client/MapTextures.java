@@ -39,6 +39,8 @@ public final class MapTextures {
     private static DynamicTexture tex;
     private static int builtRev = -1;
     private static volatile boolean building;
+    private static volatile String requestedMode = "";
+    private static int buildToken;
     private static int counter;
 
     private MapTextures() {}
@@ -54,19 +56,32 @@ public final class MapTextures {
             release();
             return;
         }
+        requestedMode = wantMode;
         if (building || (builtRev == ClientState.revision && wantMode.equals(mode) && id != null)) return;
         building = true;
+        final int token = ++buildToken;
         final int rev = ClientState.revision;
         final TitleData copy = st.titles.copy();
-        final int[] terrain = ClientState.terrain;
         final int tw = st.w, th = st.h;
+        final long pixelCount = (long) tw * th;
+        // The raster pipeline temporarily holds several int[] buffers (base, labels, output).
+        // Cap the source image before allocation to avoid multi-hundred-megabyte spikes.
+        final long maxPixels = 16L * 1024L * 1024L;
+        if (tw <= 0 || th <= 0 || pixelCount > maxPixels) {
+            building = false;
+            return;
+        }
+        final int[] terrainSnapshot;
+        int[] sourceTerrain = ClientState.terrain;
+        if (sourceTerrain != null && sourceTerrain.length == (int) pixelCount) {
+            terrainSnapshot = sourceTerrain.clone();
+        } else {
+            terrainSnapshot = new int[(int) pixelCount];
+            java.util.Arrays.fill(terrainSnapshot, 0xFF1E2A3A);
+        }
         CompletableFuture.supplyAsync(() -> {
             Result r = new Result();
-            int[] base = terrain;
-            if (base == null || base.length != tw * th) {
-                base = new int[tw * th];
-                java.util.Arrays.fill(base, 0xFF1E2A3A);
-            }
+            int[] base = terrainSnapshot;
             r.img = MapImages.render(copy, base, wantMode);
             r.w = tw;
             r.h = th;
@@ -75,8 +90,11 @@ public final class MapTextures {
             r.labels = makeLabels(copy, wantMode);
             return r;
         }).whenComplete((r, err) -> Minecraft.getInstance().execute(() -> {
+            if (token != buildToken) return;
             building = false;
-            if (err != null || r == null) return;
+            // A newer world snapshot, requested layer, or screen lifecycle may supersede this raster pass.
+            if (err != null || r == null || ClientState.state == null
+                    || rev != ClientState.revision || !wantMode.equals(requestedMode)) return;
             upload(r, rev, wantMode);
         }));
     }
@@ -125,6 +143,11 @@ public final class MapTextures {
     }
 
     private static void upload(Result r, int rev, String m) {
+        if (r == null || r.w <= 0 || r.h <= 0
+                || (long) r.w * r.h > 16L * 1024L * 1024L
+                || r.img == null || r.img.length != r.w * r.h
+                || r.titles == null || !m.equals(requestedMode)
+                || ClientState.state == null || rev != ClientState.revision) return;
         Minecraft mc = Minecraft.getInstance();
         NativeImage ni = new NativeImage(r.w, r.h, false);
         for (int z = 0; z < r.h; z++) {
@@ -150,10 +173,17 @@ public final class MapTextures {
     }
 
     public static void release() {
+        buildToken++;
+        building = false;
+        requestedMode = "";
         if (id != null) Minecraft.getInstance().getTextureManager().release(id);
         id = null;
         tex = null;
         titles = null;
+        lut = null;
+        labels = List.of();
+        w = 0;
+        h = 0;
         builtRev = -1;
         mode = "";
     }

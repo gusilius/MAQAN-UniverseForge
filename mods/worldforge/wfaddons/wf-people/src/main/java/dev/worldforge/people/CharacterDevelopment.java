@@ -61,9 +61,9 @@ public final class CharacterDevelopment {
         catch(IllegalArgumentException ignored){mood=Mood.NEUTRAL;}
         Object until=c.props.get(MOOD_UNTIL);
         if(mood!=Mood.NEUTRAL&&until instanceof Number n&&worldMinute>=n.longValue()){
-            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
                 c.props.put(MOOD,Mood.NEUTRAL.name());c.props.remove(MOOD_UNTIL);c.props.remove(MOOD_CAUSE);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
             return Mood.NEUTRAL;
         }
@@ -72,7 +72,7 @@ public final class CharacterDevelopment {
     public static void setMood(Character c,Mood mood,long worldMinute,long duration,String cause){
         Objects.requireNonNull(mood);
         if(worldMinute<0||duration<0)throw new IllegalArgumentException("invalid mood time");
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
         Map<String,Object> before = new LinkedHashMap<>();
         before.put(MOOD,c.props.get(MOOD)); before.put(MOOD_UNTIL,c.props.get(MOOD_UNTIL)); before.put(MOOD_CAUSE,c.props.get(MOOD_CAUSE));
         c.props.put(MOOD,mood.name());
@@ -84,7 +84,7 @@ public final class CharacterDevelopment {
         if (!Objects.equals(before.get(MOOD),c.props.get(MOOD))
                 || !Objects.equals(before.get(MOOD_UNTIL),c.props.get(MOOD_UNTIL))
                 || !Objects.equals(before.get(MOOD_CAUSE),c.props.get(MOOD_CAUSE)))
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(c);
         }
     }
     public static String moodCause(Character c){return string(c,MOOD_CAUSE,"");}
@@ -126,7 +126,7 @@ public final class CharacterDevelopment {
 
     public static void setTemperament(Character c, Temperament facet, int value) {
         Objects.requireNonNull(c); Objects.requireNonNull(facet);
-        setValue(c,"personality.temperament." + facet.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
+        setSocialValue(c,"personality.temperament." + facet.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
     }
 
     /** Motivation strength is not an exclusive alignment: several strong, even competing drives are valid. */
@@ -155,13 +155,13 @@ public final class CharacterDevelopment {
 
     public static void setDrive(Character c, Drive drive, int value) {
         Objects.requireNonNull(c); Objects.requireNonNull(drive);
-        setValue(c,"personality.drive." + drive.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
+        setSocialValue(c,"personality.drive." + drive.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
     }
 
     /** Materializes all stable facets into the canonical Character save without creating another profile. */
     public static void ensurePsychology(Character c) {
         Objects.requireNonNull(c, "character");
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             boolean changed = false;
             for (Temperament facet : Temperament.values()) {
                 String key = "personality.temperament." + facet.name().toLowerCase(Locale.ROOT);
@@ -183,7 +183,7 @@ public final class CharacterDevelopment {
             }
             // Stable defaults become persisted Character state; publish one revision for the
             // complete initialization, but do not churn revisions on subsequent idempotent calls.
-            if (changed) CharacterRegistry.recordCharacterMutation();
+            if (changed) CharacterRegistry.recordCharacterMutation(c);
         }
     }
 
@@ -193,14 +193,14 @@ public final class CharacterDevelopment {
     }
 
     public static int changeStress(Character c, int delta) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             return changeStressBatched(c, delta);
         }
     }
 
     private static int changeStressBatched(Character c, int delta) {
         int next = clamp(stress(c) + delta, 0, 100);
-        if (stress(c) != next) { c.props.put("psychology.stress", next); CharacterRegistry.recordCharacterMutation(); }
+        if (stress(c) != next) { c.props.put("psychology.stress", next); CharacterRegistry.recordCharacterMutation(c); }
         return next;
     }
 
@@ -215,19 +215,25 @@ public final class CharacterDevelopment {
     public static boolean remember(Character observer, String eventId, String kind, String subjectGlobalId,
                                    String detail, int emotionalWeight, long worldMinute) {
         Objects.requireNonNull(observer);
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
         if (eventId == null || !eventId.matches("[A-Za-z0-9_.:-]{1,160}"))
             throw new IllegalArgumentException("invalid memory event ID");
         if (kind == null || kind.isBlank() || kind.length() > 64 || worldMinute < 0)
             throw new IllegalArgumentException("invalid memory");
-        List<Object> history = new ArrayList<>();
         Object raw = observer.props.get("character.memory.events");
-        if (raw instanceof List<?> list) for (Object item : list) if (item instanceof Map<?,?> map) {
-            if (eventId.equals(map.get("id"))) return false;
-            Map<String,Object> copy = new LinkedHashMap<>();
-            map.forEach((k,v) -> { if (k instanceof String key) copy.put(key,v); });
-            history.add(copy);
+        List<Object> history;
+        if (raw instanceof ArrayList<?> existing) {
+            // The canonical Character owns this mutable list. Mutate it in place:
+            // copying up to 96 maps on every conversation caused massive allocation churn.
+            @SuppressWarnings("unchecked")
+            List<Object> mutable = (List<Object>) existing;
+            history = mutable;
+        } else {
+            history = new ArrayList<>();
+            if (raw instanceof List<?> list) history.addAll(list);
         }
+        for (Object item : history)
+            if (item instanceof Map<?, ?> map && eventId.equals(map.get("id"))) return false;
         Map<String,Object> event = new LinkedHashMap<>();
         event.put("id", eventId); event.put("kind", kind);
         event.put("subject", subjectGlobalId == null ? "" : subjectGlobalId);
@@ -237,7 +243,7 @@ public final class CharacterDevelopment {
         while (history.size() > 96) history.remove(0);
         observer.props.put("character.memory.events", history);
         observer.props.put("character.memory.last_minute", worldMinute);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(observer);
         return true;
         }
     }
@@ -258,7 +264,7 @@ public final class CharacterDevelopment {
     /** Returns stress caused by acting against the character's own principles. */
     public static int recordConduct(Character actor, Conduct conduct, Character affected,
                                     String operationId, long worldMinute) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             return recordConductBatched(actor, conduct, affected, operationId, worldMinute);
         }
     }
@@ -307,7 +313,7 @@ public final class CharacterDevelopment {
                 subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute)) {
             receipts.put(operationId, payload);
             actor.props.put(receiptKey, receipts);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(actor);
             return 0;
         }
         changeStress(actor, stressDelta);
@@ -325,7 +331,7 @@ public final class CharacterDevelopment {
     /** Experiences slowly alter motivation and temperament; repeated experiences may unlock a compatible trait. */
     public static void recordExperience(Character c, Experience experience, String eventId,
                                          String detail, long worldMinute, int intensity) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             recordExperienceBatched(c, experience, eventId, detail, worldMinute, intensity);
         }
     }
@@ -397,7 +403,7 @@ public final class CharacterDevelopment {
 
     /** Blended inherited psychology and a small, compatible sample of family traits. */
     public static void inheritPsychology(Character child, Character father, Character mother, long worldMinute) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             inheritPsychologyBatched(child, father, mother, worldMinute);
         }
     }
@@ -432,7 +438,7 @@ public final class CharacterDevelopment {
     /** Parents shape early temperament; a kin guardian can provide a real substitute caregiver. */
     public static void upbringingTick(Character child, Character father, Character mother,
                                       Character guardian, int year) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             upbringingTickBatched(child, father, mother, guardian, year);
         }
     }
@@ -510,7 +516,7 @@ public final class CharacterDevelopment {
 
     /** Records a lasting injury on the canonical person, not on the disposable troop entity. */
     public static int recordInjury(Character c,int severity,String cause,long worldMinute) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             return recordInjuryBatched(c,severity,cause,worldMinute);
         }
     }
@@ -537,13 +543,13 @@ public final class CharacterDevelopment {
         history.add(event);
         while(history.size()>24)history.remove(0);
         c.props.put("military.injury.history",history);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(c);
         return next;
     }
 
     /** One physical hit produces one durable wound and one trauma response. */
     public static boolean recordCombatInjury(Character c,int severity,String eventId,String cause,long worldMinute) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             return recordCombatInjuryBatched(c,severity,eventId,cause,worldMinute);
         }
     }
@@ -574,7 +580,7 @@ public final class CharacterDevelopment {
 
     /** Healing is explicit and gradual; injuries do not vanish merely because an entity reloads. */
     public static int healInjury(Character c,int severityPoints) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             return healInjuryBatched(c,severityPoints);
         }
     }
@@ -588,7 +594,7 @@ public final class CharacterDevelopment {
             c.props.remove("military.injury.cause");
             c.props.remove("military.injury.last_minute");
         } else c.props.put("military.injury.severity",next);
-        if (next != previous) CharacterRegistry.recordCharacterMutation();
+        if (next != previous) CharacterRegistry.recordCharacterMutation(c);
         return next;
     }
 
@@ -636,7 +642,7 @@ public final class CharacterDevelopment {
         String id=id(abilityId,"ability");
         List<String> values=new ArrayList<>(abilities(c));
         if(values.contains(id))return false;
-        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();return true;
+        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation(c);return true;
     }
     public static boolean forgetAbility(Character c,String abilityId) {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
@@ -647,15 +653,24 @@ public final class CharacterDevelopment {
     private static boolean forgetAbilityBatched(Character c,String abilityId){
         List<String> values=new ArrayList<>(abilities(c));
         boolean changed=values.remove(id(abilityId,"ability"));
-        if(changed){c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();}
+        if(changed){c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation(c);}
         return changed;
     }
+    private static void setSocialValue(Character c,String key,Object value){
+        Objects.requireNonNull(c,"character");
+        if(!Objects.equals(c.props.get(key),value)){
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
+                c.props.put(key,value); CharacterRegistry.recordCharacterMutation(c);
+            }
+        }
+    }
+
     private static void setValue(Character c,String key,Object value){
         Objects.requireNonNull(c,"character");
         if(!Objects.equals(c.props.get(key),value)){
             try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
                 c.props.put(key,value);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
         }
     }

@@ -58,6 +58,22 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(SettlementSpacing.conflicts(127, 0)
+                        && SettlementSpacing.conflicts(-127, 0)
+                        && SettlementSpacing.conflicts(90, 90)
+                        && !SettlementSpacing.conflicts(128, 0)
+                        && !SettlementSpacing.conflicts(91, 91),
+                "overlapping emergence sites are detected deterministically at the exact 128-block boundary");
+        int[] relocated = SettlementSpacing.findAvailablePosition(10, 10,
+                List.of(new long[]{10, 10}), 256);
+        ok(relocated != null && !SettlementSpacing.conflicts(10L - relocated[0], 10L - relocated[1])
+                        && Arrays.equals(relocated, SettlementSpacing.findAvailablePosition(10, 10,
+                                List.of(new long[]{10, 10}), 256)),
+                "overlapping settlement anchors relocate to the same nearest deterministic free position");
+        ok(SettlementSpacing.findAvailablePosition(10, 10,
+                        List.of(new long[]{10, 10}, new long[]{138, 10}, new long[]{-118, 10},
+                                new long[]{10, 138}, new long[]{10, -118}), 0) == null,
+                "settlement placement reports a bounded search with no available location");
         SettleTypes settlementTypes = new SettleTypes();
         settlementTypes.load(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/types.json")));
         Settlement emptyBlueprintSite = new Settlement("empty_blueprint_site", "Empty site", d);
@@ -193,6 +209,10 @@ public class SettleTest {
         Flow restoredFlow = new Flow();
         SettlementTestAccess.flowLoad(restoredFlow,corruptedFlow);
         ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
+
+        Settlement snapshotProbe = fresh(d, 2);
+        ok(Json.write(snapshotProbe.toMap()).equals(snapshotProbe.toJson()),
+                "structured settlement snapshots serialize identically without a JSON parse round-trip");
 
         Settlement s = fresh(d, 4);
         Worker lifeResident = s.workers.get(0);

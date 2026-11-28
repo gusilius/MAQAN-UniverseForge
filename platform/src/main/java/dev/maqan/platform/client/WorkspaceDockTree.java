@@ -182,16 +182,34 @@ public final class WorkspaceDockTree {
     }
 
     public static List<Splitter> splitters(Node root, Rect bounds) {
+        return splitters(root, bounds, Map.of());
+    }
+
+    /** Splitter geometry must use the same minimum-size constraints as panel layout. */
+    public static List<Splitter> splitters(Node root, Rect bounds, Map<String, MinimumSize> minimums) {
         List<Splitter> result = new ArrayList<>();
-        collectSplitters(root, bounds, "", result);
+        collectSplitters(root, bounds, "", minimums == null ? Map.of() : minimums, result);
         return List.copyOf(result);
     }
 
-    private static void collectSplitters(Node node, Rect bounds, String path, List<Splitter> result) {
-        if (!(node instanceof Split split)) return;
+    private static int firstSize(Split split, Rect bounds, Map<String, MinimumSize> minimums) {
         boolean horizontal = split.axis() == Axis.HORIZONTAL;
         int available = horizontal ? bounds.width() : bounds.height();
-        int firstSize = (int) (((long) available * split.firstWeight()) / WEIGHT_SCALE);
+        int firstMin = minimum(split.first(), minimums, horizontal);
+        int secondMin = minimum(split.second(), minimums, horizontal);
+        int size = (int) (((long) available * split.firstWeight()) / WEIGHT_SCALE);
+        return available >= firstMin + secondMin
+                ? Math.max(firstMin, Math.min(available - secondMin, size))
+                : Math.max(0, Math.min(available, size));
+    }
+
+    private static void collectSplitters(Node node, Rect bounds, String path,
+                                         Map<String, MinimumSize> minimums, List<Splitter> result) {
+        if (!(node instanceof Split split)) return;
+        boolean horizontal = split.axis() == Axis.HORIZONTAL;
+        int firstSize = firstSize(split, bounds, minimums);
+        int available = horizontal ? bounds.width() : bounds.height();
+        int secondSize = Math.max(0, available - firstSize);
         int position = horizontal ? bounds.x() + firstSize : bounds.y() + firstSize;
         result.add(new Splitter(path, split.axis(), position,
                 horizontal ? bounds.y() : bounds.x(),
@@ -200,10 +218,10 @@ public final class WorkspaceDockTree {
                 ? new Rect(bounds.x(), bounds.y(), firstSize, bounds.height())
                 : new Rect(bounds.x(), bounds.y(), bounds.width(), firstSize);
         Rect second = horizontal
-                ? new Rect(bounds.x() + firstSize, bounds.y(), bounds.width() - firstSize, bounds.height())
-                : new Rect(bounds.x(), bounds.y() + firstSize, bounds.width(), bounds.height() - firstSize);
-        collectSplitters(split.first(), first, path + "0", result);
-        collectSplitters(split.second(), second, path + "1", result);
+                ? new Rect(bounds.x() + firstSize, bounds.y(), secondSize, bounds.height())
+                : new Rect(bounds.x(), bounds.y() + firstSize, bounds.width(), secondSize);
+        collectSplitters(split.first(), first, path + "0", minimums, result);
+        collectSplitters(split.second(), second, path + "1", minimums, result);
     }
 
     public static Node group(Node root, String targetPanelId, String newPanelId) {

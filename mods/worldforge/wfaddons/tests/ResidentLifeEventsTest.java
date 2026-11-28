@@ -1,15 +1,19 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterHealth;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public final class ResidentLifeEventsTest {
     private static int failures;
@@ -18,7 +22,49 @@ public final class ResidentLifeEventsTest {
         else System.out.println("ok   " + message);
     }
 
+    private static boolean retainsCharacterReference(Object value) {
+        if (value instanceof Character) return true;
+        if (value instanceof Iterable<?> values)
+            for (Object item : values) if (retainsCharacterReference(item)) return true;
+        if (value instanceof Map<?, ?> map)
+            for (Object item : map.values()) if (retainsCharacterReference(item)) return true;
+        return false;
+    }
+
+    private static int registryPassField(CharacterRegistry registry, String fieldName) {
+        try {
+            java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
+            passesField.setAccessible(true);
+            java.util.Map<?, ?> passes = (java.util.Map<?, ?>) passesField.get(null);
+            Object state = passes.get(registry);
+            if (state == null) return Integer.MIN_VALUE;
+            java.lang.reflect.Field valueField = state.getClass().getDeclaredField(fieldName);
+            valueField.setAccessible(true);
+            return valueField.getInt(state);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("could not inspect resident registry pass state", error);
+        }
+    }
+
     public static void main(String[] args) {
+        System.setProperty("wf.test.traceResidentLife", "true");
+        CharacterRegistry retentionRegistry = new CharacterRegistry();
+        for (int i = 0; i < 64; i++)
+            retentionRegistry.create("Resident " + i, "", "north", i % 2 == 0 ? "m" : "f", 1980);
+        ResidentLifeEvents.advanceYearly(retentionRegistry, 2020, null, 1, 9001L);
+        try {
+            java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
+            passesField.setAccessible(true);
+            Object passState = ((java.util.Map<?, ?>) passesField.get(null)).get(retentionRegistry);
+            java.lang.reflect.Field sessionField = passState.getClass().getDeclaredField("session");
+            sessionField.setAccessible(true);
+            Object session = sessionField.get(passState);
+            check(session != null && !retainsCharacterReference(session),
+                    "resumable family sessions retain UUIDs rather than population-sized Character references");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("could not inspect UUID-based family session", error);
+        }
+
         CharacterRegistry registry = new CharacterRegistry();
         Character father = registry.create("Арен", "Дом Арен", "north", "m", 1980);
         Character mother = registry.create("Мира", "Дом Мира", "north", "f", 1980);
@@ -29,10 +75,16 @@ public final class ResidentLifeEventsTest {
         check("друг".equals(ResidentSocial.bond(father, mother.globalId)),
                 "relationship score resolves to a stable friendship bond");
 
+        WorldForgeApi.clock().reset();
         boolean married = false;
+        int marriageYear = -1;
         for (int year = 2000; year < 2040 && !married; year++) {
+            System.out.println("LIFE_TEST marriage-year-start=" + year);
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
+            System.out.println("LIFE_TEST marriage-year-end=" + year);
             married = father.id.equals(mother.spouse) && mother.id.equals(father.spouse);
+            if (married) marriageYear = year;
         }
         check(married, "mutual high affinity can lead to a persistent marriage event");
         check(father.name.equals(mother.props.get("family.spouse_name"))
@@ -45,8 +97,11 @@ public final class ResidentLifeEventsTest {
                 "family events retain the original Character identities");
 
         boolean childBorn = false;
-        for (int year = 2000; year < 2040 && !childBorn; year++) {
+        for (int year = marriageYear + 1; marriageYear > 0 && year < marriageYear + 40 && !childBorn; year++) {
+            System.out.println("LIFE_TEST birth-year-start=" + year);
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
+            System.out.println("LIFE_TEST birth-year-end=" + year);
             childBorn = !mother.children.isEmpty() && !father.children.isEmpty();
         }
         check(childBorn, "married residents can have a child through the canonical family registry");
@@ -74,8 +129,13 @@ public final class ResidentLifeEventsTest {
         namedFather.props.put("origin.race", "deep_dwarf");
         namedMother.props.put("origin.race", "deep_dwarf");
         namedFamily.marry(namedFather.id, namedMother.id, 2000);
-        for (int year = 2000; year <= 2022 && namedMother.children.isEmpty(); year++)
+        WorldForgeApi.clock().reset();
+        for (int year = 2000; year <= 2040 && namedMother.children.isEmpty(); year++) {
+            System.out.println("LIFE_TEST named-birth-year-start=" + year);
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(namedFamily, year, birthNames);
+            System.out.println("LIFE_TEST named-birth-year-end=" + year);
+        }
         Character namedChild = namedMother.children.isEmpty() ? null : namedFamily.get(namedMother.children.get(0));
         check(namedChild != null && List.of("Торин", "Двалин", "Диса", "Груна").contains(namedChild.name),
                 "natural births use the shared race-aware NameBank instead of generic placeholder names");
@@ -143,6 +203,68 @@ public final class ResidentLifeEventsTest {
                         && PopulationSimulation.skillRank(pupil, "farming") == 0,
                 "children inherit learning opportunities gradually without copying guardian skill ranks");
 
+        CharacterRegistry dueBirthRegistry = new CharacterRegistry();
+        Character dueMother = dueBirthRegistry.create("Мать", "house-due", "north", "f", 1975);
+        Character dueFather = dueBirthRegistry.create("Отец", "house-due", "north", "m", 1974);
+        dueBirthRegistry.marry(dueMother.id, dueFather.id, 2000);
+        dueMother.props.put("family.pregnancy.father_id", dueFather.id);
+        dueMother.props.put("family.pregnancy.start_day", 100L);
+        dueMother.props.put("family.pregnancy.due_day", 370L);
+        dueMother.props.put("family.pregnancy.conception_year", 2000);
+        dueMother.props.put("social.last_family_year", 2001);
+        check(ResidentLifeEvents.advanceDuePregnanciesBatch(dueBirthRegistry, 2001, 369L, null, 16) > 0
+                        && dueMother.children.isEmpty(),
+                "a pregnancy is not delivered before its persisted due day");
+        String dueSave = dueBirthRegistry.toJson();
+        CharacterRegistry dueReload = new CharacterRegistry();
+        dueReload.fromJson(dueSave);
+        int dueBirthWork = ResidentLifeEvents.advanceDuePregnanciesBatch(dueReload, 2001, 370L, null, 16);
+        Character restoredMother = dueReload.get(dueMother.id);
+        Character restoredFather = dueReload.get(dueFather.id);
+        check(dueBirthWork > 0 && restoredMother.children.size() == 1
+                        && restoredFather.children.size() == 1
+                        && !FamilyPlanning.isPregnant(restoredMother),
+                "due-date queue delivers on the persisted day after reload, independent of the annual family pass marker");
+
+        CharacterRegistry healthRegistry = new CharacterRegistry();
+        Character patient = healthRegistry.create("Пациент", "", "north", "f", 1985);
+        check(CharacterHealth.health(patient) == 100 && CharacterHealth.nextEventDay(patient) == -1
+                        && !patient.props.containsKey("life.health.value"),
+                "healthy residents use implicit defaults without per-Character health payload");
+        check(CharacterHealth.infect(patient, "seasonal_fever", 100, 100L, "illness:patient:100")
+                        && !CharacterHealth.infect(patient, "seasonal_fever", 40, 100L, "illness:patient:100")
+                        && CharacterHealth.illnessSeverity(patient) == 100,
+                "health event IDs make repeated illness delivery idempotent");
+        check(!CharacterHealth.advance(patient, 106L) && CharacterHealth.illnessSeverity(patient) == 100,
+                "health recovery does not run before its scheduled deadline");
+        check(CharacterHealth.advance(patient, 107L) && CharacterHealth.illnessSeverity(patient) == 99
+                        && CharacterHealth.nextEventDay(patient) == 114L,
+                "illness recovery advances in scheduled world-day intervals");
+        String healthSave = healthRegistry.toJson();
+        CharacterRegistry healthReload = new CharacterRegistry();
+        healthReload.fromJson(healthSave);
+        Character restoredPatient = healthReload.get(patient.id);
+        check(restoredPatient != null && CharacterHealth.illnessSeverity(restoredPatient) == 99
+                        && CharacterHealth.nextEventDay(restoredPatient) == 114L,
+                "illness and recovery deadlines persist through world save/load");
+        check(CharacterHealth.treat(restoredPatient, 100, 107L, "treatment:patient:1")
+                        && CharacterHealth.illnessSeverity(restoredPatient) == 0
+                        && CharacterHealth.health(restoredPatient) < 100
+                        && CharacterHealth.nextEventDay(restoredPatient) == 114L,
+                "treatment clears illness but keeps a deadline for natural health recovery");
+        check(CharacterHealth.advance(restoredPatient, 117L)
+                        && CharacterHealth.health(restoredPatient) == 99,
+                "natural health recovery continues after the illness itself is cleared");
+
+        CharacterRegistry scheduledHealthRegistry = new CharacterRegistry();
+        Character scheduledPatient = scheduledHealthRegistry.create("Scheduled Patient", "", "north", "m", 1980);
+        CharacterHealth.injure(scheduledPatient, "sprain", 60, 200L, "injury:scheduled:200");
+        int healthWork = ResidentLifeEvents.advanceHealthBatch(scheduledHealthRegistry, 207L, 16);
+        check(healthWork >= 2 && CharacterHealth.injurySeverity(scheduledPatient) == 60
+                        && CharacterHealth.health(scheduledPatient) == 78
+                        && CharacterHealth.nextEventDay(scheduledPatient) == 214L,
+                "registry health scheduler discovers and advances only a resident whose persisted deadline is due");
+
         CharacterRegistry sameYearRegistry = new CharacterRegistry();
         sameYearRegistry.create("Первый", "", "north", "m", 1990);
         ResidentLifeEvents.yearly(sameYearRegistry, 2020);
@@ -200,6 +322,25 @@ public final class ResidentLifeEventsTest {
         for (int year = 2015; year <= 2023; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
         check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
                 "close cousins sharing grandparents are excluded from autonomous dating");
+
+        CharacterRegistry guardedRegistry = new CharacterRegistry();
+        guardedRegistry.create("Один", "", "north", "m", 1990);
+        guardedRegistry.create("Два", "", "north", "f", 1991);
+        for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(registryPassField(guardedRegistry, "lastCallYear") == 2030
+                        && registryPassField(guardedRegistry, "stageSize") == 2
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "hundreds of settlement callbacks share one canonical registry/year pass");
+        Character lateResident = guardedRegistry.create("Поздний житель", "", "north", "f", 2010);
+        ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(registryPassField(guardedRegistry, "stageSize") == 3
+                        && "adult".equals(lateResident.props.get("population.life_stage"))
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "late same-year residents receive stage refresh without replaying annual family events");
+        for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(registryPassField(guardedRegistry, "stageSize") == 3
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "same-year callbacks after population changes do not repeat the global family pass");
 
         if (failures > 0) throw new AssertionError(failures + " resident life event tests failed");
     }

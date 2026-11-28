@@ -13,6 +13,20 @@ public final class MapImages {
 
     private MapImages() {}
 
+    private static int checkedPixelCount(TitleData d) {
+        if (d == null || d.w <= 0 || d.h <= 0)
+            throw new IllegalArgumentException("Некорректные размеры политической карты");
+        long count = (long) d.w * d.h;
+        if (count > 16L * 1024L * 1024L)
+            throw new IllegalArgumentException("Политическая карта превышает безопасный размер растра");
+        return (int) count;
+    }
+
+    private static void requireTerrain(int[] terrain, int expectedPixels) {
+        if (terrain == null || terrain.length != expectedPixels)
+            throw new IllegalArgumentException("Размер массива рельефа не соответствует снимку карты");
+    }
+
     public static List<String> modes(TitleData d) {
         List<String> out = new ArrayList<>();
         out.add(TERRAIN);
@@ -81,9 +95,15 @@ public final class MapImages {
     }
 
     public static PropInfo propInfo(TitleData d, String key) {
+        checkedPixelCount(d);
+        if (key == null || key.isBlank())
+            throw new IllegalArgumentException("Не указан ключ свойства политической карты");
+        long lutLength = (long) d.maxId() + 1L;
+        if (lutLength <= 0 || lutLength > 16L * 1024L * 1024L)
+            throw new IllegalArgumentException("Некорректный диапазон идентификаторов титулов");
         PropInfo pi = new PropInfo();
         java.util.Map<String, Integer> idx = new java.util.HashMap<>();
-        int[] lut = new int[d.maxId() + 1];
+        int[] lut = new int[(int) lutLength];
         java.util.List<Long> areas = new ArrayList<>();
         for (TitleData.Title p : d.allTitles()) {
             if (p.tier != 0) continue;
@@ -110,7 +130,11 @@ public final class MapImages {
         // порядок значений из prop_defs.order идёт первым: так цвета и легенда стабильны
         if (def != null && def.get("order") instanceof List) {
             java.util.List<String> pre = new ArrayList<>();
-            for (Object o : (List<?>) def.get("order")) if (idx.containsKey(String.valueOf(o))) pre.add(String.valueOf(o));
+            java.util.Set<String> ordered = new java.util.HashSet<>();
+            for (Object o : (List<?>) def.get("order")) {
+                String value = String.valueOf(o);
+                if (idx.containsKey(value) && ordered.add(value)) pre.add(value);
+            }
             java.util.List<Long> oldAreas = new ArrayList<>(areas);
             java.util.List<String> oldVals = new ArrayList<>(pi.vals);
             int[] remap = new int[oldVals.size() + 1];
@@ -159,6 +183,57 @@ public final class MapImages {
         return 0xFF000000 | (rr << 16) | (gg << 8) | bb;
     }
 
+    /**
+     * Aged vellum substrate. Terrain luminance is retained as subtle relief tint,
+     * while deterministic multi-scale grain, fibres and edge ageing give the map
+     * a hand-made cartographic surface without external texture dependencies.
+     */
+    private static int parchmentBase(int c, int x, int y, int w, int h) {
+        int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+        int luminance = (r * 30 + g * 59 + b * 11) / 100;
+        int hash = x * 73428767 ^ y * 912931 ^ (x * y * 31);
+        int coarse = Math.floorMod(hash ^ (x >> 3) * 19349663 ^ (y >> 3) * 83492791, 9) - 4;
+        int fine = Math.floorMod(hash >>> 7, 5) - 2;
+        int fibre = Math.floorMod(x * 13 + y * 7, 173) == 0 ? -7
+                : Math.floorMod(x * 5 - y * 11, 257) == 0 ? 5 : 0;
+        int fleck = Math.floorMod(hash ^ (hash >>> 11), 997) == 0 ? -12 : 0;
+        int edge = Math.min(Math.min(x, w - 1 - x), Math.min(y, h - 1 - y));
+        int edgeBand = Math.max(8, Math.min(w, h) / 18);
+        int age = edge < edgeBand ? (int) Math.round((1.0 - edge / (double) edgeBand) * 11.0) : 0;
+        int paperR = clamp(191 + luminance / 6 + coarse + fine + fibre + fleck - age);
+        int paperG = clamp(166 + luminance / 7 + coarse + fine + fibre + fleck - age);
+        int paperB = clamp(126 + luminance / 9 + coarse + fine + fibre + fleck - age / 2);
+        return 0xFF000000 | (paperR << 16) | (paperG << 8) | paperB;
+    }
+
+    private static int clamp(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private static int luminance(int argb) {
+        int r = (argb >> 16) & 255, g = (argb >> 8) & 255, b = argb & 255;
+        return (r * 30 + g * 59 + b * 11) / 100;
+    }
+
+    /**
+     * Directional relief engraving for the vellum map. A restrained light from
+     * the north-west gives ridges and valleys depth without hiding political fills.
+     */
+    private static int reliefPaper(int[] terrain, int x, int y, int w, int h) {
+        int left = luminance(terrain[y * w + Math.max(0, x - 1)]);
+        int right = luminance(terrain[y * w + Math.min(w - 1, x + 1)]);
+        int up = luminance(terrain[Math.max(0, y - 1) * w + x]);
+        int down = luminance(terrain[Math.min(h - 1, y + 1) * w + x]);
+        int dx = left - right;
+        int dy = up - down;
+        int directional = dx - dy;
+        int strength = Math.max(-10, Math.min(10, directional / 7));
+        int paper = parchmentBase(terrain[y * w + x], x, y, w, h);
+        if (strength < 0) return mix(paper, 0xFF6F5439, (-strength) / 95.0);
+        if (strength > 0) return mix(paper, 0xFFFFE8B5, strength / 115.0);
+        return paper;
+    }
+
     private static boolean pattern(String kind, int x, int y) {
         if ("dots".equals(kind)) return x % 11 < 4 && y % 11 < 4;
         if ("cross".equals(kind)) return Math.floorMod(x - y, 14) < 4 || (x + y) % 14 < 4;
@@ -175,6 +250,8 @@ public final class MapImages {
 
     /** Метка в каждом пикселе: id титула нужного уровня или номер государства (1-based), 0 = нет. */
     static int[] labels(TitleData d, String mode) {
+        int pixelCount = checkedPixelCount(d);
+        if (mode == null || mode.isBlank()) throw new IllegalArgumentException("Не указан режим карты");
         int[] lut;
         if (REALMS.equals(mode) || isDip(mode)) {
             lut = d.realmLut();
@@ -185,8 +262,10 @@ public final class MapImages {
             if (ti < 0) return null;
             lut = d.provinceLut(ti);
         }
-        int[] lab = new int[d.w * d.h];
+        int[] lab = new int[pixelCount];
         short[] px = d.pixels();
+        if (px == null || px.length != pixelCount)
+            throw new IllegalArgumentException("Пиксельные данные карты повреждены");
         for (int i = 0; i < lab.length; i++) {
             int p = px[i] & 0xFFFF;
             lab[i] = p == 0 || p >= lut.length ? 0 : lut[p];
@@ -254,8 +333,17 @@ public final class MapImages {
         for (int i = 0; i < img.length; i++) if (e[i]) img[i] = mix(img[i], EDGE, a);
     }
 
+    /** Warm ink rather than pure black keeps political borders legible on vellum. */
+    private static void inkEdges(int[] img, boolean[] edges, int ink, double strength) {
+        for (int i = 0; i < img.length; i++)
+            if (edges[i]) img[i] = mix(img[i], ink, strength);
+    }
+
     /** terrain: основа, остальные режимы: заливка цветом титулов или государств, границы. */
     public static int[] render(TitleData d, int[] terrain, String mode) {
+        int pixelCount = checkedPixelCount(d);
+        requireTerrain(terrain, pixelCount);
+        if (mode == null || mode.isBlank()) throw new IllegalArgumentException("Не указан режим карты");
         int w = d.w, h = d.h;
         if (TERRAIN.equals(mode)) return terrain.clone();
         int[] lab = labels(d, mode);
@@ -290,14 +378,15 @@ public final class MapImages {
                 color[i] = dev.worldforge.mod.api.Diplomacy.relation(d, focus, r, adj).rgb;
             }
         }
-        double alpha = realms ? 0.66 : 0.62;
         for (int z = 0, i = 0; z < h; z++) {
             for (int x = 0; x < w; x++, i++) {
-                int l = lab[i], t = terrain[i];
-                if (l == 0) { img[i] = t; continue; }
+                int l = lab[i];
+                int paper = reliefPaper(terrain, x, z, w, h);
+                if (l <= 0 || l >= color.length) { img[i] = paper; continue; }
                 int c = color[l];
                 if (realms && over[l] > 0 && pattern(pat[l], x, z)) c = color[over[l]];
-                img[i] = mix(mutedBase(t), c, alpha);
+                // Keep the terrain legible beneath political fills instead of painting opaque flat regions.
+                img[i] = mix(paper, c, realms ? 0.48 : 0.44);
             }
         }
         boolean[] e = new boolean[w * h];
@@ -309,33 +398,45 @@ public final class MapImages {
                 while (over[cur] > 0 && g++ < 32) cur = over[cur];
                 topOf[i] = cur;
             }
-            for (int i = 0; i < top.length; i++) top[i] = lab[i] == 0 ? 0 : topOf[lab[i]];
+            for (int i = 0; i < top.length; i++) {
+                int label = lab[i];
+                top[i] = label <= 0 || label >= topOf.length ? 0 : topOf[label];
+            }
             innerGlow(img, lab, w, h, 3, 0.22);
             innerGlow(img, top, w, h, 7, 0.45);
             edges(lab, w, h, e, false);
-            darken(img, e, 0.45);
+            inkEdges(img, e, 0xFF725438, 0.34);
             boolean[] e2 = new boolean[w * h];
             edges(top, w, h, e2, true);
-            darken(img, e2, 0.7);
+            inkEdges(img, e2, 0xFF38271D, 0.78);
+            // A restrained warm edge catches the light like an engraved atlas border.
+            inkEdges(img, e2, 0xFFC19A5B, 0.16);
         } else if (prop) {
             innerGlow(img, lab, w, h, 4, 0.3);
-            int[] low = labels(d, d.tiers.get(Math.min(1, d.tiers.size() - 1)).key);
-            edges(low, w, h, e, false);
-            darken(img, e, 0.22);
+            // Some imported/minimal worlds have no title hierarchy. Property fills
+            // remain valid there; simply omit the optional county/province separator.
+            if (!d.tiers.isEmpty()) {
+                int lowTier = Math.min(1, d.tiers.size() - 1);
+                int[] low = labels(d, d.tiers.get(lowTier).key);
+                if (low != null) {
+                    edges(low, w, h, e, false);
+                    inkEdges(img, e, 0xFF806344, 0.22);
+                }
+            }
             e = new boolean[w * h];
             edges(lab, w, h, e, true);
-            darken(img, e, 0.75);
+            inkEdges(img, e, 0xFF493326, 0.72);
         } else {
             int ti = tierIndex(d, mode);
             innerGlow(img, lab, w, h, ti > 0 ? 6 : 3, ti > 0 ? 0.42 : 0.25);
             if (ti > 0) {
                 int[] low = labels(d, d.tiers.get(ti - 1).key);
                 edges(low, w, h, e, false);
-                darken(img, e, 0.35);
+                inkEdges(img, e, 0xFF806344, 0.28);
                 e = new boolean[w * h];
             }
             edges(lab, w, h, e, true);
-            darken(img, e, ti > 0 ? 0.85 : 0.6);
+            inkEdges(img, e, 0xFF493326, ti > 0 ? 0.76 : 0.58);
         }
         return img;
     }
@@ -347,6 +448,9 @@ public final class MapImages {
     }
 
     public static Overlay overlay(TitleData d, String mode, int label) {
+        if (label <= 0) return null;
+        checkedPixelCount(d);
+        if (mode == null || mode.isBlank()) return null;
         int[] lab = labels(d, mode);
         if (lab == null) return null;
         int w = d.w, h = d.h, x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -380,6 +484,10 @@ public final class MapImages {
     }
 
     public static void writePng(int[] argb, int w, int h, java.io.OutputStream out) throws java.io.IOException {
+        long count = (long) w * h;
+        if (w <= 0 || h <= 0 || count > 16L * 1024L * 1024L
+                || argb == null || argb.length != (int) count || out == null)
+            throw new IllegalArgumentException("Некорректные данные PNG политической карты");
         java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         img.setRGB(0, 0, w, h, argb, 0, w);
         javax.imageio.ImageIO.write(img, "png", out);

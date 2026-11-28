@@ -38,11 +38,20 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod("wf_court")
 public class CourtMod {
     public static final Logger LOGGER = LogUtils.getLogger();
-    public static final int COURT_STEP = 100, SAVE_EVERY = 6000;
+    public static final int COURT_STEP = 1, SAVE_EVERY = 6000;
     private static final Map<MapData, CourtSim> COURTS = new ConcurrentHashMap<>();
     /** Autonomous courts for vanilla/non-map dimensions, backed by the same canonical CharacterRegistry. */
     private static final Map<String, CourtSim> VIRTUAL_COURTS = new ConcurrentHashMap<>();
     private static final Map<String, TitleData> VIRTUAL_DATA = new ConcurrentHashMap<>();
+    /** Bounded cursor for projecting canonical ruler offices; never scan the whole population in one tick. */
+    private static final Map<String, VirtualCourtRefresh> VIRTUAL_REFRESH = new ConcurrentHashMap<>();
+    private static final int VIRTUAL_COURT_SCAN_BUDGET = 256;
+    private static final class VirtualCourtRefresh {
+        CharacterRegistry registry;
+        long membershipGeneration = Long.MIN_VALUE;
+        int cursor;
+        long completedPasses;
+    }
     /** Исходные JSON событий: уходят клиенту вместе со срезом двора. */
     private static volatile List<String> EVENT_JSON = List.of();
     private static long ticks;
@@ -60,6 +69,7 @@ public class CourtMod {
         COURTS.clear();
         VIRTUAL_COURTS.clear();
         VIRTUAL_DATA.clear();
+        VIRTUAL_REFRESH.clear();
         ticks = 0;
         List<String> evs = new ArrayList<>();
         Map<ResourceLocation, Resource> found = new TreeMap<>(e.getServer().getResourceManager().listResources("wf_events", rl -> rl.getPath().endsWith(".json")));
@@ -80,7 +90,8 @@ public class CourtMod {
         if (reg == null) return null;
         return COURTS.computeIfAbsent(m, k -> {
             var ed = EditorManager.editorFor(k);
-            CourtSim s = new CourtSim(k.titles, ed, reg, PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(k), PeopleMod.YEAR);
+            CourtSim s = new CourtSim(k.titles, ed, reg, PeopleMod.ROLES, PeopleMod.NAMES,
+                    PeopleMod.seed(k), PeopleMod.YEAR, WorldForgeApi.clock().dayNumber());
             for (String j : EVENT_JSON) {
                 try { s.addEvent(j); } catch (Exception ex) { LOGGER.error("wf_court: ошибка события: {}", ex.toString()); }
             }
@@ -210,9 +221,17 @@ public class CourtMod {
     private static CourtSim virtualCourt(MinecraftServer server, String dimension, CharacterRegistry registry) {
         if (server == null || registry == null) return null;
         TitleData data = virtualTitleData(dimension);
-        int added = 0;
-        for (Character person : registry.all()) {
-            if (!person.alive || !person.props.containsKey("emergence.polity_id")) continue;
+        VirtualCourtRefresh refresh = VIRTUAL_REFRESH.computeIfAbsent(dimension, ignored -> new VirtualCourtRefresh());
+        long generation = registry.membershipGeneration();
+        if (refresh.registry != registry || refresh.membershipGeneration != generation) {
+            refresh.registry = registry;
+            refresh.membershipGeneration = generation;
+            refresh.cursor = 0;
+        }
+        int peopleCount = registry.all().size();
+        int pageSize = Math.min(VIRTUAL_COURT_SCAN_BUDGET, Math.max(0, peopleCount - refresh.cursor));
+        scanCharacterPage(registry, refresh.cursor, pageSize, person -> {
+            if (!person.alive || !person.props.containsKey("emergence.polity_id")) return;
             for (Character.Post post : person.posts) {
                 if (!post.place.startsWith("realm:")) continue;
                 String realmId = post.place.substring("realm:".length());
@@ -231,19 +250,28 @@ public class CourtMod {
                 realm.ruler = person.globalId;
                 Object name = person.props.get("emergence.polity_name");
                 if (name instanceof String text && !text.isBlank()) realm.name = text;
-                added++;
             }
+        });
+        refresh.cursor += pageSize;
+        boolean scanComplete = refresh.cursor >= peopleCount;
+        if (scanComplete) {
+            // Re-scan continuously in bounded slices. This also observes role changes and deaths
+            // that do not alter registry membership, without an O(population) pass per server tick.
+            refresh.cursor = 0;
+            refresh.completedPasses++;
+            // Preserve Statecraft contracts only after a complete canonical-office pass.
+            syncVirtualStatecraftRealms(data, dimension);
+            data.refreshRealmIndex();
+            if (refresh.completedPasses == 1 || refresh.completedPasses % 100 == 0)
+                LOGGER.info("wf_court: virtual realm projection dimension={} people={} passes={} budget={}",
+                        dimension, peopleCount, refresh.completedPasses, VIRTUAL_COURT_SCAN_BUDGET);
         }
-        // Preserve the real Statecraft vassal/suzerain contracts, subject types and realm names.
-        // The court keeps a lightweight view; Statecraft remains the sole authority.
-        syncVirtualStatecraftRealms(data, dimension);
-        data.refreshRealmIndex();
-        if (data.realmList().isEmpty()) return null;
+        if (data.realmList().isEmpty()) return VIRTUAL_COURTS.get(dimension);
         CourtSim sim = VIRTUAL_COURTS.computeIfAbsent(dimension, key -> {
             long seed = WorldForgeMod.worldId() == null ? key.hashCode()
                     : WorldForgeMod.worldId().toString().hashCode() ^ key.hashCode();
             CourtSim created = new CourtSim(data, null, registry, PeopleMod.ROLES,
-                    PeopleMod.NAMES, seed, PeopleMod.YEAR);
+                    PeopleMod.NAMES, seed, PeopleMod.YEAR, WorldForgeApi.clock().dayNumber());
             created.hooks = new CourtSim.Hooks() {
                 @Override public void news(String text) {
                     if (text != null && text.startsWith("MAQAN_AUTONOMOUS_BIRTH"))
@@ -276,34 +304,28 @@ public class CourtMod {
         COURTS.clear();
         VIRTUAL_COURTS.clear();
         VIRTUAL_DATA.clear();
+        VIRTUAL_REFRESH.clear();
     }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return;
         ticks++;
         try {
-            if (ticks % COURT_STEP == 0) {
-                int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_court");
-                if (days > 0) {
-                    for (MapData m : WorldForgeMod.loadedMaps().values()) {
-                        CourtSim cs = m.titles == null ? null : court(m);
-                        if (cs != null) cs.tick(days);
-                    }
-                    // Vanilla and other non-map dimensions previously had no CourtSim:
-                    // their NPCs received offices, but autonomous marriage, births,
-                    // succession pressure and court AI never advanced. Attach the same
-                    // CourtSim engine to each canonical dimension registry.
-                    // Overworld retains its durable legacy Character partition and is
-                    // therefore not present in dimensionRegistries(). Attach it explicitly.
-                    CourtSim overworldCourt = virtualCourt(e.getServer(), "minecraft:overworld",
-                            PeopleMod.worldRegistry());
-                    if (overworldCourt != null) overworldCourt.tick(days);
-                    for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
-                        CourtSim cs = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
-                        if (cs != null) cs.tick(days);
-                    }
-                }
+            int days = dev.worldforge.mod.api.WorldForgeApi.clock().pullLimited("wf_court", 1);
+            for (MapData map : WorldForgeMod.loadedMaps().values()) {
+                CourtSim sim = map.titles == null ? null : court(map);
+                if (sim != null) sim.tick(days);
+            }
+            // tick(0) advances only resumable annual population work; daily court decisions
+            // still run only when the shared world clock yields a complete day.
+            CourtSim overworldCourt = virtualCourt(e.getServer(), "minecraft:overworld",
+                    PeopleMod.worldRegistry());
+            if (overworldCourt != null) overworldCourt.tick(days);
+            for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
+                CourtSim sim = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
+                if (sim != null) sim.tick(days);
             }
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_court: ошибка тика: {}", ex.toString()); }
@@ -311,4 +333,33 @@ public class CourtMod {
 
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent e) { CourtCommands.register(e.getDispatcher()); }
+    /** Reflective bounded lease bridge keeps wf-court binary-compatible with older wf-people API jars. */
+    private static void scanCharacterPage(CharacterRegistry registry, int offset, int limit,
+                                          java.util.function.Consumer<Character> visitor) {
+        if (limit <= 0) return;
+        Object access = null;
+        try {
+            java.lang.reflect.Method idPage = registry.getClass().getMethod("idPage", int.class, int.class);
+            access = registry.getClass().getMethod("access").invoke(registry);
+            java.lang.reflect.Method acquire = access.getClass().getMethod("acquire", String.class);
+            Object rawPage = idPage.invoke(registry, offset, limit);
+            if (!(rawPage instanceof List<?> ids)) throw new IllegalStateException("Character ID page API returned a non-list");
+            for (Object rawId : ids) {
+                Object lease = acquire.invoke(access, String.valueOf(rawId));
+                if (lease == null) throw new IllegalStateException("Could not lease canonical Character " + rawId);
+                try {
+                    Character person = (Character) lease.getClass().getMethod("get").invoke(lease);
+                    visitor.accept(person);
+                } finally {
+                    ((AutoCloseable) lease).close();
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("wf-court requires the bounded Character ID/lease API", error);
+        } catch (Exception error) {
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Could not close wf-court Character lease", error);
+        }
+    }
+
 }

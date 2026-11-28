@@ -3,6 +3,7 @@ package dev.worldforge.mod.client;
 import dev.worldforge.mod.MapImages;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.api.Diplomacy;
+import dev.worldforge.mod.api.Ledger;
 import dev.worldforge.mod.Markers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -20,7 +21,7 @@ import java.util.Set;
  */
 final class SidePanel {
     enum Tab {
-        TITLE("Т", "Титул"), REALM("Г", "Государство"), DIP("Д", "Дипломатия"), EDIT("Р", "Редактор"), MARKS("М", "Метки");
+        TITLE("Т", "Титул"), REALM("Г", "Государство"), DIP("Д", "Дипломатия"), STRATEGY("Σ", "Стратегия"), EDIT("Р", "Редактор"), MARKS("М", "Метки");
 
         final String glyph, title;
 
@@ -62,6 +63,7 @@ final class SidePanel {
     // ------------------------------------------------------------------ состояние
 
     boolean isOpen() { return open; }
+    int leftEdge() { return px; }
 
     void toggle() { open = !open; }
 
@@ -92,7 +94,7 @@ final class SidePanel {
     }
 
     private List<Tab> tabs() {
-        List<Tab> out = new ArrayList<>(List.of(Tab.TITLE, Tab.REALM, Tab.DIP));
+        List<Tab> out = new ArrayList<>(List.of(Tab.TITLE, Tab.REALM, Tab.DIP, Tab.STRATEGY));
         if (canEdit()) out.add(Tab.EDIT);
         out.add(Tab.MARKS);
         return out;
@@ -125,11 +127,14 @@ final class SidePanel {
             hits.add(new Hit(rx, y, RAIL, RAIL, () -> { if (open && tab == ft) open = false; else show(ft); }));
         }
         if (!open) return;
-        pw = WIDTH;
-        px = rx - GAP - pw;
+        pw = Math.max(1, Math.min(WIDTH, Math.min(host.width() - RAIL - GAP - 16,
+                (int) Math.floor(host.width() * 0.35))));
+        px = Math.max(0, Math.min(rx - GAP - pw, host.width() - pw));
         py = 8;
-        ph = Math.max(150, host.panelBottom() - py);
+        int availableBottom = Math.min(host.panelBottom(), host.height() - 8);
+        ph = Math.max(1, Math.min(availableBottom - py, host.height() - py - 8));
         MapScreen.bevel(g, px, py, pw, ph, false);
+        if (pw < 48 || ph < 36) { contentH = 0; return; }
         g.drawString(host.font(), tab.title.toUpperCase(), px + 8, py + 7, GOLD);
         g.fill(px, py + 19, px + pw, py + 21, 0xFF000000);
         int bx = px + pw - 15, by = py + 5;
@@ -145,6 +150,7 @@ final class SidePanel {
             case TITLE -> titleTab(c);
             case REALM -> realmTab(c);
             case DIP -> dipTab(c);
+            case STRATEGY -> strategyTab(c);
             case EDIT -> editTab(c);
             case MARKS -> marksTab(c);
         }
@@ -331,46 +337,92 @@ final class SidePanel {
         TitleData.Realm r = p == null ? null : d.realmOf(p);
         if (p == null) { empty(c, "Выберите землю на карте."); return; }
         if (r == null) { empty(c, "У этой земли нет государства."); return; }
+
         c.swatch(r.rgb, r.name, GOLD, 0, null);
-        c.text(r.overlord != null ? relLabel(d, r) + " · " + r.overlord.name : "Независимое государство", MUTED);
-        c.gap(4);
-        c.kv("Правитель", r.ruler == null || r.ruler.isEmpty() ? "не назначен" : r.ruler);
-        c.kv("Площадь", r.areaBlocks / 1000 + " тыс. блоков²");
-        for (Map.Entry<String, Object> e : r.props.entrySet()) {
-            Object v = e.getValue();
-            if (v == null || v instanceof Map || v instanceof List || v.toString().isEmpty()) continue;
-            String k = e.getKey();
-            if (k.equals("allies") || k.equals("enemies")) {
-                c.kv(k.equals("allies") ? "Союзники" : "Воюет с", realmNames(d, Diplomacy.ids(r, k)));
-            } else {
-                String name = MapImages.propName(d, k);
-                c.kv(name != null ? name : k, v.toString());
+        c.text(r.overlord != null ? relLabel(d, r) + " · " + r.overlord.name : "Суверенное независимое государство", MUTED);
+        c.gap(3);
+
+        // One canonical dossier assembled from the existing title/realm registry.
+        // Do not create a parallel capital, holding or diplomacy model for the map UI.
+        List<TitleData.Title> holdings = new ArrayList<>();
+        TitleData.Title highest = null;
+        for (String key : r.titleKeys) {
+            TitleData.Title title = d.byKey(key);
+            if (title == null) continue;
+            holdings.add(title);
+            if (highest == null || title.tier > highest.tier) highest = title;
+        }
+        holdings.sort(java.util.Comparator
+                .comparingInt((TitleData.Title title) -> title.tier).reversed()
+                .thenComparing(title -> title.name == null ? "" : title.name, String.CASE_INSENSITIVE_ORDER));
+
+        c.head("Положение государства");
+        c.kv("Правитель", r.ruler == null || r.ruler.isBlank() ? "не назначен" : r.ruler);
+        c.kv("Территория", r.areaBlocks / 1000 + " тыс. блоков²");
+        c.kv("Титулы", String.valueOf(holdings.size()));
+        c.kv("Вассалы", String.valueOf(r.subjectIds.size()));
+
+        if (highest != null) {
+            // capProvince is a child title at the next lower tier, not necessarily a province.
+            // Resolve through the existing hierarchy before selecting or centering the map.
+            int capitalProvince = provinceOf(d, highest);
+            TitleData.Title capital = d.get(capitalProvince);
+            if (capital != null) {
+                c.head("Столица");
+                c.swatch(capital.rgb, capital.name, GOLD, 0,
+                        () -> host.selectProvince(capital.id));
+                c.kv("Координаты", "X " + capital.capX + " · Z " + capital.capZ);
+                c.button("Перейти к столице", true, () -> host.centerOnProvince(capital.id));
             }
         }
-        c.head("Титулы");
-        for (String key : r.titleKeys) {
-            TitleData.Title t = d.byKey(key);
-            if (t != null) c.swatch(t.rgb, d.tiers.get(t.tier).name + " " + t.name, TX, 0, () -> host.selectProvince(provinceOf(d, t)));
+
+        boolean hasRelations = false;
+        for (String key : List.of("allies", "enemies")) {
+            Set<String> ids = Diplomacy.ids(r, key);
+            if (ids.isEmpty()) continue;
+            if (!hasRelations) { c.head("Внешние отношения"); hasRelations = true; }
+            c.kv(key.equals("allies") ? "Союзники" : "Враги", realmNames(d, ids));
         }
+
+        boolean hasProperties = false;
+        for (Map.Entry<String, Object> e : r.props.entrySet()) {
+            Object value = e.getValue();
+            if (value == null || value instanceof Map || value instanceof List || value.toString().isBlank()) continue;
+            String key = e.getKey();
+            if (key.equals("allies") || key.equals("enemies")) continue;
+            String name = MapImages.propName(d, key);
+            if (!hasProperties) { c.head("Характеристики и состояние"); hasProperties = true; }
+            c.kv(name != null ? name : key, value.toString());
+        }
+
+        c.head("Титулы и владения");
+        if (holdings.isEmpty()) c.text("Титулы не назначены.", MUTED);
+        for (TitleData.Title title : holdings) {
+            c.swatch(title.rgb, d.tiers.get(title.tier).name + " · " + title.name,
+                    title == highest ? GOLD : TX, 0,
+                    () -> host.selectProvince(provinceOf(d, title)));
+        }
+
         if (!r.subjectIds.isEmpty()) {
             c.head("Подчинённые · " + r.subjectIds.size());
             for (String id : r.subjectIds) {
-                TitleData.Realm s = d.realms.get(id);
-                if (s != null) c.swatch(s.rgb, s.name + " [" + relLabel(d, s) + "]", TX, 0, () -> selectRealm(d, s));
+                TitleData.Realm subject = d.realms.get(id);
+                if (subject != null) c.swatch(subject.rgb, subject.name + " [" + relLabel(d, subject) + "]",
+                        TX, 0, () -> selectRealm(d, subject));
             }
         }
         c.gap(4);
-        c.button("Дипломатический слой", true, () -> host.setMode(MapImages.DIP + r.id, true));
+        c.button("Открыть дипломатическую карту", true, () -> host.setMode(MapImages.DIP + r.id, true));
     }
 
     private static String realmNames(TitleData d, Set<String> ids) {
-        StringBuilder sb = new StringBuilder();
+        List<String> names = new ArrayList<>();
         for (String id : ids) {
-            TitleData.Realm x = d.realms.get(id);
-            if (sb.length() > 0) sb.append(", ");
-            sb.append(x == null ? id : x.name);
+            TitleData.Realm realm = d.realms.get(id);
+            names.add(realm == null || realm.name == null || realm.name.isBlank() ? id : realm.name);
         }
-        return sb.toString();
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        return String.join(", ", names);
     }
 
     /** Любая провинция (барство) под титулом: сам титул или первый потомок-барство; для столицы берём capProvince. */
@@ -422,6 +474,97 @@ final class SidePanel {
             if (!a.hint.isEmpty()) c.text(a.hint, MUTED);
         }
         c.text("* только оператор", MUTED);
+    }
+
+    /** Strategic overview assembled from canonical realm, treasury, live-marker and event models. */
+    private void strategyTab(Ctx c) {
+        TitleData d = data();
+        TitleData.Title province = d == null ? null : d.get(host.selectedProv());
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) {
+            empty(c, "Выберите государство на карте, чтобы открыть стратегическую сводку.");
+            c.gap(4);
+            c.button("Открыть реестр государств", d != null, () -> Minecraft.getInstance().setScreen(new LedgerScreen(d, null, host::command, host)));
+            c.button("Открыть летопись мира", true, () -> Minecraft.getInstance().setScreen(new EventLogScreen(ClientState.events, d, null, host::command, host)));
+            return;
+        }
+        c.swatch(realm.rgb, realm.name, GOLD, 0, null);
+        c.text(realm.overlord == null ? "Суверенное государство" : relLabel(d, realm) + " · " + realm.overlord.name, MUTED);
+        c.head("Казна и финансы");
+        ClientState.TreasuryAccount treasury = ClientState.treasury.get(realm.id);
+        if (treasury == null) c.text("Казначейский счёт ещё не передан сервером.", MUTED);
+        else {
+            c.kv("Баланс", formatAmount(treasury.balance()) + " " + treasury.currency());
+            if (treasury.debt() > 0) c.kv("Долг", formatAmount(treasury.debt()) + " " + treasury.currency());
+            c.kv("Банкротство", treasury.bankrupt() ? "Да" : "Нет");
+        }
+        int armies = 0, soldiers = 0, settlements = 0, population = 0, caravans = 0, moving = 0;
+        boolean hasPopulation = false;
+        for (Markers.Marker marker : ClientState.markers.list()) {
+            String owner = markerValue(marker.desc, "realm");
+            String destination = markerValue(marker.desc, "destination");
+            boolean belongs = realm.id.equals(owner) || realm.name.equalsIgnoreCase(owner)
+                    || ("caravan".equals(marker.type) && realm.id.equals(destination));
+            if (!belongs) continue;
+            switch (marker.type) {
+                case "army", "corps", "unit", "commander" -> {
+                    armies++; soldiers += markerInt(marker.desc, "men");
+                    if ("true".equalsIgnoreCase(markerValue(marker.desc, "moving"))) moving++;
+                }
+                case "city", "settlement", "village", "capital", "castle", "fort", "port" -> {
+                    settlements++; int count = markerInt(marker.desc, "population");
+                    if (count > 0) { population += count; hasPopulation = true; }
+                }
+                case "caravan" -> caravans++;
+                default -> { }
+            }
+        }
+        c.head("Население и владения");
+        c.kv("Поселения и крепости", String.valueOf(settlements));
+        if (!hasPopulation) {
+            Double realmPopulation = Ledger.parse(realm.props.get("population"));
+            if (realmPopulation == null) realmPopulation = Ledger.parse(realm.props.get("population.total"));
+            if (realmPopulation != null && realmPopulation >= 0) {
+                population = (int) Math.min(Integer.MAX_VALUE, Math.round(realmPopulation));
+                hasPopulation = true;
+            }
+        }
+        c.kv("Население", hasPopulation ? formatAmount(population) : "нет данных в снимке объектов");
+        c.head("Военная сила");
+        c.kv("Военные объекты", String.valueOf(armies));
+        c.kv("Личный состав", soldiers > 0 ? formatAmount(soldiers) : "нет данных в снимке объектов");
+        c.kv("В движении", String.valueOf(moving));
+        c.head("Торговля");
+        c.kv("Караваны", String.valueOf(caravans));
+        c.text("Показатели строятся по актуальным серверным объектам карты; отсутствие маркера не означает нулевое значение симуляции.", MUTED);
+        c.head("Последние события");
+        List<dev.worldforge.mod.api.EventLog.Event> recent = ClientState.events.filter(null, realm.id, 4);
+        if (recent.isEmpty()) c.text("В летописи пока нет событий этого государства.", MUTED);
+        for (var event : recent) c.text("• " + event.text, MUTED);
+        c.gap(4);
+        c.button("Открыть реестр государств", true, () -> Minecraft.getInstance().setScreen(new LedgerScreen(d, realm.id, host::command, host)));
+        c.button("Открыть полную летопись", true, () -> Minecraft.getInstance().setScreen(new EventLogScreen(ClientState.events, d, realm.id, host::command, host)));
+        c.button("Открыть дипломатическую карту", true, () -> host.setMode(MapImages.DIP + realm.id, true));
+    }
+
+    private static int markerInt(String description, String key) {
+        try { return Math.max(0, Integer.parseInt(markerValue(description, key))); }
+        catch (NumberFormatException ignored) { return 0; }
+    }
+
+    private static String markerValue(String description, String key) {
+        if (description == null || key == null) return "";
+        String prefix = key + "=";
+        for (String field : description.split(";")) {
+            String item = field.trim();
+            if (item.startsWith(prefix)) return item.substring(prefix.length()).trim();
+        }
+        return "";
+    }
+
+    private static String formatAmount(double amount) {
+        if (!Double.isFinite(amount)) return "—";
+        return String.format(java.util.Locale.ROOT, "%,.2f", amount);
     }
 
     private void tree(Ctx c, TitleData d, TitleData.Realm node, TitleData.Realm cur, int depth) {

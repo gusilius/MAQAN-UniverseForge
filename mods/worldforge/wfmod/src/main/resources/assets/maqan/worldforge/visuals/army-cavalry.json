@@ -1,0 +1,23 @@
+{
+  "id": "maqan:army.cavalry",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Кавалерия · отряд",
+  "description": "Конная формация; отдельный визуальный вариант армии",
+  "mapScale": 39,
+  "mapItem": "minecraft:iron_horse_armor",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "army",
+    "unit",
+    "corps"
+  ],
+  "tags": [
+    "cavalry",
+    "mounted",
+    "formation"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}

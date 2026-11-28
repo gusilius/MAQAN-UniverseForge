@@ -1519,7 +1519,7 @@ public class NavigatorScreen extends Screen {
             drawBreadcrumbs(g, mx, my);
         } else {
             renderBackground(g);
-            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderChrome(g, font, width, height, partial, 0)) drawCosmicBackdrop(g);
+            drawCosmicBackdrop(g);
             MaqanUiTheme.panel(g,12,4,width-12,38);
             g.fill(0, 38, width, 39, 0x665D7895);
             g.fill(14, 37, 54, 39, CYAN);
@@ -1624,8 +1624,7 @@ public class NavigatorScreen extends Screen {
             transitionStartedNanos = 0L;
             return;
         }
-        if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderTransitionOverlay(
-                g, width, height, progress, transitionBackward)) {
+        {
             int alpha = (int)Math.round(34.0 * (1.0 - progress) * (1.0 - progress));
             if (alpha > 0) g.fill(0, 0, width, height, alpha << 24 | 0x00101C2A);
             int sweepX = (int)(width * (transitionBackward ? 1.0 - progress : progress));
@@ -1737,8 +1736,7 @@ public class NavigatorScreen extends Screen {
             int row = (int)((my - y - 20) / 18);
             if (row >= 0 && row <= 3) hoveredRow = row;
         }
-        if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderContextMenu(
-                g, x, y, x + w, y + h, hoveredRow, (float)alpha)) {
+        {
             g.fill(x, y, x + w, y + h, fadeColor(0xF00A1424, alpha));
             g.fill(x, y, x + w, y + 1, fadeColor(0xFF67D8F2, alpha));
             g.fill(x, y + h - 1, x + w, y + h, fadeColor(0xFF263E50, alpha));
@@ -1885,8 +1883,7 @@ public class NavigatorScreen extends Screen {
             breadcrumbHits.add(new BreadcrumbHit(segment[1], hit));
             boolean hovered = hit.contains(mouseX, mouseY);
             boolean current = i == segments.size() - 1;
-            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderBreadcrumbChip(
-                    g, hit.x, hit.y, hit.x + hit.w, hit.y + hit.h, current, hovered)) {
+            {
                 int fill = hovered ? 0xCC24465B : current ? 0x88304D62 : 0x55202F40;
                 g.fill(hit.x, hit.y, hit.x + hit.w, hit.y + hit.h, fill);
                 g.fill(hit.x, hit.y, hit.x + hit.w, hit.y + 1,
@@ -1998,8 +1995,7 @@ public class NavigatorScreen extends Screen {
             listRects.put(n.id, rect);
             boolean active = n.id.equals(selectedNodeId) || n.id.equals(selectedId);
             boolean hover = rect.contains(mx, my);
-            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderCatalogueCard(
-                    g, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, active, hover)) {
+            {
                 if (active) g.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0xFF25465A);
                 else if (hover) g.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0xFF1B3040);
             }
@@ -4247,8 +4243,8 @@ public class NavigatorScreen extends Screen {
             g.drawString(font, "MAQAN catalogue to inspect it.", infoL + 10, mapT + 60, MUTED, false);
             return;
         }
-        com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderDossierCard(
-                g, infoL + 5, mapT + 3, infoR - 5, mapT + 68, true);
+        g.fill(infoL + 5, mapT + 3, infoR - 5, mapT + 68, 0xD9101923);
+        g.fill(infoL + 5, mapT + 3, infoR - 5, mapT + 4, CYAN);
         g.drawString(font, "OBJECT DOSSIER", infoL + 10, mapT + 8, TEXT, false);
         g.drawString(font, trim(n.label, infoR - infoL - 20), infoL + 10, mapT + 28, GOLD, false);
         if (level == 3 && n.entries.size() == 1) {
@@ -4277,8 +4273,7 @@ public class NavigatorScreen extends Screen {
             infoTabRects.add(rect);
             boolean active = infoTab == i;
             boolean hovered = rect.contains(mx, my);
-            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderNavigationTab(
-                    g, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, active, hovered)) {
+            {
                 g.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h,
                         active ? 0xD02A5064 : hovered ? 0xA91B3547 : 0x88303D4D);
                 g.fill(rect.x, rect.y, rect.x + rect.w, rect.y + 1,
@@ -4492,16 +4487,6 @@ public class NavigatorScreen extends Screen {
         // sit underneath the shared navigation.
         int railReserve = embeddedInMaqan ? 48 : 0;
         int layoutWidth = Math.max(120, width - railReserve);
-        int[] nativeLayout = com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.computePanelLayout(
-                layoutWidth, height, showList, showInfo, NavigatorPreferences.listPanelWidth(),
-                NavigatorPreferences.infoPanelWidth(), NavigatorPreferences.panelOrder());
-        if (nativeLayout != null) {
-            mapT = nativeLayout[0]; mapB = nativeLayout[1];
-            listL = nativeLayout[2] + railReserve; listR = nativeLayout[3] + railReserve;
-            infoL = nativeLayout[4] + railReserve; infoR = nativeLayout[5] + railReserve;
-            mapL = nativeLayout[6] + railReserve; mapR = nativeLayout[7] + railReserve;
-            return;
-        }
         int[] fallback = WorkspaceLayout.compute(layoutWidth, height, NavigatorPreferences.workspace());
         if (fallback == null) {
             mapT = mapB = 0;

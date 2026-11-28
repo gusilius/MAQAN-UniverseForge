@@ -1,122 +1,286 @@
 package dev.worldforge.court;
 
 import dev.worldforge.people.Character;
-
+import dev.worldforge.people.CharacterAccessService;
+import dev.worldforge.people.CharacterRegistry;
 import java.util.*;
 
-/**
- * Династические браки между государствами. Предложение оценивается как «мнение» (мнение правителя невесты/жениха о просителе
- * плюс склонность его совета к договорам и мелкие слагаемые), поэтому игроку понятно, почему отказали.
- * Родственные узлы между государствами живут, пока жив хотя бы один такой брак; они читаются как свойство `people.ties`.
- */
+/** Династические браки. Долгоживущие пулы содержат только UUID и компактные метаданные. */
 public final class Marriages {
     private Marriages() {}
-
     public static final int MIN_AGE = 16, TIE_OPINION = 30;
+    private static final int SOURCE_RESERVOIR_SIZE = 32, PARTNER_RESERVOIR_SIZE = 16;
 
     public static final class Offer {
         public boolean ok;
         public int score;
         public final List<String> reasons = new ArrayList<>(), problems = new ArrayList<>();
-        void add(String r, int v) { reasons.add((v >= 0 ? "+" : "") + v + " " + r); score += v; }
+        void add(String reason, int value) {
+            reasons.add((value >= 0 ? "+" : "") + value + " " + reason);
+            score += value;
+        }
     }
 
-    /** Государство, к чьему дому относится персонаж: свой пост, иначе государство отца или матери. */
-    public static String family(CourtSim s, Character c) {
-        for (int i = 0; i < 4 && c != null; i++) {
-            String r = s.realmOf(c);
-            if (!r.isEmpty()) return r;
-            Character p = !c.father.isEmpty() ? s.reg.get(c.father) : !c.mother.isEmpty() ? s.reg.get(c.mother) : null;
-            c = p;
+    private record CandidateRef(String id, String globalId, String gender, int birthYear) {}
+    private record Person(String id, String globalId, String name, String gender, int birthYear,
+                          boolean alive, String spouse, boolean craven) {}
+
+    public static String family(CourtSim sim, Character character) {
+        return family(sim, character == null ? "" : character.id);
+    }
+
+    public static String family(CourtSim sim, String localId) {
+        Set<String> visited = new HashSet<>();
+        ArrayDeque<String> pending = new ArrayDeque<>();
+        if (localId != null && !localId.isBlank()) pending.add(localId);
+        while (!pending.isEmpty()) {
+            String currentId = pending.removeFirst();
+            if (!visited.add(currentId)) continue;
+            final String[] realm = {""}, father = {""}, mother = {""};
+            withCharacterLease(sim.reg, currentId, current -> {
+                if (current == null) return;
+                realm[0] = sim.realmOf(current);
+                father[0] = current.father;
+                mother[0] = current.mother;
+            });
+            if (!realm[0].isBlank()) return realm[0];
+            if (!father[0].isBlank()) pending.addLast(father[0]);
+            if (!mother[0].isBlank()) pending.addLast(mother[0]);
         }
         return "";
     }
 
-    public static boolean single(CourtSim s, Character c) {
-        return c != null && c.alive && c.spouse.isEmpty() && s.year() - c.birthYear >= MIN_AGE;
+    public static boolean single(CourtSim sim, Character character) {
+        return character != null && character.alive && character.spouse.isEmpty()
+                && sim.year() - character.birthYear >= MIN_AGE;
     }
 
-    public static List<Character> candidates(CourtSim s, String realm) {
-        List<Character> out = new ArrayList<>();
-        Character ruler = s.ruler(realm);
-        for (Character c : s.reg.all()) if (single(s, c) && family(s, c).equals(realm) && c != ruler) out.add(c);
-        out.sort(Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.id));
-        return out;
+    private static boolean single(CourtSim sim, Person person) {
+        return person != null && person.alive && person.spouse.isEmpty()
+                && sim.year() - person.birthYear >= MIN_AGE;
     }
 
-    /** realmA предлагает брак своего charA с charB из другого государства (оценивает правитель государства B). */
-    public static Offer evaluate(CourtSim s, String charA, String charB) {
-        Offer o = new Offer();
-        Character a = s.reg.get(charA), b = s.reg.get(charB);
-        if (!single(s, a) || !single(s, b)) { o.problems.add("Оба должны быть живы, совершеннолетни и не состоять в браке"); return o; }
-        if (a.gender.equals(b.gender)) { o.problems.add("Брак возможен только между мужчиной и женщиной"); return o; }
-        String ra = family(s, a), rb = family(s, b);
-        if (ra.isEmpty() || rb.isEmpty() || ra.equals(rb)) { o.problems.add("Нужны персонажи из разных государств"); return o; }
-        if (s.hooks.atWar(ra) && s.hooks.atWar(rb)) { o.problems.add("Государства воюют"); }
-        Character kinA = s.ruler(ra), kinB = s.ruler(rb);
-        if (kinA == null || kinB == null) { o.problems.add("У государства нет правителя"); return o; }
-        if (!o.problems.isEmpty()) return o;
-        o.add("Мнение правителя о просителе", Math.max(-40, Math.min(40, s.opinion(kinB.id, kinA.id))));
-        int cn = (int) Math.round(s.council(ra).getOrDefault("ai_accept", 0.0) / 2);
-        if (cn != 0) o.add("Канцлер просителя", Math.min(15, cn));
-        int gap = Math.abs(a.birthYear - b.birthYear);
-        if (gap > 12) o.add("Разница в возрасте", -Math.min(20, gap - 12));
-        if (a.traits.contains("craven") || b.traits.contains("craven")) o.add("Трусость жениха или невесты", -3);
-        o.add("Выгода союза", 5);
-        o.ok = o.score >= 0;
-        return o;
+    private static Person snapshot(Character character) {
+        return new Person(character.id, character.globalId, character.name, character.gender,
+                character.birthYear, character.alive, character.spouse, character.traits.contains("craven"));
     }
 
-    /** Выполняет брак, если предложение принято. Возвращает оценку. */
-    public static Offer propose(CourtSim s, String charA, String charB) {
-        Offer o = evaluate(s, charA, charB);
-        if (!o.ok) return o;
-        Character a = s.reg.get(charA), b = s.reg.get(charB);
-        String ra = family(s, a), rb = family(s, b);
-        s.reg.marry(a.id, b.id);
-        Character ka = s.ruler(ra), kb = s.ruler(rb);
-        if (ka != null && kb != null) {
-            s.opinions.add(ka.id, kb.id, "Династический брак", TIE_OPINION, 0);
-            s.opinions.add(kb.id, ka.id, "Династический брак", TIE_OPINION, 0);
+    private static CandidateRef candidate(Character character) {
+        return new CandidateRef(character.id, character.globalId, character.gender, character.birthYear);
+    }
+
+    private static Person readPerson(CourtSim sim, String localId) {
+        final Person[] result = {null};
+        withCharacterLease(sim.reg, localId, character -> {
+            if (character != null) result[0] = snapshot(character);
+        });
+        return result[0];
+    }
+
+    /** Candidate UI projection returns local IDs, never Character references. */
+    public static List<String> candidates(CourtSim sim, String realm) {
+        final int capacity = 64;
+        Comparator<CandidateRef> order = Comparator.comparingInt(CandidateRef::birthYear)
+                .thenComparing(CandidateRef::id);
+        PriorityQueue<CandidateRef> bounded = new PriorityQueue<>(capacity, order.reversed());
+        String sovereignId = rulerId(sim, realm);
+        forEachCharacter(sim.reg, character -> {
+            if (!single(sim, character) || character.id.equals(sovereignId)
+                    || !family(sim, character.id).equals(realm)) return;
+            CandidateRef ref = candidate(character);
+            if (bounded.size() < capacity) bounded.add(ref);
+            else if (order.compare(ref, bounded.peek()) < 0) {
+                bounded.poll();
+                bounded.add(ref);
+            }
+        });
+        List<CandidateRef> pool = new ArrayList<>(bounded);
+        pool.sort(order);
+        return pool.stream().map(CandidateRef::id).toList();
+    }
+
+    private static String rulerId(CourtSim sim, String realm) {
+        Character ruler = sim.ruler(realm);
+        return ruler == null ? "" : ruler.id;
+    }
+
+    public static Offer evaluate(CourtSim sim, String charA, String charB) {
+        return evaluate(sim, readPerson(sim, charA), readPerson(sim, charB));
+    }
+
+    private static Offer evaluate(CourtSim sim, Person a, Person b) {
+        Offer offer = new Offer();
+        if (!single(sim, a) || !single(sim, b)) {
+            offer.problems.add("Оба должны быть живы, совершеннолетни и не состоять в браке");
+            return offer;
         }
-        s.announce("Брак: " + a.name + " (" + s.realmName(ra) + ") и " + b.name + " (" + s.realmName(rb) + ")");
-        s.hooks.marriage(ra, rb);
-        s.syncProps();
-        return o;
-    }
-
-    /** Государства, связанные с realm живым браком. */
-    public static Set<String> ties(CourtSim s, String realm) {
-        Set<String> out = new TreeSet<>();
-        for (Character c : s.reg.all()) {
-            if (!c.alive || c.spouse.isEmpty()) continue;
-            Character sp = s.reg.get(c.spouse);
-            if (sp == null || !sp.alive) continue;
-            String r1 = family(s, c), r2 = family(s, sp);
-            if (r1.equals(realm) && !r2.isEmpty() && !r2.equals(realm)) out.add(r2);
+        if (a.gender.equals(b.gender)) {
+            offer.problems.add("Брак возможен только между мужчиной и женщиной");
+            return offer;
         }
-        return out;
+        String realmA = family(sim, a.id), realmB = family(sim, b.id);
+        if (realmA.isEmpty() || realmB.isEmpty() || realmA.equals(realmB)) {
+            offer.problems.add("Нужны персонажи из разных государств");
+            return offer;
+        }
+        if (sim.hooks.atWar(realmA) && sim.hooks.atWar(realmB)) offer.problems.add("Государства воюют");
+        String rulerA = rulerId(sim, realmA), rulerB = rulerId(sim, realmB);
+        if (rulerA.isBlank() || rulerB.isBlank()) {
+            offer.problems.add("У государства нет правителя");
+            return offer;
+        }
+        if (!offer.problems.isEmpty()) return offer;
+        offer.add("Мнение правителя о просителе", Math.max(-40, Math.min(40, sim.opinion(rulerB, rulerA))));
+        int council = (int) Math.round(sim.council(realmA).getOrDefault("ai_accept", 0.0) / 2);
+        if (council != 0) offer.add("Канцлер просителя", Math.min(15, council));
+        int ageGap = Math.abs(a.birthYear - b.birthYear);
+        if (ageGap > 12) offer.add("Разница в возрасте", -Math.min(20, ageGap - 12));
+        if (a.craven || b.craven) offer.add("Трусость жениха или невесты", -3);
+        offer.add("Выгода союза", 5);
+        offer.ok = offer.score >= 0;
+        return offer;
     }
 
-    /** Раз в год ИИ женит наследников: ищет подходящую пару в государстве с лучшим мнением правителей. */
-    public static void aiYear(CourtSim s) {
+    public static Offer propose(CourtSim sim, String charA, String charB) {
+        Person a = readPerson(sim, charA), b = readPerson(sim, charB);
+        Offer offer = evaluate(sim, a, b);
+        if (!offer.ok || a == null || b == null) return offer;
+        String realmA = family(sim, a.id), realmB = family(sim, b.id);
+        final boolean[] married = {false};
+        withCharacterLease(sim.reg, a.id, first ->
+                withCharacterLease(sim.reg, b.id, second -> {
+                    if (first == null || second == null) return;
+                    sim.reg.marry(first.id, second.id);
+                    married[0] = true;
+                }));
+        if (!married[0]) {
+            offer.ok = false;
+            offer.problems.add("Один из участников брака больше недоступен");
+            return offer;
+        }
+        String rulerA = rulerId(sim, realmA), rulerB = rulerId(sim, realmB);
+        if (!rulerA.isBlank() && !rulerB.isBlank()) {
+            sim.opinions.add(rulerA, rulerB, "Династический брак", TIE_OPINION, 0);
+            sim.opinions.add(rulerB, rulerA, "Династический брак", TIE_OPINION, 0);
+        }
+        sim.announce("Брак: " + a.name + " (" + sim.realmName(realmA) + ") и "
+                + b.name + " (" + sim.realmName(realmB) + ")");
+        sim.hooks.marriage(realmA, realmB);
+        sim.syncProps();
+        return offer;
+    }
+
+    public static Set<String> ties(CourtSim sim, String realm) {
+        Set<String> result = new TreeSet<>();
+        forEachCharacter(sim.reg, character -> {
+            if (!character.alive || character.spouse.isEmpty()) return;
+            String firstRealm = family(sim, character.id);
+            Person spouse = readPerson(sim, character.spouse);
+            if (spouse == null || !spouse.alive) return;
+            String secondRealm = family(sim, spouse.id);
+            if (firstRealm.equals(realm) && !secondRealm.isEmpty() && !secondRealm.equals(realm))
+                result.add(secondRealm);
+        });
+        return result;
+    }
+
+    /** Annual AI uses bounded deterministic reservoirs, not population-sized Character lists. */
+    public static void aiYear(CourtSim sim) {
         List<String> realms = new ArrayList<>();
-        for (var r : s.d.realmList()) if (!s.humans.contains(r.id)) realms.add(r.id);
-        for (String ra : realms) {
-            if (s.rnd("marry", ra.hashCode() + s.day).nextDouble() > 0.35) continue;
-            Character best = null, bestB = null; int bestScore = Integer.MIN_VALUE;
-            for (Character a : candidates(s, ra)) {
-                for (String rb : realms) {
-                    if (rb.equals(ra)) continue;
-                    for (Character b : candidates(s, rb)) {
-                        if (a.gender.equals(b.gender)) continue;
-                        Offer o = evaluate(s, a.id, b.id);
-                        if (o.ok && o.score > bestScore) { bestScore = o.score; best = a; bestB = b; }
+        for (var realm : sim.d.realmList()) if (!sim.humans.contains(realm.id)) realms.add(realm.id);
+        Map<String, List<CandidateRef>> sourcePools = new HashMap<>();
+        Map<String, Map<String, List<CandidateRef>>> partnerPools = new HashMap<>();
+        Map<String, Integer> sourceSeen = new HashMap<>(), partnerSeen = new HashMap<>();
+        Map<String, String> rulers = new HashMap<>();
+
+        forEachCharacter(sim.reg, character -> {
+            if (!single(sim, character)) return;
+            String realm = family(sim, character.id);
+            if (realm.isEmpty()) return;
+            String sovereignId = rulers.computeIfAbsent(realm, key -> rulerId(sim, key));
+            if (character.id.equals(sovereignId)) return;
+            CandidateRef ref = candidate(character);
+            int seenInRealm = sourceSeen.merge(realm, 1, Integer::sum);
+            reservoirAdd(sourcePools.computeIfAbsent(realm, ignored -> new ArrayList<>()), ref,
+                    seenInRealm, SOURCE_RESERVOIR_SIZE,
+                    sim.rnd("marry:source-reservoir:" + realm, ref.globalId.hashCode() ^ (long) seenInRealm));
+            String genderKey = realm + "|" + ref.gender;
+            int seenInGender = partnerSeen.merge(genderKey, 1, Integer::sum);
+            List<CandidateRef> genderPool = partnerPools.computeIfAbsent(realm, ignored -> new TreeMap<>())
+                    .computeIfAbsent(ref.gender, ignored -> new ArrayList<>());
+            reservoirAdd(genderPool, ref, seenInGender, PARTNER_RESERVOIR_SIZE,
+                    sim.rnd("marry:partner-reservoir:" + genderKey, ref.globalId.hashCode() ^ (long) seenInGender));
+        });
+
+        Comparator<CandidateRef> order = Comparator.comparingInt(CandidateRef::birthYear).thenComparing(CandidateRef::id);
+        sourcePools.values().forEach(pool -> pool.sort(order));
+        partnerPools.values().forEach(byGender -> byGender.values().forEach(pool -> pool.sort(order)));
+        final int maxSourceCandidates = 4, maxPartnerRealms = 16, maxCandidatesPerPartnerRealm = 4;
+        for (String realmA : realms) {
+            if (sim.rnd("marry", realmA.hashCode() + sim.day).nextDouble() > 0.35) continue;
+            List<CandidateRef> sourcePool = sourcePools.getOrDefault(realmA, List.of());
+            if (sourcePool.isEmpty() || realms.size() < 2) continue;
+            CandidateRef bestA = null, bestB = null;
+            int bestScore = Integer.MIN_VALUE;
+            int sourceStart = sim.rnd("marry:sources:" + realmA, sim.day).nextInt(sourcePool.size());
+            int sourceCount = Math.min(maxSourceCandidates, sourcePool.size());
+            for (int sourceOffset = 0; sourceOffset < sourceCount; sourceOffset++) {
+                CandidateRef a = sourcePool.get((sourceStart + sourceOffset) % sourcePool.size());
+                Random partnerOrder = sim.rnd("marry:partners:" + a.id, realmA.hashCode() + sim.day);
+                int start = partnerOrder.nextInt(realms.size());
+                int attempts = Math.min(realms.size(), maxPartnerRealms + 1);
+                for (int attempt = 0; attempt < attempts; attempt++) {
+                    String realmB = realms.get((start + attempt) % realms.size());
+                    if (realmB.equals(realmA)) continue;
+                    Map<String, List<CandidateRef>> byGender = partnerPools.getOrDefault(realmB, Map.of());
+                    for (Map.Entry<String, List<CandidateRef>> genderPool : byGender.entrySet()) {
+                        if (a.gender.equals(genderPool.getKey())) continue;
+                        List<CandidateRef> pool = genderPool.getValue();
+                        if (pool.isEmpty()) continue;
+                        int candidateStart = sim.rnd("marry:candidates:" + a.globalId + ":" + realmB
+                                + ":" + genderPool.getKey(), sim.day).nextInt(pool.size());
+                        int candidateCount = Math.min(maxCandidatesPerPartnerRealm, pool.size());
+                        for (int candidateOffset = 0; candidateOffset < candidateCount; candidateOffset++) {
+                            CandidateRef b = pool.get((candidateStart + candidateOffset) % pool.size());
+                            Offer offer = evaluate(sim, a.id, b.id);
+                            if (offer.ok && offer.score > bestScore) {
+                                bestScore = offer.score;
+                                bestA = a;
+                                bestB = b;
+                            }
+                        }
                     }
                 }
-                if (best != null) break;
             }
-            if (best != null) propose(s, best.id, bestB.id);
+            if (bestA != null) propose(sim, bestA.id, bestB.id);
+        }
+    }
+
+    private static void reservoirAdd(List<CandidateRef> pool, CandidateRef value, int seen,
+                                     int capacity, Random random) {
+        if (pool.size() < capacity) { pool.add(value); return; }
+        int slot = random.nextInt(seen);
+        if (slot < capacity) pool.set(slot, value);
+    }
+
+    private static void withCharacterLease(CharacterRegistry registry, String localId,
+                                           java.util.function.Consumer<Character> visitor) {
+        if (localId == null || localId.isBlank()) { visitor.accept(null); return; }
+        try (CharacterAccessService.Lease lease = registry.acquire(localId)) {
+            if (lease != null) visitor.accept(lease.get());
+        }
+    }
+
+    private static void forEachCharacter(CharacterRegistry registry,
+                                         java.util.function.Consumer<Character> visitor) {
+        final int pageSize = 256;
+        for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+            List<String> ids = registry.idPage(offset, pageSize);
+            for (String id : ids) {
+                try (CharacterAccessService.Lease lease = registry.acquire(id)) {
+                    if (lease != null) visitor.accept(lease.get());
+                }
+            }
         }
     }
 }

@@ -1,7 +1,9 @@
 package dev.worldforge.relations;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.people.CharacterRegistry;
 
 import dev.worldforge.mod.Json;
 
@@ -217,6 +219,7 @@ public final class Relations {
         b.married = true; b.dating = false; b.employed = false; b.lastContact = day;
         b.affinity = Math.max(b.affinity, 70);
         npc.props.put("people.spouse_player", player);
+        CharacterRegistry.recordCharacterMutation(npc);
         history.add(player + " женился(ась) на " + npc.name);
         return true;
     }
@@ -227,6 +230,7 @@ public final class Relations {
         b.married = b.dating = false;
         b.love = 0; b.affinity = Math.min(b.affinity, -20);
         npc.props.remove("people.spouse_player");
+        CharacterRegistry.recordCharacterMutation(npc);
         history.add(player + " расстался(ась) с " + npc.name);
     }
 
@@ -256,6 +260,7 @@ public final class Relations {
         Bond b = bond(player, npc.id);
         b.employed = true; b.wage = wageFor(npc); b.lastContact = day;
         npc.props.put("employer", player);
+        CharacterRegistry.recordCharacterMutation(npc);
         return true;
     }
 
@@ -264,6 +269,7 @@ public final class Relations {
         if (!b.employed) return;
         b.employed = false;
         npc.props.remove("employer");
+        CharacterRegistry.recordCharacterMutation(npc);
     }
 
     // ---------- просьбы жителей ----------
@@ -343,25 +349,34 @@ public final class Relations {
     // ---------- данные для окна «Отношения» ----------
 
     /** Все знакомые игрока: для списка в окне. label: подпись роли персонажа, года считает окно. */
-    public String viewJson(String player, java.util.function.Function<String, Character> npcs, java.util.function.Function<Character, String> label, int day) {
+    public String viewJson(String player,
+                           java.util.function.Function<String, CharacterAccessService.Lease> npcs,
+                           java.util.function.Function<Character, String> label, int day) {
         List<Object> rows = new ArrayList<>();
-        for (Map.Entry<String, Bond> e : bonds.entrySet()) {
-            if (!e.getKey().startsWith(player + "|")) continue;
-            Character c = npcs.apply(e.getKey().substring(player.length() + 1));
-            Bond b = e.getValue();
-            if (c == null || !c.alive || (b.met == 0 && !b.married && !b.dating && !b.employed)) continue;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("name", c.name); m.put("house", c.house); m.put("g", c.gender); m.put("born", c.birthYear);
-            m.put("role", label.apply(c)); m.put("aff", b.affinity); m.put("love", b.love); m.put("hearts", b.heartsText()); m.put("mood", b.mood());
-            m.put("dating", b.dating); m.put("married", b.married); m.put("employed", b.employed); m.put("wage", b.wage); m.put("met", b.met);
-            m.put("traits", new ArrayList<Object>(CharacterStats.traits(c)));
-            Request r = openRequest(c.id);
-            if (r != null && r.expires > day) {
-                Map<String, Object> q = new LinkedHashMap<>();
-                q.put("text", r.text); q.put("item", r.item); q.put("n", r.count); q.put("reward", r.reward); q.put("left", r.expires - day);
-                m.put("req", q);
+        for (Map.Entry<String, Bond> entry : bonds.entrySet()) {
+            if (!entry.getKey().startsWith(player + "|")) continue;
+            Bond bond = entry.getValue();
+            if (bond.met == 0 && !bond.married && !bond.dating && !bond.employed) continue;
+            try (CharacterAccessService.Lease lease = npcs.apply(entry.getKey().substring(player.length() + 1))) {
+                if (lease == null) continue;
+                Character character = lease.get();
+                if (character == null || !character.alive) continue;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", character.id); row.put("name", character.name); row.put("house", character.house);
+                row.put("g", character.gender); row.put("born", character.birthYear); row.put("role", label.apply(character));
+                row.put("aff", bond.affinity); row.put("love", bond.love); row.put("hearts", bond.heartsText());
+                row.put("mood", bond.mood()); row.put("dating", bond.dating); row.put("married", bond.married);
+                row.put("employed", bond.employed); row.put("wage", bond.wage); row.put("met", bond.met);
+                row.put("traits", new ArrayList<Object>(CharacterStats.traits(character)));
+                Request request = openRequest(character.id);
+                if (request != null && request.expires > day) {
+                    Map<String, Object> details = new LinkedHashMap<>();
+                    details.put("text", request.text); details.put("item", request.item); details.put("n", request.count);
+                    details.put("reward", request.reward); details.put("left", request.expires - day);
+                    row.put("req", details);
+                }
+                rows.add(row);
             }
-            rows.add(m);
         }
         rows.sort((x, y) -> Integer.compare(num(((Map<?, ?>) y).get("aff")), num(((Map<?, ?>) x).get("aff"))));
         Map<String, Object> root = new LinkedHashMap<>();

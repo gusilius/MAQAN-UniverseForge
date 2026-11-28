@@ -8,6 +8,9 @@ import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
 import com.maqan.galacticnavigator.navigation.NavigatorTerritory;
 import com.maqan.galacticnavigator.navigation.NavigatorTerritoryStore;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -69,76 +72,125 @@ public final class NavigatorTerrain3DScreen extends Screen {
         this.parent = parent;
     }
 
+    private int mapTop = 118;
+
+    private int[] toolbarCell(int index, int columns, int buttonWidth) {
+        int gap = 4;
+        int row = index / columns;
+        int column = index % columns;
+        return new int[]{18 + column * (buttonWidth + gap), 44 + row * 22, buttonWidth, 20};
+    }
+
     @Override
     protected void init() {
         com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.reload();
-        addRenderableWidget(Button.builder(Component.literal("ROTATE −"), b -> yaw -= Math.PI / 12.0)
-                .bounds(18, 44, 82, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("ROTATE +"), b -> yaw += Math.PI / 12.0)
-                .bounds(104, 44, 82, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TILT −"), b -> pitch = Math.max(Math.toRadians(8), Math.min(Math.toRadians(78), pitch - Math.toRadians(5))))
-                .bounds(190, 44, 66, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TILT +"), b -> pitch = Math.max(Math.toRadians(8), Math.min(Math.toRadians(78), pitch + Math.toRadians(5))))
-                .bounds(260, 44, 66, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELIEF −"), b -> relief = Math.max(0.08, relief - 0.05))
-                .bounds(330, 44, 72, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELIEF +"), b -> relief = Math.min(0.8, relief + 0.05))
-                .bounds(406, 44, 72, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RESET"), b -> {
+        com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.ensureLiveFeed();
+
+        // One responsive toolbar grid replaces the old fixed pixel coordinates.
+        // At narrow widths controls wrap instead of overlapping or leaving the screen.
+        int columns = width >= 1180 ? 8 : width >= 900 ? 6 : width >= 620 ? 4 : width >= 360 ? 3 : 2;
+        int gap = 4;
+        int buttonWidth = Math.max(1, (width - 36 - (columns - 1) * gap) / columns);
+        int index = 0;
+
+        int[] b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("ROT −"), w -> yaw -= Math.PI / 12.0)
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("ROT +"), w -> yaw += Math.PI / 12.0)
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TILT −"), w -> pitch = Math.max(Math.toRadians(8),
+                Math.min(Math.toRadians(78), pitch - Math.toRadians(5))))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TILT +"), w -> pitch = Math.max(Math.toRadians(8),
+                Math.min(Math.toRadians(78), pitch + Math.toRadians(5))))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELIEF −"), w -> relief = Math.max(0.08, relief - 0.05))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELIEF +"), w -> relief = Math.min(0.8, relief + 0.05))
+                .bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RESET"), w -> {
             yaw = Math.PI * 0.25; pitch = Math.toRadians(32); zoom = 1.0; relief = 0.28; panX = 0; panY = 0;
-        }).bounds(482, 44, 62, 20).build());
-        styleButton = addRenderableWidget(Button.builder(Component.literal("STYLE: NATURAL"), b -> {
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        styleButton = addRenderableWidget(Button.builder(Component.literal("STYLE"), w -> {
             mapStyle = MapStyle.values()[(mapStyle.ordinal() + 1) % MapStyle.values().length];
-            b.setMessage(Component.literal("STYLE: " + mapStyle.name().replace('_', ' ')));
-        }).bounds(550, 44, 132, 20).build());
-        viewButton = addRenderableWidget(Button.builder(Component.literal("VIEW: 3D"), b -> {
+            w.setMessage(Component.literal("STYLE: " + mapStyle.name().replace('_', ' ')));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        viewButton = addRenderableWidget(Button.builder(Component.literal("VIEW: 3D"), w -> {
             viewMode = viewMode == ViewMode.ISOMETRIC ? ViewMode.TOP_DOWN : ViewMode.ISOMETRIC;
-            b.setMessage(Component.literal(viewMode == ViewMode.ISOMETRIC ? "VIEW: 3D" : "VIEW: TOP"));
-        }).bounds(688, 44, 92, 20).build());
-        markerFilterButton = addRenderableWidget(Button.builder(Component.literal("MARKERS: ALL"), b -> {
+            w.setMessage(Component.literal(viewMode == ViewMode.ISOMETRIC ? "VIEW: 3D" : "VIEW: TOP"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        markerFilterButton = addRenderableWidget(Button.builder(Component.literal("MARKERS"), w -> {
             markerFilter = MarkerFilter.values()[(markerFilter.ordinal() + 1) % MarkerFilter.values().length];
-            b.setMessage(Component.literal("MARKERS: " + markerFilter.name()));
-        }).bounds(18, 68, 112, 20).build());
-        playerLayerButton = addRenderableWidget(Button.builder(Component.literal("PLAYER: ON"), b -> {
+            w.setMessage(Component.literal("MARKERS: " + markerFilter.name()));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        playerLayerButton = addRenderableWidget(Button.builder(Component.literal("PLAYER: ON"), w -> {
             showPlayer = !showPlayer;
-            b.setMessage(Component.literal("PLAYER: " + (showPlayer ? "ON" : "OFF")));
-        }).bounds(136, 68, 88, 20).build());
-        gridLayerButton = addRenderableWidget(Button.builder(Component.literal("GRID: ON"), b -> {
+            w.setMessage(Component.literal("PLAYER: " + (showPlayer ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        gridLayerButton = addRenderableWidget(Button.builder(Component.literal("GRID: ON"), w -> {
             showGrid = !showGrid;
-            b.setMessage(Component.literal("GRID: " + (showGrid ? "ON" : "OFF")));
-        }).bounds(230, 68, 78, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("LABELS: ON"), b -> {
+            w.setMessage(Component.literal("GRID: " + (showGrid ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("LABELS: ON"), w -> {
             showWaypointLabels = !showWaypointLabels;
-            b.setMessage(Component.literal("LABELS: " + (showWaypointLabels ? "ON" : "OFF")));
-        }).bounds(314, 68, 92, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("TERRITORY: DRAW"), b -> {
+            w.setMessage(Component.literal("LABELS: " + (showWaypointLabels ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("TERRITORY"), w -> {
             drawingTerritory = !drawingTerritory;
             draftTerritory.clear();
-            b.setMessage(Component.literal(drawingTerritory ? "DRAWING: ON" : "TERRITORY: DRAW"));
-        }).bounds(416, 68, 126, 20).build());
-        territoryNameField = new EditBox(font, 550, 68, 132, 20, Component.literal("Territory name"));
+            w.setMessage(Component.literal(drawingTerritory ? "DRAW: ON" : "TERRITORY"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        territoryNameField = new EditBox(font, b[0], b[1], b[2], b[3], Component.literal("Territory"));
         territoryNameField.setMaxLength(48);
         territoryNameField.setValue("New Territory");
         addRenderableWidget(territoryNameField);
-        territoryOwnerField = new EditBox(font, 688, 68, 120, 20, Component.literal("Owner"));
+        b = toolbarCell(index++, columns, buttonWidth);
+        territoryOwnerField = new EditBox(font, b[0], b[1], b[2], b[3], Component.literal("Owner"));
         territoryOwnerField.setMaxLength(48);
         territoryOwnerField.setValue("Unassigned");
         addRenderableWidget(territoryOwnerField);
-        addRenderableWidget(Button.builder(Component.literal("KIND: CLAIM"), b -> {
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("KIND: CLAIM"), w -> {
             territoryKind = NavigatorTerritory.Kind.values()[
                     (territoryKind.ordinal() + 1) % NavigatorTerritory.Kind.values().length];
-            b.setMessage(Component.literal("KIND: " + territoryKind.name()));
-        }).bounds(814, 68, 112, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("WORLDFORGE: ON"), b -> {
+            w.setMessage(Component.literal("KIND: " + territoryKind.name()));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("WORLDFORGE: ON"), w -> {
             showWorldForge = !showWorldForge;
-            b.setMessage(Component.literal("WORLDFORGE: " + (showWorldForge ? "ON" : "OFF")));
-        }).bounds(18, 92, 132, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("RELOAD WF DATA"), b -> {
+            w.setMessage(Component.literal("WORLDFORGE: " + (showWorldForge ? "ON" : "OFF")));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("RELOAD DATA"), w -> {
             boolean loaded = com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.reload();
-            b.setMessage(Component.literal(loaded ? "WF DATA: LOADED" : "WF: NO DATA"));
-        }).bounds(156, 92, 132, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("BACK"), b -> onClose())
-                .bounds(width - 92, 44, 74, 20).build());
+            w.setMessage(Component.literal(loaded ? "DATA: LOADED" : "NO DATA"));
+        }).bounds(b[0], b[1], b[2], b[3]).build());
+        b = toolbarCell(index++, columns, buttonWidth);
+        addRenderableWidget(Button.builder(Component.literal("BACK"), w -> onClose())
+                .bounds(b[0], b[1], b[2], b[3]).build());
+
+        int rows = (index + columns - 1) / columns;
+        mapTop = 44 + rows * 22 + 10;
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.ensureLiveFeed();
     }
 
     @Override
@@ -147,7 +199,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
         MaqanUiTheme.panel(g,12,10,width-12,36);
         MaqanUiTheme.titleRight(g,font,"MAQAN  /  PLANETARY TERRAIN  /  " + (viewMode == ViewMode.ISOMETRIC ? "3D" : "TOP-DOWN"),dimension,width);
 
-        int left = 16, top = 118, right = width - 16, bottom = height - 42;
+        int left = 16, top = mapTop, right = width - 16, bottom = Math.max(mapTop, height - 42);
         g.fill(left, top, right, bottom, 0xC908111C);
         if (showGrid) {
             for (int x = left; x < right; x += 40) g.fill(x, top, x + 1, bottom, 0x183A6680);
@@ -155,11 +207,20 @@ public final class NavigatorTerrain3DScreen extends Screen {
         }
 
         List<NavigatorExplorationStore.ExploredChunk> all = NavigatorExplorationStore.chunks(dimension);
+        var worldSnapshot = com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.current();
+        var worldTerrain = worldSnapshot == null ? null : worldSnapshot.terrainInDimension(dimension);
         NavigatorPlayerPosition player = NavigatorPlayerPositionTracker.current();
         boolean playerHere = player != null && dimension.equals(player.dimensionId());
-        double centerBlockX = playerHere ? player.x() : averageChunkCenter(all, true);
-        double centerBlockZ = playerHere ? player.z() : averageChunkCenter(all, false);
-        double centerHeight = playerHere ? player.y() : averageSurfaceHeight(all);
+        double terrainCenterX = worldTerrain == null ? 0
+                : worldTerrain.origin_x + worldTerrain.width * worldTerrain.step_pixels * worldTerrain.blocks_per_pixel * 0.5;
+        double terrainCenterZ = worldTerrain == null ? 0
+                : worldTerrain.origin_z + worldTerrain.height * worldTerrain.step_pixels * worldTerrain.blocks_per_pixel * 0.5;
+        double centerBlockX = playerHere ? player.x()
+                : !all.isEmpty() ? averageChunkCenter(all, true) : terrainCenterX;
+        double centerBlockZ = playerHere ? player.z()
+                : !all.isEmpty() ? averageChunkCenter(all, false) : terrainCenterZ;
+        double centerHeight = playerHere ? player.y()
+                : !all.isEmpty() ? averageSurfaceHeight(all) : averageSnapshotHeight(worldTerrain);
 
         // Cull by the actual viewport instead of silently limiting the atlas to
         // an arbitrary number of visited chunks.
@@ -237,6 +298,10 @@ public final class NavigatorTerrain3DScreen extends Screen {
                     halfW, halfH, color);
             rendered++;
         }
+        if (visible.isEmpty() && worldTerrain != null) {
+            rendered += renderSnapshotTerrainRaster(g, worldTerrain, centerBlockX, centerBlockZ,
+                    centerHeight, cos, sin, tile, originX, originY, left, top, right, bottom);
+        }
 
         // Waypoints use the same world-to-isometric transform as the terrain.
         for (NavigatorWaypoint waypoint : NavigatorWaypointStore.all()) {
@@ -273,12 +338,77 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 + "  ·  RELIEF " + String.format(java.util.Locale.ROOT, "%.2f", relief),
                 22, height - 25, 0xFFB6C7D8, false);
         g.drawString(font, "WF: " + com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.status(), 22, height - 13, 0xFF86C8B5, false);
-        g.drawString(font, (viewMode == ViewMode.ISOMETRIC ? "LEFT-DRAG: ROTATE · RIGHT-DRAG: TILT/ROTATE · " : "DRAG: PAN · ") + "WHEEL: ZOOM · ONLY EXPLORED TERRAIN",
+        g.drawString(font, (viewMode == ViewMode.ISOMETRIC ? "LEFT-DRAG: ROTATE · RIGHT-DRAG: TILT/ROTATE · " : "DRAG: PAN · ") + "WHEEL: ZOOM · WORLD MAP + EXPLORED DETAIL",
                 Math.max(22, width - 430), height - 25, 0xFF65D8F2, false);
         super.render(g, mouseX, mouseY, partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
     }
 
+
+    private static double averageSnapshotHeight(
+            com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot.Terrain terrain) {
+        if (terrain == null || terrain.heights == null || terrain.heights.length == 0) return 64;
+        long sum = 0;
+        for (int height : terrain.heights) sum += height;
+        return sum / (double) terrain.heights.length;
+    }
+
+    /** Draws the bounded authoritative WorldForge terrain raster when no explored chunks are visible. */
+    private int renderSnapshotTerrainRaster(GuiGraphics g,
+            com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot.Terrain terrain,
+            double centerX, double centerZ, double centerY, double cos, double sin,
+            double tile, double originX, double originY, int left, int top, int right, int bottom) {
+        if (terrain == null || terrain.sampleCount() <= 0) return 0;
+        double sampleBlocks = terrain.step_pixels * terrain.blocks_per_pixel;
+        if (!Double.isFinite(sampleBlocks) || sampleBlocks <= 0) return 0;
+        int stride = terrain.sampleCount() > 4096 ? (zoom < 0.75 ? 8 : zoom < 1.5 ? 4 : 2) : 1;
+        double cellBlocks = sampleBlocks * stride;
+        double visibleRadius = Math.max(width, height) / Math.max(0.12, tile * 0.5) * 0.8;
+        List<TerrainCell> cells = new ArrayList<>(Math.max(64, terrain.sampleCount() / (stride * stride)));
+        for (int z = 0; z < terrain.height; z += stride) for (int x = 0; x < terrain.width; x += stride) {
+            int index = z * terrain.width + x;
+            double worldX = terrain.sampleX(index), worldZ = terrain.sampleZ(index);
+            double dx = worldX - centerX, dz = worldZ - centerZ;
+            if (dx * dx + dz * dz > visibleRadius * visibleRadius) continue;
+            double rx = dx * cos - dz * sin, rz = dx * sin + dz * cos;
+            int height = terrain.heights[index];
+            int biome = terrain.biome_indices[index];
+            int color = biome >= 0 && terrain.biome_colors != null && biome < terrain.biome_colors.length
+                    ? terrain.biome_colors[biome] : 0xFF557A68;
+            color = 0xFF000000 | (color & 0x00FFFFFF);
+            if (terrain.river_values != null && index < terrain.river_values.length
+                    && terrain.river_values[index] > 0) color = 0xFF347FA8;
+            double vertical = (height - centerY) * relief;
+            double projectedX, projectedY, depth;
+            if (viewMode == ViewMode.TOP_DOWN) {
+                projectedX = originX + rx * tile;
+                projectedY = originY + rz * tile;
+                depth = vertical;
+            } else {
+                double pitchedDepth = rz * Math.sin(pitch) + vertical * Math.cos(pitch);
+                double pitchedY = rz * Math.cos(pitch) - vertical * Math.sin(pitch);
+                projectedX = originX + (rx - rz * Math.cos(pitch)) * tile * 0.72;
+                projectedY = originY + (rx * 0.34 + pitchedY * 0.34) * tile;
+                depth = rx + rz + pitchedDepth;
+            }
+            cells.add(new TerrainCell(projectedX, projectedY, height, color, depth));
+        }
+        cells.sort(Comparator.comparingDouble(TerrainCell::depth));
+        int halfW = Math.max(1, (int) Math.ceil(cellBlocks * tile
+                * (viewMode == ViewMode.TOP_DOWN ? 0.5 : 0.72)));
+        int halfH = Math.max(1, (int) Math.ceil(cellBlocks * tile
+                * (viewMode == ViewMode.TOP_DOWN ? 0.5 : 0.34)));
+        int rendered = 0;
+        for (TerrainCell cell : cells) {
+            if (cell.x() < left - halfW || cell.x() > right + halfW
+                    || cell.y() < top - halfH || cell.y() > bottom + halfH) continue;
+            int heightShade = clamp((int) Math.round((cell.height() - centerY) * 0.12), -26, 30);
+            drawDiamond(g, (int) Math.round(cell.x()), (int) Math.round(cell.y()),
+                    halfW, halfH, shade(cell.color(), heightShade));
+            rendered++;
+        }
+        return rendered;
+    }
 
     private void renderWorldForge(GuiGraphics g, double centerX, double centerZ, double centerY,
                                   double cos, double sin, double tile, double originX, double originY,
@@ -301,15 +431,69 @@ public final class NavigatorTerrain3DScreen extends Screen {
             }
         }
         for (var feature : com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore.features(dimension)) {
+            if ("administrative_title".equals(feature.kind) && zoom < 1.15) continue;
             double[] point = project(feature.x, feature.z, feature.y, centerX, centerZ, centerY,
                     cos, sin, pitch, tile, originX, originY, viewMode);
             int x = (int) Math.round(point[0]), y = (int) Math.round(point[1]);
             if (x < left || x > right || y < top || y > bottom) continue;
             int color = feature.color == 0 ? worldForgeFeatureColor(feature.kind) : feature.color;
-            g.fill(x - 5, y - 5, x + 6, y + 6, 0xE608111C);
-            g.fill(x - 3, y - 3, x + 4, y + 4, color);
-            g.drawString(font, feature.name, x + 7, y - 4, color, false);
+            ResourceLocation itemId = worldForgeFeatureItem(feature.kind, feature.subtype, feature.attributes);
+            boolean renderedItem = false;
+            if (itemId != null && zoom >= 0.9) {
+                ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
+                if (!stack.isEmpty()) {
+                    int iconSize = Math.max(10, Math.min(26, (int) Math.round(15 * Math.sqrt(zoom))));
+                    g.fill(x - iconSize / 2 - 2, y - iconSize / 2 - 2,
+                            x + iconSize / 2 + 2, y + iconSize / 2 + 2, 0xC908111C);
+                    g.pose().pushPose();
+                    g.pose().translate(x - iconSize / 2.0F, y - iconSize / 2.0F, 0.0F);
+                    float scale = iconSize / 16.0F;
+                    g.pose().scale(scale, scale, 1.0F);
+                    g.renderItem(stack, 0, 0);
+                    g.pose().popPose();
+                    renderedItem = true;
+                }
+            }
+            if (!renderedItem) {
+                g.fill(x - 5, y - 5, x + 6, y + 6, 0xE608111C);
+                g.fill(x - 3, y - 3, x + 4, y + 4, color);
+            }
+            if (zoom > 0.85 || "region_capital".equals(feature.kind))
+                g.drawString(font, feature.name, x + 9, y - 4, color, false);
         }
+    }
+
+    private static ResourceLocation worldForgeFeatureItem(String kind, String subtype,
+                                                           java.util.Map<String, String> attributes) {
+        String item = attributes == null ? null : attributes.get("map_item");
+        if (item != null && !item.isBlank()) {
+            ResourceLocation custom = ResourceLocation.tryParse(item);
+            if (custom != null) return custom;
+            item = null;
+        }
+        String profile = attributes == null ? "" : attributes.getOrDefault("visual_profile", "");
+        if (profile.startsWith("worldforge:")) subtype = profile.substring("worldforge:".length());
+        if (item == null && "marker".equals(kind)) {
+            item = switch (subtype == null ? "" : subtype.toLowerCase(java.util.Locale.ROOT)) {
+                case "capital" -> "minecraft:gold_block";
+                case "city" -> "minecraft:bricks";
+                case "settlement", "village" -> "minecraft:oak_planks";
+                case "castle" -> "minecraft:stone_bricks";
+                case "port" -> "minecraft:barrel";
+                case "mine" -> "minecraft:iron_pickaxe";
+                case "temple" -> "minecraft:chiseled_stone_bricks";
+                case "ruin" -> "minecraft:mossy_stone_bricks";
+                case "camp" -> "minecraft:campfire";
+                case "caravan" -> "minecraft:chest";
+                case "army" -> "minecraft:shield";
+                default -> "minecraft:compass";
+            };
+        } else if (item == null && "region_capital".equals(kind)) {
+            item = "minecraft:compass";
+        } else if (item == null && "administrative_title".equals(kind)) {
+            item = "minecraft:gold_block";
+        }
+        return item == null ? null : ResourceLocation.tryParse(item);
     }
 
     private static int worldForgeFeatureColor(String kind) {
@@ -351,16 +535,16 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 centerX, centerZ, centerY, cos, sin, pitch, tile, originX, originY, viewMode));
         drawPolygonOutline(g, points, 0xFFFFD36B);
         for (double[] p : points) g.fill((int)p[0]-3,(int)p[1]-3,(int)p[0]+4,(int)p[1]+4,0xFFFFD36B);
-        g.drawString(font, "TERRITORY DRAFT: " + draftTerritory.size()
+        g.drawString(font, "DRAFT " + draftTerritory.size()
                 + " POINTS · ENTER SAVE · BACKSPACE UNDO · ESC CANCEL",
-                424, 74, 0xFFFFD36B, false);
+                24, Math.min(height - 54, mapTop + 12), 0xFFFFD36B, false);
     }
 
-    private static void fillPolygon(GuiGraphics g, List<double[]> points, int color) {
+    private void fillPolygon(GuiGraphics g, List<double[]> points, int color) {
         if (points.size() < 3 || (color >>> 24) == 0) return;
         double minY=Double.POSITIVE_INFINITY,maxY=Double.NEGATIVE_INFINITY;
         for (double[] p:points) { minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]); }
-        int top=Math.max(98,(int)Math.floor(minY)),bottom=Math.min(g.guiHeight()-42,(int)Math.ceil(maxY));
+        int top=Math.max(mapTop,(int)Math.floor(minY)),bottom=Math.min(height-42,(int)Math.ceil(maxY));
         for(int y=top;y<=bottom;y++) {
             List<Double> intersections=new ArrayList<>();
             for(int i=0,j=points.size()-1;i<points.size();j=i++) {
@@ -370,23 +554,47 @@ public final class NavigatorTerrain3DScreen extends Screen {
             }
             intersections.sort(Double::compare);
             for(int i=0;i+1<intersections.size();i+=2) {
-                int x1=(int)Math.ceil(intersections.get(i)),x2=(int)Math.floor(intersections.get(i+1));
+                int x1=Math.max(16,(int)Math.ceil(intersections.get(i)));
+                int x2=Math.min(width-16,(int)Math.floor(intersections.get(i+1)));
                 if(x2>=x1)g.fill(x1,y,x2+1,y+1,color);
             }
         }
     }
 
-    private static void drawPolygonOutline(GuiGraphics g,List<double[]> points,int color) {
+    private void drawPolygonOutline(GuiGraphics g,List<double[]> points,int color) {
         if(points.size()<2)return;
         for(int i=0;i<points.size();i++) {
             double[] a=points.get(i),b=points.get((i+1)%points.size());
-            int steps=Math.max(1,(int)Math.ceil(Math.max(Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1]))));
+            double[] clipped=clipSegment(a[0],a[1],b[0],b[1]);
+            if(clipped==null)continue;
+            int steps=Math.max(1,(int)Math.ceil(Math.max(
+                    Math.abs(clipped[2]-clipped[0]),Math.abs(clipped[3]-clipped[1]))));
             for(int step=0;step<=steps;step++) {
                 double t=step/(double)steps;
-                int x=(int)Math.round(a[0]+(b[0]-a[0])*t),y=(int)Math.round(a[1]+(b[1]-a[1])*t);
+                int x=(int)Math.round(clipped[0]+(clipped[2]-clipped[0])*t);
+                int y=(int)Math.round(clipped[1]+(clipped[3]-clipped[1])*t);
                 g.fill(x-1,y-1,x+2,y+2,color);
             }
         }
+    }
+
+    /** Liang-Barsky clipping prevents distant territory edges from causing huge off-screen loops. */
+    private double[] clipSegment(double x0,double y0,double x1,double y1) {
+        double dx=x1-x0,dy=y1-y0;
+        double[] p={-dx,dx,-dy,dy};
+        double[] q={x0-16,(width-17)-x0,y0-mapTop,(height-43)-y0};
+        double t0=0.0,t1=1.0;
+        for(int i=0;i<4;i++) {
+            if(Math.abs(p[i])<1.0e-9) {
+                if(q[i]<0)return null;
+                continue;
+            }
+            double t=q[i]/p[i];
+            if(p[i]<0)t0=Math.max(t0,t);
+            else t1=Math.min(t1,t);
+            if(t0>t1)return null;
+        }
+        return new double[]{x0+t0*dx,y0+t0*dy,x0+t1*dx,y0+t1*dy};
     }
 
     private void saveDraftTerritory() {
@@ -547,11 +755,12 @@ public final class NavigatorTerrain3DScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (super.mouseClicked(mouseX, mouseY, button)) return true;
-        if (drawingTerritory && button == 0 && mouseY >= 98 && mouseY <= height - 42) {
+        if (drawingTerritory && button == 0 && mouseY >= mapTop && mouseY <= height - 42) {
             addDraftVertex(mouseX, mouseY);
             return true;
         }
-        if ((button == 0 || button == 1) && mouseY >= 98 && mouseY <= height - 42) {
+        if ((button == 0 || button == 1) && mouseX >= 16 && mouseX < width - 16
+                && mouseY >= mapTop && mouseY < height - 42) {
             dragging = true; dragButton = button; lastMouseX = mouseX; lastMouseY = mouseY; return true;
         }
         return false;
@@ -584,7 +793,11 @@ public final class NavigatorTerrain3DScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        zoom = Math.max(0.35, Math.min(2.6, zoom * (delta > 0 ? 1.12 : 1.0 / 1.12)));
+        // Toolbar and footer must never steal map zoom input.
+        if (super.mouseScrolled(mouseX, mouseY, delta)) return true;
+        if (mouseX < 16 || mouseX >= width - 16 || mouseY < mapTop || mouseY >= height - 42) return false;
+        double factor = Math.pow(1.12, delta);
+        zoom = Math.max(0.35, Math.min(2.6, zoom * factor));
         return true;
     }
 
@@ -613,7 +826,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
                 NavigatorExplorationStore.chunks(dimension),false);
         double centerY=player!=null&&dimension.equals(player.dimensionId())?player.y():
                 averageSurfaceHeight(NavigatorExplorationStore.chunks(dimension));
-        double tile=0.92*zoom, originX=width*0.5+panX,originY=(98+height-42)*0.5+panY+26;
+        double tile=0.92*zoom, originX=width*0.5+panX,originY=(mapTop+height-42)*0.5+panY+26;
         double sx=(mouseX-originX)/Math.max(0.001,tile),sy=(mouseY-originY)/Math.max(0.001,tile);
         double rx,rz;
         if(viewMode==ViewMode.TOP_DOWN) { rx=sx;rz=sy; }

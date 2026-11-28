@@ -54,7 +54,10 @@ public final class ImageWorldIdentityTest {
         Path archive = Path.of(args[0]).toAbsolutePath();
         MapData map = MapData.load("real-map", archive.getParent());
         TitleData titles = map.titles;
-        if (titles == null) throw new AssertionError("Actual image map has no political titles");
+        if (titles == null) throw new AssertionError("Actual image map has no territorial titles");
+        long stateCandidates = titles.allTitles().stream().filter(title -> title.tier == 2).count();
+        check(stateCandidates > 0 && titles.realmList().isEmpty(),
+                "image map preserves state-formation borders without preassigning sovereign identities");
 
         Path originsDir = Path.of("wf-origins/src/main/resources/data/wf_origins/wf_origins");
         OriginDefs originDefs = new OriginDefs();
@@ -100,7 +103,7 @@ public final class ImageWorldIdentityTest {
                 TerritorialIdentity.ensure(map.name, titles, editor, people, names, seed);
 
         check(titles.realmList().isEmpty() && demographics.realmsClassified() == 0,
-                "image geography starts without pre-authored states; sovereignty is created by autonomous emergence");
+                "generated state boundaries remain unowned until autonomous emergence creates sovereign identities");
         Set<String> knownRaces = originDefs.snapshot().races().keySet();
         for (TitleData.Realm realm : titles.realmList()) {
             Map<String, Integer> mix = shares(realm.props.get("races"));

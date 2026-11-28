@@ -485,6 +485,9 @@ public class GenesisMod {
                 name, draft.race, "m", PeopleMod.YEAR - 20);
         boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
         person.props.put("genesis.player_uuid", playerUuid);
+        CharacterRegistry personRegistry = PeopleMod.authority().registryForGlobal(person.globalId);
+        if (personRegistry == null) throw new IllegalStateException("Canonical player Character registry disappeared");
+        personRegistry.indexPlayerBinding(person.id, playerUuid);
         person.props.put("genesis.profile_owner", owner(sp));
         person.props.put("genesis.race", draft.race);
         person.props.put("genesis.start", draft.start);
@@ -569,23 +572,26 @@ public class GenesisMod {
         boolean settle = settleLoaded() && SettleBridge.ready();
         switch (st.spawn()) {
             case "here" -> {
-                BlockPos at = BlockPos.containing(sp.position());
-                if (st.leader() && settle) foundFor(sp, d, st, lv, at);
-                else if (st.leader()) sp.sendSystemMessage(Component.literal("Поселения недоступны: нет мода wf_settle. Вы просто начинаете здесь."));
+                // Genesis selects the player's race, origin and appearance only.
+                // It must never found a settlement or create population/political records.
+                if (st.leader() && !settle) {
+                    sp.sendSystemMessage(Component.literal("Поселения недоступны: wf_settle не загружен. Персонаж создан без основания поселения."));
+                }
             }
             case "settlement" -> {
-                if (!settle) { teleport(sp, lv, scatter(lv, spawn, 150, 500, rng)); break; }
-                var c = SettleBridge.nearest(lv, sp.getX(), sp.getZ(), 4000);
-                BlockPos at;
-                if (c != null) at = new BlockPos(SettleBridge.cx(c), lv.getSharedSpawnPos().getY(), SettleBridge.cz(c));
-                else {
-                    BlockPos where = scatter(lv, spawn, 120, 400, rng);
-                    var tier = DEFS.tiers.get(st.tier().isEmpty() ? "village" : st.tier());
-                    String name = GENESIS.randomName(d, rng);
-                    var col = SettleBridge.found(lv, where, name, tier, null, null, d, "genesis:" + sp.getUUID() + ":origin-settlement");
-                    at = new BlockPos(SettleBridge.cx(col), where.getY(), SettleBridge.cz(col));
-                    sp.sendSystemMessage(Component.literal("§7Вы родом из поселения «" + name + "»."));
+                if (!settle) {
+                    teleport(sp, lv, scatter(lv, spawn, 150, 500, rng));
+                    break;
                 }
+                // An origin settlement must already exist in the world and be registered by
+                // the structure/settlement pipeline. No synthetic colony fallback is allowed.
+                var c = SettleBridge.nearest(lv, sp.getX(), sp.getZ(), 4000);
+                if (c == null) {
+                    sp.sendSystemMessage(Component.literal("Рядом нет зарегистрированного поселения. Genesis не создаёт поселение из пустой местности."));
+                    teleport(sp, lv, scatter(lv, spawn, 150, 500, rng));
+                    break;
+                }
+                BlockPos at = new BlockPos(SettleBridge.cx(c), lv.getSharedSpawnPos().getY(), SettleBridge.cz(c));
                 BlockPos s = surface(lv, at.getX() + 4, at.getZ() + 4);
                 teleport(sp, lv, s == null ? at : s);
             }

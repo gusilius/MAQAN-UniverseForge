@@ -57,6 +57,12 @@ public final class ArmyEngine {
         boolean persist();
     }
     private transient volatile PersistenceBridge persistenceBridge;
+    /** WorldSim is the sole strategic recruitment planner when its proposal pipeline is active. */
+    private volatile boolean autonomousRecruitmentEnabled = true;
+
+    public void setAutonomousRecruitmentEnabled(boolean enabled) {
+        autonomousRecruitmentEnabled = enabled;
+    }
 
     public void installPersistenceBridge(PersistenceBridge bridge) {
         if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
@@ -513,6 +519,8 @@ public final class ArmyEngine {
         target.morale = Math.max(0, Math.min(1, target.morale * targetWeight + source.morale * sourceWeight));
         target.supply = Math.max(0, Math.min(1, target.supply * targetWeight + source.supply * sourceWeight));
         if (target.commander == null || target.commander.isBlank()) target.commander = source.commander == null ? "" : source.commander;
+        if (target.commanderGlobalId == null || target.commanderGlobalId.isBlank())
+            target.setCommanderGlobalId(source.commanderGlobalId);
         target.martial = Math.max(target.martial, source.martial);
         for (Map.Entry<String, Integer> entry : source.units.entrySet()) target.add(entry.getKey(), entry.getValue());
         armies.remove(from);
@@ -544,6 +552,9 @@ public final class ArmyEngine {
         Army split = new Army(nextArmy++, source.realm, (armiesOf(source.realm).size() + 1) + "-я армия", source.location);
         split.mercenary = source.mercenary;
         split.martial = source.martial;
+        // A split preserves command authority by UUID without pinning the commander object.
+        split.commander = source.commander == null ? "" : source.commander;
+        split.setCommanderGlobalId(source.commanderGlobalId);
         split.morale = source.morale;
         split.supply = source.supply;
         split.add(type, n);
@@ -703,11 +714,15 @@ public final class ArmyEngine {
         pactsDaily();
         Set<String> realms = new LinkedHashSet<>();
         for (TitleData.Realm r : d().realmList()) if (!r.titleKeys.isEmpty()) realms.add(r.id);
+        Map<String, List<Army>> armiesByRealm = new HashMap<>();
+        for (Army army : armies.values())
+            armiesByRealm.computeIfAbsent(army.realm, ignored -> new ArrayList<>()).add(army);
         for (String r : realms) {
-            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
-            gold(r); // initialize or migrate the canonical opening balance before the first daily posting
+            List<Army> realmArmies = armiesByRealm.getOrDefault(r, List.of());
+            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && realmArmies.isEmpty() && !isAtWar(r)) continue;
+            gold(r);
             double inc = eco.net(r), cost = 0;
-            for (Army a : armiesOf(r)) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
+            for (Army a : realmArmies) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
                 UnitType u = types.get(e.getKey());
                 if (u != null) cost += e.getValue() * u.upkeep * (a.mercenary ? 2 : 1) / 10.0;
             }
@@ -716,9 +731,12 @@ public final class ArmyEngine {
             if (!treasuryPosted) say("Казна " + realmName(r) + " достигла кредитного лимита; армейские расходы не оплачены");
             double cap = levyCap(r);
             pool.put(r, Math.min(cap, pool(r) + cap * POOL_REGEN));
-            if (g < 0) for (Army a : armiesOf(r)) {
+            if (g < 0) for (Army a : realmArmies) {
                 a.morale = Math.max(0.1, a.morale - 0.03);
-                for (String k : new ArrayList<>(a.units.keySet())) { int left = (int) Math.floor(a.units.get(k) * 0.98); if (left <= 0) a.units.remove(k); else a.units.put(k, left); }
+                for (String k : new ArrayList<>(a.units.keySet())) {
+                    int left = (int) Math.floor(a.units.get(k) * 0.98);
+                    if (left <= 0) a.units.remove(k); else a.units.put(k, left);
+                }
             }
         }
     }
@@ -726,14 +744,26 @@ public final class ArmyEngine {
     private boolean isAtWar(String r) { for (War w : war.wars.values()) if (w.active && w.sides.containsKey(r)) return true; return false; }
 
     private void movement() {
+        Map<Integer, List<Army>> byLocation = new HashMap<>();
+        for (Army army : armies.values())
+            byLocation.computeIfAbsent(army.location, ignored -> new ArrayList<>()).add(army);
         for (Army a : armies.values()) {
             if (a.moving()) {
                 a.moveAcc += a.speed(types);
                 while (a.moveAcc >= 1 && a.moving()) {
                     a.moveAcc -= 1;
+                    List<Army> oldLocation = byLocation.get(a.location);
+                    if (oldLocation != null) {
+                        oldLocation.remove(a);
+                        if (oldLocation.isEmpty()) byLocation.remove(a.location);
+                    }
                     a.location = a.path.remove(0);
-                    // вошли в землю, где стоит армия врага - остановка: сражение
-                    if (hostileArmyAt(a)) { a.path.clear(); a.lastEvent = "встретила врага в " + title(a.location); break; }
+                    byLocation.computeIfAbsent(a.location, ignored -> new ArrayList<>()).add(a);
+                    if (hostileArmyAt(a, byLocation)) {
+                        a.path.clear();
+                        a.lastEvent = "встретила врага в " + title(a.location);
+                        break;
+                    }
                 }
                 if (!a.moving()) { a.moveAcc = 0; if (a.lastEvent.startsWith("идёт")) a.lastEvent = "прибыла в " + title(a.location); }
             } else a.morale = Math.min(1.0, a.morale + 0.02);
@@ -742,6 +772,12 @@ public final class ArmyEngine {
 
     private boolean hostileArmyAt(Army a) {
         for (Army b : armies.values()) if (b != a && b.location == a.location && enemyWar(a.realm, b.realm) != null) return true;
+        return false;
+    }
+
+    private boolean hostileArmyAt(Army army, Map<Integer, List<Army>> byLocation) {
+        for (Army other : byLocation.getOrDefault(army.location, List.of()))
+            if (other != army && enemyWar(army.realm, other.realm) != null) return true;
         return false;
     }
 
@@ -1028,7 +1064,8 @@ public final class ArmyEngine {
     private void aiRealm(War w, String r) {
         War.Side me = w.sides.get(r);
         // 1. набор
-        if (armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
+        if (autonomousRecruitmentEnabled
+                && armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
             double availablePool = pool(r);
             int n = (int) Math.min(availablePool, levyCap(r) * 0.6);
             if (n >= 20) {
@@ -1241,7 +1278,7 @@ public final class ArmyEngine {
     public String toJson() {
         for (String realm : new ArrayList<>(gold.keySet())) gold(realm); // migrate every wf-army/1 balance before dropping the legacy field
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-army/3");
+        root.put("format", "wf-army/4");
         root.put("next", nextArmy);
         root.put("dayAccumulator", dayAccumulator);
         root.put("pool", new LinkedHashMap<String, Object>(pool));
@@ -1249,7 +1286,9 @@ public final class ArmyEngine {
         List<Object> al = new ArrayList<>();
         for (Army a : armies.values()) {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", a.id); m.put("realm", a.realm); m.put("name", a.name); m.put("commander", a.commander); m.put("martial", a.martial);
+            m.put("id", a.id); m.put("realm", a.realm); m.put("name", a.name);
+            m.put("commander", a.commander); m.put("commanderGlobalId", a.commanderGlobalId == null ? "" : a.commanderGlobalId);
+            m.put("martial", a.martial);
             m.put("loc", a.location); m.put("morale", a.morale); m.put("supply", a.supply); m.put("merc", a.mercenary); m.put("siege", a.siegeTitle);
             m.put("units", new LinkedHashMap<String, Object>(a.units));
             m.put("path", new ArrayList<Object>(a.path));
@@ -1275,7 +1314,7 @@ public final class ArmyEngine {
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         String format = String.valueOf(root.get("format"));
-        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format) && !"wf-army/3".equals(format))
+        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format) && !"wf-army/3".equals(format) && !"wf-army/4".equals(format))
             throw new IllegalArgumentException("Неверный формат армий");
         armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear(); rosterOperations.clear(); pendingRecruitments.clear();
         nextArmy = ((Number) root.get("next")).intValue();
@@ -1293,7 +1332,15 @@ public final class ArmyEngine {
         for (Object o : (List<Object>) root.get("armies")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Army a = new Army(((Number) m.get("id")).intValue(), (String) m.get("realm"), (String) m.get("name"), ((Number) m.get("loc")).intValue());
-            a.commander = (String) m.get("commander"); a.martial = ((Number) m.get("martial")).intValue();
+            a.commander = (String) m.get("commander");
+            Object commanderId = m.get("commanderGlobalId");
+            if (commanderId != null && !(commanderId instanceof String))
+                throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id);
+            try { a.setCommanderGlobalId((String) commanderId); }
+            catch (IllegalArgumentException malformed) {
+                throw new IllegalArgumentException("Повреждён UUID командира армии #" + a.id, malformed);
+            }
+            a.martial = ((Number) m.get("martial")).intValue();
             a.morale = ((Number) m.get("morale")).doubleValue(); if (m.get("supply") instanceof Number sp) a.supply = sp.doubleValue(); a.mercenary = Boolean.TRUE.equals(m.get("merc")); a.siegeTitle = ((Number) m.get("siege")).intValue();
             for (Map.Entry<String, Object> e : ((Map<String, Object>) m.get("units")).entrySet()) a.units.put(e.getKey(), ((Number) e.getValue()).intValue());
             for (Object p : (List<Object>) m.get("path")) a.path.add(((Number) p).intValue());

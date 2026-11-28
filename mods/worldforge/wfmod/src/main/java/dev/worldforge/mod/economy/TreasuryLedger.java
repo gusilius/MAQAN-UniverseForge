@@ -11,7 +11,7 @@ import java.util.*;
  * The ledger is independent of Minecraft so economy rules can be tested deterministically.
  */
 public final class TreasuryLedger {
-    public enum Kind { OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF, PRODUCTION, CONSUMPTION, LOGISTICS, IMPORT, EXPORT }
+    public enum Kind { ACCOUNT_CREATED, CREDIT_LIMIT_CHANGED, OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF, PRODUCTION, CONSUMPTION, LOGISTICS, IMPORT, EXPORT }
     public static final class Account {
         public final String id, ownerId, currency;
         public double balance, creditLimit, debt;
@@ -24,19 +24,21 @@ public final class TreasuryLedger {
     public record Entry(long sequence, String transactionId, String accountId, String counterpartyId,
                         String currency, double amount, boolean credit, Kind kind, String category,
                         String reference, long worldMinute, double balanceAfter, String memo) { }
+    /** Bounded-cardinality aggregate for diagnosing which economic domain grows the audit journal. */
+    public record JournalStat(Kind kind, String category, long entries) { }
 
     private final Map<String, Account> accounts = new LinkedHashMap<>();
     private final List<Entry> journal = new ArrayList<>();
-    private final Set<String> postedReferences = new HashSet<>();
-    private final Set<String> postedDebits = new HashSet<>();
-    private final Set<String> postedCredits = new HashSet<>();
+    /** Durable history is queried from its archive; only entries after this cursor remain in journal. */
+    private TreasuryJournalArchive historyArchive;
+    private long archivedThroughSequence;
     /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
     private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
-    /** Append-only secondary indexes keep journal queries proportional to the selected account/reference. */
-    private final Map<String, List<Entry>> entriesByAccount = new HashMap<>();
-    private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
     private final Map<String, Double> debitTotals = new HashMap<>();
+    private final Map<String, Long> journalCountsByKindCategory = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
+    /** O(1) idempotency lookup for the unarchived tail; archived history uses the disk index. */
+    private final Map<String, List<Entry>> pendingEntriesByReference = new HashMap<>();
     private long sequence=1, transactionSequence=1;
     private long mutationVersion;
     private String lastError="";
@@ -110,23 +112,350 @@ public final class TreasuryLedger {
     private static long minute(long v) { if(v<0) throw new IllegalArgumentException("worldMinute cannot be negative"); return v; }
     public synchronized String lastError() { return lastError; }
     public synchronized long mutationVersion() { return mutationVersion; }
+
+    /** Immutable state required to checkpoint account balances and crash-retry identity. */
+    synchronized TreasuryLedgerSnapshot.State checkpointState() {
+        List<TreasuryLedgerSnapshot.AccountState> accountStates = accounts.values().stream()
+                .map(a -> new TreasuryLedgerSnapshot.AccountState(a.id, a.ownerId, a.currency,
+                        a.balance, a.creditLimit, a.debt, a.bankrupt)).toList();
+        return new TreasuryLedgerSnapshot.State(sequence, transactionSequence, mutationVersion,
+                accountStates, Set.of(), Set.of(), Set.of(), Set.copyOf(armyFieldRationDebitAccounts), false);
+    }
+
+    private static void validateArchivedTransaction(List<Entry> postings, Map<String, Account> accounts) {
+        if (postings.size() == 1) {
+            Entry single = postings.get(0);
+            if (accounts.containsKey(single.counterpartyId()))
+                throw new IllegalStateException("Treasury archive is missing a matching double-entry posting: " + single.transactionId());
+            return;
+        }
+        if (postings.size() != 2)
+            throw new IllegalStateException("Invalid treasury transaction cardinality: " + postings.get(0).transactionId());
+        Entry a = postings.get(0), b = postings.get(1);
+        if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
+                || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
+                || !a.currency().equals(b.currency()) || a.kind() != b.kind()
+                || !a.category().equals(b.category()) || !a.reference().equals(b.reference())
+                || a.worldMinute() != b.worldMinute() || Math.abs(a.amount() - b.amount()) > 1e-8)
+            throw new IllegalStateException("Unbalanced treasury transaction: " + a.transactionId());
+    }
+
+    /**
+     * Restores the checkpoint state, verifies its immutable archive prefix, then replays
+     * only the append-only suffix. Snapshot balances/debt are the replay base; journal
+     * postings rebuild indexes and apply later account mutations exactly once.
+     */
+    public static TreasuryLedger restoreFromCheckpoint(TreasuryCheckpointStore.Checkpoint checkpoint,
+                                                        TreasuryJournalArchive archive) throws java.io.IOException {
+        TreasuryCheckpointStore.verify(checkpoint, archive);
+        TreasuryLedgerSnapshot.State state;
+        try {
+            state = TreasuryLedgerSnapshot.decode(checkpoint.snapshotJson());
+        } catch (RuntimeException invalid) {
+            throw new java.io.IOException("Treasury checkpoint state is invalid", invalid);
+        }
+        if (checkpoint.nextSequence() != state.nextSequence()
+                || archive.nextSequence() < state.nextSequence())
+            throw new java.io.IOException("Treasury checkpoint sequence does not match its verified archive");
+
+        TreasuryLedger restored = new TreasuryLedger();
+        restored.restoring = true;
+        for (TreasuryLedgerSnapshot.AccountState saved : state.accounts()) {
+            Account account = new Account(saved.id(), saved.ownerId(), saved.currency(), saved.balance());
+            account.creditLimit = saved.creditLimit();
+            account.debt = saved.debt();
+            account.bankrupt = saved.bankrupt();
+            if (restored.accounts.putIfAbsent(account.id, account) != null)
+                throw new java.io.IOException("Duplicate account in treasury checkpoint: " + account.id);
+        }
+
+        Set<String> prefixReferences = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
+        Set<String> prefixDebits = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
+        Set<String> prefixCredits = state.legacyIdempotencyIndexes() ? new HashSet<>() : Set.of();
+        Set<String> prefixRationAccounts = new HashSet<>();
+        Map<String, Double> prefixBalances = new HashMap<>();
+        List<Entry> transaction = new ArrayList<>(2);
+        String[] transactionId = {null};
+        long[] expected = {1};
+        try {
+            archive.forEachEntryFrom(1, entry -> {
+                if (entry.sequence() >= state.nextSequence())
+                    return;
+                if (entry.sequence() != expected[0]++)
+                    throw new IllegalStateException("Treasury checkpoint prefix sequence discontinuity");
+                Account account = restored.accounts.get(entry.accountId());
+                if (account == null || !account.currency.equals(entry.currency()))
+                    throw new IllegalStateException("Treasury checkpoint prefix references an unknown or mismatched account: " + entry.accountId());
+                if (transactionId[0] != null && !transactionId[0].equals(entry.transactionId())) {
+                    validateArchivedTransaction(transaction, restored.accounts);
+                    transaction.clear();
+                }
+                transactionId[0] = entry.transactionId();
+                transaction.add(entry);
+                if (transaction.size() > 2)
+                    throw new IllegalStateException("Invalid treasury transaction cardinality: " + entry.transactionId());
+                String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+                if (state.legacyIdempotencyIndexes()) {
+                    prefixReferences.add(key);
+                    (entry.credit() ? prefixCredits : prefixDebits).add(key);
+                }
+                if (!entry.credit() && entry.kind() == Kind.LOGISTICS
+                        && "army-field-rations".equals(entry.category()))
+                    prefixRationAccounts.add(entry.accountId());
+                restored.indexEntry(entry);
+                prefixBalances.put(entry.accountId(), entry.balanceAfter());
+                restored.transactionSequence = Math.max(restored.transactionSequence,
+                        nextTransactionSequence(entry.transactionId()));
+            });
+            if (!transaction.isEmpty()) validateArchivedTransaction(transaction, restored.accounts);
+        } catch (RuntimeException invalid) {
+            throw new java.io.IOException("Treasury checkpoint prefix failed ledger reconstruction", invalid);
+        }
+        if (expected[0] != state.nextSequence())
+            throw new java.io.IOException("Treasury archive does not contain the complete checkpoint prefix");
+        if ((state.legacyIdempotencyIndexes()
+                && (!prefixReferences.equals(state.postedReferences()) || !prefixDebits.equals(state.postedDebits())
+                || !prefixCredits.equals(state.postedCredits())))
+                || !prefixRationAccounts.equals(state.armyFieldRationDebitAccounts()))
+            throw new java.io.IOException("Treasury checkpoint idempotency indexes do not match its archive prefix");
+        for (Account account : restored.accounts.values()) {
+            double journalBalance = prefixBalances.getOrDefault(account.id, 0.0);
+            if (Math.abs(journalBalance - account.balance) > 1e-8)
+                throw new java.io.IOException("Treasury checkpoint cash balance does not match its prefix journal: " + account.id);
+        }
+        restored.armyFieldRationDebitAccounts.addAll(prefixRationAccounts);
+
+        List<Entry> suffixTransaction = new ArrayList<>(2);
+        String[] suffixTransactionId = {null};
+        long[] suffixExpected = {state.nextSequence()};
+        long[] suffixEntries = {0};
+        long[] extraAccountMutations = {0};
+        try {
+            archive.forEachEntryFrom(state.nextSequence(), entry -> {
+                if (entry.sequence() != suffixExpected[0]++)
+                    throw new IllegalStateException("Treasury suffix sequence discontinuity");
+                if (suffixTransactionId[0] != null && !suffixTransactionId[0].equals(entry.transactionId())) {
+                    validateArchivedTransaction(suffixTransaction, restored.accounts);
+                    suffixTransaction.clear();
+                }
+                suffixTransactionId[0] = entry.transactionId();
+                suffixTransaction.add(entry);
+                if (suffixTransaction.size() > 2)
+                    throw new IllegalStateException("Invalid treasury transaction cardinality: " + entry.transactionId());
+
+                Account account = restored.accounts.get(entry.accountId());
+                if (entry.kind() == Kind.ACCOUNT_CREATED) {
+                    if (account != null || entry.amount() != 0 || !entry.credit()
+                            || !"@treasury:structural".equals(entry.counterpartyId())
+                            || !entry.reference().equals(entry.accountId())
+                            || entry.memo().isBlank() || entry.balanceAfter() < 0)
+                        throw new IllegalStateException("Invalid treasury account-created event: " + entry.accountId());
+                    account = new Account(entry.accountId(), entry.memo(), entry.currency(), entry.balanceAfter());
+                    restored.accounts.put(account.id, account);
+                    extraAccountMutations[0]++;
+                } else {
+                    if (account == null || !account.currency.equals(entry.currency()))
+                        throw new IllegalStateException("Treasury suffix references an unknown or mismatched account: " + entry.accountId());
+                    if (entry.kind() == Kind.CREDIT_LIMIT_CHANGED) {
+                        if (entry.amount() != 0 || !entry.credit()
+                                || !"@treasury:structural".equals(entry.counterpartyId())
+                                || Math.abs(account.balance - entry.balanceAfter()) > 1e-8)
+                            throw new IllegalStateException("Invalid treasury credit-limit event: " + entry.accountId());
+                        double limit;
+                        try { limit = Double.parseDouble(entry.memo()); }
+                        catch (RuntimeException invalid) {
+                            throw new IllegalStateException("Invalid treasury credit limit payload", invalid);
+                        }
+                        if (!Double.isFinite(limit) || limit < 0)
+                            throw new IllegalStateException("Invalid treasury credit limit value");
+                        account.creditLimit = limit;
+                        restored.updateBankruptcy(account);
+                    } else if (entry.kind() == Kind.OPENING) {
+                        if (!entry.credit() || Math.abs(account.balance - entry.balanceAfter()) > 1e-8)
+                            throw new IllegalStateException("Opening posting changed the already initialized account balance");
+                    } else {
+                        double previousBalance = account.balance;
+                        double nextBalance = entry.balanceAfter();
+                        if (!Double.isFinite(nextBalance) || nextBalance < 0)
+                            throw new IllegalStateException("Invalid treasury suffix balance");
+                        double debtDelta;
+                        if (entry.kind() == Kind.LOAN) {
+                            if (!entry.credit()) throw new IllegalStateException("Loan posting must be a credit");
+                            debtDelta = entry.amount();
+                        } else if (entry.kind() == Kind.INTEREST) {
+                            if (entry.credit() || Math.abs(nextBalance - previousBalance) > 1e-8)
+                                throw new IllegalStateException("Invalid interest posting");
+                            debtDelta = entry.amount();
+                        } else if (entry.kind() == Kind.REPAYMENT) {
+                            if (entry.credit() || !"debt".equals(entry.counterpartyId()))
+                                throw new IllegalStateException("Invalid debt repayment posting");
+                            debtDelta = -entry.amount();
+                        } else {
+                            double cashDelta = nextBalance - previousBalance;
+                            debtDelta = entry.credit()
+                                    ? -(entry.amount() - cashDelta)
+                                    : entry.amount() + cashDelta;
+                        }
+                        double nextDebt = account.debt + debtDelta;
+                        if (!Double.isFinite(nextDebt) || nextDebt < -1e-8)
+                            throw new IllegalStateException("Treasury suffix produces invalid debt for " + account.id);
+                        account.balance = nextBalance;
+                        account.debt = Math.max(0, nextDebt);
+                        restored.updateBankruptcy(account);
+                    }
+                }
+
+                if (!entry.credit() && entry.kind() == Kind.LOGISTICS
+                        && "army-field-rations".equals(entry.category()))
+                    restored.armyFieldRationDebitAccounts.add(entry.accountId());
+                restored.indexEntry(entry);
+                restored.transactionSequence = Math.max(restored.transactionSequence,
+                        nextTransactionSequence(entry.transactionId()));
+                suffixEntries[0]++;
+            });
+            if (!suffixTransaction.isEmpty()) validateArchivedTransaction(suffixTransaction, restored.accounts);
+        } catch (RuntimeException invalid) {
+            throw new java.io.IOException("Treasury archive suffix replay failed validation", invalid);
+        }
+        if (suffixExpected[0] != archive.nextSequence())
+            throw new java.io.IOException("Treasury archive suffix is incomplete");
+
+        restored.sequence = archive.nextSequence();
+        restored.historyArchive = archive;
+        restored.archivedThroughSequence = archive.nextSequence() - 1;
+        restored.transactionSequence = Math.max(state.nextTransactionSequence(), restored.transactionSequence);
+        // Account creation mutates the account map before appending its structural journal row.
+        // Preserve that separate mutation in addition to the posting count during replay.
+        restored.mutationVersion = state.mutationVersion() + suffixEntries[0] + extraAccountMutations[0];
+        restored.restoring = false;
+        return restored;
+    }
+
+    private static long nextTransactionSequence(String transactionId) {
+        if (transactionId == null) return 1;
+        int separator = transactionId.lastIndexOf(':');
+        if (separator < 0 || separator == transactionId.length() - 1) return 1;
+        try {
+            long value = Long.parseLong(transactionId.substring(separator + 1));
+            return value == Long.MAX_VALUE ? Long.MAX_VALUE : value + 1;
+        } catch (NumberFormatException ignored) {
+            return 1;
+        }
+    }
+
+    /** Next global journal sequence; 1 means no journal entries have been posted. */
+    public synchronized long nextSequence() { return sequence; }
+
     public synchronized int accountCount() { return accounts.size(); }
-    public synchronized int journalSize() { return journal.size(); }
+    public synchronized int journalSize() { return (int) Math.min(Integer.MAX_VALUE, sequence - 1); }
+    /** Number of journal rows currently retained in heap (excludes durable archived history). */
+    public synchronized int pendingJournalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
-    public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
+
+    /** Explicit compatibility export. Normal restore and save paths never materialize archived history. */
+    public synchronized List<Entry> journal() {
+        List<Entry> result = new ArrayList<>();
+        if (historyArchive != null) {
+            try { historyArchive.forEachEntry(result::add); }
+            catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
+        result.addAll(journal);
+        return List.copyOf(result);
+    }
+
+    /** Bounded view of the unarchived operational tail, starting at an exact global sequence. */
+    public synchronized List<Entry> entriesFromSequence(long firstSequence) {
+        long firstUnarchived = archivedThroughSequence + 1;
+        if (firstSequence < firstUnarchived || firstSequence > sequence)
+            throw new IllegalArgumentException("Treasury archive cursor is outside the unarchived journal tail");
+        int start = Math.toIntExact(firstSequence - firstUnarchived);
+        if (start > journal.size()
+                || (start < journal.size() && journal.get(start).sequence() != firstSequence)
+                || journal.size() != sequence - firstUnarchived)
+            throw new IllegalStateException("Treasury unarchived journal tail is not contiguous");
+        return List.copyOf(journal.subList(start, journal.size()));
+    }
+
+    /** Drop the in-memory tail only after its complete sequence has been durably archived and checkpointed. */
+    public synchronized void acknowledgeArchivedThrough(TreasuryJournalArchive archive, long exclusiveNextSequence) {
+        if (archive == null || archive.nextSequence() < exclusiveNextSequence)
+            throw new IllegalArgumentException("Verified treasury archive is required at the acknowledged boundary");
+        long firstPending = archivedThroughSequence + 1;
+        if (exclusiveNextSequence < firstPending || exclusiveNextSequence > sequence
+                || journal.size() != sequence - firstPending)
+            throw new IllegalStateException("Cannot acknowledge an incomplete treasury archive boundary");
+        int acknowledged = Math.toIntExact(exclusiveNextSequence - firstPending);
+        for (int i = 0; i < acknowledged; i++) {
+            Entry entry = journal.get(i);
+            if (entry.sequence() != firstPending + i)
+                throw new IllegalStateException("Treasury journal prefix is not contiguous at acknowledgement");
+            removePendingReference(entry);
+        }
+        historyArchive = archive;
+        archivedThroughSequence = exclusiveNextSequence - 1;
+        if (acknowledged > 0) journal.subList(0, acknowledged).clear();
+    }
     public synchronized Account account(String id) { return accounts.get(id); }
     public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
     public synchronized double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
 
-    /** Account-scoped immutable journal view in original append order. */
+    /**
+     * Account-scoped journal view in original append order. History is scanned on demand
+     * rather than retained in a second per-account collection alongside the canonical journal.
+     */
     public synchronized List<Entry> entriesForAccount(String accountId) {
-        return Collections.unmodifiableList(entriesByAccount.getOrDefault(accountId, List.of()));
+        if (accountId == null || accountId.isBlank()) return List.of();
+        List<Entry> result = new ArrayList<>();
+        if (historyArchive != null) {
+            try {
+                long cursor = 1;
+                while (cursor < historyArchive.nextSequence()) {
+                    TreasuryJournalArchive.AccountPage page = historyArchive.readAccountPage(accountId, cursor, 512);
+                    result.addAll(page.entries());
+                    if (page.complete()) break;
+                    if (page.nextSequence() <= cursor) throw new java.io.IOException("Treasury account history cursor did not advance");
+                    cursor = page.nextSequence();
+                }
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
+        for (Entry entry : journal)
+            if (accountId.equals(entry.accountId())) result.add(entry);
+        return List.copyOf(result);
     }
 
-    /** O(1) lookup of the postings sharing one account/kind/reference idempotency key. */
+    /**
+     * Returns postings for one idempotency key. Archived history is resolved through its
+     * persistent reference index; the unarchived tail uses this bounded in-memory index.
+     * This path must never scan the entire pending journal for every retry.
+     */
     public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
-        return Collections.unmodifiableList(entriesByReference.getOrDefault(
-                referenceKey(accountId, kind, reference), List.of()));
+        String key = referenceKey(accountId, kind, reference);
+        List<Entry> archived = List.of();
+        if (historyArchive != null) {
+            try {
+                archived = historyArchive.readReferenceEntries(accountId, kind.name(), clean(reference));
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
+        List<Entry> pending = pendingEntriesByReference.get(key);
+        if (archived.isEmpty()) return pending == null ? List.of() : List.copyOf(pending);
+        if (pending == null || pending.isEmpty()) return List.copyOf(archived);
+        List<Entry> result = new ArrayList<>(archived.size() + pending.size());
+        result.addAll(archived);
+        result.addAll(pending);
+        return List.copyOf(result);
+    }
+
+    private void indexPendingReference(Entry entry) {
+        String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+        pendingEntriesByReference.computeIfAbsent(key, ignored -> new ArrayList<>(2)).add(entry);
+    }
+
+    private void removePendingReference(Entry entry) {
+        String key = referenceKey(entry.accountId(), entry.kind(), entry.reference());
+        List<Entry> entries = pendingEntriesByReference.get(key);
+        if (entries == null) throw new IllegalStateException("Missing pending treasury reference index for " + key);
+        if (!entries.remove(entry)) throw new IllegalStateException("Pending treasury reference index lost journal entry " + entry.sequence());
+        if (entries.isEmpty()) pendingEntriesByReference.remove(key);
     }
 
     public synchronized boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
@@ -147,10 +476,29 @@ public final class TreasuryLedger {
         return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(category);
     }
 
+    private static String categoryGroup(String category) {
+        String value = clean(category);
+        int separator = value.indexOf(':');
+        return separator > 0 ? value.substring(0, separator) : value;
+    }
+
+    /** Top journal sources are maintained on append/load; diagnostics never rescan millions of rows. */
+    public synchronized List<JournalStat> topJournalStats(int limit) {
+        int bounded = Math.max(0, Math.min(32, limit));
+        return journalCountsByKindCategory.entrySet().stream()
+                .map(entry -> {
+                    int separator = entry.getKey().indexOf(0);
+                    Kind kind = Kind.valueOf(entry.getKey().substring(0, separator));
+                    String category = entry.getKey().substring(separator + 1);
+                    return new JournalStat(kind, category, entry.getValue());
+                })
+                .sorted(Comparator.comparingLong(JournalStat::entries).reversed()
+                        .thenComparing(stat -> stat.kind().name()).thenComparing(JournalStat::category))
+                .limit(bounded).toList();
+    }
+
     private void indexEntry(Entry entry) {
-        entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>()).add(entry);
-        entriesByReference.computeIfAbsent(referenceKey(entry.accountId(), entry.kind(), entry.reference()),
-                ignored -> new ArrayList<>()).add(entry);
+        journalCountsByKindCategory.merge(entry.kind().name() + (char) 0 + categoryGroup(entry.category()), 1L, Long::sum);
         accountsWithEntries.add(entry.accountId());
         if (!entry.credit()) debitTotals.merge(
                 debitTotalKey(entry.accountId(), entry.kind(), entry.category()), entry.amount(), Double::sum);
@@ -162,13 +510,13 @@ public final class TreasuryLedger {
 
     /** True when this account already posted the same economic event; used for crash-safe retries. */
     public synchronized boolean hasTransaction(String accountId, Kind kind, String reference) {
-        return postedReferences.contains(referenceKey(accountId, kind, reference));
+        return !entriesForReference(accountId, kind, reference).isEmpty();
     }
     public synchronized boolean hasDebit(String accountId, Kind kind, String reference) {
-        return postedDebits.contains(referenceKey(accountId, kind, reference));
+        return entriesForReference(accountId, kind, reference).stream().anyMatch(entry -> !entry.credit());
     }
     public synchronized boolean hasCredit(String accountId, Kind kind, String reference) {
-        return postedCredits.contains(referenceKey(accountId, kind, reference));
+        return entriesForReference(accountId, kind, reference).stream().anyMatch(Entry::credit);
     }
     /** O(1) query for the legacy stock-reconciliation guard used by settlement resource reads. */
     public synchronized boolean hasArmyFieldRationDebit(String accountId) {
@@ -185,6 +533,8 @@ public final class TreasuryLedger {
             return existing;
         }
         Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a); markMutation();
+        append("struct:"+transactionSequence++, id, "@treasury:structural", currency, 0, true,
+                Kind.ACCOUNT_CREATED, "account-created", id, 0, a.balance, ownerId);
         if(opening>0) append("opening:"+transactionSequence++,id,"",currency,opening,true,Kind.OPENING,"opening",id,0,a.balance,"opening balance");
         return a;
     
@@ -194,7 +544,11 @@ public final class TreasuryLedger {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         double normalized = amount(limit);
         if (Double.compare(a.creditLimit, normalized) == 0) return true;
-        a.creditLimit=normalized; updateBankruptcy(a); markMutation(); return true;
+        a.creditLimit=normalized; updateBankruptcy(a);
+        append("struct:"+transactionSequence++, a.id, "@treasury:structural", a.currency, 0, true,
+                Kind.CREDIT_LIMIT_CHANGED, "credit-limit", "credit-limit:"+transactionSequence,
+                0, a.balance, Double.toString(normalized));
+        return true;
     
         }}
     public synchronized boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
@@ -346,9 +700,7 @@ public final class TreasuryLedger {
         Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
         journal.add(entry);
         indexEntry(entry);
-        String key = referenceKey(account, kind, reference);
-        postedReferences.add(key);
-        (credit ? postedCredits : postedDebits).add(key);
+        indexPendingReference(entry);
         if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
             armyFieldRationDebitAccounts.add(account);
     }
@@ -370,6 +722,8 @@ public final class TreasuryLedger {
     private void writeJsonContents(java.io.Writer writer) throws java.io.IOException {
         writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
         writer.write(Long.toString(sequence));
+        writer.write(",\"archivedThrough\":");
+        writer.write(Long.toString(archivedThroughSequence));
         writer.write(",\"transactionSequence\":");
         writer.write(Long.toString(transactionSequence));
         writer.write(",\"accounts\":[");
@@ -446,7 +800,18 @@ public final class TreasuryLedger {
         }
 
         ledger.journal.clear();
-        long previousSequence = 0;
+        long declaredArchivedThrough = 0;
+        Object archivedValue = root.get("archivedThrough");
+        if (archivedValue instanceof Number archivedNumber) {
+            double rawArchived = archivedNumber.doubleValue();
+            if (!Double.isFinite(rawArchived) || rawArchived < 0 || rawArchived != Math.rint(rawArchived)
+                    || rawArchived >= 0x1.0p63)
+                throw new IllegalArgumentException("Invalid treasury archived-through sequence");
+            declaredArchivedThrough = archivedNumber.longValue();
+        }
+        ledger.archivedThroughSequence = declaredArchivedThrough;
+        long previousSequence = declaredArchivedThrough;
+        long firstJournalSequence = 0;
         Map<String, List<Entry>> transactions = new HashMap<>();
         for (Object row : journalRows) {
             if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury journal row");
@@ -468,15 +833,23 @@ public final class TreasuryLedger {
             String memo = optionalString(m.get("memo"));
             Account account = ledger.accounts.get(accountId);
             if (account == null || !account.currency.equals(currency)) throw new IllegalArgumentException("Journal references unknown or mismatched account: " + accountId);
-            if (seq <= previousSequence || seq < 1 || worldMinute < 0 || value <= 0 || balanceAfter < 0)
-                throw new IllegalArgumentException("Invalid journal ordering or amount at sequence " + seq);
+            if (firstJournalSequence == 0 && archivedValue == null && seq > 1) {
+                // Older compacted shadow files did not persist the archive cursor.
+                // Infer the retained-tail boundary; the archive store verifies it
+                // against canonical history before accepting the shadow.
+                previousSequence = seq - 1;
+                ledger.archivedThroughSequence = previousSequence;
+            }
+            if (firstJournalSequence == 0) firstJournalSequence = seq;
+            if (seq != previousSequence + 1 || seq < 1 || worldMinute < 0
+                    || (value <= 0 && !(value == 0 && (kind == Kind.ACCOUNT_CREATED || kind == Kind.CREDIT_LIMIT_CHANGED)))
+                    || balanceAfter < 0)
+                throw new IllegalArgumentException("Invalid or discontinuous journal sequence/amount at " + seq);
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
             ledger.indexEntry(entry);
-            String referenceKey = referenceKey(accountId, kind, reference);
-            ledger.postedReferences.add(referenceKey);
-            (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
+            ledger.indexPendingReference(entry);
             if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
                 ledger.armyFieldRationDebitAccounts.add(accountId);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
@@ -501,7 +874,11 @@ public final class TreasuryLedger {
         }
         ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
         ledger.transactionSequence = Math.max(1, requiredLong(root.get("transactionSequence"), "transaction next sequence"));
-        if (ledger.sequence <= previousSequence) throw new IllegalArgumentException("Treasury journal sequence is not ahead of the journal");
+        if (firstJournalSequence == 0 && archivedValue == null && ledger.sequence > 1)
+            ledger.archivedThroughSequence = ledger.sequence - 1;
+        if (ledger.sequence <= previousSequence
+                || ledger.sequence - ledger.archivedThroughSequence - 1 != ledger.journal.size())
+            throw new IllegalArgumentException("Treasury journal sequence does not match its retained tail");
         ledger.restoring = false;
         return ledger;
     }

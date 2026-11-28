@@ -15,6 +15,48 @@ public class ClockTest {
         ok(c.pull("court") == 0 && c.pull("court") == 0, "другой потребитель начинает со своей отметки");
         c.advance(GameClock.TICKS_PER_DAY * 2);
         ok(c.pull("court") == 2 && c.pull("war") == 2, "каждый получает свои дни");
+        GameClock budgeted = new GameClock();
+        budgeted.pull("social");
+        budgeted.advance(GameClock.TICKS_PER_DAY * 12);
+        ok(budgeted.pullLimited("social", 1) == 1 && budgeted.consumedDay("social") == 1,
+                "limited consumer advances exactly one day and exposes its cursor");
+        ok(budgeted.pullLimited("social", 2) == 2 && budgeted.consumedDay("social") == 3,
+                "unprocessed elapsed days remain queued");
+        ok(budgeted.pullLimited("social", 20) == 9 && budgeted.pullLimited("social", 1) == 0,
+                "calendar backlog drains exactly once without loss");
+        GameClock resumed = new GameClock();
+        resumed.load(budgeted.toJson());
+        ok(resumed.pullLimited("social", 1) == 0 && resumed.consumedDay("social") == 12,
+                "fully consumed cursor persists across restart");
+        GameClock pending = new GameClock();
+        pending.pull("social");
+        pending.advance(GameClock.TICKS_PER_DAY * 12);
+        pending.pullLimited("social", 3);
+        GameClock restoredPending = new GameClock();
+        restoredPending.load(pending.toJson());
+        ok(restoredPending.pullLimited("social", 2) == 2 && restoredPending.consumedDay("social") == 5,
+                "unprocessed calendar backlog survives restart");
+        boolean invalidBudget = false;
+        try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
+        ok(invalidBudget, "zero processing budget is rejected");
+        GameClock previous = new GameClock();
+        previous.load("{\"format\":\"wf-clock/2\",\"elapsed\":5,\"speed\":3,\"last\":4,\"start\":300}");
+        ok(previous.speedName().equals("x5"), "wf-clock/2 save migrates old x5 speed index without changing speed");
+        previous.setSpeed(3);
+        ok(previous.speedName().equals("x4"), "new x4 speed is independently selectable");
+
+        GameClock legacy = new GameClock();
+        legacy.load("{\"format\":\"wf-clock/1\",\"elapsed\":5,\"speed\":1,\"last\":1,\"start\":300}");
+        ok(legacy.dayNumber() == 5 && legacy.pull("legacy") == 0,
+                "legacy clock saves migrate without inventing consumer backlog");
+        GameClock transientCursor = new GameClock();
+        transientCursor.pull("legacy");
+        transientCursor.advance(GameClock.TICKS_PER_DAY * 2);
+        GameClock transientRestored = new GameClock();
+        transientRestored.load(transientCursor.toJson());
+        ok(transientRestored.pull("legacy") == 0,
+                "legacy pull consumers retain their previous restart semantics");
+
         // пауза и скорость
         c.pause();
         double e0 = c.elapsedDays();
@@ -22,12 +64,16 @@ public class ClockTest {
         ok(c.paused() && c.elapsedDays() == e0 && c.multiplier() == 0, "на паузе время стоит");
         c.resume();
         ok(!c.paused() && c.speedName().equals("x1"), "возобновление на прежней скорости");
-        c.setSpeed(3);
+        c.setSpeed(4);
         c.pause(); c.resume();
         ok(c.speedName().equals("x5"), "скорость помнится после паузы");
         c.pull("t");
         c.advance(GameClock.TICKS_PER_DAY);
         ok(c.pull("t") == 5, "x5: день реального хода даёт 5 дней");
+        c.setSpeed(3);
+        c.pull("x4");
+        c.advance(GameClock.TICKS_PER_DAY);
+        ok(c.speedName().equals("x4") && c.pull("x4") == 4, "x4: день реального хода даёт 4 дня");
         c.faster(); ok(c.speedName().equals("x10"), "быстрее");
         c.faster(); ok(c.speedName().equals("x10"), "предел скорости");
         c.setSpeed(2); c.slower(); c.slower(); ok(c.speedName().equals("x1"), "медленнее не ниже x1 (паузу задают отдельно)");
@@ -51,7 +97,8 @@ public class ClockTest {
         // сохранение
         GameClock r = new GameClock();
         r.load(d.toJson());
-        ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0, "часы сохраняются, потребители начинают заново");
+        ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0,
+                "calendar, speed and consumer cursors survive save/load");
         GameClock strict = new GameClock();
         strict.advance(GameClock.TICKS_PER_DAY * 12);
         String validBeforeBadLoad = strict.toJson();

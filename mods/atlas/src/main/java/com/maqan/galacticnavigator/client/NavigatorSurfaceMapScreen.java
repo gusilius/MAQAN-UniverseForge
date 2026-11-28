@@ -13,9 +13,17 @@ import com.maqan.galacticnavigator.navigation.WorldForgeMapGeometry;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
 import java.util.ArrayList;
 import java.util.Comparator;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import java.util.List;
 import java.util.Map;
@@ -33,8 +41,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private boolean terrain3D;
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
-    private Button viewModeButton,refreshSnapshotButton;
+    private boolean dragMoved;
+    private double dragStartX,dragStartY;
+    private Button viewModeButton,refreshSnapshotButton,radarButton,toolsButton,dioramaButton;
     private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton,terrainLayerButton;
+    private boolean controlsExpanded;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
@@ -44,7 +55,54 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     /** 0 off, 1 biome, 2 elevation, 3 hydrography. */
     private int terrainLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
+    private enum RadarFilter { ALL, HOSTILE, PASSIVE, PLAYERS, OTHER, OFF }
+    private RadarFilter radarFilter=RadarFilter.ALL;
+    private static final int[] RADAR_RANGES={64,160,320,640};
+    private int radarRangeIndex=1;
+    private double radarRangeBlocks(){return RADAR_RANGES[radarRangeIndex];}
+    private Object radarCacheLevel;
+    private long radarCacheTick=Long.MIN_VALUE;
+    private String radarCacheKey="";
+    private List<Entity> radarCache=List.of();
     private static final int BACKGROUND=0xF0060B16;
+
+    private record ControlBounds(int x, int y, int width) {}
+
+    private int controlRows() { return !controlsExpanded ? 1 : width >= 1040 ? 1 : width >= 620 ? 2 : 3; }
+
+    private int mapViewportTop() { return 74 + (controlRows() - 1) * 24; }
+
+    private ControlBounds controlBounds(int index) {
+        int[] fullX = {18, 110, 238, 306, 374, 482, 586, 744, 846};
+        int[] fullW = {86, 124, 64, 64, 104, 96, 154, 94, 112};
+        if (width >= 1040) return new ControlBounds(fullX[index], 48, fullW[index]);
+
+        boolean twoRows = width >= 620;
+        int[] rows = twoRows
+                ? new int[]{0, 0, 0, 0, 0, 0, 1, 1, 1}
+                : new int[]{0, 0, 0, 0, 1, 1, 1, 2, 2};
+        int[] baseWidths = twoRows
+                ? new int[]{72, 100, 50, 50, 82, 78, 130, 80, 96}
+                : new int[]{60, 82, 44, 44, 70, 70, 110, 70, 82};
+        int row = rows[index], count = 0, sum = 0;
+        for (int i = 0; i < rows.length; i++) if (rows[i] == row) {
+            count++;
+            sum += baseWidths[i];
+        }
+        int gap = 3;
+        int available = Math.max(1, width - 36 - gap * (count - 1)
+                - (controlsExpanded ? 84 : 0));
+        double scale = Math.min(1.0, available / (double) Math.max(1, sum));
+        int x = 18;
+        for (int i = 0; i < index; i++) if (rows[i] == row)
+            x += Math.max(20, (int) Math.floor(baseWidths[i] * scale)) + gap;
+        int buttonWidth = Math.max(20, (int) Math.floor(baseWidths[index] * scale));
+        return new ControlBounds(x, 48 + row * 24, buttonWidth);
+    }
+
+    private int bottomActionWidth() {
+        return width >= 440 ? 148 : Math.max(44, (width - 52) / 2);
+    }
 
     public NavigatorSurfaceMapScreen(String dimension) { this(dimension,null); }
     public NavigatorSurfaceMapScreen(String dimension,Screen parent) {
@@ -58,59 +116,100 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             centerChunkZ=((int)Math.floor(p.z()))>>4;
             selectedSectionY=Math.floorDiv((int)Math.floor(p.y()),16);
         }
+        double[] savedViewport=NavigatorPlatformSelectionBridge.loadViewport(this.dimension);
+        if(savedViewport!=null){
+            zoom=Math.max(0.35,Math.min(4.0,savedViewport[2]));
+            double savedChunkX=savedViewport[0]/16.0;
+            double savedChunkZ=savedViewport[1]/16.0;
+            centerChunkX=(int)Math.floor(savedChunkX);
+            centerChunkZ=(int)Math.floor(savedChunkZ);
+            panX=(centerChunkX-savedChunkX)*18.0*zoom;
+            panY=(centerChunkZ-savedChunkZ)*18.0*zoom;
+            cameraYaw=Math.toRadians(savedViewport[3]);
+            cameraPitch=SurfaceTerrainProjection.clampPitch(Math.toRadians(savedViewport[4]));
+        }
+        NavigatorPlatformSelectionBridge.setViewType("EXPLORATION");
     }
 
     @Override protected void init(){
-        viewModeButton=addRenderableWidget(Button.builder(Component.literal("VIEW: 2D"),b->{
+        boolean micro=width<300, compact=width<560;
+        ControlBounds view=controlBounds(0), layer=controlBounds(1), down=controlBounds(2),
+                up=controlBounds(3), route=controlBounds(4), clear=controlBounds(5),
+                political=controlBounds(6), terrain=controlBounds(7);
+        viewModeButton=addRenderableWidget(Button.builder(Component.literal(micro?"V":compact?"VIEW":"VIEW: 2D"),b->{
             terrain3D=!terrain3D;
-            b.setMessage(Component.literal(terrain3D?"VIEW: 3D":"VIEW: 2D"));
-        }).bounds(18,48,86,20).build());
-        layerButton=addRenderableWidget(Button.builder(Component.literal("LAYER: SURFACE"),b->{
+            NavigatorPlatformSelectionBridge.setViewType(terrain3D?"DIORAMA_3D":"EXPLORATION");
+            b.setMessage(Component.literal(micro?(terrain3D?"3D":"2D"):(compact?(terrain3D?"3D":"2D"):(terrain3D?"VIEW: 3D":"VIEW: 2D"))));
+        }).bounds(view.x(),view.y(),view.width(),20).build());
+        layerButton=addRenderableWidget(Button.builder(Component.literal(micro?"L":compact?"LAYER":"LAYER: SURFACE"),b->{
             underground=!underground;
-            b.setMessage(Component.literal(underground?"LAYER: UNDERGROUND":"LAYER: SURFACE"));
+            b.setMessage(Component.literal(micro?(underground?"U":"S"):(compact?(underground?"UNDER":"SURFACE"):(underground?"LAYER: UNDERGROUND":"LAYER: SURFACE"))));
             updateDepthButtons();
-        }).bounds(110,48,124,20).build());
+        }).bounds(layer.x(),layer.y(),layer.width(),20).build());
         depthDownButton=addRenderableWidget(Button.builder(Component.literal("DEPTH −"),b->{
             selectedSectionY--;updateDepthButtons();
-        }).bounds(238,48,64,20).build());
+        }).bounds(down.x(),down.y(),down.width(),20).build());
         depthUpButton=addRenderableWidget(Button.builder(Component.literal("DEPTH +"),b->{
             selectedSectionY++;updateDepthButtons();
-        }).bounds(306,48,64,20).build());
-        routeModeButton=addRenderableWidget(Button.builder(Component.literal("ROUTE: WALK"),b->{
+        }).bounds(up.x(),up.y(),up.width(),20).build());
+        routeModeButton=addRenderableWidget(Button.builder(Component.literal(micro?"R":compact?"ROUTE":"ROUTE: WALK"),b->{
             var modes=ExploredSurfaceRoutePlanner.Mode.values();
             routeMode=modes[(routeMode.ordinal()+1)%modes.length];
-            b.setMessage(Component.literal("ROUTE: "+routeMode.name()));
+            b.setMessage(Component.literal(micro?routeMode.name().substring(0,1):(compact?routeMode.name():"ROUTE: "+routeMode.name())));
             recalculateRoute();
-        }).bounds(374,48,104,20).build());
-        clearRouteButton=addRenderableWidget(Button.builder(Component.literal("CLEAR ROUTE"),b->{
+        }).bounds(route.x(),route.y(),route.width(),20).build());
+        clearRouteButton=addRenderableWidget(Button.builder(Component.literal(micro?"X":compact?"CLEAR":"CLEAR ROUTE"),b->{
             selectedWaypointId="";surfaceRoute=null;routeStartX=routeStartZ=Integer.MIN_VALUE;
-        }).bounds(482,48,96,20).build());
-        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal("POLITICAL: PROVINCES"),b->{
+        }).bounds(clear.x(),clear.y(),clear.width(),20).build());
+        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal(micro?"P":compact?"POL":"POLITICAL: PROVINCES"),b->{
             politicalLayer=(politicalLayer+1)%4;
-            b.setMessage(Component.literal(switch(politicalLayer){
-                case 0 -> "POLITICAL: PROVINCES";
-                case 1 -> "POLITICAL: REALMS";
-                case 2 -> "POLITICAL: BOTH";
-                default -> "POLITICAL: OFF";
-            }));
-        }).bounds(586,48,154,20).build());
-        refreshSnapshotButton=addRenderableWidget(Button.builder(Component.literal("REFRESH WORLD DATA"),b->{
+            b.setMessage(Component.literal(micro?new String[]{"P","R","B","P×"}[politicalLayer]
+                    :(compact?new String[]{"PROV","REALM","BOTH","OFF"}[politicalLayer]
+                    :switch(politicalLayer){case 0 -> "POLITICAL: PROVINCES";case 1 -> "POLITICAL: REALMS";case 2 -> "POLITICAL: BOTH";default -> "POLITICAL: OFF";})));
+        }).bounds(political.x(),political.y(),political.width(),20).build());
+        int bottomW=bottomActionWidth(), bottomY=height-68;
+        String refreshLabel=width<260?"SYNC":width<440?"REFRESH":"REFRESH WORLD DATA";
+        refreshSnapshotButton=addRenderableWidget(Button.builder(Component.literal(refreshLabel),b->{
             boolean loaded=NavigatorWorldForgeMapStore.reload();
-            b.setMessage(Component.literal(loaded?"WORLD DATA: UPDATED":"REFRESH FAILED · LAST GOOD KEPT"));
-        }).bounds(18,height-68,148,20).build());
-        addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
+            b.setMessage(Component.literal(loaded?(width<440?"UPDATED":"WORLD DATA: UPDATED"):(width<440?"FAILED":"REFRESH FAILED · LAST GOOD KEPT")));
+        }).bounds(18,bottomY,bottomW,20).build());
+        int planetX=width>=440?Math.max(18,width-190):18+bottomW+8;
+        int planetW=width>=440?172:bottomW;
+        String planetLabel=width<260?"3D":width<440?"3D MAP":"OPEN 3D PLANET MAP";
+        dioramaButton=addRenderableWidget(Button.builder(Component.literal(planetLabel),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
-                .bounds(Math.max(18,width-190),height-68,172,20).build());
-        terrainLayerButton=addRenderableWidget(Button.builder(Component.literal("MAP: OFF"),b->{
+                .bounds(planetX,bottomY,planetW,20).build());
+        terrainLayerButton=addRenderableWidget(Button.builder(Component.literal(micro?"M":compact?"MAP":"MAP: OFF"),b->{
             terrainLayer=(terrainLayer+1)%4;
-            b.setMessage(Component.literal(switch(terrainLayer){
-                case 1 -> "MAP: BIOME";
-                case 2 -> "MAP: RELIEF";
-                case 3 -> "MAP: WATER";
-                default -> "MAP: OFF";
-            }));
-        }).bounds(744,48,94,20).build());
+            b.setMessage(Component.literal(micro?new String[]{"M","B","R","W"}[terrainLayer]
+                    :(compact?new String[]{"OFF","BIOME","RELIEF","WATER"}[terrainLayer]
+                    :switch(terrainLayer){case 1 -> "MAP: BIOME";case 2 -> "MAP: RELIEF";case 3 -> "MAP: WATER";default -> "MAP: OFF";})));
+        }).bounds(terrain.x(),terrain.y(),terrain.width(),20).build());
+        ControlBounds radar=controlBounds(8);
+        radarButton=addRenderableWidget(Button.builder(Component.literal(radarLabel()),b->{
+            if(hasShiftDown())radarRangeIndex=(radarRangeIndex+1)%RADAR_RANGES.length;
+            else radarFilter=RadarFilter.values()[(radarFilter.ordinal()+1)%RadarFilter.values().length];
+            b.setMessage(Component.literal(radarLabel()));
+        }).bounds(radar.x(),radar.y(),radar.width(),20).build());
+        toolsButton=addRenderableWidget(Button.builder(Component.literal("TOOLS ▾"),b->{
+            controlsExpanded=!controlsExpanded;
+            b.setMessage(Component.literal(controlsExpanded?"TOOLS ▴":"TOOLS ▾"));
+            applyControlVisibility();
+        }).bounds(Math.max(18,width-82),48,72,20).build());
+        applyControlVisibility();
         updateDepthButtons();
+    }
+
+    private void applyControlVisibility(){
+        if(depthDownButton!=null)depthDownButton.visible=controlsExpanded;
+        if(depthUpButton!=null)depthUpButton.visible=controlsExpanded;
+        if(routeModeButton!=null)routeModeButton.visible=controlsExpanded;
+        if(clearRouteButton!=null)clearRouteButton.visible=controlsExpanded;
+        if(politicalLayerButton!=null)politicalLayerButton.visible=controlsExpanded;
+        if(terrainLayerButton!=null)terrainLayerButton.visible=controlsExpanded;
+        if(radarButton!=null)radarButton.visible=controlsExpanded;
+        if(refreshSnapshotButton!=null)refreshSnapshotButton.visible=controlsExpanded;
+        if(dioramaButton!=null)dioramaButton.visible=controlsExpanded;
     }
     private void updateDepthButtons(){
         if(depthDownButton!=null)depthDownButton.setMessage(Component.literal("Y "+(selectedSectionY*16)));
@@ -122,10 +221,10 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         MaqanUiTheme.panel(g,12,12,width-12,42);
         MaqanUiTheme.titleRight(g,font,"MAQAN  /  SURFACE CARTOGRAPHY",dimension,width);
 
-        int mapLeft=18,mapTop=74,mapRight=width-18,mapBottom=height-48;
-        g.fill(mapLeft,mapTop,mapRight,mapBottom,0xC908111C);
+        int mapLeft=18,mapTop=mapViewportTop(),mapRight=width-18,mapBottom=height-48;
+        renderFogOfWar(g,mapLeft,mapTop,mapRight,mapBottom);
         for(int x=mapLeft;x<mapRight;x+=32)g.fill(x,mapTop,x+1,mapBottom,0x183A6680);
-        for(int y=mapTop;y<mapBottom;y+=32)g.fill(mapLeft,y,mapRight,y+1,0x183A6680);
+        for(int y=mapTop;y<mapBottom;y+=32)g.fill(mapLeft,y,y+1,0x183A6680);
 
         NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
         if(player!=null&&dimension.equals(player.dimensionId())
@@ -133,10 +232,25 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             centerChunkX=((int)Math.floor(player.x()))>>4;
             centerChunkZ=((int)Math.floor(player.z()))>>4;
         }
+        double viewportCenterX=(centerChunkX-panX/(18.0*zoom))*16.0;
+        double viewportCenterZ=(centerChunkZ-panY/(18.0*zoom))*16.0;
+        NavigatorPlatformSelectionBridge.publishViewport(dimension,
+                viewportCenterX, viewportCenterZ, zoom,
+                Math.toDegrees(cameraYaw), Math.toDegrees(cameraPitch));
         double cell=18.0*zoom;
-        List<NavigatorExplorationStore.ExploredChunk> chunks=NavigatorExplorationStore.chunks(dimension);
+        double projectionScale=terrain3D?Math.max(1.2,Math.min(8.0,cell/2.8)):cell;
+        double visibleRadius=(Math.hypot(mapRight-mapLeft,mapBottom-mapTop)+2.0*Math.hypot(panX,panY))
+                /Math.max(0.65,projectionScale)+10.0;
+        int minChunkX=(int)Math.floor(centerChunkX-visibleRadius);
+        int maxChunkX=(int)Math.ceil(centerChunkX+visibleRadius);
+        int minChunkZ=(int)Math.floor(centerChunkZ-visibleRadius);
+        int maxChunkZ=(int)Math.ceil(centerChunkZ+visibleRadius);
+        List<NavigatorExplorationStore.ExploredChunk> chunks=
+                NavigatorExplorationStore.chunksInBounds(dimension,minChunkX,minChunkZ,maxChunkX,maxChunkZ);
         if(!underground)refreshRouteIfPlayerMoved(player);
-        List<NavigatorExplorationStore.ExploredLayer> layers=NavigatorExplorationStore.layers(dimension);
+        List<NavigatorExplorationStore.ExploredLayer> layers=underground
+                ?NavigatorExplorationStore.layersInBounds(dimension,selectedSectionY,
+                        minChunkX,minChunkZ,maxChunkX,maxChunkZ):List.of();
         int visibleCells=0;
         if(!underground&&!terrain3D){
             for(NavigatorExplorationStore.ExploredChunk chunk:chunks){
@@ -156,10 +270,10 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                         int x1=(int)Math.ceil(px+cell*(rx+1)/16.0);
                         int y0=(int)Math.floor(py+cell*rz/16.0);
                         int y1=(int)Math.ceil(py+cell*(rz+1)/16.0);
-                        g.fill(x0,y0,x1,y1,shade(terrain,relief));
+                        g.fill(x0,y0,x1,y1,shade(terrain,14+relief));
                     }
                 }else{
-                    int color=shade(base,Math.max(0,Math.min(28,(chunk.surfaceY()-64)/4)));
+                    int color=shade(base,18+Math.max(0,Math.min(28,(chunk.surfaceY()-64)/4)));
                     g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
                 }
                 g.fill((int)px,(int)py,(int)(px+cell),(int)py+1,0x665D8A91);
@@ -172,8 +286,19 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 double px=projected[0],py=projected[1];
                 if(px+cell<mapLeft||px>mapRight||py+cell<mapTop||py>mapBottom)continue;
                 int base=layer.mapColor()==0?0xFF536A83:0xFF000000|layer.mapColor();
-                int color=shade(base,Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
-                g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
+                if(cell>=12.0){
+                    for(int rz=0;rz<16;rz++)for(int rx=0;rx<16;rx++){
+                        int index=rz*16+rx,blockColor=layer.colorAt(index);
+                        if(blockColor==0)blockColor=layer.hasBlockRaster()?0xFF111923:base;
+                        int relief=Math.max(-20,Math.min(20,(layer.heightAt(index)-layer.playerY())/2));
+                        int x0=(int)Math.floor(px+cell*rx/16.0),x1=(int)Math.ceil(px+cell*(rx+1)/16.0);
+                        int y0=(int)Math.floor(py+cell*rz/16.0),y1=(int)Math.ceil(py+cell*(rz+1)/16.0);
+                        g.fill(x0,y0,x1,y1,shade(blockColor,12+relief));
+                    }
+                }else{
+                    int color=shade(base,14+Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
+                    g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
+                }
                 g.fill((int)px,(int)py,(int)(px+cell),(int)py+1,0x886B9AC4);
                 visibleCells++;
             }
@@ -226,11 +351,12 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 ?project(player.x()/16.0,player.z()/16.0,cell,mapLeft,mapTop,mapRight,mapBottom,player)
                 :new double[]{(mapLeft+mapRight)/2.0+panX,(mapTop+mapBottom)/2.0+panY};
         int cx=(int)Math.round(playerPoint[0]),cy=(int)Math.round(playerPoint[1]);
+        Entity hoveredRadar=renderEntityRadar(g,mouseX,mouseY,player,mapLeft,mapTop,mapRight,mapBottom);
         drawPlayerMarker(g,cx,cy,player);
 
         g.fill(12,height-38,width-12,height-12,0xD9101C2B);
         g.drawString(font,(underground?"VISITED DEPTH CELLS: "+visibleCells+"  ·  SECTION Y "+selectedSectionY
-                :"EXPLORED SURFACE CHUNKS: "+chunks.size()),24,height-28,0xFFB6C7D8,false);
+                :"EXPLORED SURFACE CHUNKS: "+NavigatorExplorationStore.exploredCount(dimension)),24,height-28,0xFFB6C7D8,false);
         String routeLabel=surfaceRoute==null?"RIGHT-CLICK A WAYPOINT TO ROUTE"
                 :surfaceRoute.message()+"  ·  "+(surfaceRoute.found()
                     ?surfaceRoute.points().size()+" CHUNKS  ·  COST "+String.format(java.util.Locale.ROOT,"%.1f",surfaceRoute.cost())
@@ -239,7 +365,183 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 surfaceRoute!=null&&!surfaceRoute.found()?0xFFFFB47A:0xFF8EA8BC,false);
         super.render(g,mouseX,mouseY,partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
+        if(hoveredRadar!=null){
+            List<Component> tooltip=new ArrayList<>();
+            tooltip.add(hoveredRadar.getDisplayName().copy().withStyle(net.minecraft.ChatFormatting.GOLD));
+            tooltip.add(Component.literal("Y "+(int)Math.floor(hoveredRadar.getY())
+                    +" · ΔY "+(player==null?0:(int)Math.round(hoveredRadar.getY()-player.y()))).withStyle(net.minecraft.ChatFormatting.GRAY));
+            if(player!=null&&dimension.equals(player.dimensionId())){double dx=hoveredRadar.getX()-player.x(),dy=hoveredRadar.getY()-player.y(),dz=hoveredRadar.getZ()-player.z();tooltip.add(Component.literal((int)Math.round(Math.sqrt(dx*dx+dy*dy+dz*dz))+" blocks").withStyle(net.minecraft.ChatFormatting.GRAY));}
+            g.renderComponentTooltip(font,tooltip,mouseX,mouseY);
+        }
     }
+
+    /**
+     * Unexplored territory is opaque cartographic fog, not a transparent viewport.
+     * Its deterministic cloud field remains stable while panning; explored chunk rasters
+     * are rendered above it and reveal only captured terrain.
+     */
+    private void renderFogOfWar(GuiGraphics g,int left,int top,int right,int bottom){
+        g.fill(left,top,right,bottom,0xFF111B27);
+        final int tile=24;
+        int dimHash=dimension.hashCode();
+        for(int y=Math.floorDiv(top,tile)*tile;y<bottom;y+=tile){
+            for(int x=Math.floorDiv(left,tile)*tile;x<right;x+=tile){
+                int wx=(int)Math.floor((x-(left+right)*0.5-panX)/(18.0*zoom)+centerChunkX);
+                int wz=(int)Math.floor((y-(top+bottom)*0.5-panY)/(18.0*zoom)+centerChunkZ);
+                int hash=wx*0x45d9f3b ^ wz*0x119de1f3 ^ dimHash;
+                hash=(hash^(hash>>>16))*0x45d9f3b;
+                hash^=hash>>>16;
+                int tone=hash&7,cloud=(hash>>>8)&15;
+                int x0=Math.max(left,x),y0=Math.max(top,y),x1=Math.min(right,x+tile),y1=Math.min(bottom,y+tile);
+                int base=tone<3?0xFF172432:tone<6?0xFF1B2937:0xFF202E3C;
+                g.fill(x0,y0,x1,y1,base);
+                if(cloud<11){
+                    int alpha=0x18+cloud*2;
+                    int fog=(alpha<<24)|0x8795A4;
+                    int cx=x+((hash>>>16)&15),cy=y+((hash>>>20)&15);
+                    g.fill(Math.max(left,cx-12),Math.max(top,cy-7),
+                            Math.min(right,cx+17),Math.min(bottom,cy+12),fog);
+                    g.fill(Math.max(left,cx-5),Math.max(top,cy-13),
+                            Math.min(right,cx+10),Math.min(bottom,cy+16),0x183E5061);
+                }
+            }
+        }
+        g.drawString(font,"НЕИССЛЕДОВАННАЯ ТЕРРИТОРИЯ",left+12,top+12,0xFF91A3B4,false);
+    }
+
+    private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"b";}
+
+    /** Selects an entity already tracked by the client and publishes the same UUID to MAQAN's inspector. */
+    private boolean selectRadarEntityAt(double mouseX,double mouseY){
+        if(radarFilter==RadarFilter.OFF||terrain3D||underground)return false;
+        Minecraft mc=Minecraft.getInstance();
+        NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
+        if(mc.level==null||player==null||!dimension.equals(player.dimensionId()))return false;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
+        if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
+        double range=radarRangeBlocks(),best=100.0;
+        Entity nearest=null;
+        for(Entity entity:mc.level.entitiesForRendering()){
+            if(entity==null||!entity.isAlive()||entity==mc.player)continue;
+            double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+            if(dx*dx+dz*dz>range*range)continue;
+            boolean hostile=entity instanceof Monster;
+            boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+            boolean otherPlayer=entity instanceof Player;
+            boolean other=!hostile&&!passive&&!otherPlayer;
+            if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+            if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+            if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+            if(radarFilter==RadarFilter.OTHER&&!other)continue;
+            double[] point=project(entity.getX()/16.0,entity.getZ()/16.0,18.0*zoom,left,top,right,bottom,player);
+            double x=point[0]-mouseX,y=point[1]-mouseY,distance=x*x+y*y;
+            if(distance<best){best=distance;nearest=entity;}
+        }
+        if(nearest==null)return false;
+        String id=nearest.getUUID().toString();
+        String type=nearest.getType().getDescription().getString();
+        String name=nearest.getDisplayName().getString();
+        int vertical=(int)Math.floor(nearest.getY()-player.y());
+        NavigatorPlatformSelectionBridge.publish("minecraft:entity/"+id,type,name,dimension,
+                "Entity UUID: "+id+" · Y offset: "+vertical+" · distance: "
+                        +(int)Math.round(Math.hypot(nearest.getX()-player.x(),nearest.getZ()-player.z()))+" blocks");
+        return true;
+    }
+
+    /** Live vanilla-world radar: only entities already tracked by the client are sampled. */
+    private Entity renderEntityRadar(GuiGraphics g,int mouseX,int mouseY,NavigatorPlayerPosition player,
+                                     int left,int top,int right,int bottom){
+        if(radarFilter==RadarFilter.OFF||terrain3D||player==null||!dimension.equals(player.dimensionId()))return null;
+        Minecraft mc=Minecraft.getInstance();
+        if(mc.level==null)return null;
+        String cacheKey=radarFilter.name()+":"+radarRangeIndex;
+        long gameTick=mc.level.getGameTime();
+        if(radarCacheLevel!=mc.level||!cacheKey.equals(radarCacheKey)
+                ||gameTick-radarCacheTick>=3L||gameTick<radarCacheTick){
+            List<Entity> candidates=new ArrayList<>();
+            double range=radarRangeBlocks(),rangeSq=range*range;
+            for(Entity entity:mc.level.entitiesForRendering()){
+                if(entity==null||!entity.isAlive()||entity==mc.player)continue;
+                double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+                if(dx*dx+dz*dz>rangeSq)continue;
+                boolean hostile=entity instanceof Monster;
+                boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+                boolean otherPlayer=entity instanceof Player;
+                boolean other=!hostile&&!passive&&!otherPlayer;
+                if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+                if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+                if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+                if(radarFilter==RadarFilter.OTHER&&!other)continue;
+                candidates.add(entity);
+            }
+            candidates.sort(Comparator.comparingDouble(entity->{
+                double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+                return dx*dx+dz*dz;
+            }));
+            radarCache=List.copyOf(candidates);
+            radarCacheLevel=mc.level;
+            radarCacheTick=gameTick;
+            radarCacheKey=cacheKey;
+        }
+        Entity hovered=null;
+        double nearest=100.0;
+        int drawn=0;
+        for(Entity entity:radarCache){
+            if(entity==null||!entity.isAlive())continue;
+            double dx=entity.getX()-player.x(),dz=entity.getZ()-player.z();
+            double distanceSq=dx*dx+dz*dz;
+            double radarRange=radarRangeBlocks();
+            if(distanceSq>radarRange*radarRange)continue;
+            boolean hostile=entity instanceof Monster;
+            boolean passive=entity instanceof Animal||entity instanceof AbstractVillager;
+            boolean otherPlayer=entity instanceof Player;
+            boolean other=!hostile&&!passive&&!otherPlayer;
+            if(radarFilter==RadarFilter.HOSTILE&&!hostile)continue;
+            if(radarFilter==RadarFilter.PASSIVE&&!passive)continue;
+            if(radarFilter==RadarFilter.PLAYERS&&!otherPlayer)continue;
+            if(radarFilter==RadarFilter.OTHER&&!other)continue;
+            double[] point=project(entity.getX()/16.0,entity.getZ()/16.0,18.0*zoom,left,top,right,bottom,player);
+            if(!insideMap(point[0],point[1],left,top,right,bottom))continue;
+            int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
+            int color=otherPlayer?0xFF55DDF2:hostile?0xFFFF6262:passive?0xFF8BDA91:0xFFFFC66D;
+            if(otherPlayer){
+                double yaw=Math.toRadians(entity.getYRot());
+                int hx=x-(int)Math.round(Math.sin(yaw)*7.0);
+                int hy=y+(int)Math.round(Math.cos(yaw)*7.0);
+                drawLine(g,x,y,hx,hy,0xFFEAFBFF);
+            }
+            int radius=zoom>=1.5?4:3;
+            g.fill(x-radius-2,y-radius-2,x+radius+3,y+radius+3,0xAA07101A);
+            g.fill(x-radius,y-radius,x+radius+1,y+radius+1,color);
+            // At close zoom show actual vanilla mob/player models, not substitute pictograms.
+            if(zoom>=2.2&&drawn<8&&entity instanceof LivingEntity living){
+                g.enableScissor(left,top,right,bottom);
+                try{
+                    InventoryScreen.renderEntityInInventoryFollowsMouse(g,x,y,18,0.0F,0.0F,living);
+                }catch(RuntimeException rendererFailure){
+                    // Keep the category-colored radar dot if a modded entity renderer fails.
+                }finally{
+                    g.disableScissor();
+                }
+            }
+            int dy=(int)Math.round(entity.getY()-player.y());
+            if(Math.abs(dy)>=8){
+                String vertical=dy>0?"↑":"↓";
+                g.drawString(font,vertical,x+radius+2,y-font.lineHeight/2,0xFFECEBE4,false);
+            }
+            double hoverDx=mouseX-x,hoverDy=mouseY-y,hoverDistance=hoverDx*hoverDx+hoverDy*hoverDy;
+            if(hoverDistance<=nearest){nearest=hoverDistance;hovered=entity;}
+            if(zoom>=1.65&&drawn<36){
+                String name=entity.getType().getDescription().getString();
+                g.drawString(font,font.plainSubstrByWidth(name,64),x+radius+3,y+radius+1,0xFFDCE7EE,false);
+            }
+            drawn++;
+        }
+        String label="RADAR "+radarFilter.name()+" · "+drawn+" entities · "+(int)radarRangeBlocks()+" blocks · SHIFT+CLICK: RANGE";
+        g.drawString(font,label,left+8,top+8,0xFF9BD7F1,false);
+        return hovered;
+    }
+
     /** Renders validated political and settlement layers from the active WorldForge dimension. */
     private void renderWorldForgeOverlay(GuiGraphics g,double cell,int left,int top,int right,int bottom,
                                          NavigatorPlayerPosition player){
@@ -420,7 +722,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     /** Selects an imported WorldForge feature or territory and publishes its identity to MAQAN Inspector. */
     private boolean selectWorldForgeAt(double mouseX,double mouseY) {
         if(underground||terrain3D)return false;
-        int left=18,top=74,right=width-18,bottom=height-48;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
         WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
         if(snapshot==null)return false;
@@ -574,7 +876,17 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         double unit=Math.max(1.0,Math.min(5.0,cell/16.0));
         double scale=Math.max(1.2,Math.min(8.0,cell/2.8));
         double originX=(left+right)/2.0+panX,originY=(top+bottom)/2.0+panY;
+        // Conservative radius in chunk-space: the projection rotates terrain, so a
+        // circular bound safely covers every visible corner without scanning all history.
+        double visibleRadius=(Math.hypot(right-left,bottom-top)+Math.hypot(panX,panY))
+                /Math.max(0.65,scale)+10.0;
+        int minChunkX=(int)Math.floor(centerChunkX-visibleRadius);
+        int maxChunkX=(int)Math.ceil(centerChunkX+visibleRadius);
+        int minChunkZ=(int)Math.floor(centerChunkZ-visibleRadius);
+        int maxChunkZ=(int)Math.ceil(centerChunkZ+visibleRadius);
         for(var chunk:chunks){
+            if(chunk.chunkX()<minChunkX||chunk.chunkX()>maxChunkX
+                    ||chunk.chunkZ()<minChunkZ||chunk.chunkZ()>maxChunkZ)continue;
             for(int z=0;z<16;z++)for(int x=0;x<16;x++){
                 int index=z*16+x;
                 double localX=(chunk.chunkX()-centerChunkX)+(x+0.5)/16.0;
@@ -619,7 +931,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     }
     private boolean selectWaypointAt(double mouseX,double mouseY){
         NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
-        int mapLeft=18,mapTop=74,mapRight=width-18,mapBottom=height-48;
+        int mapLeft=18,mapTop=mapViewportTop(),mapRight=width-18,mapBottom=height-48;
         if(mouseX<mapLeft||mouseX>mapRight||mouseY<mapTop||mouseY>mapBottom||underground)return false;
         double cell=18.0*zoom,best=100.0;
         NavigatorWaypoint selected=null;
@@ -722,33 +1034,54 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
     }
     private static int shade(int argb,int amount){
-        int r=Math.min(255,((argb>>16)&255)+amount);
-        int green=Math.min(255,((argb>>8)&255)+amount);
-        int b=Math.min(255,(argb&255)+amount);
-        return (argb&0xFF000000)|(r<<16)|(green<<8)|b;
+        int r=Math.max(0,Math.min(255,((argb>>16)&255)+amount));
+        int green=Math.max(0,Math.min(255,((argb>>8)&255)+amount));
+        int b=Math.max(0,Math.min(255,(argb&255)+amount));
+        // Minecraft MapColor.col is RGB-only (alpha=0). Preserve explicit alpha,
+        // but make raw map-color samples fully opaque or the explored map vanishes.
+        int alpha=(argb>>>24)&255;
+        if(alpha==0)alpha=255;
+        return (alpha<<24)|(r<<16)|(green<<8)|b;
     }
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if(button==1&&selectWaypointAt(x,y))return true;
-        if(button==0&&selectWorldForgeAt(x,y))return true;
-        if((button==0||button==2)&&x>=18&&x<=width-18&&y>=74&&y<=height-48){
-            dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
+        // Begin panning on any point of the map, including unknown/fogged terrain.
+        // Resolve object selection on release only when this was a click, not a drag.
+        if((button==0||button==2)&&insideMap(x,y,left,top,right,bottom)){
+            dragging=true;dragMoved=false;dragStartX=x;dragStartY=y;
+            dragX=x;dragY=y;cameraDrag=button==2;return true;
         }
         return false;
     }
     @Override public boolean mouseReleased(double x,double y,int button){
         boolean handled=super.mouseReleased(x,y,button);
-        if((button==0||button==2)&&dragging){dragging=false;cameraDrag=false;return true;}
+        if((button==0||button==2)&&dragging){
+            boolean click=!dragMoved;
+            dragging=false;cameraDrag=false;
+            if(click&&button==0){
+                if(selectRadarEntityAt(dragStartX,dragStartY))return true;
+                if(selectWorldForgeAt(dragStartX,dragStartY))return true;
+            }
+            return true;
+        }
         return handled;
     }
     @Override public boolean mouseDragged(double x,double y,int button,double dx,double dy){
-        if(dragging&&button==2&&cameraDrag&&terrain3D){cameraYaw+=dx*0.012;cameraPitch=SurfaceTerrainProjection.clampPitch(cameraPitch+dy*0.009);return true;}
-        if(dragging&&button==0){panX+=dx;panY+=dy;return true;}
+        if(dragging&&button==2&&cameraDrag&&terrain3D){
+            if(Math.abs(x-dragStartX)+Math.abs(y-dragStartY)>2)dragMoved=true;
+            cameraYaw+=dx*0.012;cameraPitch=SurfaceTerrainProjection.clampPitch(cameraPitch+dy*0.009);return true;
+        }
+        if(dragging&&button==0){
+            if(Math.abs(x-dragStartX)+Math.abs(y-dragStartY)>2)dragMoved=true;
+            panX+=dx;panY+=dy;return true;
+        }
         return super.mouseDragged(x,y,button,dx,dy);
     }
     @Override public boolean mouseScrolled(double x,double y,double delta){
         if (delta == 0) return false;
-        int left=18,top=74,right=width-18,bottom=height-48;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if (!insideMap(x,y,left,top,right,bottom)) return super.mouseScrolled(x,y,delta);
         double factor=delta>0?1.15:1.0/1.15;
         double nextZoom=Math.max(0.35,Math.min(4.0,zoom*factor));

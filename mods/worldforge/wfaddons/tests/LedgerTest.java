@@ -127,7 +127,9 @@ public class LedgerTest {
 
         // ---- журнал событий
         EventLog log = new EventLog();
+        long initialEventRevision = log.revision();
         log.post("war", "Война началась", List.of(A, B), 100);
+        ok(log.revision() > initialEventRevision, "журнал событий публикует монотонную ревизию для синхронизации");
         log.post("DIPLOMACY", "Союз", List.of(B, C), 110);
         log.post("people", "Свадьба", List.of(A), 120);
         log.post("bogus", "Что-то", null, 130);

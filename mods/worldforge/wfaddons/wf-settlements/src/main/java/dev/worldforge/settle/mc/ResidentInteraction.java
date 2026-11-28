@@ -56,18 +56,18 @@ public final class ResidentInteraction {
         return player.distanceToSqr(worker) <= 36.0;
     }
 
-    private static Character person(WFWorker worker) {
-        return SettleMod.residentCharacter(worker);
-    }
-
     private static void open(ServerPlayer player, WFWorker worker) {
         Colony colony = SettleMod.colony(worker.colonyId);
-        Character person = person(worker);
         Worker data = worker.worker();
-        if (colony == null || person == null || data == null || !person.alive) {
+        if (colony == null || data == null || !SettleMod.withResidentCharacter(worker,
+                person -> openPinned(player, worker, colony, data, person))) {
             player.sendSystemMessage(Component.literal("Житель сейчас не может поговорить с вами."));
-            return;
         }
+    }
+
+    private static void openPinned(ServerPlayer player, WFWorker worker, Colony colony,
+                                   Worker data, Character person) {
+        if (!person.alive) return;
         ResidentQuest currentQuest = quest(person);
         String questText = currentQuest == null
                 ? (person.props.containsKey(QUEST_KEY) ? "Повреждённая запись · сохранена для восстановления" : "Нет активного поручения")
@@ -76,18 +76,24 @@ public final class ResidentInteraction {
         String profession = colony.s.defs.professionName(data.profession);
         String status = data.status == null || data.status.isBlank() ? "Повседневная жизнь" : data.status;
         int age = Math.max(0, PeopleMod.YEAR - person.birthYear);
+        // Network menu factories may run after this method returns. Capture immutable
+        // presentation data, never the leased Character object itself.
+        String personName = person.name;
+        String profile = residentProfile(person);
+        String relation = relationship(person, player);
+        String entityUuid = worker.getUUID().toString();
         net.minecraftforge.network.NetworkHooks.openScreen(player,
                 new net.minecraft.world.SimpleMenuProvider((windowId, inventory, viewer) ->
-                        new ResidentDialogueMenu(windowId, inventory, worker.getUUID().toString(), person.name, profession,
-                                status, residentProfile(person), relationship(person, player), questText, age),
-                        Component.literal("Диалог · " + person.name)),
+                        new ResidentDialogueMenu(windowId, inventory, entityUuid, personName, profession,
+                                status, profile, relation, questText, age),
+                        Component.literal("Диалог · " + personName)),
                 buffer -> {
-                    buffer.writeUtf(worker.getUUID().toString(), 128);
-                    buffer.writeUtf(person.name, 128);
+                    buffer.writeUtf(entityUuid, 128);
+                    buffer.writeUtf(personName, 128);
                     buffer.writeUtf(profession, 128);
                     buffer.writeUtf(status, 256);
-                    buffer.writeUtf(residentProfile(person), 512);
-                    buffer.writeUtf(relationship(person, player), 128);
+                    buffer.writeUtf(profile, 512);
+                    buffer.writeUtf(relation, 128);
                     buffer.writeUtf(questText, 512);
                     buffer.writeVarInt(age);
                 });
@@ -223,16 +229,40 @@ public final class ResidentInteraction {
             return 0;
         }
         Colony colony = SettleMod.colony(worker.colonyId);
+        Worker data = worker.worker();
         if (!validApproach(player, worker, colony)) {
             player.sendSystemMessage(Component.literal("Подойдите к жителю ближе, в том же измерении."));
             return 0;
         }
-        Character person = person(worker);
-        Worker data = worker.worker();
-        if (person == null || !person.alive || data == null) {
+        if (data == null) return 0;
+        int[] result = {0};
+        boolean resolved = SettleMod.withResidentCharacter(worker, person -> {
+            if (!person.alive) return;
+            if (mutatesCharacter(action)) {
+                var owner = PeopleMod.authority().registryForGlobal(person.globalId);
+                if (owner == null) return;
+                owner.access().mutateGlobal(person.globalId, current ->
+                        result[0] = executePinned(player, action, worker, colony, data, current, outcome));
+            } else {
+                result[0] = executePinned(player, action, worker, colony, data, person, outcome);
+            }
+        });
+        if (!resolved) {
             player.sendSystemMessage(Component.literal("Связь жителя с реестром персонажей повреждена; действие отменено."));
             return 0;
         }
+        return result[0];
+    }
+
+    private static boolean mutatesCharacter(String action) {
+        return switch (action) {
+            case "gift", "quest", "abandon", "accept", "deliver" -> true;
+            default -> false;
+        };
+    }
+
+    private static int executePinned(ServerPlayer player, String action, WFWorker worker, Colony colony,
+                                     Worker data, Character person, String[] outcome) {
         boolean ruler = WorkerControlAccess.mayControl(player, colony);
         switch (action) {
             case "open" -> { }
@@ -384,6 +414,7 @@ public final class ResidentInteraction {
                         "Доставить " + required + " ед. ресурса «" + resourceName + "» в поселение",
                         resource, required, colony.s.year());
                 person.props.put(QUEST_KEY, next.toMap());
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
                 player.sendSystemMessage(Component.literal("§e" + person.name + ": Нам нужны " + required
                         + " ед. ресурса «" + resourceName + "». Поможете доставить?"));
             }
@@ -530,6 +561,7 @@ public final class ResidentInteraction {
 
     private static void saveQuest(Character person, ResidentQuest quest) {
         person.props.put(QUEST_KEY, new LinkedHashMap<>(quest.toMap()));
+            dev.worldforge.people.CharacterRegistry.recordCharacterMutation(person);
     }
 
     private static String relationship(Character person, ServerPlayer player) {

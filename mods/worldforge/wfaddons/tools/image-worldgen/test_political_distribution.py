@@ -4,16 +4,60 @@ from image_worldgen import (
     allocate_counts, select_independent_islands, aggregate_realm_regions,
     classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES, partition,
     create_test_image, convert_image, apply_province_aligned_wilderness, validate_package,
+    settlement_opportunities_for_area, spread_settlement_points, choose_spaced_settlement_point,
 )
 
 
 class PoliticalDistributionTests(unittest.TestCase):
+    def test_settlement_opportunities_scale_with_area_and_density(self):
+        small = settlement_opportunities_for_area(400, 0.38)
+        large = settlement_opportunities_for_area(4000, 0.38)
+        sparse = settlement_opportunities_for_area(4000, 0.02)
+        dense = settlement_opportunities_for_area(4000, 1.0)
+        self.assertGreater(large, small)
+        self.assertGreater(dense, sparse)
+        self.assertGreaterEqual(small, 1)
+        self.assertGreater(settlement_opportunities_for_area(100000, 1.0), 12)
+
+    def test_extra_settlement_sites_are_deterministic_and_spread(self):
+        import numpy as np
+        cells = np.arange(40 * 40, dtype=np.int64)
+        first = spread_settlement_points(cells, 0, 4, 40, 424242)
+        second = spread_settlement_points(cells, 0, 4, 40, 424242)
+        self.assertEqual(first, second)
+        points = [0, *first]
+        for index, point in enumerate(points):
+            for other in points[index + 1:]:
+                dx = point % 40 - other % 40
+                dz = point // 40 - other // 40
+                self.assertGreaterEqual(dx * dx + dz * dz, 36)
+
+    def test_extra_sites_respect_global_reserved_centers(self):
+        import numpy as np
+        cells = np.arange(40 * 40, dtype=np.int64)
+        reserved = [20 * 40 + 20, 10 * 40 + 10]
+        selected = spread_settlement_points(
+            cells, 0, 30, 40, 424242,
+            reserved_points=reserved, minimum_distance=10)
+        points = [0, *reserved, *selected]
+        for index, point in enumerate(points):
+            for other in points[index + 1:]:
+                dx = point % 40 - other % 40
+                dz = point // 40 - other // 40
+                self.assertGreaterEqual(dx * dx + dz * dz, 100)
+
+        relocated = choose_spaced_settlement_point(
+            cells, 1, 40, 424242, reserved_points=[0], minimum_distance=10)
+        self.assertIsNotNone(relocated)
+        dx, dz = relocated % 40, relocated // 40
+        self.assertGreaterEqual(dx * dx + dz * dz, 100)
+
     def test_settlement_profiles_do_not_define_political_budgets(self):
         for profile in SETTLEMENT_PROFILES.values():
             for key in ("realms", "provinces", "minimum_pixels", "merge_fraction", "realm_area_cap"):
                 self.assertNotIn(key, profile)
 
-    def test_all_density_profiles_emit_geography_without_canonical_polities(self):
+    def test_all_density_profiles_keep_unowned_state_boundaries_and_sites(self):
         from pathlib import Path
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -26,12 +70,16 @@ class PoliticalDistributionTests(unittest.TestCase):
                     seed=424242, settlement_level=level)
                 self.assertNotIn("realm_count", result)
                 self.assertNotIn("realms", result)
+                self.assertGreater(result["state_candidate_count"], 0)
                 self.assertEqual(result["province_count"], len(result["provinces"]))
                 self.assertEqual(result["region_count"], len(result["regions"]))
+                self.assertGreaterEqual(result["settlement_count"], result["province_count"])
                 self.assertTrue(all(not row["name"] for row in result["settlements"]))
                 self.assertTrue(all(not row["realm_id"] and row["type"] == "site"
                                     for row in result["settlements"]))
-                self.assertEqual(validate_package(root / f"level-{level}.worldmap")["realm_count"], 0)
+                validation = validate_package(root / f"level-{level}.worldmap")
+                self.assertEqual(validation["realm_count"], 0)
+                self.assertGreater(validation["state_candidate_count"], 0)
 
     def test_wilderness_reserves_whole_provinces_and_protects_realm_cores(self):
         import numpy as np

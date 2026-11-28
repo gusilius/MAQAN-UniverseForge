@@ -1,0 +1,23 @@
+{
+  "id": "maqan:city.walled",
+  "category": "settlement",
+  "icon": "city",
+  "displayName": "Город · каменные стены",
+  "description": "Компактная городская миниатюра с укреплённым контуром",
+  "mapScale": 40,
+  "mapItem": "minecraft:stone_bricks",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "city",
+    "settlement",
+    "capital"
+  ],
+  "tags": [
+    "city",
+    "walled",
+    "medieval"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}

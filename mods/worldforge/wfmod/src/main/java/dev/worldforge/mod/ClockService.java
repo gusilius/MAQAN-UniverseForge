@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -44,22 +45,27 @@ public final class ClockService {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onStop(ServerStoppingEvent e) { save(e.getServer()); }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.START) return;
-        WorldForgeApi.clock().advanceServerTick();
-        ticks++;
-        if (ticks % 40 == 0) {
-            GameClock c = WorldForgeApi.clock();
-            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-            m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("paused", c.paused());
-            String json = Json.write(m);
-            for (net.minecraft.server.level.ServerPlayer sp : e.getServer().getPlayerList().getPlayers()) WFNet.sendView(sp, "wf:clock", json);
+        if (e.phase == TickEvent.Phase.START) {
+            WorldForgeApi.clock().advanceServerTick();
+            ticks++;
+            if (ticks % 40 == 0) {
+                GameClock c = WorldForgeApi.clock();
+                java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                m.put("date", c.dateText()); m.put("speed", c.speedName()); m.put("speedIndex", c.speedIndex()); m.put("paused", c.paused());
+                String json = Json.write(m);
+                for (net.minecraft.server.level.ServerPlayer sp : e.getServer().getPlayerList().getPlayers())
+                    WFNet.sendView(sp, "wf:clock", json);
+            }
+        } else if (ticks > 0 && ticks % SAVE_EVERY == 0) {
+            // Persist the calendar cursor after END-phase addon consumers have
+            // advanced and checkpointed their own state for this server tick.
+            save(e.getServer());
         }
-        if (ticks % SAVE_EVERY == 0) save(e.getServer());
     }
 
     private static Path ledgerFile(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("wf_treasury.json"); }
@@ -76,9 +82,32 @@ public final class ClockService {
         }
     }
 
+    /**
+     * Clock checkpoints must remain independent from the canonical treasury archive.
+     * TreasuryApi.allLedgers() reconstructs per-realm projections from archived journal
+     * history and is intentionally not a tick-time persistence operation.
+     *
+     * The old root-level wf_treasury.json is still read on startup for legacy migration,
+     * but the canonical treasury is now persisted by WorldForgeMod/TreasuryArchiveStore.
+     */
     private static void save(MinecraftServer s) {
-        try { Files.writeString(ledgerFile(s), Json.write(new java.util.LinkedHashMap<String, Object>(dev.worldforge.mod.api.TreasuryApi.allLedgers()))); } catch (Exception ex) { WorldForgeMod.LOGGER.error("WorldForge: книга казны не сохранена: {}", ex.toString()); }
-        try { Files.writeString(file(s), WorldForgeApi.clock().toJson()); } catch (Exception ex) { WorldForgeMod.LOGGER.error("WorldForge: часы не сохранены: {}", ex.toString()); }
+        try {
+            Path target = file(s);
+            Path temporary = Files.createTempFile(target.getParent(), "wf-clock-", ".tmp");
+            try {
+                Files.writeString(temporary, WorldForgeApi.clock().toJson());
+                try {
+                    Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+        } catch (Exception ex) {
+            WorldForgeMod.LOGGER.error("WorldForge: часы не сохранены; следующий checkpoint повторит попытку: {}", ex.toString());
+        }
     }
 
     private static int say(CommandSourceStack s) {

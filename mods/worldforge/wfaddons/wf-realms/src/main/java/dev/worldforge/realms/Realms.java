@@ -86,8 +86,22 @@ public final class Realms {
 
     /** Почему строй недоступен (пустая строка - доступен). */
     public String why(String realm, RealmDefs.Gov g) {
+        return why(realm, g, null, null);
+    }
+
+    /**
+     * Evaluates one government against caller-provided demographic snapshots.
+     * UI projection code checks many governments for the same realm in one pass;
+     * sharing these snapshots prevents a full Character census per government.
+     */
+    public String why(String realm, RealmDefs.Gov g,
+                      Map<String, Double> raceSnapshot, Map<String, Double> terrainSnapshot) {
         if (level(realm) < g.minLevel()) return "нужен уровень «" + defs.levels.get(g.minLevel()).name() + "»";
-        Map<String, Double> races = hooks.races(realm), terr = hooks.terrain(realm);
+        Map<String, Double> races = raceSnapshot;
+        Map<String, Double> terr = terrainSnapshot;
+        if ((!g.reqRaces().isEmpty() || !g.forbidRaces().isEmpty()) && races == null)
+            races = hooks.races(realm);
+        if (!g.reqTerrain().isEmpty() && terr == null) terr = hooks.terrain(realm);
         if (!g.reqRaces().isEmpty()) {
             double sum = 0;
             for (String r : g.reqRaces()) sum += share(races, r);

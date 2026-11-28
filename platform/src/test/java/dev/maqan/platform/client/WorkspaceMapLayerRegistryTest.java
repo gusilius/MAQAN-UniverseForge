@@ -27,6 +27,44 @@ class WorkspaceMapLayerRegistryTest {
     }
 
     @Test
+    void persistsAndAppliesUserDefinedLayerCompositingOrder() {
+        WorkspaceMapLayerRegistry.register(new WorkspaceMapLayerRegistry.Layer(
+                "test.base", "Base", "test", 0, true, 1f, (g, x, y, w, h, opacity) -> {}));
+        WorkspaceMapLayerRegistry.register(new WorkspaceMapLayerRegistry.Layer(
+                "test.armies", "Armies", "test", 0, true, 1f, (g, x, y, w, h, opacity) -> {}));
+        WorkspaceMapLayerRegistry.register(new WorkspaceMapLayerRegistry.Layer(
+                "test.labels", "Labels", "test", 0, true, 1f, (g, x, y, w, h, opacity) -> {}));
+
+        assertEquals("test.armies", WorkspaceMapLayerRegistry.layers().get(0).id());
+        WorkspaceMapLayerRegistry.move("test.labels", -1);
+
+        assertEquals(java.util.List.of("test.armies", "test.labels", "test.base"),
+                WorkspaceMapLayerRegistry.layers().stream().map(WorkspaceMapLayerRegistry.Layer::id).toList());
+        assertEquals(0, WorkspaceMapLayerRegistry.order("test.armies"));
+        assertEquals(10, WorkspaceMapLayerRegistry.order("test.labels"));
+        assertEquals(20, WorkspaceMapLayerRegistry.order("test.base"));
+    }
+
+
+    @Test
+    void zeroOpacitySkipsLayerRenderer() {
+        java.util.concurrent.atomic.AtomicInteger renders = new java.util.concurrent.atomic.AtomicInteger();
+        WorkspaceMapLayerRegistry.register(new WorkspaceMapLayerRegistry.Layer(
+                "test.transparent", "Transparent", "test", 0, true, 1f,
+                (g, x, y, w, h, opacity) -> renders.incrementAndGet()));
+        WorkspaceMapLayerRegistry.setOpacity("test.transparent", 0f);
+
+        WorkspaceMapLayerRegistry.render(null, 0, 0, 100, 100);
+
+        assertEquals(0, renders.get());
+    }
+
+    @Test
+    void rejectsOrderingUnknownLayers() {
+        assertThrows(IllegalArgumentException.class, () -> WorkspaceMapLayerRegistry.setOrder("missing", 1));
+    }
+
+    @Test
     void validatesLayerOpacityAndRejectsCrossProviderIdCollision() {
         assertThrows(IllegalArgumentException.class, () ->
                 new WorkspaceMapLayerRegistry.Layer("bad", "Bad", "provider", 0,

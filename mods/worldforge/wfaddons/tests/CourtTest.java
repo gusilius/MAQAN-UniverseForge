@@ -103,17 +103,35 @@ public class CourtTest {
             family.marry(mother.id, father.id, 300);
             CourtSim familyCourt = new CourtSim(s.d, null, family, s.defs, s.names, seed, 300);
             familyCourt.day = 364;
-            familyCourt.tick(1);
-            if (mother.children.isEmpty()) continue; // choose a deterministic seed that produces the annual birth
+            familyCourt.tick(1); // first annual pass may begin a pregnancy
+            if (!mother.children.isEmpty()) continue;
+            familyCourt.tick(365); // the gestation window must elapse before the birth event
+            if (mother.children.isEmpty()) continue;
             int childrenAfterCourt = mother.children.size();
-            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == 301,
-                    "court birth publishes the shared family-year marker");
+            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == familyCourt.year(),
+                    "court birth publishes the actual shared family-year marker");
             ResidentLifeEvents.yearly(family, 301);
             ok(mother.children.size() == childrenAfterCourt,
                     "settlement family pass does not duplicate a birth already resolved by court simulation");
             sharedBirthGuard = true;
         }
         ok(sharedBirthGuard, "shared court/settlement family lifecycle produces a reproducible annual birth for integration testing");
+
+        // A virtual court may be attached before WorldSim creates its first residents.
+        // Empty years must not consume the one-time population lifecycle initialization.
+        CharacterRegistry delayedRegistry = new CharacterRegistry();
+        CourtSim delayedCourt = new CourtSim(s.d, null, delayedRegistry, s.defs, s.names, 29L, 300);
+        delayedCourt.tick(365);
+        boolean deferredWhileEmpty = !delayedCourt.populationLifecycleInitialized();
+        delayedRegistry.create("Первый житель", "Дом", "north", "m", 300);
+        delayedCourt.tick(1);
+        String delayedSave = delayedCourt.toJson();
+        CourtSim delayedReload = new CourtSim(s.d, null, delayedRegistry, s.defs, s.names, 30L, 300);
+        delayedReload.fromJson(delayedSave);
+        ok(deferredWhileEmpty && delayedCourt.populationLifecycleInitialized()
+                        && delayedReload.populationLifecycleInitialized()
+                        && delayedReload.toJson().equals(delayedSave),
+                "court defers its first annual population pass until canonical residents exist and persists that initialization");
 
         // совет
         String realm = null;
@@ -194,9 +212,13 @@ public class CourtTest {
         minorCourt.reg.appoint(childHeir.id, rulerRole, rulerPlace);
         minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
         minorCourt.regencies.clear();
-        List<Character> expectedRegents = minorCourt.regencyCandidates(minorRealm);
-        ok(!expectedRegents.isEmpty(), "the test court has at least one eligible adult regent");
-        adultRegent = expectedRegents.isEmpty() ? adultRegent : expectedRegents.get(0);
+        List<String> expectedRegentIds = minorCourt.regencyCandidates(minorRealm);
+        ok(!expectedRegentIds.isEmpty(), "the test court has at least one eligible adult regent");
+        if (!expectedRegentIds.isEmpty()) {
+            try (var lease = minorCourt.reg.acquire(expectedRegentIds.get(0))) {
+                if (lease != null) adultRegent = lease.get();
+            }
+        }
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) != null
                         && minorCourt.regency(minorRealm).heir.equals(childHeir.id)

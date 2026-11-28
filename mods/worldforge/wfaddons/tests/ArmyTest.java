@@ -73,6 +73,8 @@ public class ArmyTest {
         // набор
         double p0 = e.pool(A);
         Army ar = e.raise(A, "levy", 50);
+        ar.commander = "Marshal";
+        ar.setCommanderGlobalId("11111111-1111-4111-8111-111111111111");
         ok(ar.men() == 50 && e.pool(A) == p0 - 50, "ополчение берётся из запаса");
         ok(Math.abs(e.gold(A) - ArmyEngine.START_GOLD) < 1e-8, "new realm receives its opening treasury balance exactly once");
         ok(fails(() -> e.raise(A, "levy", 1_000_000)), "нельзя набрать больше запаса");
@@ -90,8 +92,17 @@ public class ArmyTest {
         Army merc = e.hire(A, "cavalry", 10);
         ok(merc.mercenary && merc != ar, "наёмники отдельной армией");
         ok(e.armiesOf(A).size() == 2 && ar.count("archer") == 20, "армии: войско и наёмники");
-        e.merge(ar.id, e.split(ar.id, "archer", 20, A).id, A);
-        ok(ar.count("archer") == 20, "split+merge возвращают отряд");
+        Army separated = e.split(ar.id, "archer", 20, A);
+        ok(separated.commanderGlobalId.equals(ar.commanderGlobalId),
+                "army split preserves canonical commander UUID without retaining a Character reference");
+        boolean malformedCommanderRejected = false;
+        try { separated.setCommanderGlobalId("not-a-global-id"); }
+        catch (IllegalArgumentException expected) { malformedCommanderRejected = true; }
+        ok(malformedCommanderRejected && separated.commanderGlobalId.equals(ar.commanderGlobalId),
+                "malformed commander identity is rejected without corrupting the army");
+        e.merge(ar.id, separated.id, A);
+        ok(ar.count("archer") == 20 && ar.commanderGlobalId.equals("11111111-1111-4111-8111-111111111111"),
+                "split+merge restore roster and canonical commander identity");
         ok(fails(() -> e.merge(ar.id, merc.id, A)), "наёмников с войском не сливают");
 
         // движение
@@ -189,7 +200,25 @@ public class ArmyTest {
         ArmyEngine back = new ArmyEngine(ai.war);
         back.fromJson(js);
         ok(back.armies.size() == ai.armies.size() && back.toJson().equals(js), "сохранение и загрузка совпадают");
-        ok(!js.contains("\"gold\"") && js.contains("wf-army/3"), "new army snapshots no longer persist a duplicate local gold balance");
+        ok(!js.contains("\"gold\"") && js.contains("wf-army/4"),
+                "new army snapshots persist canonical commander UUIDs without duplicate local gold");
+        ArmyEngine commanderReload = fresh(a[0], ids);
+        commanderReload.ai = false;
+        Army commanderArmy = commanderReload.raise(ids[0], "levy", 5);
+        commanderArmy.setCommanderGlobalId("22222222-2222-4222-8222-222222222222");
+        ArmyEngine commanderRestored = new ArmyEngine(commanderReload.war);
+        commanderRestored.fromJson(commanderReload.toJson());
+        ok(commanderRestored.army(commanderArmy.id).commanderGlobalId.equals(commanderArmy.commanderGlobalId),
+                "canonical commander UUID survives army save/reload");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> wf3Root = (Map<String, Object>) Json.parse(commanderReload.toJson());
+        wf3Root.put("format", "wf-army/3");
+        for (Object row : (List<?>) wf3Root.get("armies"))
+            ((Map<String, Object>) row).remove("commanderGlobalId");
+        ArmyEngine wf3Reload = new ArmyEngine(commanderReload.war);
+        wf3Reload.fromJson(Json.write(wf3Root));
+        ok(wf3Reload.army(commanderArmy.id).commanderGlobalId.isEmpty(),
+                "legacy wf-army/3 snapshots migrate with an empty canonical commander UUID");
         @SuppressWarnings("unchecked")
         Map<String, Object> legacyRoot = (Map<String, Object>) Json.parse(js);
         legacyRoot.put("format", "wf-army/1");
@@ -199,7 +228,7 @@ public class ArmyTest {
         ok(Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
                 "wf-army/1 legacy gold migrates into the shared treasury on first access");
         String upgradedLegacySave = legacyReload.toJson();
-        ok(upgradedLegacySave.contains("wf-army/3") && !upgradedLegacySave.contains("\"gold\"")
+        ok(upgradedLegacySave.contains("wf-army/4") && !upgradedLegacySave.contains("\"gold\"")
                         && Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
                 "legacy army save upgrades without persisting or importing its gold balance twice");
 

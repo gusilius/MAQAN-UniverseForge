@@ -35,6 +35,14 @@ final class WorldSimProfiler {
         root.addProperty("schema_version", 1);
         root.addProperty("clock", "System.nanoTime");
         root.addProperty("sample_capacity_per_metric", SAMPLE_CAPACITY);
+        // Heap gauges are sampled on demand with the profiler snapshot, not every tick.
+        // They intentionally describe JVM heap only; native/JNI and process RSS must be
+        // measured separately by the runtime harness.
+        Runtime runtime = Runtime.getRuntime();
+        long heapUsed = runtime.totalMemory() - runtime.freeMemory();
+        root.addProperty("runtime_heap_used_bytes", heapUsed);
+        root.addProperty("runtime_heap_committed_bytes", runtime.totalMemory());
+        root.addProperty("runtime_heap_max_bytes", runtime.maxMemory());
         JsonObject measurements = new JsonObject();
         for (Map.Entry<String, Metric> entry : metrics.entrySet()) {
             Metric metric = entry.getValue();

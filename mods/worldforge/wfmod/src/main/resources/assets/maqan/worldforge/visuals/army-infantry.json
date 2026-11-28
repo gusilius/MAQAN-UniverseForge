@@ -1,0 +1,23 @@
+{
+  "id": "maqan:army.infantry",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Пехота · строевая",
+  "description": "Стандартная пехотная формация для оперативной карты",
+  "mapScale": 34,
+  "mapItem": "minecraft:iron_sword",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "army",
+    "unit",
+    "corps"
+  ],
+  "tags": [
+    "infantry",
+    "formation",
+    "human"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}

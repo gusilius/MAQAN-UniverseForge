@@ -13,7 +13,7 @@ import java.util.Optional;
  */
 public final class DomainMutationRevisions {
     public enum Domain {
-        CHARACTERS, ORIGINS, REALMS_POLITICS, SETTLEMENTS,
+        CHARACTERS, CHARACTER_SOCIAL, ORIGINS, REALMS_POLITICS, SETTLEMENTS,
         ECONOMY_TRADE, ARMIES_WARS, INVENTORY_OWNERSHIP, EVENTS_ACTIONS
     }
 

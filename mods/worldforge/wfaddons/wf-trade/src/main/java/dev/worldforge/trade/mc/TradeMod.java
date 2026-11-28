@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.MaqanPerformanceConfig;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.mod.WorldForgeMod;
@@ -61,6 +62,11 @@ public class TradeMod {
     public static final Trade TRADE = new Trade(DEFS);
     private static final int STEP = 100, SAVE_EVERY = 6000;
     private static long ticks;
+    // Offline catch-up is a backlog, not permission to execute an unbounded number
+    // of full realm/goods/caravan passes inside one Minecraft server tick.
+    private static long pendingSimulationDays;
+    private static List<String> activeTradeRealms;
+    private static int nextSimulationDay;
     private static boolean armyLoaded;
     private static Map<String, Set<String>> adjacency = new HashMap<>();
     private static int adjacencyDay = -999;
@@ -296,10 +302,37 @@ public class TradeMod {
 
     @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }
     @SubscribeEvent public void onReload(AddReloadListenerEvent e) { e.addListener((ResourceManagerReloadListener) TradeMod::loadDefs); }
-    @SubscribeEvent public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
+    @SubscribeEvent public void onStopping(ServerStoppingEvent e) {
+        try {
+            // Graceful shutdown completes the in-flight day before writing the durable trade snapshot.
+            // This exceptional shutdown path may do extra work; normal server ticks remain budgeted.
+            if (TRADE.hasPendingDay()) {
+                List<String> ids = activeTradeRealms;
+                if (ids == null) {
+                    ids = new ArrayList<>();
+                    for (TitleData.Realm realm : realms()) ids.add(realm.id);
+                }
+                TRADE.tick(nextSimulationDay, ids);
+                WorldLayer.SHOPS.tick();
+                if (pendingSimulationDays > 0) {
+                    nextSimulationDay++;
+                    pendingSimulationDays--;
+                }
+                activeTradeRealms = null;
+            }
+            save(e.getServer());
+        } catch (Exception ex) {
+            LOGGER.error("wf_trade: не удалось завершить экономический день при остановке; сохранение последнего целого снимка", ex);
+            TRADE.cancelPendingDay();
+            save(e.getServer());
+        }
+    }
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
+        TRADE.cancelPendingDay();
+        activeTradeRealms = null;
+        pendingSimulationDays = 0;
         try { Path f = file(e.getServer()); if (Files.exists(f)) TRADE.fromJson(Files.readString(f)); }
         catch (Exception ex) { LOGGER.error("wf_trade: не удалось прочитать состояние: {}", ex.toString()); }
     }
@@ -315,13 +348,30 @@ public class TradeMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int days = WorldForgeApi.clock().pull("wf_trade");
-                int today = day();
-                List<String> ids = new ArrayList<>();
-                for (TitleData.Realm r : realms()) ids.add(r.id);
-                for (int i = days - 1; i >= 0; i--) { TRADE.tick(today - i, ids); WorldLayer.SHOPS.tick(); }
+                int days = Math.max(0, WorldForgeApi.clock().pull("wf_trade"));
+                if (days > 0) {
+                    int today = day();
+                    if (pendingSimulationDays == 0) nextSimulationDay = today - days + 1;
+                    pendingSimulationDays = Math.min(Long.MAX_VALUE - days, pendingSimulationDays) + days;
+                }
             }
-            if (ticks % SAVE_EVERY == 0) save(e.getServer());
+            // A day is processed in deterministic phases with a bounded per-tick budget.
+            // The complete market/caravan result is preserved; only CPU work is spread over ticks.
+            if (pendingSimulationDays > 0) {
+                if (activeTradeRealms == null) {
+                    activeTradeRealms = new ArrayList<>();
+                    for (TitleData.Realm realm : realms()) activeTradeRealms.add(realm.id);
+                }
+                List<String> completed = TRADE.advanceDay(nextSimulationDay, activeTradeRealms,
+                        MaqanPerformanceConfig.tradeWorkItemsPerTick());
+                if (completed != null) {
+                    WorldLayer.SHOPS.tick();
+                    nextSimulationDay++;
+                    pendingSimulationDays--;
+                    activeTradeRealms = null;
+                }
+            }
+            if (ticks % SAVE_EVERY == 0 && !TRADE.hasPendingDay()) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_trade: ошибка тика: {}", ex.toString()); }
     }
 

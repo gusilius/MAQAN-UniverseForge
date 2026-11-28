@@ -47,6 +47,8 @@ public class ArmyMod {
     static volatile List<String> RAW = List.of();
     private static long ticks;
     private static volatile boolean actionPersistenceBlocked;
+    /** When true, WorldSim is the sole AI recruitment planner; ArmyEngine keeps movement/war AI. */
+    private static volatile boolean worldSimOwnsRecruitment;
 
     public ArmyMod() {
         ArmyActions.installPersistenceBridge(new ArmyActions.PersistenceBridge() {
@@ -67,6 +69,40 @@ public class ArmyMod {
             for (MapData m : WorldForgeMod.loadedMaps().values()) if (EditorManager.editorFor(m) == editor) return armies(m);
             return null;
         });
+        dev.worldforge.mod.MapMarkerProviders.register("wf_army", (server, map) -> {
+            if (map.titles == null) return List.of();
+            List<dev.worldforge.mod.Markers.Marker> markers = new ArrayList<>();
+            ArmyEngine engine = armies(map);
+            for (dev.worldforge.army.Army army : engine.armies.values()) {
+                if (army == null || army.men() <= 0 || army.location <= 0) continue;
+                // An army remains visible even when it has no assigned commander or the leader entity is unloaded.
+                dev.worldforge.mod.LeaderVisualProviders.Visual leader = army.commanderGlobalId == null
+                        || army.commanderGlobalId.isBlank() ? null
+                        : dev.worldforge.mod.LeaderVisualProviders.resolve(server, army.commanderGlobalId);
+                dev.worldforge.mod.TitleData.Title location = map.titles.get(army.location);
+                if (location == null) continue;
+                dev.worldforge.mod.Markers.Marker marker = new dev.worldforge.mod.Markers.Marker();
+                marker.id = "wf_army:" + map.name + ":" + army.id;
+                marker.name = army.name == null || army.name.isBlank() ? "Армия " + army.id : army.name;
+                marker.type = "army";
+                marker.x = location.capX;
+                marker.z = location.capZ;
+                dev.worldforge.mod.TitleData.Realm realm = map.titles.realms.get(army.realm);
+                marker.rgb = realm == null ? location.rgb : realm.rgb;
+                String commanderName = army.commander == null || army.commander.isBlank()
+                        ? leader == null ? "" : leader.displayName() : army.commander;
+                marker.desc = "armyId=" + army.id + ";men=" + army.men()
+                        + ";realm=" + (army.realm == null ? "" : army.realm)
+                        + ";commander=" + (commanderName == null ? "" : commanderName)
+                        + ";commanderId=" + (army.commanderGlobalId == null ? "" : army.commanderGlobalId)
+                        + ";leaderEntity=" + (leader == null ? "" : leader.entityUuid())
+                        + ";leaderType=" + (leader == null ? "" : leader.entityTypeId())
+                        + ";leaderModel=" + (leader == null ? "" : leader.modelProfile())
+                        + ";title=" + army.location + ";moving=" + army.moving();
+                markers.add(marker);
+            }
+            return markers;
+        });
     }
 
     /** Read-only strategic engines for cross-module world snapshots; ownership stays in wf-army. */
@@ -74,9 +110,17 @@ public class ArmyMod {
         return Collections.unmodifiableCollection(new ArrayList<>(ARMIES.values()));
     }
 
+    /** WorldSim plans recruitment from the full settlement/troop catalogs; this disables only
+     * ArmyEngine's legacy duplicate recruitment branch, not its war, movement, merge or siege AI. */
+    public static void setWorldSimRecruitmentAuthority(boolean enabled) {
+        worldSimOwnsRecruitment = enabled;
+        for (ArmyEngine engine : ARMIES.values())
+            engine.setAutonomousRecruitmentEnabled(!enabled);
+    }
+
     /** Армии карты поверх движка войн; создание ставит их водителем времени войн. */
     public static ArmyEngine armies(MapData m) {
-        return ARMIES.computeIfAbsent(m, k -> {
+        ArmyEngine engine = ARMIES.computeIfAbsent(m, k -> {
             ArmyEngine a = new ArmyEngine(WarMod.engine(k));
             a.installPersistenceBridge(new ArmyEngine.PersistenceBridge() {
                 @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
@@ -105,6 +149,8 @@ public class ArmyMod {
             }
             return a;
         });
+        engine.setAutonomousRecruitmentEnabled(!worldSimOwnsRecruitment);
+        return engine;
     }
 
     /**

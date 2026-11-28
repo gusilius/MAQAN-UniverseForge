@@ -25,6 +25,13 @@ public final class DomainMutationRevisionsTest {
         check(revisions.isCurrent(initial), "aborted write scope does not advance committed revisions");
 
         var characterOnly = revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).orElseThrow();
+        try (var social = revisions.begin(DomainMutationRevisions.Domain.CHARACTER_SOCIAL)) {
+            social.commit();
+        }
+        check(revisions.isCurrent(characterOnly, DomainMutationRevisions.Domain.CHARACTERS),
+                "social-only mutation does not stale a population/Character-only snapshot");
+        check(!revisions.isCurrent(characterOnly),
+                "global snapshot freshness still observes social mutations");
         try (var unrelated = revisions.begin(DomainMutationRevisions.Domain.SETTLEMENTS)) {
             check(revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).isPresent(),
                     "Character snapshot is not blocked by an unrelated Settlement writer");
@@ -196,32 +203,51 @@ public final class DomainMutationRevisionsTest {
                         == afterRace.revision(DomainMutationRevisions.Domain.CHARACTERS),
                 "Character development setter records real changes and ignores idempotent writes");
 
-        long beforeExperience = afterRepeatedRace.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeExperienceCharacters = afterRepeatedRace.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeExperienceSocial = afterRepeatedRace.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
         CharacterDevelopment.recordExperience(founder, CharacterDevelopment.Experience.BATTLE_VICTORY,
                 "revision-test:victory", "deterministic revision fixture", 100, 2);
         var afterExperience = WorldForgeApi.revisions().snapshot().orElseThrow();
-        check(afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeExperience + 1,
-                "compound psychological experience commits one Character revision despite nested writes");
+        check(afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeExperienceCharacters
+                        && afterExperience.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL) == beforeExperienceSocial + 1,
+                "psychological experience advances only the social lane despite nested writes");
 
-        long beforeTrait = afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeTraitCharacters = afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeTraitSocial = afterExperience.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
         check(CharacterStats.addTrait(founder, "brave"), "canonical Character trait addition succeeds");
         var afterTrait = WorldForgeApi.revisions().snapshot().orElseThrow();
         check(!CharacterStats.addTrait(founder, "brave")
-                        && afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeTrait + 1,
-                "CharacterStats trait mutation advances one revision and duplicate trait is a no-op");
+                        && afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeTraitCharacters
+                        && afterTrait.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL) == beforeTraitSocial + 1,
+                "CharacterStats trait mutation advances one social revision and duplicate trait is a no-op");
 
-        long beforePsychologyInit = afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforePsychologyCharacters = afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforePsychologySocial = afterTrait.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
         CharacterDevelopment.ensurePsychology(founder);
         var afterPsychologyInit = WorldForgeApi.revisions().snapshot().orElseThrow();
-        check(afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS)
-                        == beforePsychologyInit + 1
+        check(afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforePsychologyCharacters
+                        && afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL) == beforePsychologySocial + 1
                         && CharacterDevelopment.stress(founder) == 0,
-                "lazy psychology initialization persists stable facets and advances one Character revision");
+                "lazy psychology initialization advances only the social lane");
         CharacterDevelopment.ensurePsychology(founder);
         var afterRepeatedPsychologyInit = WorldForgeApi.revisions().snapshot().orElseThrow();
-        check(afterRepeatedPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS)
-                        == afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS),
-                "repeated psychology initialization is idempotent and does not churn Character revisions");
+        check(afterRepeatedPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL)
+                        == afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL),
+                "repeated psychology initialization is idempotent and does not churn social revisions");
+
+        long beforeNestedCharacters = afterRepeatedPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeNestedSocial = afterRepeatedPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL);
+        try (var populationScope = CharacterRegistry.beginMutationBatch()) {
+            CharacterRegistry.recordCharacterMutation();
+            try (var socialScope = CharacterRegistry.beginSocialMutationBatch();
+                 var inheritedScope = CharacterRegistry.beginMutationBatch()) {
+                CharacterRegistry.recordCharacterMutation();
+            }
+        }
+        var afterNested = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterNested.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeNestedCharacters + 1
+                        && afterNested.revision(DomainMutationRevisions.Domain.CHARACTER_SOCIAL) == beforeNestedSocial + 1,
+                "nested social and inherited scopes commit both lanes once");
 
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");

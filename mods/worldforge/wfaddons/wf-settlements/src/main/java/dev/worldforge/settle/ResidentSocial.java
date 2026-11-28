@@ -9,6 +9,10 @@ import java.util.Map;
 /** Persistent, bounded social relationship scores stored on the canonical Character. */
 public final class ResidentSocial {
     private static final String KEY = "social.relationships";
+    // A resident has only one live pending social action; retain a bounded replay window.
+    private static final int MAX_INTERACTION_RECEIPTS = 64;
+    /** A bounded neighbourhood keeps every social event's fan-out and per-NPC memory bounded. */
+    public static final int MAX_RELATIONSHIPS_PER_CHARACTER = 256;
     private ResidentSocial() {}
 
     public static int score(Character person, String otherCharacterOrPlayerId) {
@@ -24,13 +28,28 @@ public final class ResidentSocial {
         if (otherCharacterOrPlayerId == null || otherCharacterOrPlayerId.isBlank())
             throw new IllegalArgumentException("relationship target is required");
         Object raw = person.props.get(KEY);
-        Map<String, Object> relationships = new LinkedHashMap<>();
-        if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet())
+        Map<String, Object> relationships;
+        if (raw instanceof LinkedHashMap<?, ?> existing) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mutable = (Map<String, Object>) existing;
+            relationships = mutable;
+            relationships.entrySet().removeIf(entry -> entry.getKey() == null || entry.getValue() == null
+                    || !(entry.getValue() instanceof Number));
+            relationships.replaceAll((key, value) -> clamp(((Number) value).intValue()));
+        } else {
+            relationships = new LinkedHashMap<>();
+            if (raw instanceof Map<?, ?> map) for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (relationships.size() >= MAX_RELATIONSHIPS_PER_CHARACTER) break;
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
                     relationships.put(key, clamp(n.intValue()));
+            }
         }
         int next = clamp(score(person, otherCharacterOrPlayerId) + delta);
+        if (!relationships.containsKey(otherCharacterOrPlayerId)
+                && relationships.size() >= MAX_RELATIONSHIPS_PER_CHARACTER) {
+            String oldest = relationships.keySet().iterator().next();
+            relationships.remove(oldest);
+        }
         relationships.put(otherCharacterOrPlayerId, next);
         person.props.put(KEY, relationships);
         return next;
@@ -94,10 +113,16 @@ public final class ResidentSocial {
     @SuppressWarnings("unchecked")
     private static void applyInteractionOnce(Character person, Character other, int delta, String operationId) {
         final String receiptKey = "social.interaction_receipts";
-        Map<String, Object> receipts = new LinkedHashMap<>();
         Object raw = person.props.get(receiptKey);
-        if (raw instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet())
+        Map<String, Object> receipts;
+        if (raw instanceof LinkedHashMap<?, ?> existing) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mutable = (Map<String, Object>) existing;
+            receipts = mutable;
+            receipts.entrySet().removeIf(entry -> entry.getKey() == null || !(entry.getValue() instanceof String));
+        } else {
+            receipts = new LinkedHashMap<>();
+            if (raw instanceof Map<?, ?> map) for (Map.Entry<?, ?> entry : map.entrySet())
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
                     receipts.put(key, value);
         }
@@ -109,8 +134,8 @@ public final class ResidentSocial {
                 throw new IllegalStateException("Social interaction ID collision: " + operationId);
             return;
         }
-        if (receipts.size() >= 10000)
-            throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
+        while (receipts.size() >= MAX_INTERACTION_RECEIPTS)
+            receipts.remove(receipts.keySet().iterator().next());
         adjust(person, counterpartId, delta);
         updateBond(person, counterpartId, score(person, counterpartId));
         CharacterDevelopment.remember(person, "social:" + operationId,

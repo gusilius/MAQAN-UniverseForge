@@ -1,5 +1,6 @@
 package dev.worldforge.relations.mc;
 
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.WFNet;
@@ -40,6 +41,7 @@ public class RelationsMod {
             if (ModList.get().isLoaded("wf_dialogue")) { DialogueLink.register(); LOGGER.info("wf_relations: мост к wf_dialogue подключён"); }
         }));
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(new SocialLifeStressLab());
     }
 
     @SubscribeEvent
@@ -53,19 +55,27 @@ public class RelationsMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            if (ticks % STEP == 0) {
-                int elapsedDays = WorldForgeApi.clock().pull("wf_relations");
+            // Prepare the next consumed calendar day gradually; never scan the full population
+            // synchronously on the day-advance tick. Do not consume calendar backlog until its
+            // index is complete, otherwise a day could be marked consumed without simulation.
+            boolean socialIndexReady = false;
+            if (!SocialLifeStressLab.isRunning()) {
+                long nextSocialDay = WorldForgeApi.clock().consumedDay("wf_relations") + 1;
+                int nextSocialYear = WorldForgeApi.clock().startYear + (int) (nextSocialDay / 365L);
+                socialIndexReady = NpcSocialSimulation.prepareContactIndex(nextSocialDay, nextSocialYear, 2048);
+            }
+            // The isolated stress driver owns NpcSocialSimulation's shared cursors
+            // while it advances its separate Relations graph on accelerated test days.
+            if (ticks % STEP == 0 && !SocialLifeStressLab.isRunning() && socialIndexReady) {
+                // A single bounded calendar step per cadence; backlog remains queued.
+                int elapsedDays = WorldForgeApi.clock().pullLimited("wf_relations", 1);
                 if (elapsedDays > 0) {
-                    int currentDay = RelationsMc.dayNumber();
-                    int firstDay = Math.max(0, currentDay - elapsedDays + 1);
-                    int totalInteractions = 0;
-                    for (int day = firstDay; day <= currentDay; day++) {
-                        RelationsMc.REL.tick(day);
-                        int year = WorldForgeApi.clock().startYear + day / 365;
-                        totalInteractions += NpcSocialSimulation.advance(RelationsMc.REL, day, year);
-                    }
-                    if (totalInteractions > 0 && currentDay % 30 < elapsedDays)
-                        LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, currentDay);
+                    int day = Math.toIntExact(WorldForgeApi.clock().consumedDay("wf_relations"));
+                    int year = WorldForgeApi.clock().startYear + day / 365;
+                    RelationsMc.REL.tick(day);
+                    int totalInteractions = NpcSocialSimulation.advance(RelationsMc.REL, day, year);
+                    if (totalInteractions > 0)
+                        LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", totalInteractions, day);
                 }
             }
             if (ticks % SAVE_EVERY == 0) RelationsMc.save(e.getServer());
@@ -77,45 +87,78 @@ public class RelationsMod {
         e.getDispatcher().register(Commands.literal("wfrel")
                 .executes(c -> open(c.getSource()))
                 .then(Commands.literal("dismiss").then(Commands.argument("id", StringArgumentType.word()).executes(c -> dismiss(c.getSource(), StringArgumentType.getString(c, "id"))))));
+        e.getDispatcher().register(Commands.literal("wfrelstress")
+                .requires(source -> source.hasPermission(4))
+                .then(Commands.literal("start")
+                        .then(Commands.argument("target", IntegerArgumentType.integer(2, 1_000_000))
+                                .then(Commands.argument("days", IntegerArgumentType.integer(1, 3650))
+                                        .executes(c -> startSocialStress(c.getSource(),
+                                                IntegerArgumentType.getInteger(c, "target"),
+                                                IntegerArgumentType.getInteger(c, "days"))))))
+                .then(Commands.literal("status").executes(c -> {
+                    c.getSource().sendSuccess(() -> Component.literal("Social stress: " + SocialLifeStressLab.status()), false);
+                    return 1;
+                })));
+    }
+
+
+    private static int startSocialStress(CommandSourceStack source, int target, int days) {
+        try {
+            if (!SocialLifeStressLab.start(source.getServer(), target, days)) {
+                source.sendFailure(Component.literal("Social stress уже выполняется."));
+                return 0;
+            }
+            source.sendSuccess(() -> Component.literal("Contour 03 social stress запущен: " + target
+                    + " жителей, " + days + " модельных дней."), true);
+            return 1;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось запустить contour 03: " + ex.getMessage()));
+            return 0;
+        }
     }
 
     private static int open(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) { s.sendFailure(Component.literal("Только для игрока")); return 0; }
-        String json = RelationsMc.REL.viewJson(sp.getUUID().toString(), PeopleMod::findNpc, PeopleMod::roleName, RelationsMc.dayNumber());
+        String json = RelationsMc.REL.viewJson(sp.getUUID().toString(), PeopleMod::findNpcLease, PeopleMod::roleName, RelationsMc.dayNumber());
         WFNet.sendView(sp, "wf_relations:relations", json);
         return 1;
     }
 
     private static int dismiss(CommandSourceStack source, String id) {
         ServerPlayer player = source.getPlayer();
-        Character npc = PeopleMod.findNpc(id);
-        if (player == null || npc == null) return 0;
-        String actor = player.getUUID().toString();
-        long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "relations:dismiss:" + java.util.UUID.nameUUIDFromBytes(
-                (actor + ":" + source.getServer().getTickCount() + ":" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        try {
-            var task = WorldForgeApi.actionExecution().execute(
-                    new dev.worldforge.mod.api.ActionExecutionService.Request(
-                            requestId, "relations.dismiss_companion", actor, id, java.util.List.of(id), minute),
-                    req -> source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
-                            ? "Игрок отключился до изменения отношений" : null,
-                    (req, attempt) -> {
-                        if (!RelationsMc.REL.bond(actor, npc.id).employed)
-                            return dev.worldforge.mod.api.ActionResult.fail("Этот житель не состоит у вас на службе.");
-                        RelationsMc.REL.dismiss(actor, npc);
-                        return dev.worldforge.mod.api.ActionResult.ok(npc.name + " освобождён от службы.");
-                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
-            if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
-                source.sendFailure(Component.literal(task.message()));
+        if (player == null) return 0;
+        try (var npcLease = PeopleMod.findNpcLease(id)) {
+            if (npcLease == null) return 0;
+            Character npc = npcLease.get();
+            if (npc == null) return 0;
+            String actor = player.getUUID().toString();
+            long minute = WorldForgeApi.clock().worldMinute();
+            String requestId = "relations:dismiss:" + java.util.UUID.nameUUIDFromBytes(
+                    (actor + ":" + source.getServer().getTickCount() + ":" + id)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            try {
+                var task = WorldForgeApi.actionExecution().execute(
+                        new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                requestId, "relations.dismiss_companion", actor, id, java.util.List.of(id), minute),
+                        req -> source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
+                                ? "Игрок отключился до изменения отношений" : null,
+                        (req, attempt) -> {
+                            if (!RelationsMc.REL.bond(actor, npc.id).employed)
+                                return dev.worldforge.mod.api.ActionResult.fail("Этот житель не состоит у вас на службе.");
+                            RelationsMc.REL.dismiss(actor, npc);
+                            return dev.worldforge.mod.api.ActionResult.ok(npc.name + " освобождён от службы.");
+                        }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+                if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                    source.sendFailure(Component.literal(task.message()));
+                    return 0;
+                }
+                source.sendSuccess(() -> Component.literal(task.message()), false);
+                return open(source);
+            } catch (RuntimeException ex) {
+                source.sendFailure(Component.literal("Не удалось освободить жителя: " + ex.getMessage()));
                 return 0;
             }
-            source.sendSuccess(() -> Component.literal(task.message()), false);
-            return open(source);
-        } catch (RuntimeException ex) {
-            source.sendFailure(Component.literal("Не удалось освободить жителя: " + ex.getMessage()));
-            return 0;
         }
     }
 }

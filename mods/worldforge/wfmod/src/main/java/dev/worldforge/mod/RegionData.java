@@ -26,11 +26,11 @@ public final class RegionData {
 
     public final List<Region> list = new ArrayList<>();
     private final Region[] byId;
-    private final byte[] labels;
+    private final RasterTileLayer labels;
     private final int w, h;
 
     @SuppressWarnings("unchecked")
-    RegionData(String json, byte[] labels, int w, int h) {
+    RegionData(String json, RasterTileLayer labels, int w, int h) {
         this.labels = labels;
         this.w = w;
         this.h = h;
@@ -63,7 +63,7 @@ public final class RegionData {
     int labelAt(int px, int pz) {
         px = px < 0 ? 0 : (px >= w ? w - 1 : px);
         pz = pz < 0 ? 0 : (pz >= h ? h - 1 : pz);
-        return labels[pz * w + px] & 0xFF;
+        return labels.sample(px, pz) & 0xFF;
     }
 
     public Region get(int id) {

@@ -1,6 +1,6 @@
 //! Deterministic population batch over immutable Character projections.
 use serde::{Deserialize,Serialize};
-use std::collections::{BTreeMap,BTreeSet};
+use std::collections::{BTreeMap,BTreeSet,HashSet};
 const MAX:i32=100;
 mod i64_decimal_string {
  use serde::{Deserialize,Deserializer,Serializer};
@@ -37,7 +37,7 @@ pub fn advance(r:Request)->Result<Frame,String>{
  if r.elapsed_days==0{return Err("elapsed_days must be positive".into())}
  // Validate IDs in a borrowed pass, then release those borrows before
  // consuming the request. This avoids cloning IDs merely for uniqueness checks.
- let mut seen=BTreeSet::new();
+ let mut seen=HashSet::with_capacity(r.characters.len());
  for p in r.characters.iter().filter(|person| person.alive){
   if p.id.trim().is_empty()||!seen.insert(p.id.as_str()){return Err(format!("empty or duplicate character id: {}",p.id))}
  }
@@ -50,13 +50,18 @@ pub fn advance(r:Request)->Result<Frame,String>{
   let d=p.elapsed_days.min(MAX as u64) as i32;
   let drifts=[("hunger",10*d),("rest",6*d),("social",2*d),("purpose",d),("leisure",3*d)];
   let age=r.year.saturating_sub(p.birth_year).max(0);
-  for (key,drift) in drifts{let value=need(&p.needs,key).saturating_add(drift).clamp(0,MAX);p.needs.insert(key.into(),value);}
+  for (key,drift) in drifts{
+   if let Some(value)=p.needs.get_mut(key){*value=value.saturating_add(drift).clamp(0,MAX);}
+   else{p.needs.insert(key.to_owned(),drift.clamp(0,MAX));}
+  }
   let intent=decide(&p,&p.needs,age).to_owned();
   out.push(PersonResult{id:p.id,needs:p.needs,intent,age_years:age,
    life_stage:stage(age).into(),simulated_days:p.simulated_days.max(0).saturating_add(p.elapsed_days.min(i64::MAX as u64) as i64),
    last_simulated_year:r.year,world_day:r.world_day});
  }
- out.sort_by(|a,b|a.id.cmp(&b.id));
+ // IDs are unique (validated above), so stable ordering has no semantic value.
+ // Unstable sorting preserves deterministic ID order without allocating a merge buffer.
+ out.sort_unstable_by(|a,b|a.id.cmp(&b.id));
  Ok(Frame{schema_version:1,world_id:r.world_id,year:r.year,elapsed_days:r.elapsed_days,world_day:r.world_day,characters:out})
 }
 #[cfg(test)]mod tests{use super::*;
@@ -93,6 +98,29 @@ pub fn advance(r:Request)->Result<Frame,String>{
   let fixture:Fixture=serde_json::from_str(include_str!("../../../../../shared/contracts/population-compute-parity-v1.json")).unwrap();
   let actual=advance(fixture.request).unwrap();
   assert_eq!(actual,fixture.expected);
+ }
+ #[test]
+ #[ignore = "explicit 100k/500k/1m population capacity gate; run in release mode"]
+ fn population_scale_100k_500k_1m() {
+  use std::time::Instant;
+  for count in [100_000usize, 500_000, 1_000_000] {
+   let started = Instant::now();
+   let mut people = Vec::with_capacity(count);
+   for i in 0..count {
+    people.push(Person {
+     id: format!("resident-{i:07}"), birth_year: 250 + (i % 500) as i32,
+     alive: true, elapsed_days: 1, ..Default::default()
+    });
+   }
+   let frame = advance(Request {
+    schema_version: 1, world_id: format!("population-scale-{count}"),
+    year: 750, elapsed_days: 1, world_day: 182_500, characters: people,
+   }).expect("population-scale frame must complete");
+   assert_eq!(frame.characters.len(), count);
+   assert!(frame.characters.windows(2).all(|pair| pair[0].id < pair[1].id));
+   println!("POPULATION_SCALE count={} elapsed_ms={}", count, started.elapsed().as_millis());
+   drop(frame);
+  }
  }
  #[test]fn invalid_schema_and_duplicate_ids_fail_closed(){let a=p("same");let r=Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![a.clone(),a]};assert!(advance(r).unwrap_err().contains("duplicate"));let r=Request{schema_version:2,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![]};assert!(advance(r).unwrap_err().contains("schema"));}
 }

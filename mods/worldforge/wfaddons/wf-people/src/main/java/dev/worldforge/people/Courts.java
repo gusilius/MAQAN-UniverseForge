@@ -41,23 +41,15 @@ public final class Courts {
             if (race.isBlank()) race = dominantRace(realm.props.get("races"));
             String culture = text(realm.props.get("culture"));
             if (culture.isBlank()) culture = names.culture(race);
-            Map<String, Integer> holders = new HashMap<>();
-            Set<String> usedHouses = new HashSet<>();
-            for (Character character : reg.all()) {
-                if (!character.house.isEmpty()) usedHouses.add(character.house);
-                if (!character.alive) continue;
-                for (Character.Post post : character.posts)
-                    holders.merge(holderKey(post.role, post.place), 1, Integer::sum);
-            }
+            Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
             int created = 0;
             for (Role role : defs.all()) {
                 if (!"realm".equals(role.per)) continue;
                 String key = holderKey(role.id, place);
-                int have = holders.getOrDefault(key, 0);
+                int have = reg.holderCount(role.id, place);
                 for (int i = have; i < role.count; i++) {
                     create(null, null, reg, defs, names, role, place, culture, realm.id, race,
                             new Random(mix(seed, place, role.id, i)), year, usedHouses);
-                    holders.merge(key, 1, Integer::sum);
                     created++;
                 }
             }
@@ -73,18 +65,10 @@ public final class Courts {
         // records; filling offices for every one of them creates a phantom population before
         // any polity has claimed territory.
         Set<Integer> realmOwnedTitles = realmOwnedTitleIds(d);
-        // Courts.ensure may run during world emergence. Build the role/place counts once:
-        // CharacterRegistry.holders() scans the complete population, so calling it for every
-        // role and every title made this pass O(roles * places * population).
-        Map<String, Integer> holderCounts = new HashMap<>();
-        Set<String> usedHouses = new HashSet<>();
-        for (Character character : reg.all()) {
-            if (!character.house.isEmpty()) usedHouses.add(character.house);
-            if (!character.alive) continue;
-            for (Character.Post post : character.posts) {
-                holderCounts.merge(holderKey(post.role, post.place), 1, Integer::sum);
-            }
-        }
+        // House uniqueness still needs the currently used house names, but office counts
+        // are served by the registry's role/place reverse index rather than a full-population
+        // aggregation pass.
+        Set<String> usedHouses = new HashSet<>(reg.houseNamesSnapshot());
         for (Role role : defs.all()) {
             List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
             if (role.per.equals("realm")) {
@@ -108,11 +92,10 @@ public final class Courts {
             }
             for (String[] pl : places) {
                 String key = holderKey(role.id, pl[0]);
-                int have = holderCounts.getOrDefault(key, 0);
+                int have = reg.holderCount(role.id, pl[0]);
                 for (int i = have; i < role.count; i++) {
                     create(d, ed, reg, defs, names, role, pl[0], pl[1], pl[2], pl[3],
                             new Random(mix(seed, pl[0], role.id, i)), year, usedHouses);
-                    holderCounts.merge(key, 1, Integer::sum);
                     created++;
                 }
             }

@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc.client;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.troops.BuildGhost;
 import dev.worldforge.troops.CameraRig;
@@ -13,7 +14,11 @@ import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -34,12 +39,25 @@ public final class CommandScreen extends Screen {
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
     private boolean dragging, midDrag, zoomDragging;
+    private boolean heightEditing;
+    private String heightInput = "";
+    private boolean embeddedInMaqan;
+    private String hoveredTooltipKey = "";
+    private long hoveredTooltipSince;
+    public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private double dragX, dragY, mx, my;
     // стройка
     private static volatile Settlement incomingSettlement;
     private Settlement settlement = incomingSettlement;
     private boolean settlementOpen = true;
     private boolean buildOpen;
+    private boolean recruitOpen;
+    private int recruitCount=1;
+    private String selectedRecruitType="";
+    private int recruitScroll;
+    private record RecruitOption(String id,String name,String role,int cost,double upkeep,
+                                 String building,Map<String,Integer> supply,String description) {}
+    private final List<RecruitOption> recruitOptions=new ArrayList<>();
     private boolean workAreaDrag;
     private int workMode = -1;
     private int workOverlay = 2;
@@ -63,7 +81,8 @@ public final class CommandScreen extends Screen {
             Defs defs = new Defs();
             if (m.get("defs") instanceof List<?> raw) for (Object o : raw) if (o instanceof String id) defs.add(id);
             incomingSettlement = Settlement.fromJson((String) m.get("s"), defs);
-            if (Minecraft.getInstance().screen instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+            CommandScreen screen = CommandMode.currentCommandView();
+            if (screen != null) screen.setSettlement(incomingSettlement);
         } catch (RuntimeException ex) {
             org.slf4j.LoggerFactory.getLogger("wf_troops").error("Не удалось подключить модель поселения к общей RTS-панели", ex);
         }
@@ -72,7 +91,7 @@ public final class CommandScreen extends Screen {
 
     @Override public boolean isPauseScreen() { return false; }
     @Override public boolean shouldCloseOnEsc() { return false; }
-    @Override public void removed() { CommandMode.exit(Minecraft.getInstance()); }
+    @Override public void removed() { CommandMode.onCommandViewRemoved(this); }
 
     double mouseX() { return mx; }
     double mouseY() { return my; }
@@ -87,11 +106,27 @@ public final class CommandScreen extends Screen {
         buildError = "";
         try {
             Map<String, Object> m = (Map<String, Object>) Json.parse(json);
-            if (m.get("error") != null) { buildError = String.valueOf(m.get("error")); return; }
+            if (m.get("error") != null) buildError = String.valueOf(m.get("error"));
             colName = String.valueOf(m.getOrDefault("colony", ""));
             colX = ((Number) m.getOrDefault("cx", 0)).intValue();
             colZ = ((Number) m.getOrDefault("cz", 0)).intValue();
             defs.addAll(BuildGhost.parseDefs(m.get("defs")));
+            recruitOptions.clear();
+            if(m.get("units") instanceof List<?> unitRows)for(Object rawUnit:unitRows){
+                if(!(rawUnit instanceof Map<?,?> unit))continue;
+                Map<String,Integer> supply=new TreeMap<>();
+                if(unit.get("supply") instanceof Map<?,?> costs)
+                    for(var entry:costs.entrySet())if(entry.getValue() instanceof Number amount)
+                        supply.put(String.valueOf(entry.getKey()),amount.intValue());
+                recruitOptions.add(new RecruitOption(String.valueOf(unit.get("id")),
+                        String.valueOf(unit.get("name")),String.valueOf(unit.get("role")),
+                        unit.get("cost") instanceof Number cost?cost.intValue():0,
+                        unit.get("upkeep") instanceof Number upkeep?upkeep.doubleValue():0.0,
+                        String.valueOf(unit.get("building")),Map.copyOf(supply),
+                        unit.get("description")==null?"":String.valueOf(unit.get("description"))));
+            }
+            if(selectedRecruitType.isBlank()&&!recruitOptions.isEmpty())
+                selectedRecruitType=recruitOptions.get(0).id();
             if (m.get("stock") instanceof Map<?, ?> s) for (var e : s.entrySet()) stock.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue());
             if (m.get("taken") instanceof List<?> l) for (Object o : l) {
                 Map<String, Object> t = (Map<String, Object>) o;
@@ -118,7 +153,7 @@ public final class CommandScreen extends Screen {
         picked = null;
         if (buildOpen) requestBuilds();
     }
-    private static final String[] WORK_LABELS = {"целые деревья", "камень", "руда", "расчистка", "выравнивание", "урожай", "мёд", "лекарственные растения"};
+    private static final String[] WORK_LABELS = {"целые деревья", "камень", "руда", "расчистка", "выравнивание", "урожай", "мёд", "лекарственные растения", "снести указанный блок"};
     private void cycleWorkMode() {
         workMode = (workMode + 1) % (WORK_LABELS.length + 1);
         if (workMode == WORK_LABELS.length) workMode = -1;
@@ -159,6 +194,46 @@ public final class CommandScreen extends Screen {
         double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
         CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
+    private int heightWidgetX() { return Math.max(4, width - 174); }
+    private int heightWidgetY() { return height - 54; }
+    private boolean overHeightWidget(double x, double y) {
+        return x >= heightWidgetX() && x <= width - 4 && y >= heightWidgetY() && y <= heightWidgetY()+22;
+    }
+    private void drawHeightWidget(GuiGraphics g) {
+        int x = heightWidgetX(), y = heightWidgetY();
+        CameraRig rig = CommandMode.RIG;
+        boolean locked = rig.heightLockedFor(rig.view);
+        g.fill(x, y, width - 4, y + 22, 0xD9101721);
+        g.renderOutline(x, y, width - x - 4, 22, locked ? 0xFFCEB56E : 0xFF526D83);
+        g.fill(x + 4, y + 4, x + 21, y + 18, 0xFF263747);
+        g.drawCenteredString(font, "−", x + 12, y + 7, 0xFFE8EDF5);
+        g.fill(x + 24, y + 4, x + 105, y + 18, 0xFF111C28);
+        String value = heightEditing ? heightInput + "_" : String.format(Locale.ROOT, "%.0f", rig.heightAbovePlayer);
+        g.drawCenteredString(font, value + " бл.", x + 64, y + 7, 0xFFE8EDF5);
+        g.fill(x + 108, y + 4, x + 125, y + 18, 0xFF263747);
+        g.drawCenteredString(font, "+", x + 116, y + 7, 0xFFE8EDF5);
+        g.fill(x + 128, y + 4, x + 166, y + 18, locked ? 0xFF66532B : 0xFF263747);
+        g.drawCenteredString(font, locked ? "FIX" : "LOCK", x + 147, y + 7, locked ? 0xFFFFE1A0 : 0xFFB9C8D8);
+    }
+    private boolean clickHeightWidget(double x, double y) {
+        if (!overHeightWidget(x, y)) return false;
+        int local = (int) x - heightWidgetX();
+        CameraRig rig = CommandMode.RIG;
+        if (local < 23) { heightEditing = false; rig.adjustHeight(-CameraRig.HEIGHT_STEP); }
+        else if (local >= 106 && local < 127) { heightEditing = false; rig.adjustHeight(CameraRig.HEIGHT_STEP); }
+        else if (local >= 127) { heightEditing = false; rig.setHeightLocked(!rig.heightLockedFor(rig.view)); }
+        else { heightEditing = true; heightInput = String.format(Locale.ROOT, "%.0f", rig.heightAbovePlayer); }
+        return true;
+    }
+    private void applyHeightInput() {
+        try {
+            double value = Double.parseDouble(heightInput);
+            if (value >= CameraRig.MIN_HEIGHT && value <= CameraRig.MAX_HEIGHT)
+                CommandMode.RIG.setHeightFromUser(value);
+        } catch (NumberFormatException ignored) { }
+        heightEditing = false;
+    }
+
     private boolean onZoomSlider(double x, double y) {
         return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
                 && y >= zoomSliderY() - 8 && y <= zoomSliderY() + 8;
@@ -181,35 +256,259 @@ public final class CommandScreen extends Screen {
         boolean hit(double px, double py) { return px >= x && px < x + w && py >= y && py < y + BTN_H; }
     }
 
+    private int commandButtonWidth() {
+        // Eight controls must remain reachable even at the smallest supported GUI scale.
+        return Math.max(18, Math.min(BTN_W, (width - 8 - 10) / 6));
+    }
+
     private List<Btn> buttons() {
         List<Btn> l = new ArrayList<>();
-        int x = width - 4 - BTN_W;
-        l.add(new Btn("Выход (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Стройка (B)", x, 4, BTN_W, buildOpen, this::toggleBuild));
-        x -= BTN_W + 4;
-        l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
-        x -= BTN_W + 4;
-        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.RIG.setView(CameraRig.View.SKY)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.RIG.setView(CameraRig.View.TACTICS)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.RIG.setView(CameraRig.View.FREE)));
+        int buttonWidth = commandButtonWidth();
+        boolean compact = buttonWidth < 52;
+        int gap = 2;
+        int x = width - 4 - buttonWidth;
+        l.add(new Btn(compact ? "×" : "Выход (R)", x, 4, buttonWidth, false, () -> CommandMode.exit(minecraft)));
+        x -= buttonWidth + gap;
+        l.add(new Btn("RTS", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.SKY,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.SKY)));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "ISO" : "Изометрия", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.TACTICS,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.TACTICS)));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "F" : "Свободная", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.FREE,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.FREE)));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "TOP" : "Сверху", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.TOP_DOWN,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.TOP_DOWN)));
+        x -= buttonWidth + gap;
+        l.add(new Btn(compact ? "POL" : "Политика", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.STRATEGIC,
+                () -> CommandMode.RIG.transitionTo(CameraRig.View.STRATEGIC)));
         return l;
     }
 
-    private int panelX() { return width - PANEL_W - 4; }
-    private int panelY() { return 26; }
-    private int panelH() { return Math.max(80, height - 26 - 90); }
+    private List<Btn> dockButtons(){
+        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Жители +","NPC +","Тело","1-е лицо"};
+        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ЖИТ+","NPC+","ТЕЛО","1P"};
+        int count=full.length,gap=3,available=Math.max(1,width-16);
+        int buttonWidth=Math.max(20,Math.min(92,(available-gap*(count-1))/count));
+        boolean compact=buttonWidth<64;
+        int total=count*buttonWidth+(count-1)*gap;
+        int x=Math.max(4,(width-total)/2),y=height-23;
+        List<Btn> out=new ArrayList<>(count);
+        Runnable[] actions={
+                this::selectAllWorkers,this::selectAllTroops,
+                ()->sendSelectedOrder(Squads.Kind.STOP),()->sendSelectedOrder(Squads.Kind.HOLD),
+                this::cycleSelectedFormation,this::cycleSelectedStance,
+                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,this::addWorkers,this::addNpcs,
+                this::selectPlayerBody,()->CommandMode.enterBodyCommand(minecraft)
+        };
+        for(int i=0;i<count;i++){
+            boolean on=switch(i){case 0->!CommandMode.selected().isEmpty()&&selectedWorkerIds().size()==CommandMode.selected().size();
+                case 1->!CommandMode.selected().isEmpty()&&selectedTroopIds().size()==CommandMode.selected().size();
+                case 6->workMode>=0;case 7->recruitOpen;case 8->buildOpen;default->false;};
+            out.add(new Btn(compact?shortLabels[i]:full[i],x,y,buttonWidth,on,actions[i]));
+            x+=buttonWidth+gap;
+        }
+        return out;
+    }
 
-    private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }
+    private List<String> selectedTroopIds(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof TroopEntity troop&&CommandMode.SEL.isSelected(troop.getUUID().toString()))
+                ids.add(troop.getUUID().toString());
+        return ids;
+    }
+
+    private void addNpcs(){
+        if(minecraft.player==null)return;
+        if(!minecraft.player.isCreative()){
+            minecraft.player.displayClientMessage(Component.literal("Произвольное создание NPC доступно в творческом режиме."),true);
+            return;
+        }
+        if(!net.minecraftforge.fml.ModList.get().isLoaded("wf_people")){
+            minecraft.player.displayClientMessage(Component.literal("Модуль wf_people не загружен."),true);
+            return;
+        }
+        minecraft.player.connection.sendCommand("wfpeople spawn \"Поселенец\" 4");
+    }
+    private void selectPlayerBody(){
+        if(minecraft.player==null)return;
+        CommandMode.SEL.set(List.of(minecraft.player.getUUID().toString()));
+        minecraft.player.displayClientMessage(Component.literal("Выбрано ваше тело. ПКМ — движение/атака, X — добыча, Ctrl+ПКМ — строительство."),true);
+    }
+
+    private void addWorkers(){
+        if(minecraft.player==null)return;
+        if(!minecraft.player.isCreative()){
+            minecraft.player.displayClientMessage(Component.literal(
+                    "В обычном режиме население растёт через жильё, еду и настроение. Ручное создание жителей — творческий инструмент."),true);
+            return;
+        }
+        minecraft.player.connection.sendCommand("wfsettle workers add 4");
+    }
+
+    private void selectAllWorkers(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof LivingEntity living&&CommandMode.isWorkerEntity(living)
+                    &&CommandMode.selectable(minecraft,living))ids.add(entity.getUUID().toString());
+        CommandMode.SEL.set(ids);
+        if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal(
+                ids.isEmpty()?"В загруженной области нет доступных рабочих":"Выбрано рабочих: "+ids.size()),true);
+    }
+
+    private void selectAllTroops(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof TroopEntity troop&&CommandMode.selectable(minecraft,troop))
+                ids.add(troop.getUUID().toString());
+        CommandMode.SEL.set(ids);
+        if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal(
+                ids.isEmpty()?"В загруженной области нет доступных войск":"Выбрано бойцов: "+ids.size()),true);
+    }
+
+    private void sendSelectedOrder(Squads.Kind order){
+        List<String> ids=CommandMode.selected();
+        if(ids.isEmpty()){
+            if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal("Сначала выделите рабочих или войска"),true);
+            return;
+        }
+        CommandMode.send(new OrderPacket(OrderPacket.ORDER,ids,order.ordinal(),0,0,"",false,0));
+    }
+
+    private void cycleSelectedFormation(){
+        if(CommandMode.selected().isEmpty())return;
+        CommandMode.formation=(CommandMode.formation+1)%Formations.Type.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.FORMATION,CommandMode.selected(),0,0,0,"",false,CommandMode.formation));
+    }
+
+    private void cycleSelectedStance(){
+        if(CommandMode.selected().isEmpty())return;
+        CommandMode.stance=(CommandMode.stance+1)%Squads.Stance.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.STANCE,CommandMode.selected(),0,0,0,"",false,CommandMode.stance));
+    }
+
+    private void drawCommandDock(GuiGraphics g,int mouseX,int mouseY){
+        List<Btn> dock=dockButtons();
+        if(dock.isEmpty())return;
+        int left=dock.get(0).x-6,right=dock.get(dock.size()-1).x+dock.get(dock.size()-1).w+6;
+        int y=height-28;
+        g.fill(left,y,right,height-2,0xB9101721);
+        g.fill(left,y,right,y+1,0xFF536D83);
+        g.renderOutline(left,y,right-left,height-y-2,0x884B657A);
+        for(Btn button:dock)button(g,button,mouseX,mouseY);
+    }
+
+    private void toggleRecruit(){
+        recruitOpen=!recruitOpen;
+        if(recruitOpen){
+            buildOpen=false;
+            if(recruitOptions.isEmpty())requestBuilds();
+        }
+        picked=null;
+    }
+
+    private int recruitPanelX(){return Math.max(4,width-panelW()-4);}
+    private int recruitPanelY(){return 30;}
+    private int recruitPanelH(){return Math.max(100,Math.min(height-72,300));}
+    private boolean inRecruitPanel(double x,double y){
+        return recruitOpen&&x>=recruitPanelX()&&x<recruitPanelX()+panelW()
+                &&y>=recruitPanelY()&&y<recruitPanelY()+recruitPanelH();
+    }
+    private void drawRecruitPanel(GuiGraphics g,int mouseX,int mouseY){
+        int x=recruitPanelX(),y=recruitPanelY(),w=panelW(),h=recruitPanelH();
+        g.fill(x,y,x+w,y+h,0xE8101721);
+        g.fill(x,y,x+w,y+2,0xFFD0A65B);
+        g.renderOutline(x,y,w,h,0xFF536D83);
+        g.drawString(font,"ВОЕННЫЙ НАБОР",x+8,y+7,0xFFFFD88B,false);
+        g.drawString(font,"−",x+w-70,y+7,0xFFE6D7B8,false);
+        g.drawString(font,String.valueOf(recruitCount),x+w-50,y+7,0xFFFFFFFF,false);
+        g.drawString(font,"+",x+w-25,y+7,0xFFE6D7B8,false);
+        g.drawString(font,minecraft.player!=null&&minecraft.player.isCreative()
+                ?"Творческий режим · без зданий и ресурсов"
+                :"Готовое здание + инструктор · склад + золото",x+8,y+22,0xFF9EAFC0,false);
+        int rowY=y+39,shown=0;
+        int visibleRows=Math.max(1,(h-39-34)/23);
+        recruitScroll=Math.max(0,Math.min(recruitScroll,Math.max(0,recruitOptions.size()-visibleRows)));
+        for(int optionIndex=recruitScroll;optionIndex<recruitOptions.size()&&shown<visibleRows;optionIndex++){
+            RecruitOption option=recruitOptions.get(optionIndex);
+            boolean active=option.id().equals(selectedRecruitType);
+            boolean hover=mouseX>=x+5&&mouseX<x+w-5&&mouseY>=rowY&&mouseY<rowY+22;
+            if(active||hover)g.fill(x+5,rowY,x+w-5,rowY+21,active?0x664C778D:0x443B5063);
+            String title=font.plainSubstrByWidth(option.name(),w-86);
+            g.drawString(font,title,x+10,rowY+3,active?0xFFFFE4A5:0xFFE3E8EF,false);
+            String meta=option.building()+" · "+option.cost()+" зол.";
+            g.drawString(font,font.plainSubstrByWidth(meta,w-86),x+10,rowY+12,0xFF93A6B8,false);
+            if(active)g.drawString(font,"◆",x+w-19,rowY+6,0xFFFFD36A,false);
+            rowY+=23;shown++;
+        }
+        if(recruitOptions.isEmpty())
+            g.drawString(font,buildError.isBlank()?"Получение списка войск…":buildError,x+8,y+54,0xFFFFB77A,false);
+        RecruitOption selected=recruitOptions.stream().filter(o->o.id().equals(selectedRecruitType)).findFirst().orElse(null);
+        if(selected!=null){
+            String supply=selected.supply().entrySet().stream().map(e->e.getKey()+" "+e.getValue()*recruitCount)
+                    .collect(java.util.stream.Collectors.joining(" · "));
+            g.drawString(font,font.plainSubstrByWidth("Снабжение: "+supply,w-16),x+8,y+h-31,0xFF9EC7B3,false);
+            g.fill(x+8,y+h-20,x+w-8,y+h-5,0xFF315A46);
+            g.drawCenteredString(font,"НАНЯТЬ "+recruitCount+" · "+selected.id(),x+w/2,y+h-17,0xFFE9F4E9);
+        }
+    }
+    private void recruitPanelClick(double x,double y){
+        int px=recruitPanelX(),py=recruitPanelY(),w=panelW(),h=recruitPanelH();
+        if(y<py+19){
+            if(x>=px+w-80&&x<px+w-54)recruitCount=Math.max(1,recruitCount-1);
+            else if(x>=px+w-36&&x<px+w-8)recruitCount=Math.min(minecraft.player!=null&&minecraft.player.isCreative()?1000:Squads.MAX_SIZE,recruitCount+1);
+            return;
+        }
+        if(y>=py+39&&y<py+h-34){
+            int row=(int)((y-(py+39))/23);
+            int visibleRows=Math.max(1,(h-39-34)/23);
+            if(row>=0&&row<visibleRows){
+                int index=recruitScroll+row;
+                if(index>=0&&index<recruitOptions.size())selectedRecruitType=recruitOptions.get(index).id();
+            }
+            return;
+        }
+        if(y>=py+h-22){
+            RecruitOption selected=recruitOptions.stream().filter(o->o.id().equals(selectedRecruitType)).findFirst().orElse(null);
+            if(selected==null)return;
+            if(minecraft.player!=null)minecraft.player.connection.sendCommand(
+                    "wftroops raise "+selected.id()+" "+recruitCount);
+            recruitOpen=false;
+        }
+    }
+
+    private int panelW() { return Math.max(1, Math.min(PANEL_W, width - 8)); }
+    private int panelX() { return Math.max(0, width - panelW() - 4); }
+    private int panelY() { return 26; }
+    private int panelH() {
+        // Keep the build list above the shared RTS command dock.
+        int bottomReserve = 56;
+        return Math.max(3, height - panelY() - bottomReserve);
+    }
+
+    private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + panelW() && py >= panelY() && py < panelY() + panelH(); }
 
     private boolean inSelPanel(double px, double py) { return px < 192 && py > height - 90; }
 
+    private int miniMapX() { return width - 146; }
+    private int miniMapY() { return height - 104; }
+    private boolean overMiniMap(double x, double y) {
+        return embeddedInMaqan && x >= miniMapX() && x < miniMapX()+136 && y >= miniMapY() && y < miniMapY()+94;
+    }
+
     boolean overPanel(double px, double py) {
-        if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
-        if (onZoomSlider(px, py)) return true;
-        return inBuildPanel(px, py) || inSelPanel(px, py);
+        if (py >= 4 && py < 4 + BTN_H + 2
+                && px >= width - 4 - 8 * commandButtonWidth() - 14) return true;
+        if (overHeightWidget(px,py)) return true;
+        if (py >= height-28 && py < height-2) return true;
+        if (!embeddedInMaqan && onZoomSlider(px, py)) return true;
+        if (settlement != null && px >= 4 && px < 254
+                && py >= 34 && py < 34 + settlementSummaryHeight()) return true;
+        if (!CommandMode.selected().isEmpty() && px >= INSPECT_X && px < INSPECT_X + INSPECT_W
+                && py >= inspectY() && py < inspectY() + 96) return true;
+        return inBuildPanel(px, py) || inRecruitPanel(px,py) || inSelPanel(px, py);
     }
 
     private List<String> categories() {
@@ -226,18 +525,46 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
+    private int categoryRowCount() {
+        int left = panelX() + 6, right = panelX() + panelW() - 4;
+        int cursor = left, rows = 0;
+        List<String> chips = new ArrayList<>();
+        chips.add("");
+        chips.addAll(categories());
+        for (String category : chips) {
+            String label = category.isEmpty() ? "Все" : catName(category);
+            int chipWidth = font.width(label) + 8;
+            if (cursor + chipWidth > right) { cursor = left; rows++; }
+            cursor += chipWidth + 3;
+        }
+        return rows + 1;
+    }
+
+    private int buildListY() { return panelY() + 28 + categoryRowCount() * 12 + 4; }
+
+    private int rowsFit() {
+        return Math.max(0, (panelY() + panelH() - buildListY() - 20) / ROW);
+    }
 
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
-    private int inspectY() { return settlementOpen ? 148 : 34; }
+    private int settlementSummaryHeight() { return height < 250 ? 40 : 106; }
+    private int inspectY() { return settlementOpen ? 34 + settlementSummaryHeight() + 8 : 34; }
+    private int inspectorRowsFit() {
+        return Math.max(1, Math.min(8, (height - inspectY() - 42) / INSPECT_ROW));
+    }
 
     private boolean inspectAt(double x,double y) {
+        List<String> ids=CommandMode.selected();
+        if (ids.size() == 1) {
+            if (x < INSPECT_X || x >= INSPECT_X + INSPECT_W
+                    || y < inspectY() || y >= inspectY() + 96) return false;
+            focusSelection();
+            return true;
+        }
         if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
         int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
-        List<String> ids=CommandMode.selected();
-        if(row<0||row>=Math.min(8,ids.size()))return false;
-        if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
+        if(row<0||row>=Math.min(inspectorRowsFit(),ids.size()))return false;
         String id=ids.get(row);
         for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
             if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
@@ -250,13 +577,14 @@ public final class CommandScreen extends Screen {
 
     private void drawSettlementPanel(GuiGraphics g) {
         if (settlement == null) return;
-        int x = 4, y = 34, w = 250, h = 106;
+        int x = 4, y = 34, w = 250, h = settlementSummaryHeight();
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
         g.drawString(font, "ПОСЕЛЕНИЕ · " + settlement.name, x + 6, y + 5, 0xFFE6C875, false);
         String pop = "Жители " + settlement.workers.size() + " / жильё " + settlement.housing()
                 + " · настроение " + settlement.approval() + " · здания " + settlement.buildings.size();
         g.drawString(font, font.plainSubstrByWidth(pop, w - 12), x + 6, y + 17, 0xFFD7DCE8, false);
+        if (h < 60) return;
         int rx = x + 6, ry = y + 31, col = 0;
         for (var entry : settlement.defs.resourceNames.entrySet()) {
             String text = entry.getValue() + " " + (int) settlement.amount(entry.getKey());
@@ -269,11 +597,75 @@ public final class CommandScreen extends Screen {
         g.drawString(font, "Рабочие, армия, стройка и приказы — в этом командном пространстве", x + 6, y + h - 11, 0xFF9EA4B5, false);
     }
 
+    /** One selected body gets a real renderer-backed portrait; every vanilla/modded LivingEntity uses its registered renderer. */
+    private void drawSingleUnitPortrait(GuiGraphics g, LivingEntity entity, String entityUuid) {
+        int x = INSPECT_X, y = inspectY(), h = 96;
+        g.fill(x, y, x + INSPECT_W, y + h, 0xD910121A);
+        g.fill(x, y, x + INSPECT_W, y + 1, 0xFF8A7040);
+        boolean troop = entity instanceof TroopEntity;
+        String role, identity = "", state = "";
+        int morale = -1, xp = -1;
+        if (entity instanceof TroopEntity t) {
+            role = t.def() == null ? t.unitId() : t.def().role();
+            morale = t.moralePct();
+            identity = t.syncedCharacterId() == null ? "" : t.syncedCharacterId();
+            xp = t.syncedCombatXp();
+            state = t.squadId() == null || t.squadId().isBlank() ? "" : "Отряд " + t.squadId();
+        } else if (CommandMode.isWorkerEntity(entity)) {
+            role = CommandMode.workerString(entity, "professionId");
+            if (role.isBlank()) role = "Рабочий";
+            identity = CommandMode.workerString(entity, "characterId");
+            state = CommandMode.workerString(entity, "statusLabel");
+            int assigned = CommandMode.workerInt(entity, "assignedBuildingId");
+            if (assigned > 0) state += " · здание #" + assigned;
+        } else {
+            role = entity.getType().builtInRegistryHolder().key().location().toString();
+        }
+        g.drawString(font, troop ? "КОМАНДИР ОТРЯДА" : "ВЫБРАННЫЙ ПЕРСОНАЖ",
+                x + 6, y + 6, 0xFFE6C875, false);
+        g.fill(x + 4, y + 20, x + 78, y + h - 4, 0xFF202733);
+        g.renderOutline(x + 4, y + 20, 74, h - 24, 0xFF6A7482);
+        g.enableScissor(x + 5, y + 21, x + 77, y + h - 5);
+        try {
+            InventoryScreen.renderEntityInInventoryFollowsMouse(g,
+                    x + 41, y + h - 5, 34,
+                    (float) (mx - (x + 41)), (float) (my - (y + 55)), entity);
+        } catch (RuntimeException rendererFailure) {
+            g.drawCenteredString(font, "MODEL", x + 41, y + 55, 0xFF9EA4B5);
+        } finally {
+            g.disableScissor();
+        }
+        int tx = x + 84;
+        int health = entity.getMaxHealth() > 0
+                ? Math.round(100 * entity.getHealth() / entity.getMaxHealth()) : 0;
+        g.drawString(font, font.plainSubstrByWidth(entity.getDisplayName().getString(), INSPECT_W - 92),
+                tx, y + 23, troop ? 0xFFE6C875 : 0xFFB8D8A0, false);
+        g.drawString(font, font.plainSubstrByWidth(role, INSPECT_W - 92), tx, y + 35, 0xFFD7DCE8, false);
+        g.drawString(font, "Здоровье " + health + "%"
+                        + (morale >= 0 ? " · Мораль " + morale + "%" : "")
+                        + (xp >= 0 ? " · XP " + xp : ""),
+                tx, y + 47, 0xFFB5B7C2, false);
+        if (!state.isBlank())
+            g.drawString(font, font.plainSubstrByWidth(state, INSPECT_W - 92), tx, y + 59, 0xFF9EA4B5, false);
+        String id = identity.isBlank() ? entityUuid : identity;
+        g.drawString(font, id.length() > 22 ? id.substring(0, 22) + "…" : id,
+                tx, y + 72, 0xFF777F91, false);
+        g.drawString(font, "Клик по карточке — фокус камеры", tx, y + 83, 0xFF8F9AA9, false);
+    }
+
     private void drawUnitInspector(GuiGraphics g) {
         List<String> ids=CommandMode.selected();
         if(ids.isEmpty())return;
-        int rows=Math.min(8,ids.size());
-        int h=24+rows*INSPECT_ROW;
+        if (ids.size() == 1) {
+            String selectedId = ids.get(0);
+            for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+                if (!(entity instanceof LivingEntity living) || !entity.getUUID().toString().equals(selectedId)) continue;
+                drawSingleUnitPortrait(g, living, selectedId);
+                return;
+            }
+        }
+        int rows=Math.min(inspectorRowsFit(),ids.size());
+        int h=38+rows*INSPECT_ROW;
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
         g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
         g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,inspectY()+6,0xFFE6C875,false);
@@ -319,7 +711,7 @@ public final class CommandScreen extends Screen {
             }
             row++;
         }
-        if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
+        if(ids.size()>rows)g.drawString(font,"Ещё "+(ids.size()-rows)+" · прокрутите выбор",
                 INSPECT_X+6,inspectY()+h-10,0xFF9EA4B5,false);
     }
 
@@ -328,21 +720,48 @@ public final class CommandScreen extends Screen {
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
-        if(button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
+        if (clickHeightWidget(x, y)) return true;
+
+        if(!embeddedInMaqan && button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
         if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
+            for(Btn b:dockButtons())if(b.hit(x,y)){b.run().run();return true;}
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
+            if (recruitOpen && inRecruitPanel(x,y)) { recruitPanelClick(x,y); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
+            // Consume clicks on every remaining UI surface before issuing world orders.
+            if (overPanel(x, y)) return true;
             if (picked != null) { place(shift); return true; }
             if (workMode >= 0) { workAreaDrag = true; dragging = true; dragX = x; dragY = y; return true; }
             dragging = true; dragX = x; dragY = y;
             return true;
         }
-        if (button == 2) { midDrag = true; return true; }
+        if (button == 2) {
+            if (overPanel(x, y)) return true;
+            midDrag = true;
+            return true;
+        }
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
             if (overPanel(x, y)) return true;
+            if(ctrl&&minecraft.player!=null&&!CommandMode.SEL.selected().isEmpty()){
+                net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,x,y);
+                if(target!=null){
+                    String coordinates=target.getX()+","+target.getY()+","+target.getZ();
+                    if(CommandMode.SEL.isSelected(minecraft.player.getUUID().toString()))
+                        CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,List.of(minecraft.player.getUUID().toString()),
+                                0,0,0,coordinates,false,OrderPacket.BODY_BUILD));
+                    List<String> npcs=new ArrayList<>();
+                    for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+                        if(entity instanceof LivingEntity living&&CommandMode.isOwnedNpcEntity(living)
+                                &&CommandMode.selectable(minecraft,living)&&CommandMode.SEL.isSelected(entity.getUUID().toString()))
+                            npcs.add(entity.getUUID().toString());
+                    if(!npcs.isEmpty())CommandMode.send(new OrderPacket(OrderPacket.NPC_TASK,npcs,0,0,0,coordinates,false,2));
+                    minecraft.player.displayClientMessage(Component.literal("Приказ: построить из имеющихся блоков"),true);
+                    return true;
+                }
+            }
             LivingEntity resident = CommandMode.residentAt(minecraft, x, y);
             if (resident != null && minecraft.player != null) {
                 minecraft.player.connection.sendCommand("wfresident open " + resident.getUUID());
@@ -377,12 +796,12 @@ public final class CommandScreen extends Screen {
         for (String c : chips) {
             String label = c.isEmpty() ? "Все" : catName(c);
             int w = font.width(label) + 8;
-            if (cx + w > panelX() + PANEL_W - 4) { cx = px; row++; }
+            if (cx + w > panelX() + panelW() - 4) { cx = px; row++; }
             int yy = cy + row * 12;
             if (x >= cx && x < cx + w && y >= yy && y < yy + 11) { cat = c; scroll = 0; picked = null; return; }
             cx += w + 3;
         }
-        int listY = cy + (row + 1) * 12 + 4;
+        int listY = buildListY();
         List<BuildGhost.Def> vis = visibleDefs();
         int i = (int) ((y - listY) / ROW) + scroll;
         if (y >= listY && i >= 0 && i < vis.size() && (y - listY) / ROW < rowsFit()) picked = vis.get(i);
@@ -423,10 +842,106 @@ public final class CommandScreen extends Screen {
         return true;
     }
 
+    private void focusMiniMap(double x, double y) {
+        if (settlement == null) return;
+        MiniMapBounds bounds = miniMapBounds();
+        double lx = bounds.centerX + (x - (miniMapX()+8) - 60) / bounds.scale;
+        double lz = bounds.centerZ + (y - (miniMapY()+18) - 38) / bounds.scale;
+        CommandMode.RIG.focusOn(colX + lx, colZ + lz);
+    }
+
+    private record MiniMapBounds(double centerX, double centerZ, double scale) {}
+    private MiniMapBounds miniMapBounds() {
+        double minX=-24,maxX=24,minZ=-24,maxZ=24;
+        if (settlement != null) {
+            for (Building building : settlement.buildings) {
+                minX=Math.min(minX,building.x-building.def.sizeX/2.0-8); maxX=Math.max(maxX,building.x+building.def.sizeX/2.0+8);
+                minZ=Math.min(minZ,building.z-building.def.sizeZ/2.0-8); maxZ=Math.max(maxZ,building.z+building.def.sizeZ/2.0+8);
+            }
+            for (var worker : settlement.workers) {
+                minX=Math.min(minX,worker.x-8); maxX=Math.max(maxX,worker.x+8);
+                minZ=Math.min(minZ,worker.z-8); maxZ=Math.max(maxZ,worker.z+8);
+            }
+        }
+        double spanX=Math.max(32,maxX-minX),spanZ=Math.max(32,maxZ-minZ);
+        return new MiniMapBounds((minX+maxX)*0.5,(minZ+maxZ)*0.5,Math.min(120/spanX,76/spanZ));
+    }
+
+    private static String minimapBuildingItem(String category) {
+        if (category == null) return "minecraft:compass";
+        return switch (category.toLowerCase(Locale.ROOT)) {
+            case "housing" -> "minecraft:oak_door";
+            case "food" -> "minecraft:wheat";
+            case "industry" -> "minecraft:furnace";
+            case "storage" -> "minecraft:chest";
+            case "military" -> "minecraft:iron_sword";
+            case "trade" -> "minecraft:emerald";
+            case "civic" -> "minecraft:bell";
+            default -> "minecraft:compass";
+        };
+    }
+
+    private void drawMiniMap(GuiGraphics g) {
+        int x=miniMapX(),y=miniMapY(),w=136,h=94;
+        g.fill(x-3,y-3,x+w+3,y+h+3,0xD810151D);
+        g.fill(x,y,x+w,y+h,0xFF101820);
+        g.renderOutline(x,y,w,h,0xFF668091);
+        g.drawString(font,"ПОСЕЛЕНИЕ",x+6,y+4,0xFF8FDDF0,false);
+        if(settlement==null){g.drawCenteredString(font,"NO DATA",x+w/2,y+43,0xFF788A98);return;}
+        MiniMapBounds bounds=miniMapBounds();
+        int ox=x+8,oy=y+18;
+        g.enableScissor(x+2,y+18,x+w-2,y+h-2);
+        for(Building building:settlement.buildings) {
+            int bx=ox+60+(int)Math.round((building.x-bounds.centerX)*bounds.scale);
+            int bz=oy+38+(int)Math.round((building.z-bounds.centerZ)*bounds.scale);
+            int bw=Math.max(2,(int)Math.round(building.def.sizeX*bounds.scale));
+            int bh=Math.max(2,(int)Math.round(building.def.sizeZ*bounds.scale));
+            g.fill(bx-bw/2-1,bz-bh/2-1,bx+bw/2+2,bz+bh/2+2,0xC8081018);
+            String itemId = minimapBuildingItem(building.def.category);
+            ResourceLocation item = ResourceLocation.tryParse(itemId);
+            ItemStack stack = item == null ? ItemStack.EMPTY
+                    : new ItemStack(BuiltInRegistries.ITEM.get(item));
+            if (!stack.isEmpty()) {
+                int iconSize = Math.max(6, Math.min(12, Math.max(bw, bh)));
+                g.pose().pushPose();
+                g.pose().translate(bx - iconSize / 2.0F, bz - iconSize / 2.0F, 0.0F);
+                float scale = iconSize / 16.0F;
+                g.pose().scale(scale, scale, 1.0F);
+                g.renderItem(stack, 0, 0);
+                g.pose().popPose();
+            } else {
+                g.fill(bx-bw/2,bz-bh/2,bx+bw/2+1,bz+bh/2+1,
+                        building.state==Building.State.DONE?0xFFB9A36A:0xFF687987);
+            }
+            if (building.state != Building.State.DONE)
+                g.renderOutline(bx-bw/2-1,bz-bh/2-1,Math.max(3,bw+2),Math.max(3,bh+2),0xFF79C9F2);
+        }
+        for(var worker:settlement.workers) {
+            int wx=ox+60+(int)Math.round((worker.x-bounds.centerX)*bounds.scale);
+            int wz=oy+38+(int)Math.round((worker.z-bounds.centerZ)*bounds.scale);
+            g.fill(wx-1,wz-1,wx+2,wz+2,0xFF65D69A);
+        }
+        int cx=ox+60+(int)Math.round((CommandMode.RIG.fx-colX-bounds.centerX)*bounds.scale);
+        int cz=oy+38+(int)Math.round((CommandMode.RIG.fz-colZ-bounds.centerZ)*bounds.scale);
+        g.fill(cx-3,cz-1,cx+4,cz+2,0xFF66D9FF);
+        g.fill(cx-1,cz-3,cx+2,cz+4,0xFF66D9FF);
+        g.disableScissor();
+    }
+
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
-        if (button == 2) CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+        if (button == 2 && !midDrag) return false;
+        if (button == 2 && midDrag) {
+            if (hasShiftDown()) {
+                // Shift + middle drag pans the tactical map in screen space;
+                // plain middle drag remains the free-look orbit gesture.
+                CommandMode.RIG.pan(-dy * 0.01, -dx * 0.01, 1.0 / 60.0, false);
+                CommandMode.RIG.clamp(minecraft.player.getX(), minecraft.player.getZ());
+            } else {
+                CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+            }
+        }
         if (button == 0 && zoomDragging) setZoomFromMouse(x);
         return true;
     }
@@ -436,15 +951,44 @@ public final class CommandScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double delta) {
+        if(recruitOpen&&inRecruitPanel(x,y)){
+            int visibleRows=Math.max(1,(recruitPanelH()-39-34)/23);
+            recruitScroll=Math.max(0,Math.min(Math.max(0,recruitOptions.size()-visibleRows),
+                    recruitScroll+(delta<0?1:-1)));
+            return true;
+        }
         if (buildOpen && inBuildPanel(x, y)) {
             int max = Math.max(0, visibleDefs().size() - rowsFit());
             scroll = Math.max(0, Math.min(max, scroll + (delta < 0 ? 1 : -1)));
-        } else CommandMode.RIG.zoomBy(delta);
+        } else if (overHeightWidget(x, y)) {
+            return true;
+        } else if (overPanel(x, y)) {
+            return true; // UI surfaces consume the wheel; do not zoom the world behind them.
+        } else if (hasControlDown()
+                || GLFW.glfwGetMouseButton(Minecraft.getInstance().getWindow().getWindow(),
+                        GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS) {
+            CommandMode.RIG.adjustHeight(Math.signum(delta) * CameraRig.HEIGHT_STEP);
+        } else {
+            CommandMode.zoomAtCursor(minecraft, x, y, delta);
+        }
         return true;
     }
 
     @Override
     public boolean keyPressed(int key, int scan, int mods) {
+        if (heightEditing) {
+            if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) { applyHeightInput(); return true; }
+            if (key == GLFW.GLFW_KEY_BACKSPACE) {
+                if (!heightInput.isEmpty()) heightInput = heightInput.substring(0, heightInput.length() - 1);
+                return true;
+            }
+            if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
+                if (heightInput.length() < 3) heightInput += (char) ('0' + key - GLFW.GLFW_KEY_0);
+                return true;
+            }
+            if (key == GLFW.GLFW_KEY_ESCAPE) { heightEditing = false; return true; }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_ESCAPE) {
             if (picked != null) picked = null;
             else if (buildOpen) buildOpen = false;
@@ -454,7 +998,26 @@ public final class CommandScreen extends Screen {
         if (CommandMode.TOGGLE.matches(key, scan)) { CommandMode.exit(minecraft); return true; }
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
+        if (key == GLFW.GLFW_KEY_X && minecraft.player!=null
+                &&!CommandMode.SEL.selected().isEmpty()) {
+            net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,mx,my);
+            if(target!=null){
+                String coordinates=target.getX()+","+target.getY()+","+target.getZ();
+                if(CommandMode.SEL.isSelected(minecraft.player.getUUID().toString()))
+                    CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,List.of(minecraft.player.getUUID().toString()),
+                            0,0,0,coordinates,false,OrderPacket.BODY_CHOP));
+                List<String> npcs=new ArrayList<>();
+                for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+                    if(entity instanceof LivingEntity living&&CommandMode.isOwnedNpcEntity(living)
+                            &&CommandMode.selectable(minecraft,living)&&CommandMode.SEL.isSelected(entity.getUUID().toString()))
+                        npcs.add(entity.getUUID().toString());
+                if(!npcs.isEmpty())CommandMode.send(new OrderPacket(OrderPacket.NPC_TASK,npcs,0,0,0,coordinates,false,1));
+                minecraft.player.displayClientMessage(Component.literal("Приказ: рубить/добывать выбранным телам"),true);
+            }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
+        if (key == GLFW.GLFW_KEY_N) { toggleRecruit(); return true; }
         if (key == GLFW.GLFW_KEY_H) {
             settlementOpen = !settlementOpen;
             if (settlement == null && minecraft.player != null) minecraft.player.connection.sendCommand("wfsettle view hud");
@@ -599,6 +1162,30 @@ public final class CommandScreen extends Screen {
         g.fill(b.x, b.y, b.x + b.w, b.y + BTN_H, b.on ? 0xEE3A5A2A : over ? 0xEE3A3A52 : 0xDD15151F);
         g.fill(b.x, b.y, b.x + b.w, b.y + 1, b.on ? 0xFF8AD060 : 0xFF6A5A30);
         g.drawCenteredString(font, b.label, b.x + b.w / 2, b.y + 4, b.on ? 0xFFDDFFCC : 0xFFE6C875);
+        if(over){
+            String key=b.label;
+            if(!key.equals(hoveredTooltipKey)){hoveredTooltipKey=key;hoveredTooltipSince=System.currentTimeMillis();}
+            if(System.currentTimeMillis()-hoveredTooltipSince>=1500){
+                String description=switch(key){
+                    case "РАБ.","Рабочие"->"Выделить всех доступных рабочих поблизости";
+                    case "ВОЙ.","Войска"->"Выделить все подконтрольные военные отряды";
+                    case "СТОП","Стоп"->"Остановить выделенных и очистить очередь приказов";
+                    case "ДЕРЖ.","Удержать"->"Удерживать текущую позицию";
+                    case "ФОРМ.","Формация"->"Сменить боевую формацию выделенных отрядов";
+                    case "СТОЙ.","Стойка"->"Сменить боевую стойку и правила вступления в бой";
+                    case "ЗОНЫ","Участки"->"Назначить рабочим лес, камень, руду и другие рабочие зоны";
+                    case "НАЙМ","Найм"->"Открыть набор войск; в творческом режиме здания и ресурсы не нужны";
+                    case "СТРОЙ","Стройка"->"Открыть каталог поселения и разместить чертёж";
+                    case "ЖИТ+","Жители +"->"Добавить четырёх жителей поселения в творческом режиме";
+                    case "NPC+","NPC +"->"Создать четыре принадлежащих вам автономных NPC";
+                    case "ТЕЛО","Тело"->"Выделить собственное тело как единицу RTS";
+                    case "1P","1-е лицо"->"Вернуться к непосредственному управлению от первого лица";
+                    case "ТЕЛО","Тело"->"Вернуться к виду от первого лица и приказам персонажу";
+                    default->key;
+                };
+                g.renderTooltip(font,Component.literal(description),mxx,myy);
+            }
+        }else if(hoveredTooltipKey.equals(b.label)){hoveredTooltipKey="";hoveredTooltipSince=0;}
     }
 
     @Override
@@ -641,13 +1228,18 @@ public final class CommandScreen extends Screen {
             g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
-        drawSelection(g, h);
+        // The unit inspector is the detailed selection surface. Suppress the legacy
+        // aggregate box while units are selected so the two panels cannot overlap.
+        if (!embeddedInMaqan && CommandMode.selected().isEmpty()) drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
-        drawZoomSlider(g);
+        if (!embeddedInMaqan) drawZoomSlider(g);
+        drawHeightWidget(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
-        String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
+        if (recruitOpen) drawRecruitPanel(g,mxi,myi);
+        drawCommandDock(g,mxi,myi);
+        String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена"
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD — камера · Ctrl/СКМ+колесо — высота · колесо — приближение · СКМ — вращать · P патруль · G/ТЕЛО — управление персонажем · R — выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);
@@ -776,11 +1368,12 @@ public final class CommandScreen extends Screen {
     }
 
     private void drawBuildPanel(GuiGraphics g, int mxi, int myi) {
-        int x = panelX(), y = panelY(), pw = PANEL_W, ph = panelH();
+        int x = panelX(), y = panelY(), pw = panelW(), ph = panelH();
         g.fill(x, y, x + pw, y + ph, 0xDD101018);
         g.fill(x, y, x + pw, y + 1, 0xFF6A5A30);
+        g.enableScissor(x + 1, y + 1, x + pw - 1, y + ph - 1);
         g.drawString(font, buildError.isEmpty() ? "Стройка: " + (colName.isEmpty() ? "…" : colName) : buildError, x + 6, y + 5, buildError.isEmpty() ? 0xFFE6C875 : 0xFFFF8888, false);
-        if (!buildError.isEmpty()) return;
+        if (!buildError.isEmpty()) { g.disableScissor(); return; }
         StringBuilder st = new StringBuilder();
         for (var e : new TreeMap<>(stock).entrySet()) if (e.getValue() > 0 && st.length() < 60) st.append(st.length() > 0 ? " " : "").append(RES.getOrDefault(e.getKey(), e.getKey())).append(' ').append(e.getValue());
         g.drawString(font, font.plainSubstrByWidth(st.length() == 0 ? "Склад пуст" : st.toString(), pw - 12), x + 6, y + 16, 0xFFAAAAAA, false);
@@ -798,7 +1391,7 @@ public final class CommandScreen extends Screen {
             g.drawString(font, label, cx + 4, yy + 2, on ? 0xFFDDFFCC : 0xFFBBBBBB, false);
             cx += cw + 3;
         }
-        int listY = cy + (row + 1) * 12 + 4;
+        int listY = buildListY();
         List<BuildGhost.Def> vis = visibleDefs();
         int fit = rowsFit();
         BuildGhost.Def hover = null;
@@ -820,5 +1413,6 @@ public final class CommandScreen extends Screen {
             for (var e : info.cost().entrySet()) c.append(RES.getOrDefault(e.getKey(), e.getKey())).append(' ').append(e.getValue()).append("  ");
             g.drawString(font, font.plainSubstrByWidth(c.toString(), pw - 12), x + 6, y + ph - 12, 0xFFE6C875, false);
         }
+        g.disableScissor();
     }
 }

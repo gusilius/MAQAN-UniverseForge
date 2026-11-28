@@ -3,6 +3,7 @@ package dev.worldforge.people.mc;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterInventory;
+import dev.worldforge.people.CharacterAccessService;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
@@ -96,8 +97,7 @@ public final class PlayerInventoryBridge {
             Character character = PeopleMod.playerCharacter(player.getUUID());
             if (character != null && Boolean.TRUE.equals(character.props.get(INITIALIZED))
                     && SAFE_DEATH_SNAPSHOTS.remove(player.getUUID())) try {
-                restore(player, character);
-                if (!rebaseAfterRestore(player, character))
+                if (!projectNow(player))
                     throw new IllegalStateException("Respawn inventory projection could not be durably saved");
             } catch (RuntimeException ex) {
                 LOGGER.error("wf_people: player inventory restore after respawn failed for {}: {}",
@@ -130,8 +130,14 @@ public final class PlayerInventoryBridge {
         Character character = PeopleMod.playerCharacter(player.getUUID());
         if (character == null) return false;
         try {
-            restore(player, character);
-            return rebaseAfterRestore(player, character);
+            boolean[] persisted = {false};
+            CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(), List.of(character.globalId), participants -> {
+                Character canonical = participants.get(character.globalId);
+                restore(player, canonical);
+                persisted[0] = rebaseAfterRestore(player, canonical);
+                return true;
+            });
+            return persisted[0];
         } catch (RuntimeException ex) {
             LOGGER.error("wf_people: could not project canonical inventory for {}: {}",
                     player.getGameProfile().getName(), ex.toString(), ex);
@@ -141,9 +147,27 @@ public final class PlayerInventoryBridge {
 
     public static ItemStack decodeItem(CharacterInventory.Item item) { return decode(item); }
 
+    private record SyncOutcome(boolean success, boolean changed) { }
+
     private static boolean sync(ServerPlayer player) {
         Character character = PeopleMod.playerCharacter(player.getUUID());
         if (character == null || player.getServer() == null) return false;
+        try {
+            boolean[] success = {false};
+            CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(), List.of(character.globalId), participants -> {
+                SyncOutcome outcome = syncLeased(player, participants.get(character.globalId));
+                success[0] = outcome.success();
+                return outcome.changed();
+            });
+            return success[0];
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_people: player inventory snapshot failed for {}: {}",
+                    player.getGameProfile().getName(), ex.toString(), ex);
+            return false;
+        }
+    }
+
+    private static SyncOutcome syncLeased(ServerPlayer player, Character character) {
         try {
             Snapshot snapshot = capture(player);
             String fingerprint = fingerprint(snapshot);
@@ -158,7 +182,7 @@ public final class PlayerInventoryBridge {
             boolean persistenceDirty = Boolean.TRUE.equals(character.props.get(SYNC_DIRTY));
             CharacterInventory.PlayerSyncDecision decision = CharacterInventory.playerSyncDecision(
                     externalLedgerChanged, physicalChanged, persistenceDirty);
-            if (decision == CharacterInventory.PlayerSyncDecision.UNCHANGED) return true;
+            if (decision == CharacterInventory.PlayerSyncDecision.UNCHANGED) return new SyncOutcome(true, false);
             if (decision == CharacterInventory.PlayerSyncDecision.CONFLICT) {
                 // Both copies contain independent changes. Keep both durable snapshots untouched;
                 // a deterministic winner cannot be inferred from fingerprints alone.
@@ -167,7 +191,7 @@ public final class PlayerInventoryBridge {
                     LOGGER.error("wf_people: could not persist conflict marker for player Character {}", character.globalId);
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
                         "Конфликт инвентаря: физический инвентарь и Character-ledger изменились независимо. Обе копии сохранены без перезаписи; требуется сверка."));
-                return false;
+                return new SyncOutcome(false, true);
             }
 
             // Failed journal actions are terminal. A retry therefore receives a fresh request ID;
@@ -203,15 +227,20 @@ public final class PlayerInventoryBridge {
                                 ? dev.worldforge.mod.api.ActionResult.ok("Player inventory snapshot saved")
                                 : dev.worldforge.mod.api.ActionResult.fail("Player inventory snapshot could not be saved");
                     }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.getServer()));
-            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+            return new SyncOutcome(task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED, true);
         } catch (RuntimeException ex) {
-            LOGGER.error("wf_people: player inventory snapshot failed for {}: {}",
-                    player.getGameProfile().getName(), ex.toString(), ex);
-            return false;
+            throw ex;
         }
     }
 
     private static void importLegacy(ServerPlayer player, Character character) {
+        CharacterAccessService.mutateGlobalsIfChanged(PeopleMod.authority(), List.of(character.globalId), participants -> {
+            importLegacyLeased(player, participants.get(character.globalId));
+            return true;
+        });
+    }
+
+    private static void importLegacyLeased(ServerPlayer player, Character character) {
         Snapshot physical = capture(player);
         // One-time migration: combine old Character-owned entries with the vanilla player save
         // using the maximum count for an identical stack, avoiding duplication of already-ledgered

@@ -257,8 +257,26 @@ public final class Statecraft {
                 target = createTitle(id, realmId, Rank.values()[tier], source.name);
                 imported++;
             } else if (!target.realmId.equals(realmId)) {
-                throw new IllegalStateException("imported title ownership changed for " + source.key
-                        + "; explicit political transfer is required");
+                // An unclaimed map placeholder is not a sovereign owner. The first
+                // generated polity may claim it; transfers between actual realms remain
+                // forbidden here and must go through an explicit political transfer.
+                if (target.realmId.startsWith("unclaimed:") && !realmId.startsWith("unclaimed:")) {
+                    // realmId is immutable on Title: replace the neutral placeholder
+                    // with a claimed copy while preserving source identity and claims.
+                    Title claimed = new Title(target.id, realmId, target.rank,
+                            source.name == null || source.name.isBlank() ? id : source.name);
+                    claimed.sourceTierIndex = target.sourceTierIndex;
+                    claimed.sourceTierKey = target.sourceTierKey;
+                    claimed.sourceParentTitleId = target.sourceParentTitleId;
+                    claimed.holderCharacterId = target.holderCharacterId;
+                    claimed.claims.addAll(target.claims);
+                    titles.put(id, claimed);
+                    target = claimed;
+                } else {
+                    throw new IllegalStateException("imported title ownership changed for " + source.key
+                            + "; explicit political transfer is required");
+                }
+                target.name = source.name == null || source.name.isBlank() ? id : source.name;
             } else {
                 target.name = source.name == null || source.name.isBlank() ? id : source.name;
             }
@@ -273,6 +291,15 @@ public final class Statecraft {
             Object holder = source.props.get("holderCharacterId");
             if (holder instanceof String characterId && !characterId.isBlank())
                 target.holderCharacterId = clean(characterId, "holder Character ID");
+        }
+
+        // Remove stale parent edges when an initially unclaimed parent/child pair
+        // receives different first owners. The hierarchy is then rebuilt only within
+        // each resulting sovereign realm.
+        for (Title source : titles.values()) {
+            if (source.sourceTierIndex < 0 || source.liegeTitleId == null || source.liegeTitleId.isEmpty()) continue;
+            Title parent = titles.get(source.liegeTitleId);
+            if (parent != null && !source.realmId.equals(parent.realmId)) source.liegeTitleId = "";
         }
 
         // Link only titles that were imported and remain inside the same sovereign realm.

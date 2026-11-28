@@ -454,7 +454,7 @@ public final class SettlementMap {
         }
     }
 
-    public String toJson() {
+    public Map<String, Object> toMap() {
         Map<String,Object> root = new LinkedHashMap<>();
         root.put("format","wf-settlement-map/1"); root.put("nextRoad",nextRoad); root.put("nextLogistics",nextLogistics);
         root.put("simulationTime",simulationTime); root.put("totalGoodsMoved",totalGoodsMoved); root.put("simulationSteps",simulationSteps);
@@ -479,8 +479,10 @@ public final class SettlementMap {
         List<Object> jobs = new ArrayList<>();
         for (LogisticsJob j : logistics.values()) jobs.add(Map.of("id",j.id,"from",j.from,"to",j.to,"resource",j.resource,"rate",j.rate,"accumulator",j.accumulator,"moved",j.moved,"status",j.status));
         root.put("logistics",jobs);
-        return Json.write(root);
+        return root;
     }
+
+    public String toJson() { return Json.write(toMap()); }
 
     @SuppressWarnings("unchecked")
     public static SettlementMap fromJson(String json) {

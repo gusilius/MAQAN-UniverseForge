@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.worldforge.mod.client.ClientViews;
+import dev.worldforge.mod.client.PlatformWorkspaceBridge;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Projection;
 import dev.worldforge.troops.Squads;
@@ -10,6 +11,7 @@ import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
 import dev.worldforge.troops.mc.TroopsMod;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -18,7 +20,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Marker;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -44,6 +45,8 @@ import java.util.List;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.prefs.Preferences;
+import java.util.prefs.BackingStoreException;
 
 /**
  * Командный режим (R): камера отвязывается от игрока и летает над миром как в стратегии (вид «Сверху» и «Тактика»; Tab - переключить),
@@ -61,6 +64,7 @@ public final class CommandMode {
     static final KeyMapping RADIAL_COMMAND = new KeyMapping("key.wf_troops.radial_command", GLFW.GLFW_KEY_LEFT_ALT, "key.categories.wf_troops");
     static boolean firstPersonCommand;
     static boolean active;
+    private static CommandScreen hostedCommandView;
     private static boolean radialSuppressed;
     static final UnitSelection SEL = new UnitSelection();
     static final CameraRig RIG = new CameraRig();
@@ -71,9 +75,141 @@ public final class CommandMode {
     static long markerUntil;
     private static CameraType prevCamera = CameraType.FIRST_PERSON;
     private static Marker camEntity;
-    private static double groundY;
+    private static boolean cameraPositionInitialized;
+    private static double cameraSmoothX, cameraSmoothY, cameraSmoothZ;
     private static long lastFrame;
     private static CameraRig.View lastView = CameraRig.View.SKY;
+    private static final Preferences CAMERA_PREFS =
+            Preferences.userNodeForPackage(CommandMode.class).node("camera-state");
+    private static long lastCameraPersistNanos;
+    private static final long CAMERA_PERSIST_INTERVAL_NANOS = 10_000_000_000L;
+    private static String lastWorkspaceSelection = "";
+    private static String lastWorkspaceProvider = "";
+
+    /** Mirror the exact RTS selection into the shared map/inspector context without duplicating Character identity. */
+    private static void publishWorkspaceSelection(Minecraft mc) {
+        List<String> ids = SEL.selected().stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList();
+        String signature = String.join("|", ids);
+        boolean unchanged = signature.equals(lastWorkspaceSelection);
+        if (ids.isEmpty()) {
+            if (!lastWorkspaceProvider.isBlank()) PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+            lastWorkspaceProvider = "";
+            lastWorkspaceSelection = "";
+            return;
+        }
+        if (ids.size() == 1) {
+            String physicalId = ids.get(0);
+            LivingEntity selected = null;
+            for (net.minecraft.world.entity.Entity candidate : mc.level.entitiesForRendering()) {
+                if (candidate instanceof LivingEntity living && physicalId.equals(candidate.getUUID().toString())) {
+                    selected = living;
+                    break;
+                }
+            }
+            if (selected != null) {
+                String provider = selected instanceof TroopEntity ? "wf_troops"
+                        : isWorkerEntity(selected) ? "wf_settle"
+                        : isOwnedNpcEntity(selected) ? "wf_people" : "wf_troops";
+                String characterId = selected instanceof TroopEntity troop ? troop.characterId
+                        : isWorkerEntity(selected) ? workerString(selected, "characterId")
+                        : invokeCharacterId(selected);
+                String entityId = characterId.isBlank() ? physicalId : characterId;
+                if (unchanged && provider.equals(lastWorkspaceProvider)
+                        && PlatformWorkspaceBridge.isCurrentSelection(provider, entityId)) return;
+                String type = selected instanceof TroopEntity ? "TROOP"
+                        : isWorkerEntity(selected) ? "WORKER"
+                        : isOwnedNpcEntity(selected) ? "NPC" : "CHARACTER";
+                String summary = "Physical entity UUID: " + physicalId
+                        + (characterId.isBlank() ? "" : " · canonical Character UUID: " + characterId);
+                if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals(provider))
+                    PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+                lastWorkspaceProvider = provider;
+                lastWorkspaceSelection = signature;
+                PlatformWorkspaceBridge.publish(provider, entityId, type, selected.getName().getString(), summary);
+                return;
+            }
+        }
+        String aggregateId = "selection:" + java.util.UUID.nameUUIDFromBytes(
+                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (unchanged && "wf_troops".equals(lastWorkspaceProvider)
+                && PlatformWorkspaceBridge.isCurrentSelection("wf_troops", aggregateId)) return;
+        if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals("wf_troops"))
+            PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+        lastWorkspaceProvider = "wf_troops";
+        lastWorkspaceSelection = signature;
+        PlatformWorkspaceBridge.publish("wf_troops", aggregateId, "UNIT_SELECTION",
+                "Выбрано объектов: " + ids.size(), "Общая тактическая выборка · " + ids.size() + " физических сущностей");
+    }
+
+    private static String invokeCharacterId(LivingEntity entity) {
+        try {
+            Object value = entity.getClass().getMethod("characterId").invoke(entity);
+            return value instanceof String text ? text : "";
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private static String cameraDimension(Minecraft mc) {
+        return mc.level == null ? "" : mc.level.dimension().location().toString();
+    }
+
+    private static String cameraKey(String dimension) {
+        return "d." + Integer.toUnsignedString(dimension.hashCode(), 16);
+    }
+
+    private static boolean restoreCamera(Minecraft mc) {
+        String dimension = cameraDimension(mc);
+        if (dimension.isBlank()) return false;
+        String key = cameraKey(dimension);
+        if (!dimension.equals(CAMERA_PREFS.get("dimension." + key, ""))) return false;
+        try {
+            CameraRig.View view = CameraRig.View.valueOf(CAMERA_PREFS.get("view." + key, ""));
+            CameraRig.Snapshot saved = new CameraRig.Snapshot(view,
+                    CAMERA_PREFS.getDouble("fx." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("fz." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("yaw." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("pitch." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("zoom." + key, Double.NaN),
+                    CAMERA_PREFS.getDouble("leash." + key, Double.NaN));
+            if (!RIG.restore(saved)) return false;
+            for (CameraRig.View cameraView : CameraRig.View.values()) {
+                RIG.restoreHeight(cameraView,
+                        CAMERA_PREFS.getDouble("height." + key + "." + cameraView.name(), Double.NaN),
+                        CAMERA_PREFS.getBoolean("height.lock." + key + "." + cameraView.name(), false));
+            }
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static void persistCamera(Minecraft mc) {
+        if (mc == null || mc.player == null || mc.level == null) return;
+        String dimension = cameraDimension(mc);
+        if (dimension.isBlank()) return;
+        CameraRig.Snapshot saved = RIG.snapshot();
+        String key = cameraKey(dimension);
+        CAMERA_PREFS.put("dimension." + key, dimension);
+        CAMERA_PREFS.put("view." + key, saved.view().name());
+        CAMERA_PREFS.putDouble("fx." + key, saved.fx());
+        CAMERA_PREFS.putDouble("fz." + key, saved.fz());
+        CAMERA_PREFS.putDouble("yaw." + key, saved.yaw());
+        CAMERA_PREFS.putDouble("pitch." + key, saved.pitch());
+        CAMERA_PREFS.putDouble("zoom." + key, saved.zoom());
+        CAMERA_PREFS.putDouble("leash." + key, saved.leash());
+        for (CameraRig.View cameraView : CameraRig.View.values()) {
+            CAMERA_PREFS.putDouble("height." + key + "." + cameraView.name(), RIG.heightFor(cameraView));
+            CAMERA_PREFS.putBoolean("height.lock." + key + "." + cameraView.name(), RIG.heightLockedFor(cameraView));
+        }
+        try {
+            CAMERA_PREFS.flush();
+            lastCameraPersistNanos = System.nanoTime();
+        }
+        catch (BackingStoreException ignored) {
+            // A failed preference write must never interrupt camera restoration or gameplay.
+        }
+    }
 
     @SubscribeEvent
     public static void keys(RegisterKeyMappingsEvent e) {
@@ -86,8 +222,30 @@ public final class CommandMode {
     @SubscribeEvent
     public static void setup(FMLClientSetupEvent e) {
         e.enqueueWork(() -> ClientViews.register(CommandScreen.BUILD_VIEW, payload -> {
-            if (Minecraft.getInstance().screen instanceof CommandScreen s) s.setBuilds(payload);
+            CommandScreen screen = currentCommandView();
+            if (screen != null) screen.setBuilds(payload);
         }));
+    }
+
+    static CommandScreen currentCommandView() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof CommandScreen screen) return screen;
+        return isHostedCommandViewActive(mc) ? hostedCommandView : null;
+    }
+
+    /** Public bridge for MAQAN's shell-level camera controls. */
+    public static boolean isCommandCameraActive() { return active && camEntity != null; }
+
+    public static String commandCameraView() { return RIG.view.name(); }
+
+    public static void setCommandCameraView(String name) {
+        if (!active || name == null) return;
+        try {
+            RIG.transitionTo(CameraRig.View.valueOf(name.trim().toUpperCase(java.util.Locale.ROOT)));
+            frame(Minecraft.getInstance());
+        } catch (IllegalArgumentException ignored) {
+            // Ignore stale or unsupported toolbar actions.
+        }
     }
 
     static void send(OrderPacket p) { TroopsMod.NET.sendToServer(p); }
@@ -158,6 +316,15 @@ public final class CommandMode {
     static boolean isWorkerEntity(LivingEntity e){
         return e!=null&&"wf_settle:worker".equals(e.getType().builtInRegistryHolder().key().location().toString());
     }
+    static boolean isOwnedNpcEntity(LivingEntity e){
+        return e!=null&&"wf_people:npc".equals(e.getType().builtInRegistryHolder().key().location().toString());
+    }
+    private static String npcOwnerId(LivingEntity entity){
+        if(!isOwnedNpcEntity(entity))return "";
+        try{return String.valueOf(entity.getClass().getMethod("ownerId").invoke(entity));}
+        catch(ReflectiveOperationException|RuntimeException ignored){return "";}
+    }
+
     private static Object workerValue(LivingEntity e,String method){
         if(!isWorkerEntity(e))return null;
         try{
@@ -177,12 +344,14 @@ public final class CommandMode {
     /** Мои солдаты и рабочие поселений: то, что можно выделить. */
     static boolean selectable(Minecraft mc, LivingEntity e) {
         if (mc == null || mc.player == null || e == null) return false;
+        if(e==mc.player)return true;
         String owner=mc.player.getUUID().toString();
         if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
         if(isWorkerEntity(e)){
             String workerOwner=workerString(e,"ownerId");
             return owner.equals(workerOwner)||mc.hasSingleplayerServer();
         }
+        if(isOwnedNpcEntity(e))return owner.equals(npcOwnerId(e));
         return false;
     }
 
@@ -208,6 +377,40 @@ public final class CommandMode {
         return hit.getType() == HitResult.Type.MISS ? null : hit.getLocation();
     }
 
+    /**
+     * Zoom around the world point currently under the cursor. The view direction
+     * is unchanged by dolly zoom, so intersect its screen ray with the anchor
+     * plane after changing distance and shift the focus by the resulting delta.
+     */
+    static void zoomAtCursor(Minecraft mc, double sx, double sy, double steps) {
+        if (mc == null || mc.level == null || mc.player == null || invVp == null
+                || !Double.isFinite(steps) || Math.abs(steps) < 1.0e-6) {
+            if (Double.isFinite(steps)) RIG.zoomBy(steps);
+            return;
+        }
+        Vec3 anchor = groundAt(mc, sx, sy);
+        if (anchor == null) {
+            RIG.zoomBy(steps);
+            frame(mc);
+            return;
+        }
+        double[] ray = Projection.ray(invVp, sx, sy,
+                mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+        Vec3 direction = new Vec3(ray[0], ray[1], ray[2]);
+        RIG.zoomBy(steps);
+        double[] desired = RIG.positionRelativeToPlayer(mc.player.getY());
+        Vec3 origin = new Vec3(desired[0], desired[1], desired[2]);
+        if (Math.abs(direction.y) > 1.0e-5) {
+            double distance = (anchor.y - origin.y) / direction.y;
+            if (distance > 0.0 && distance < 512.0) {
+                Vec3 after = origin.add(direction.scale(distance));
+                RIG.focusOn(RIG.fx + anchor.x - after.x, RIG.fz + anchor.z - after.z);
+            }
+        }
+        RIG.clamp(mc.player.getX(), mc.player.getZ());
+        frame(mc);
+    }
+
     /** Exact block under the cursor; used for single-tree/single-vein orders rather than a nearby surface point. */
     static net.minecraft.core.BlockPos blockAt(Minecraft mc, double sx, double sy) {
         if (mc == null || mc.level == null || invVp == null) return null;
@@ -225,7 +428,9 @@ public final class CommandMode {
         double bd = Double.MAX_VALUE;
         for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) {
             if (!(en instanceof LivingEntity le) || !le.isAlive() || le == mc.player) continue;
-            if (!(le instanceof Enemy) && !(le instanceof TroopEntity && !selectable(mc, le))) continue;
+            boolean hostileNpc="wf_people:npc".equals(le.getType().builtInRegistryHolder().key().location().toString());
+            if (!(le instanceof Enemy) && !(le instanceof TroopEntity && !selectable(mc, le))
+                    && !(hostileNpc && !selectable(mc,le))) continue;
             double[] p = Projection.project(vp, le.getX() - cam.x, le.getY() + le.getBbHeight() * 0.5 - cam.y, le.getZ() - cam.z, w, h);
             if (p[2] <= 0) continue;
             double d = Math.hypot(p[0] - sx, p[1] - sy);
@@ -264,45 +469,141 @@ public final class CommandMode {
     /** Public entry point used by the settlement HUD bridge; all management opens the same command workspace. */
     public static void openUnified() {
         Minecraft mc = Minecraft.getInstance();
-        if (!active && mc.screen == null) enter(mc);
-        else if (active && !(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
+        if (mc.player == null || mc.level == null) return;
+        // Opening RTS from the MAQAN workspace happens while a Screen is already
+        // installed. The old null-screen guard silently ignored that legitimate path,
+        // leaving a decorative RTS page with no camera controller behind it.
+        if (!active) {
+            firstPersonCommand = false;
+            enter(mc);
+            return;
+        }
+        if (!(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
+            openCommandView(mc, new CommandScreen());
+    }
+
+    private static boolean isPlatformWorkspace(Screen screen) {
+        return screen != null && screen.getClass().getName().equals("dev.maqan.platform.client.PlatformShellScreen");
+    }
+
+    private static boolean isHostedCommandViewActive(Minecraft mc) {
+        if (hostedCommandView == null || !isPlatformWorkspace(mc.screen)) return false;
+        try {
+            Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            return Boolean.TRUE.equals(shell.getMethod("isHostedProviderViewActive", Screen.class)
+                    .invoke(null, hostedCommandView));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    /**
+     * Host the existing RTS command screen inside MAQAN's shared workspace when
+     * Platform is installed. The troop addon remains optional and keeps its
+     * standalone screen when the host is absent.
+     */
+    private static void openCommandView(Minecraft mc, CommandScreen view) {
+        hostedCommandView = view;
+        try {
+            Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            shell.getMethod("openProviderView", String.class, Screen.class)
+                    .invoke(null, "wf_troops", view);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            mc.setScreen(view);
+        }
     }
 
     static void enter(Minecraft mc) {
         if (active || mc.level == null || mc.player == null) return;
+        boolean preserveSelection=firstPersonCommand;
+        firstPersonCommand=false;
         active = true;
-        SEL.clear();
-        prevCamera = mc.options.getCameraType();
+        if(!preserveSelection){
+            SEL.clear();
+            prevCamera = mc.options.getCameraType();
+        }
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
-        groundY = mc.player.getY();
+        if (!restoreCamera(mc)) RIG.focusOn(mc.player.getX(), mc.player.getZ());
+        lastView = RIG.view;
+        cameraPositionInitialized = false;
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
         frame(mc);
         mc.setCameraEntity(camEntity);
-        mc.setScreen(new CommandScreen());
+        openCommandView(mc, new CommandScreen());
         if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
+    }
+
+    /** Leave the RTS camera and return control to the player's body without discarding the current selection. */
+    static void enterBodyCommand(Minecraft mc){
+        if(!active||mc==null||mc.player==null)return;
+        persistCamera(mc);
+        lastView=RIG.view;
+        active=false;
+        hostedCommandView=null;
+        camEntity=null;
+        mc.setCameraEntity(mc.player);
+        mc.options.setCameraType(prevCamera);
+        firstPersonCommand=true;
+        mc.setScreen(null);
+        mc.player.displayClientMessage(Component.literal(
+                "Управление персонажем: WASD/мышь · ЛКМ выбрать · Shift+ЛКМ добавить · ПКМ приказ · Alt — круг команд · R вернуться в RTS"),false);
     }
 
     static void exit(Minecraft mc) {
         if (!active) return;
-        active = false;
+        active = false; // Set first: removing the hosted view calls removed() synchronously.
+        persistCamera(mc);
         lastView = RIG.view;
         SEL.clear();
+        CommandScreen hosted = hostedCommandView;
+        boolean inShell = isHostedCommandViewActive(mc);
+        hostedCommandView = null;
         camEntity = null;
-        mc.setCameraEntity(mc.player);
+        if (mc.player != null) mc.setCameraEntity(mc.player);
         mc.options.setCameraType(prevCamera);
-        if (mc.screen instanceof CommandScreen) mc.setScreen(null);
+        if (inShell && hosted != null) {
+            try {
+                Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+                shell.getMethod("closeEmbeddedProviderView", Screen.class).invoke(null, hosted);
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                // The shell may have been removed already; camera restoration is still complete.
+            }
+        } else if (mc.screen instanceof CommandScreen) {
+            mc.setScreen(null);
+        }
+    }
+
+    /** A provider screen may be removed while another provider replaces it. Only the
+     * currently hosted command view owns the camera lifecycle. */
+    static void onCommandViewRemoved(CommandScreen view) {
+        if (view == null || hostedCommandView != view || !active) return;
+        Minecraft mc = Minecraft.getInstance();
+        active = false;
+        persistCamera(mc);
+        cameraPositionInitialized = false;
+        lastView = RIG.view;
+        SEL.clear();
+        hostedCommandView = null;
+        camEntity = null;
+        if (mc.player != null) mc.setCameraEntity(mc.player);
+        mc.options.setCameraType(prevCamera);
     }
 
     /** Покадровое движение камеры: WASD / края экрана - сдвиг, Q/E - поворот, стрелки - поворот и наклон, Shift - быстрее. */
     static void frame(Minecraft mc) {
         if (!active || camEntity == null || mc.player == null || mc.level == null) return;
         long now = System.nanoTime();
+        if (now - lastCameraPersistNanos >= CAMERA_PERSIST_INTERVAL_NANOS) persistCamera(mc);
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
+        RIG.updateTransition(dt);
         long win = mc.getWindow().getWindow();
-        boolean ui = mc.screen instanceof CommandScreen;
+        // Resolve the actual embedded command view; mc.screen is the MAQAN shell.
+        CommandScreen commandScreen = mc.screen instanceof CommandScreen standalone
+                ? standalone : isHostedCommandViewActive(mc) ? hostedCommandView : null;
+        boolean ui = commandScreen != null;
         double fwd = 0, right = 0;
         if (ui) {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_W)) fwd += 1;
@@ -315,24 +616,30 @@ public final class CommandMode {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_UP)) pitch -= 45 * dt;
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_DOWN)) pitch += 45 * dt;
             if (yaw != 0 || pitch != 0) RIG.rotate(yaw, pitch);
-            CommandScreen cs = (CommandScreen) mc.screen;
-            if (mc.isWindowActive() && !cs.busyWithMouse()) {
-                double[] es = CameraRig.edgeScroll(cs.mouseX(), cs.mouseY(), mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+            if (mc.isWindowActive() && !commandScreen.busyWithMouse()) {
+                double[] es = CameraRig.edgeScroll(commandScreen.mouseX(), commandScreen.mouseY(),
+                        commandScreen.width, commandScreen.height);
                 right += es[0]; fwd += es[1];
             }
         }
         boolean fast = InputConstants.isKeyDown(win, GLFW.GLFW_KEY_LEFT_SHIFT);
         RIG.pan(fwd, right, dt, fast);
         RIG.clamp(mc.player.getX(), mc.player.getZ());
-        int gx = (int) Math.floor(RIG.fx), gz = (int) Math.floor(RIG.fz);
-        if (mc.level.hasChunkAt(new net.minecraft.core.BlockPos(gx, 64, gz))) {
-            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
-            groundY += (target - groundY) * Math.min(1, dt * 6);
-        }
-        double[] p = RIG.position(groundY);
-        camEntity.setPos(p[0], p[1], p[2]);
-        camEntity.xo = p[0]; camEntity.yo = p[1]; camEntity.zo = p[2];
-        camEntity.xOld = p[0]; camEntity.yOld = p[1]; camEntity.zOld = p[2];
+        // Vertical camera placement is anchored to the live player position.
+        // Terrain height at the map focus must never redefine the camera's Y coordinate.
+        double[] p = RIG.positionRelativeToPlayer(mc.player.getY());
+        if (!Double.isFinite(p[0]) || !Double.isFinite(p[1]) || !Double.isFinite(p[2])) return;
+
+        // Keep the requested player-relative height exact. Obstruction/terrain
+        // correction used to silently push the camera upward or underground.
+        cameraSmoothX = p[0];
+        cameraSmoothY = p[1];
+        cameraSmoothZ = p[2];
+        cameraPositionInitialized = true;
+
+        camEntity.setPos(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
+        camEntity.xo = cameraSmoothX; camEntity.yo = cameraSmoothY; camEntity.zo = cameraSmoothZ;
+        camEntity.xOld = cameraSmoothX; camEntity.yOld = cameraSmoothY; camEntity.zOld = cameraSmoothZ;
         camEntity.setYRot((float) RIG.yaw); camEntity.setXRot((float) RIG.pitch);
         camEntity.yRotO = (float) RIG.yaw; camEntity.xRotO = (float) RIG.pitch;
     }
@@ -365,7 +672,12 @@ public final class CommandMode {
         }
 
         @SubscribeEvent
-        public void logout(ClientPlayerNetworkEvent.LoggingOut e) { active = false; firstPersonCommand = false; camEntity = null; SEL.clear(); }
+        public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+            if (active) persistCamera(Minecraft.getInstance());
+            active = false; firstPersonCommand = false; camEntity = null;
+            cameraPositionInitialized = false;
+            hostedCommandView = null; SEL.clear();
+        }
 
         @SubscribeEvent
         public void interaction(InputEvent.InteractionKeyMappingTriggered e) {
@@ -376,7 +688,16 @@ public final class CommandMode {
         public void tick(TickEvent.ClientTickEvent e) {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            if (mc.player == null || mc.level == null) {
+                if (!lastWorkspaceProvider.isBlank()) PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+                lastWorkspaceProvider = "";
+                lastWorkspaceSelection = "";
+                active = false;
+                firstPersonCommand = false;
+                camEntity = null;
+                return;
+            }
+            publishWorkspaceSelection(mc);
             boolean radialHeld = RADIAL_COMMAND.isDown();
             if (!radialHeld) radialSuppressed = false;
             if (mc.screen instanceof RadialCommandScreen radial) {
@@ -398,10 +719,10 @@ public final class CommandMode {
                 }
             }
             while (TOGGLE.consumeClick()) if (mc.screen == null && !active) {
-                firstPersonCommand = false;
                 enter(mc);
             }
-            if (active && !(mc.screen instanceof CommandScreen)) exit(mc);                     // открылось другое окно (смерть, меню): выходим
+            if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
+                exit(mc); // Exit only when the embedded command view is no longer active.
             if (active) {
                 java.util.Set<String> alive = new java.util.HashSet<>();
                 for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) if (en.isAlive()) alive.add(en.getUUID().toString());

@@ -56,7 +56,10 @@ public final class PlayerCharacterBinding {
         if (authority.registry("__players__") != playerRegistry)
             throw new IllegalStateException("Dedicated world-wide player Character partition is not registered");
         Character created = playerRegistry.create(name, "", culture, gender, birthYear);
-        created.props.put("genesis.player_uuid", canonicalUuid(playerUuid, "player UUID"));
+        String canonicalPlayerUuid = canonicalUuid(playerUuid, "player UUID");
+        created.props.put("genesis.player_uuid", canonicalPlayerUuid);
+        playerRegistry.indexPlayerBinding(created.id, canonicalPlayerUuid);
+        CharacterRegistry.recordCharacterMutation(created);
         return created;
     }
 
@@ -66,12 +69,13 @@ public final class PlayerCharacterBinding {
     }
 
     private static Character matchPlayer(Character current, CharacterRegistry registry, String playerUuid) {
-        for (Character candidate : registry.all()) {
-            if (!playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) continue;
-            if (current != null && !current.globalId.equals(candidate.globalId))
-                throw new IllegalStateException("Player UUID is bound to multiple WorldForge Characters: " + playerUuid);
-            current = candidate;
-        }
-        return current;
+        String globalId = registry.playerGlobalIdForAccount(playerUuid);
+        if (globalId == null) return current;
+        if (current != null && !current.globalId.equals(globalId))
+            throw new IllegalStateException("Player UUID is bound to multiple WorldForge Characters: " + playerUuid);
+        Character candidate = registry.getByGlobalId(globalId);
+        if (candidate == null)
+            throw new IllegalStateException("Indexed Genesis Character is missing from its canonical registry: " + globalId);
+        return candidate;
     }
 }

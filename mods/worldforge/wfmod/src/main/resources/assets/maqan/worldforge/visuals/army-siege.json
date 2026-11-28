@@ -1,0 +1,23 @@
+{
+  "id": "maqan:army.siege",
+  "category": "army",
+  "icon": "army",
+  "displayName": "Осадный парк",
+  "description": "Осадная группа с таранами и метательными машинами",
+  "mapScale": 42,
+  "mapItem": "minecraft:crossbow",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "army",
+    "unit",
+    "corps"
+  ],
+  "tags": [
+    "siege",
+    "artillery",
+    "formation"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}

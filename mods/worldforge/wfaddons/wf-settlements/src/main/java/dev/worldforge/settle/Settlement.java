@@ -67,6 +67,15 @@ public final class Settlement {
     public final Map<String, Integer> autoSell = new TreeMap<>(), autoBuy = new TreeMap<>();
     public double tradeLeft;
     public double time;
+    /** Periodic operating flows are accrued in memory and posted once per 30 world days. */
+    private static final long ECONOMY_LEDGER_PERIOD_SECONDS = 1800L;
+    private long economyLedgerPeriod;
+    /** Period captured before advancing the current simulation interval. */
+    private long accrualPeriodOverride = -1;
+    /** Autonomous market orders clear at most once per simulated day, not on every two-second step. */
+    private double tradeCheckTimer;
+    /** Key: period|C/D|resource|category. Debit accruals reserve stock before they reach the ledger. */
+    private final Map<String, Double> pendingEconomyAccruals = new TreeMap<>();
     private int nextBuilding = 1, nextWorker = 1;
     public final Flow flow = new Flow();
     public final ResidentTaskGraph taskGraph = new ResidentTaskGraph();
@@ -318,7 +327,7 @@ public final class Settlement {
             if (stockLedgerEntries >= 0) {
                 // The settlement file may have been committed after the treasury file.
                 // Decide once per loaded snapshot, before any imports append reconciliation entries.
-                reconcileStockMirror = stockLedgerEntries > ledger.journal().size();
+                reconcileStockMirror = stockLedgerEntries > (ledger.nextSequence() - 1);
             } else {
                 // Legacy snapshots have no sequence marker. Keep their old one-time mirror
                 // reconciliation unless a durable army food transfer proves the ledger is newer.
@@ -330,9 +339,9 @@ public final class Settlement {
         TreasuryLedger.Account account = resourceAccount(resource);
         Double legacyMirror = stock.get(resource);
         // The journal is append-only; TreasuryLedger maintains this predicate as an index.
-        // Never scan the full world-wide journal on every resource read/tick.
-        boolean committedArmyFoodTransfer = ledger.hasArmyFieldRationDebit(sourceAccountId);
-        if (reconcileStockMirror && !committedArmyFoodTransfer
+        // It is needed only for one-time legacy mirror reconciliation. Querying it on every
+        // resource read made every settlement tick contend on the world-wide ledger monitor.
+        if (reconcileStockMirror && !ledger.hasArmyFieldRationDebit(sourceAccountId)
                 && legacyMirror != null && Double.isFinite(legacyMirror)
                 && Math.abs(legacyMirror - account.balance) > 1e-9) {
             double delta = legacyMirror - account.balance;
@@ -345,7 +354,67 @@ public final class Settlement {
             account = resourceAccount(resource);
         }
         stock.put(resource, account.balance);
-        return account.balance;
+        return Math.max(0, account.balance - pendingPeriodicDebits(resource));
+    }
+
+    private long economyPeriod() { return Math.max(0L, (long) Math.floor(time / ECONOMY_LEDGER_PERIOD_SECONDS)); }
+
+    private static String periodicKey(long period, boolean credit, String resource, String category) {
+        return period + "|" + (credit ? "C" : "D") + "|" + resource + "|" + category;
+    }
+
+    private double pendingPeriodicDebits(String resource) {
+        double total = 0;
+        String marker = "|D|" + resource + "|";
+        for (Map.Entry<String, Double> entry : pendingEconomyAccruals.entrySet())
+            if (entry.getKey().contains(marker)) total += entry.getValue();
+        return total;
+    }
+
+    private void accruePeriodic(boolean credit, String resource, double value, String category) {
+        if (!Double.isFinite(value) || value <= 0) return;
+        long period = accrualPeriodOverride >= 0 ? accrualPeriodOverride : economyPeriod();
+        String key = periodicKey(period, credit, resource, category);
+        pendingEconomyAccruals.merge(key, value, Double::sum);
+    }
+
+    /**
+     * Commit a completed 30-day accounting period. Each settlement/resource/category gets one
+     * idempotent receipt; pending debits already reserve stock through amount(), so no later
+     * command can spend the same goods while the period is being accumulated.
+     */
+    private boolean flushPeriodicEconomy() {
+        long currentPeriod = economyPeriod();
+        TreasuryLedger ledger = TreasuryService.current();
+        while (economyLedgerPeriod < currentPeriod) {
+            long closingPeriod = economyLedgerPeriod;
+            List<String> keys = pendingEconomyAccruals.keySet().stream()
+                    .filter(key -> key.startsWith(closingPeriod + "|")).toList();
+            // Close earned income before expenses so that the period's tax revenue can fund its upkeep.
+            for (boolean credit : new boolean[]{true, false}) {
+                for (String key : keys) {
+                    String[] parts = key.split("\\|", 4);
+                    if (parts.length != 4 || ("C".equals(parts[1])) != credit) continue;
+                    double value = pendingEconomyAccruals.getOrDefault(key, 0.0);
+                    if (value <= 1e-9) { pendingEconomyAccruals.remove(key); continue; }
+                    String resource = parts[2], category = parts[3];
+                    String reference = "settlement-period:" + id + ":" + closingPeriod + ":" + (credit ? "credit:" : "debit:")
+                            + resource + ":" + category;
+                    boolean accepted = credit
+                            ? ledger.depositOnce(accountId(resource), value,
+                                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.PRODUCTION,
+                                    category, reference, worldMinute(), "settlement periodic income")
+                            : ledger.withdrawOnce(accountId(resource), value,
+                                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.UPKEEP : TreasuryLedger.Kind.CONSUMPTION,
+                                    category, reference, worldMinute(), "settlement periodic operating expense");
+                    if (!accepted) return false;
+                    pendingEconomyAccruals.remove(key);
+                }
+            }
+            economyLedgerPeriod++;
+        }
+        syncAllResourceMirrors();
+        return true;
     }
 
     private boolean debitResource(String resource, double value, TreasuryLedger.Kind kind, String category, String reference) {
@@ -353,6 +422,10 @@ public final class Settlement {
         if (value == 0) return true;
         amount(resource);
         resourceAccount(resource);
+        if ("production-input".equals(category)) {
+            accruePeriodic(false, resource, value, "production-input");
+            return true;
+        }
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 worldMinute(), category);
         syncResourceMirror(resource);
@@ -422,16 +495,18 @@ public final class Settlement {
             String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
             TreasuryLedger ledger = TreasuryService.current();
             long beforeVersion = ledger.mutationVersion();
-            boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
-                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
             boolean accepted = ledger.depositOnce(accountId(resource), quantity,
                     Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
                     "autonomous-settlement-founding", reference, worldMinute(),
                     "one-time founding endowment for " + id);
             if (!accepted) return false;
             syncResourceMirror(resource);
-            if (!alreadyPosted) flow.record(time, resource, quantity, true);
-            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            // depositOnce's idempotency check already distinguishes an existing receipt;
+            // mutationVersion tells us whether this invocation actually appended a posting.
+            if (ledger.mutationVersion() != beforeVersion) {
+                flow.record(time, resource, quantity, true);
+                markMutation();
+            }
             return true;
         });
     }
@@ -787,6 +862,24 @@ public final class Settlement {
     public boolean updateWorker(Worker worker, Consumer<Worker> update) {
         if (worker == null || update == null) throw new IllegalArgumentException("worker update is required");
         if (workers.stream().noneMatch(current -> current == worker)) return false;
+        return mutate(() -> {
+            List<Object> before = workerMutationState(worker);
+            try {
+                update.accept(worker);
+            } finally {
+                if (!before.equals(workerMutationState(worker))) markMutation();
+            }
+            return true;
+        });
+    }
+
+    /**
+     * Fast path for a worker reference obtained directly from this settlement's worker list
+     * during the current server-thread pass. The caller guarantees membership; avoiding a
+     * linear identity scan here prevents one O(population) search for every AI action.
+     */
+    public boolean updateWorkerKnownMember(Worker worker, Consumer<Worker> update) {
+        if (worker == null || update == null) throw new IllegalArgumentException("worker update is required");
         return mutate(() -> {
             List<Object> before = workerMutationState(worker);
             try {
@@ -1304,32 +1397,38 @@ public final class Settlement {
     }
 
     private void step(double dt) {
-        time += dt;
-        decayDemand(dt);
-        eat(dt);
-        economy(dt);
-        grow(dt);
-        startConstruction();
-        if (auto) { autoAssign(); draftBuilders(); }
-        build(dt);
-        produce(dt);
-        haul(dt);
-        raidStep(dt);
-        move(dt);
+        accrualPeriodOverride = economyPeriod();
+        try {
+            time += dt;
+            decayDemand(dt);
+            eat(dt);
+            economy(dt);
+            grow(dt);
+            startConstruction();
+            if (auto) { autoAssign(); draftBuilders(); }
+            build(dt);
+            produce(dt);
+            haul(dt);
+            raidStep(dt);
+            move(dt);
+        } finally {
+            accrualPeriodOverride = -1;
+        }
     }
 
     private void eat(double dt) {
         int residents = population();
         double need = residents * EAT * dt, have = amount("food");
         if (residents == 0) { starveTimer = 0; return; }
-        if (have >= need) {
-            debitResource("food", need, TreasuryLedger.Kind.CONSUMPTION, "population-food", "daily-rations");
-            flow.record(time, "food", need, false);
+        double consumed = Math.min(have, need);
+        if (consumed > 0) {
+            accruePeriodic(false, "food", consumed, "population-food");
+            flow.record(time, "food", consumed, false);
+        }
+        if (have + 1e-9 >= need) {
             starveTimer = 0;
             return;
         }
-        debitResource("food", have, TreasuryLedger.Kind.CONSUMPTION, "population-food", "starvation-rations");
-        flow.record(time, "food", have, false);
         starveTimer += dt;
         if (starveTimer >= STARVE_EVERY) {
             starveTimer = 0;
@@ -1700,34 +1799,51 @@ public final class Settlement {
     public double upkeepPerMin() { double u = 0; for (Building b : buildings) if (b.state == Building.State.DONE && !b.paused) u += b.def.upkeep; return u; }
 
     private void economy(double dt) {
+        // Accrue the complete interval before closing the period. The step-start
+        // period key prevents a boundary-ending interval from drifting forward.
         double tax = taxPerMin() / 60 * dt;
-        if (tax > 0) { double got = add(Defs.SILVER, tax); flow.record(time, Defs.SILVER, got, true); taxCollected += got; }
+        if (tax > 0) {
+            accruePeriodic(true, Defs.SILVER, tax, "population-tax");
+            flow.record(time, Defs.SILVER, tax, true);
+            taxCollected += tax;
+        }
         for (Building b : buildings) {
             b.unpaid = false;
             if (b.state != Building.State.DONE || b.paused || b.def.upkeep <= 0) continue;
             double c = b.def.upkeep / 60 * dt;
-            if (amount(Defs.SILVER) >= c) {
-                if (debitSilver(c, TreasuryLedger.Kind.UPKEEP, "building-upkeep", b.def.id)) flow.record(time, Defs.SILVER, c, false);
-                else b.unpaid = true;
+            if (amount(Defs.SILVER) + 1e-9 >= c) {
+                // One settlement-period receipt for all operating buildings, not one receipt per building.
+                accruePeriodic(false, Defs.SILVER, c, "building-upkeep");
+                flow.record(time, Defs.SILVER, c, false);
             } else b.unpaid = true;
         }
         tradeLeft = Math.min(tradeCap(), tradeLeft + tradePerMin() / 60 * dt);
-        for (var e : autoSell.entrySet()) {
+        tradeCheckTimer += dt;
+        if (tradeCheckTimer >= 60.0) {
+            tradeCheckTimer %= 60.0;
+            for (var e : autoSell.entrySet()) {
             int spare = (int) Math.min(amount(e.getKey()) - e.getValue(), tradeLeft);
             if (spare >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { sell(e.getKey(), Math.min(spare, 5)); } catch (OrderException ignored) { } }
         }
-        for (var e : autoBuy.entrySet()) {
-            int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
-            if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
+            for (var e : autoBuy.entrySet()) {
+                int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
+                if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
+            }
         }
         int n = population();
         for (var e : defs.comfort.entrySet()) {
             double c = Math.min(amount(e.getKey()), e.getValue().rate * n * dt);
             if (c > 0) {
-                debitResource(e.getKey(), c, Defs.SILVER.equals(e.getKey())
-                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, "consumption", "comfort-goods");
-                flow.record(time, e.getKey(), c, false);
+                if (amount(e.getKey()) + 1e-9 >= c) {
+                    accruePeriodic(false, e.getKey(), c, "comfort-goods");
+                    flow.record(time, e.getKey(), c, false);
+                }
             }
+        }
+        // Close only after all income and costs for this step have been accrued.
+        if (!flushPeriodicEconomy()) {
+            for (Building building : buildings)
+                if (building.state == Building.State.DONE && building.def.upkeep > 0) building.unpaid = true;
         }
     }
 
@@ -1767,6 +1883,10 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(prof)) throw new OrderException("Нет профессии " + prof);
         if (n < 0 || n > 4) throw new OrderException("Приоритет 0..4");
+        // A specialist cannot be assigned work outside their permanent profession.
+        // Zero remains allowed so legacy/stale entries can be explicitly cleared.
+        if (n > 0 && !w.canPerform(prof))
+            throw new OrderException(w.name + " не может выполнять работу: " + prof);
         if (w.jobPrio == null) w.jobPrio = new TreeMap<>();
         w.jobPrio.put(prof, n);
     }
@@ -1977,11 +2097,11 @@ public final class Settlement {
 
     // ------------------------------------------------------------------ сохранение
 
-    public String toJson() {
+    public Map<String, Object> toMap() {
         for (String resource : new TreeSet<>(stock.keySet())) amount(resource);
         amount(Defs.SILVER);
         syncAllResourceMirrors();
-        stockLedgerEntries = TreasuryService.current().journal().size();
+        stockLedgerEntries = TreasuryService.current().nextSequence() - 1;
         stockReconciliationChecked = true;
         reconcileStockMirror = false;
         Map<String, Object> root = new LinkedHashMap<>();
@@ -1998,6 +2118,9 @@ public final class Settlement {
         root.put("auto_sell", new LinkedHashMap<String, Object>(autoSell)); root.put("auto_buy", new LinkedHashMap<String, Object>(autoBuy));
         root.put("stock", stock);
         root.put("stock_ledger_entries", stockLedgerEntries);
+        root.put("economy_ledger_period", economyLedgerPeriod);
+        root.put("pending_economy_accruals", new TreeMap<>(pendingEconomyAccruals));
+        root.put("trade_check_timer", tradeCheckTimer);
         List<Object> bs = new ArrayList<>();
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -2033,8 +2156,10 @@ public final class Settlement {
         root.put("departures", ds);
         root.put("placement_receipts", new TreeMap<>(placementReceipts));
         root.put("log", new ArrayList<Object>(log));
-        return Json.write(root);
+        return root;
     }
+
+    public String toJson() { return Json.write(toMap()); }
 
     public static Settlement fromJson(String json, Defs defs) { return fromJson(json, defs, null); }
 
@@ -2080,6 +2205,21 @@ public final class Settlement {
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("stock")).entrySet()) s.stock.put(e.getKey(), ((Number) e.getValue()).doubleValue());
         if (root.get("stock_ledger_entries") instanceof Number entries)
             s.stockLedgerEntries = Math.max(0, entries.longValue());
+        if (root.get("economy_ledger_period") instanceof Number period)
+            s.economyLedgerPeriod = Math.max(0, period.longValue());
+        else s.economyLedgerPeriod = Math.max(0L, (long) Math.floor(s.time / ECONOMY_LEDGER_PERIOD_SECONDS));
+        if (root.get("pending_economy_accruals") instanceof Map<?, ?> accruals) {
+            if (accruals.size() > 100_000) throw new IllegalArgumentException("Settlement periodic accrual limit exceeded");
+            for (Map.Entry<?, ?> entry : accruals.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || !key.matches("[0-9]+\\|[CD]\\|[a-z0-9_.:-]{1,64}\\|[a-zA-Z0-9_.:-]{1,96}")
+                        || !(entry.getValue() instanceof Number value) || !Double.isFinite(value.doubleValue())
+                        || value.doubleValue() < 0)
+                    throw new IllegalArgumentException("Malformed settlement periodic accrual");
+                s.pendingEconomyAccruals.put(key, value.doubleValue());
+            }
+        }
+        if (root.get("trade_check_timer") instanceof Number timer && Double.isFinite(timer.doubleValue()))
+            s.tradeCheckTimer = Math.max(0, Math.min(60, timer.doubleValue()));
         for (Object o : (List<Object>) root.get("buildings")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Defs.Building d = defs.buildings.get((String) m.get("def"));

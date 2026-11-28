@@ -19,6 +19,34 @@ public class MapTest {
         long t0 = System.currentTimeMillis();
         int[] terrain = TerrainImage.render(m);
         System.out.println("рельеф: " + (System.currentTimeMillis() - t0) + " мс");
+        int terrainHash = Arrays.hashCode(terrain);
+        int[] terrainRepeat = TerrainImage.render(m);
+        check(Arrays.equals(terrain, terrainRepeat), "географическая картография детерминирована между рендерами");
+        check(Arrays.hashCode(terrain) == terrainHash, "географический растр не меняется при повторном рендере");
+        check(Arrays.stream(terrain).distinct().limit(2).count() > 1, "географическая карта содержит фактические различия рельефа/биомов");
+        boolean shortTerrainRejected = false;
+        try { MapImages.render(m.titles, new int[Math.max(0, terrain.length - 1)], MapImages.REALMS); }
+        catch (IllegalArgumentException expected) { shortTerrainRejected = true; }
+        check(shortTerrainRejected, "политический рендерер отклоняет неполный массив рельефа");
+        boolean nullTerrainRejected = false;
+        try { MapImages.render(m.titles, null, MapImages.TERRAIN); }
+        catch (IllegalArgumentException expected) { nullTerrainRejected = true; }
+        check(nullTerrainRejected, "географический рендерер отклоняет отсутствующий массив рельефа");
+        boolean emptyModeRejected = false;
+        try { MapImages.render(m.titles, terrain, " "); }
+        catch (IllegalArgumentException expected) { emptyModeRejected = true; }
+        check(emptyModeRejected, "пустой режим карты отклоняется контролируемой ошибкой");
+        boolean badPngRejected = false;
+        try { MapImages.writePng(new int[3], 2, 2, new ByteArrayOutputStream()); }
+        catch (IllegalArgumentException expected) { badPngRejected = true; }
+        check(badPngRejected, "экспорт PNG отклоняет несоответствие размера пиксельного массива");
+        boolean emptyPngRejected = false;
+        try { MapImages.writePng(new int[0], 0, 0, new ByteArrayOutputStream()); }
+        catch (IllegalArgumentException expected) { emptyPngRejected = true; }
+        check(emptyPngRejected, "экспорт PNG отклоняет нулевые размеры");
+        ByteArrayOutputStream onePixelPng = new ByteArrayOutputStream();
+        MapImages.writePng(new int[]{0xFFAA8855}, 1, 1, onePixelPng);
+        check(onePixelPng.size() > 0, "экспорт PNG сохраняет корректное однопиксельное изображение");
         Path out = Paths.get(a[2]);
         Files.createDirectories(out);
         for (String mode : MapImages.modes(m.titles)) {
@@ -91,6 +119,53 @@ public class MapTest {
         boolean threw = false;
         try { ms.add("x", "bogus", 0, 0, 0); } catch (IllegalArgumentException e) { threw = true; }
         check(threw, "неизвестный тип метки отклонён");
+        boolean nullTypeRejected = false;
+        try { ms.add("null-type", null, 0, 0, 0); }
+        catch (IllegalArgumentException expected) { nullTypeRejected = true; }
+        check(nullTypeRejected, "null-тип отклоняется контролируемой ошибкой валидации");
+
+        check(Markers.fromJson("{broken-json").list().isEmpty(),
+                "синтаксически повреждённый JSON не ломает загрузку маркеров");
+
+        Path relativeFile = Paths.get("maqan-markers-relative-test-" + System.nanoTime() + ".json");
+        try {
+            Markers relativeMarkers = new Markers();
+            relativeMarkers.add("Relative", "city", 1, 2, 0x123456);
+            relativeMarkers.save(relativeFile);
+            check(Markers.load(relativeFile).find("Relative") != null,
+                    "сохранение маркеров по относительному пути без родительской папки");
+        } finally {
+            Files.deleteIfExists(relativeFile);
+            Files.deleteIfExists(relativeFile.resolveSibling(relativeFile.getFileName() + ".tmp"));
+        }
+
+        // Explicit visual overrides survive persistence and are removed with their marker.
+        Markers visualMarkers = new Markers();
+        Markers.Marker commander = visualMarkers.add("Командир", "commander", 12, 34, 0xD4AF37);
+        visualMarkers.setVisualProfile(commander.id, "maqan:commander.knight");
+        Markers visualReloaded = Markers.fromJson(visualMarkers.toJson());
+        check(visualReloaded.find(commander.id) != null
+                        && "maqan:commander.knight".equals(visualReloaded.find(commander.id).visualProfile),
+                "визуальный профиль командира сохраняется и восстанавливается");
+        visualReloaded.remove(commander.id);
+        check(!visualReloaded.toJson().contains("visual_overrides"),
+                "удаление объекта очищает сохранённое визуальное переопределение");
+
+        // Older/partially damaged marker files must not crash map loading.
+        Markers missingList = Markers.fromJson("{}");
+        check(missingList.list().isEmpty(), "файл меток без массива markers загружается безопасно");
+        Markers malformedEntries = Markers.fromJson("{\"markers\":[null,{},"
+                + "{\"id\":\"bad-color\",\"name\":\"Bad color\",\"type\":\"castle\","
+                + "\"x\":\"wrong\",\"z\":7,\"color\":\"#GGGGGG\"},"
+                + "{\"id\":\"good\",\"name\":\"Good\",\"type\":\"commander\","
+                + "\"x\":15,\"z\":-9,\"color\":\"#AABBCC\"}]}");
+        Markers.Marker safe = malformedEntries.find("good");
+        Markers.Marker fallback = malformedEntries.find("bad-color");
+        check(malformedEntries.list().size() == 2 && safe != null && safe.x == 15 && safe.z == -9
+                        && fallback != null && fallback.rgb == 0xFFFFFF && fallback.x == 0,
+                "частично повреждённые записи пропускаются или восстанавливаются безопасными значениями");
+        check(Markers.TYPES.containsAll(List.of("commander", "corps", "unit", "fort")),
+                "типы военных и укреплённых объектов доступны в общем каталоге типов");
         System.out.println(fails == 0 ? "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : "ОШИБОК: " + fails);
     }
 }

@@ -32,6 +32,26 @@ public final class CharacterStats {
     private static final int GOOD = 0xFF4FCF5A, BAD = 0xFFE04A4A, NEUT = 0xFF4AA8FF, GOLD = 0xFFF0C85A;
     private static final Map<String, Trait> TRAITS = new LinkedHashMap<>();
 
+    // LifeSimulation asks for temperament/traits several times per resident pass.
+    // Revalidating every trait against all conflict pairs allocated a HashSet and
+    // copied a List on every read. Cache the immutable normalized result by Character
+    // identity and a tiny order-independent fingerprint of its (normally 3-5) traits.
+    // Weak keys ensure evicted Characters are not retained by this derived-data cache.
+    private record TraitCache(long fingerprint, int size, List<String> normalized) { }
+    private static final Map<Character, TraitCache> TRAIT_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static long traitFingerprint(Collection<String> values) {
+        long sum = 0x9E3779B97F4A7C15L;
+        long xor = 0xD6E8FEB86659FD93L;
+        for (String value : values) {
+            long hash = value == null ? 0L : value.hashCode() * 0x100000001B3L;
+            sum += hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63));
+        }
+        return sum ^ Long.rotateLeft(xor, values.size() & 63);
+    }
+
     private static void t(Trait t) { TRAITS.put(t.id, t); }
 
     static {
@@ -58,6 +78,7 @@ public final class CharacterStats {
         t(new Trait("gluttonous", "Обжора", "Поддаётся излишествам и плохо знает меру.", BAD, "stewardship", -1));
         t(new Trait("chaste", "Целомудренный", "Сдержан в романтических привязанностях.", NEUT, "learning", 1));
         t(new Trait("lustful", "Похотливый", "Часто ставит желания выше долга.", BAD, "diplomacy", 1, "intrigue", 1));
+        t(new Trait("fecund", "Плодовитый", "Редкая врождённая особенность: повышенная вероятность зачатия и большая склонность к созданию семьи.", GOLD));
         t(new Trait("humble", "Скромный", "Не стремится выставлять заслуги напоказ.", GOOD, "diplomacy", 1));
         t(new Trait("arrogant", "Высокомерный", "Считает себя выше окружающих и плохо переносит возражения.", BAD, "diplomacy", -2));
         t(new Trait("forgiving", "Прощающий", "Способен оставить старые обиды в прошлом.", GOOD, "diplomacy", 2));
@@ -176,7 +197,7 @@ public final class CharacterStats {
 
     private static long hash(String s) {
         long h = 0xCBF29CE484222325L;
-        for (char c : s.toCharArray()) h = (h ^ c) * 0x100000001B3L;
+        for (int i = 0; i < s.length(); i++) h = (h ^ s.charAt(i)) * 0x100000001B3L;
         h ^= h >>> 29; h *= 0xBF58476D1CE4E5B9L; h ^= h >>> 32;
         return h;
     }
@@ -199,6 +220,8 @@ public final class CharacterStats {
         if (!SKILLS.containsKey(id)) throw new IllegalArgumentException("Unknown skill: " + id);
         return PopulationSimulation.train(c, id, xp);
     }
+
+    private record TraitCandidate(String id, long score) { }
 
     private static final Set<Set<String>> TRAIT_CONFLICTS = Set.of(
             Set.of("brave", "craven"), Set.of("just", "cruel"), Set.of("greedy", "generous"),
@@ -227,21 +250,21 @@ public final class CharacterStats {
         if (next.contains(id)) return false;
         next.add(id);
         if (!compatibleTraits(next)) return false;
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             c.traits.clear();
             c.traits.addAll(next);
             c.props.remove("people.derived_traits");
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(c);
         }
         return true;
     }
 
     public static boolean removeTrait(Character c, String id) {
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginSocialMutationBatch()) {
             boolean changed = c.traits.remove(id);
             if (changed) {
                 c.props.remove("people.derived_traits");
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(c);
             }
             return changed;
         }
@@ -250,14 +273,34 @@ public final class CharacterStats {
     /** 3–5 stable, varied and mutually compatible traits; the same identity always yields the same profile. */
     public static List<String> traits(Character c) {
         if (!c.traits.isEmpty()) {
-            List<String> stored = new ArrayList<>();
-            for (String id : c.traits) {
-                if (!TRAITS.containsKey(id)) continue;
-                List<String> attempt = new ArrayList<>(stored);
-                attempt.add(id);
-                if (compatibleTraits(attempt)) stored.add(id);
+            long fingerprint = traitFingerprint(c.traits);
+            TraitCache cachedTraits = TRAIT_CACHE.get(c);
+            if (cachedTraits != null && cachedTraits.size() == c.traits.size()
+                    && cachedTraits.fingerprint() == fingerprint) return cachedTraits.normalized();
+
+            // Canonical Character records normally contain an already-normalized TreeSet.
+            List<String> normalized;
+            if (compatibleTraits(c.traits)) {
+                normalized = List.copyOf(c.traits);
+            } else {
+                // Keep tolerant normalization for legacy or externally-mutated records.
+                List<String> stored = new ArrayList<>(c.traits.size());
+                for (String id : c.traits) {
+                    if (!TRAITS.containsKey(id)) continue;
+                    boolean conflict = false;
+                    for (String existing : stored) {
+                        if (TRAIT_CONFLICTS.stream().anyMatch(pair ->
+                                pair.contains(id) && pair.contains(existing))) {
+                            conflict = true;
+                            break;
+                        }
+                    }
+                    if (!conflict) stored.add(id);
+                }
+                normalized = List.copyOf(stored);
             }
-            return stored;
+            TRAIT_CACHE.put(c, new TraitCache(fingerprint, c.traits.size(), normalized));
+            return normalized;
         }
         Object cached = c.props.get("people.derived_traits");
         if (cached instanceof List<?> values) {
@@ -265,13 +308,20 @@ public final class CharacterStats {
             for (Object value : values) if (value instanceof String id && TRAITS.containsKey(id) && restored.size() < 5) restored.add(id);
             if (restored.size() >= 3 && compatibleTraits(restored)) return List.copyOf(restored);
         }
-        List<String> candidates = new ArrayList<>(TRAITS.keySet());
-        candidates.remove("usurper");
-        candidates.sort(Comparator.comparingLong(id -> hash(c.id + "|trait|" + id)));
+        // Score each catalog entry exactly once. The old comparator re-hashed the same
+        // identity/trait string hundreds of times per character during TimSort comparisons.
+        // List.sort is stable, so equal scores retain the original LinkedHashMap catalog order.
+        List<TraitCandidate> candidates = new ArrayList<>(TRAITS.size() - 2);
+        for (String id : TRAITS.keySet()) {
+            if (!id.equals("usurper") && !id.equals("fecund"))
+                candidates.add(new TraitCandidate(id, hash(c.id + "|trait|" + id)));
+        }
+        candidates.sort(Comparator.comparingLong(TraitCandidate::score));
         List<String> out = new ArrayList<>();
         Set<String> groups = new HashSet<>();
         int target = 3 + (int) Math.floorMod(hash(c.id + "|trait-count"), 3L);
-        for (String id : candidates) {
+        for (TraitCandidate candidate : candidates) {
+            String id = candidate.id();
             String group = traitGroup(id);
             if (groups.contains(group)) continue;
             List<String> attempt = new ArrayList<>(out);
@@ -281,6 +331,10 @@ public final class CharacterStats {
             groups.add(group);
             if (out.size() >= target) break;
         }
+        // Rare trait (about 1 in 160 generated identities), assigned deterministically.
+        // It is not rolled on every access and remains stable for the character's lifetime.
+        if (out.size() < 5 && Math.floorMod(hash(c.id + "|rare-trait|fecund"), 160L) == 0L)
+            out.add("fecund");
         Collections.sort(out);
         List<String> stable = List.copyOf(out);
         // Traits are deterministic for a Character identity and the catalog is static.
@@ -288,6 +342,20 @@ public final class CharacterStats {
         // the entire trait catalog inside every comparator invocation.
         c.props.put("people.derived_traits", stable);
         return stable;
+    }
+
+    /**
+     * Allocation-free hot-path trait lookup. Canonical records use Character.traits directly;
+     * legacy records fall back to the once-derived immutable profile in props.
+     */
+    public static boolean hasTrait(Character c, String id) {
+        if (c.traits.contains(id)) return true;
+        Object cached = c.props.get("people.derived_traits");
+        if (cached instanceof List<?> values) {
+            for (Object value : values) if (id.equals(value)) return true;
+            return false;
+        }
+        return traits(c).contains(id);
     }
 
     public static int bonus(Character c, String attr) {
@@ -303,12 +371,31 @@ public final class CharacterStats {
 
     /** Закрепляет выведенные характеристики и черты в данных персонажей (чтобы они попали в сохранение). */
     public static void ensure(CharacterRegistry reg) {
-        for (Character c : reg.all()) {
-            for (String a : ATTRS) if (!(c.props.get("stat." + a) instanceof Number)) c.props.put("stat." + a, base(c, a));
-            List<String> normalizedTraits = traits(c);
-            if (!c.traits.equals(new TreeSet<>(normalizedTraits))) {
-                c.traits.clear();
-                c.traits.addAll(normalizedTraits);
+        // Walk the compact identity directory and pin one bounded page at a time.
+        // Never call all(): that legacy view would rehydrate the entire evicted population.
+        final int pageSize = 128;
+        for (int offset = 0; offset < reg.size(); offset += pageSize) {
+            for (String localId : reg.idPage(offset, pageSize)) {
+                try (CharacterAccessService.Lease lease = reg.access().acquire(localId)) {
+                    if (lease == null) continue;
+                    Character character = lease.get();
+                    boolean changed = false;
+                    for (String attribute : ATTRS) {
+                        String key = "stat." + attribute;
+                        if (!(character.props.get(key) instanceof Number)) {
+                            character.props.put(key, base(character, attribute));
+                            changed = true;
+                        }
+                    }
+                    List<String> normalizedTraits = traits(character);
+                    TreeSet<String> normalized = new TreeSet<>(normalizedTraits);
+                    if (!character.traits.equals(normalized)) {
+                        character.traits.clear();
+                        character.traits.addAll(normalized);
+                        changed = true;
+                    }
+                    if (changed) CharacterRegistry.recordCharacterMutation();
+                }
             }
         }
     }

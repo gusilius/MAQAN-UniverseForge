@@ -153,10 +153,16 @@ public class FormsMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int days = WorldForgeApi.clock().pull("wf_forms");
-                int today = day();
-                for (int i = days - 1; i >= 0; i--)
-                    for (ServerPlayer p : e.getServer().getPlayerList().getPlayers()) FORMS.tick(owner(p), envOf(p, today - i));
+                var clock = WorldForgeApi.clock();
+                int days = clock.pullLimited("wf_forms", 4);
+                long lastConsumedDay = clock.consumedDay("wf_forms");
+                long firstDay = lastConsumedDay - days + 1L;
+                List<ServerPlayer> players = List.copyOf(e.getServer().getPlayerList().getPlayers());
+                for (int i = 0; i < days; i++) {
+                    int simulationDay = Math.toIntExact(firstDay + i);
+                    for (ServerPlayer player : players)
+                        FORMS.tick(owner(player), envOf(player, simulationDay));
+                }
             }
             if (ticks % SAVE_EVERY == 0) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_forms: ошибка тика: {}", ex.toString()); }

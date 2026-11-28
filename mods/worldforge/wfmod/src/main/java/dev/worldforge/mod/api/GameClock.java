@@ -11,8 +11,8 @@ import java.util.*;
 public final class GameClock {
     public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365;
     private static final int[] MONTH_LENGTHS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    public static final int[] SPEEDS = {0, 1, 2, 5, 10};
-    public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x5", "x10"};
+    public static final int[] SPEEDS = {0, 1, 2, 4, 5, 10};
+    public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x4", "x5", "x10"};
     public static final String[] MONTHS = {"Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря"};
 
     private double elapsed;                 // игровых дней с начала
@@ -22,6 +22,7 @@ public final class GameClock {
     private int simulationTickMultiplier = 1;
     public int startYear = 300;
     private final Map<String, Long> pulled = new HashMap<>();
+    private final Set<String> durableConsumers = new HashSet<>();
 
     public double elapsedDays() { return elapsed; }
 
@@ -33,6 +34,7 @@ public final class GameClock {
         simulationTickMultiplier = 1;
         startYear = 300;
         pulled.clear();
+        durableConsumers.clear();
     }
     public int speedIndex() { return speed; }
     public boolean paused() { return speed == 0; }
@@ -75,9 +77,31 @@ public final class GameClock {
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
     public int pull(String consumer) {
+        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
         long now = (long) Math.floor(elapsed);
         Long last = pulled.put(consumer, now);
-        return last == null ? 0 : (int) Math.max(0, now - last);
+        return last == null ? 0 : (int) Math.min(Integer.MAX_VALUE, Math.max(0L, now - last));
+    }
+
+    /** Consume at most maxDays while preserving unprocessed elapsed days for later ticks. */
+    public int pullLimited(String consumer, int maxDays) {
+        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
+        if (maxDays < 1) throw new IllegalArgumentException("maxDays must be positive");
+        durableConsumers.add(consumer);
+        long now = (long) Math.floor(elapsed);
+        Long last = pulled.get(consumer);
+        if (last == null) { pulled.put(consumer, now); return 0; }
+        long pending = Math.max(0L, now - last);
+        int delivered = (int) Math.min((long) maxDays, pending);
+        durableConsumers.add(consumer);
+        if (delivered > 0) pulled.put(consumer, last + delivered);
+        return delivered;
+    }
+
+    /** Last fully consumed day; -1 until the consumer cursor is initialized. */
+    public long consumedDay(String consumer) {
+        if (consumer == null || consumer.isBlank()) throw new IllegalArgumentException("consumer is required");
+        return pulled.getOrDefault(consumer, -1L);
     }
 
     /** Множитель для систем реального времени (поселения): 0 на паузе, иначе скорость. */
@@ -120,7 +144,14 @@ public final class GameClock {
 
     public String toJson() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("format", "wf-clock/1"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
+        m.put("format", "wf-clock/3"); m.put("elapsed", elapsed); m.put("speed", speed); m.put("last", lastSpeed); m.put("start", startYear);
+        m.put("consumers", new TreeMap<>(pulled));
+        Map<String, Long> durableCursors = new TreeMap<>();
+        for (String consumer : durableConsumers) {
+            Long cursor = pulled.get(consumer);
+            if (cursor != null) durableCursors.put(consumer, cursor);
+        }
+        m.put("consumers", durableCursors);
         return Json.write(m);
     }
 
@@ -129,7 +160,11 @@ public final class GameClock {
         Object parsed = Json.parse(json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Clock save must be a JSON object");
         Map<String, Object> m = (Map<String, Object>) raw;
-        if (!"wf-clock/1".equals(m.get("format"))) throw new IllegalArgumentException("Неверный формат часов");
+        Object format = m.get("format");
+        boolean legacyFormat = "wf-clock/1".equals(format);
+        boolean previousFormat = "wf-clock/2".equals(format);
+        if (!legacyFormat && !previousFormat && !"wf-clock/3".equals(format))
+            throw new IllegalArgumentException("Неверный формат часов");
         if (!(m.get("elapsed") instanceof Number elapsedValue)
                 || !(m.get("speed") instanceof Number speedValue)
                 || !(m.get("last") instanceof Number lastValue)
@@ -139,6 +174,12 @@ public final class GameClock {
         double nextElapsed = elapsedValue.doubleValue();
         int nextSpeed = speedValue.intValue();
         int nextLast = lastValue.intValue();
+        // wf-clock/2 used indices 3=x5 and 4=x10. wf-clock/3 inserts x4
+        // before them while preserving the actual speed represented by old saves.
+        if (previousFormat) {
+            if (nextSpeed >= 3) nextSpeed++;
+            if (nextLast >= 3) nextLast++;
+        }
         int nextStart = startValue.intValue();
         if (!Double.isFinite(nextElapsed) || nextElapsed < 0
                 || nextElapsed > (Integer.MAX_VALUE - (double) Math.max(1, nextStart)) * YEAR_DAYS)
@@ -149,11 +190,32 @@ public final class GameClock {
             throw new IllegalArgumentException("Clock resume speed is outside the supported range");
         if (nextStart < 1) throw new IllegalArgumentException("Clock start year must be positive");
 
+        Map<String, Long> nextPulled = new HashMap<>();
+        if (!legacyFormat) {
+            Object rawConsumers = m.get("consumers");
+            if (!(rawConsumers instanceof Map<?, ?> consumerMap))
+                throw new IllegalArgumentException("Clock save is missing consumer cursors");
+            long maxDay = (long) Math.floor(nextElapsed);
+            for (Map.Entry<?, ?> entry : consumerMap.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || key.isBlank()
+                        || !(entry.getValue() instanceof Number value))
+                    throw new IllegalArgumentException("Clock consumer cursor is malformed");
+                double numeric = value.doubleValue();
+                long cursor = value.longValue();
+                if (!Double.isFinite(numeric) || numeric != cursor || cursor < 0 || cursor > maxDay)
+                    throw new IllegalArgumentException("Clock consumer cursor is outside the elapsed calendar");
+                nextPulled.put(key, cursor);
+            }
+        }
+
         // Commit only after every field has passed validation: malformed saves never partially mutate time.
         elapsed = nextElapsed;
         speed = nextSpeed;
         lastSpeed = nextLast;
         startYear = nextStart;
         pulled.clear();
+        pulled.putAll(nextPulled);
+        durableConsumers.clear();
+        durableConsumers.addAll(nextPulled.keySet());
     }
 }

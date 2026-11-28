@@ -39,9 +39,46 @@ public final class PlatformWorkspaceBridge {
         }
     }
 
+    /** Returns whether the shared inspector still points at this exact provider-owned identity. */
+    public static boolean isCurrentSelection(String providerId, String entityId) {
+        try {
+            Class<?> context = Class.forName(CONTEXT);
+            Object current = context.getMethod("current").invoke(null);
+            if (current == null) return false;
+            String provider = String.valueOf(current.getClass().getMethod("providerId").invoke(current));
+            String id = String.valueOf(current.getClass().getMethod("entityId").invoke(current));
+            return clean(providerId).equals(provider) && clean(entityId).equals(id);
+        } catch (ClassNotFoundException | NoClassDefFoundError optionalHostMissing) {
+            return true;
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
     public static String worldId() {
         Minecraft mc = Minecraft.getInstance();
         return mc.level == null ? "" : mc.level.dimension().location().toString();
+    }
+
+    public static void publishMapViewport(double centerX, double centerZ, double zoom) {
+        publishMapViewport(centerX, centerZ, zoom, "POLITICAL");
+    }
+
+    public static void publishMapViewport(double centerX, double centerZ, double zoom, String viewTypeName) {
+        try {
+            Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceMapState");
+            state.getMethod("setViewport", String.class, double.class, double.class,
+                    double.class, double.class, double.class).invoke(null,
+                    worldId(), centerX, centerZ, zoom, 0.0, 0.0);
+            Class<?> viewType = Class.forName("dev.maqan.platform.client.WorkspaceMapState$ViewType");
+            String requested = viewTypeName == null ? "POLITICAL" : viewTypeName.trim().toUpperCase(java.util.Locale.ROOT);
+            Object selected = Enum.valueOf((Class<? extends Enum>) viewType.asSubclass(Enum.class), requested);
+            state.getMethod("setViewType", viewType).invoke(null, selected);
+        } catch (ClassNotFoundException ignored) {
+            // Optional host not installed.
+        } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
+            // Political map remains functional without the optional workspace state.
+        }
     }
 
     /** Register an action that is shown in MAQAN's context menu for this provider's selection. */

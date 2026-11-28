@@ -103,6 +103,24 @@ public final class CharacterInventoryTest {
         ok(!CharacterInventory.transfer(owner, spouse, "minecraft:bread", 0),
                 "invalid transfer amount is rejected");
 
+        CharacterAuthority inventoryAuthority = new CharacterAuthority();
+        inventoryAuthority.beginWorld(new WorldId(UUID.fromString("66666666-6666-4666-8666-666666666666")));
+        CharacterRegistry inventorySource = new CharacterRegistry();
+        CharacterRegistry inventoryDestination = new CharacterRegistry();
+        Character transferSource = inventorySource.create("UUID Source", "", "north", "m", 260);
+        Character transferDestination = inventoryDestination.create("UUID Destination", "", "north", "f", 260);
+        CharacterInventory.add(transferSource, "minecraft:gold_ingot", 5);
+        inventoryAuthority.registerMap("inventory-source", inventorySource);
+        inventoryAuthority.registerMap("inventory-destination", inventoryDestination);
+        ok(CharacterInventory.transferByGlobalId(inventoryAuthority, transferSource.globalId,
+                        transferDestination.globalId, "minecraft:gold_ingot", 3)
+                        && CharacterInventory.count(transferSource, "minecraft:gold_ingot") == 2
+                        && CharacterInventory.count(transferDestination, "minecraft:gold_ingot") == 3
+                        && inventorySource.activeAccessLeaseCount() == 0
+                        && inventoryDestination.activeAccessLeaseCount() == 0,
+                "cross-partition inventory movement resolves UUIDs, commits both ledgers and releases ordered leases");
+        inventoryAuthority.clear();
+
         Character equipped = registry.create("Garrick", "", "north", "m", 260);
         CharacterInventory.add(equipped, "minecraft:iron_sword", 2, "{Damage:4}");
         ok(CharacterInventory.equip(equipped, "mainhand", "minecraft:iron_sword")
@@ -252,18 +270,31 @@ public final class CharacterInventoryTest {
         CharacterRegistry playerPeople = new CharacterRegistry();
         Character crossMapDeceased = settlementPeople.create("Lord Edric", "", "north", "m", 220);
         Character playerHeir = playerPeople.create("Player Heir", "", "north", "f", 245);
+        Character unrelated = playerPeople.create("Unrelated", "", "south", "f", 260);
         crossMapDeceased.props.put("family.spouse_global_id", playerHeir.globalId);
         playerHeir.props.put("family.spouse_global_id", crossMapDeceased.globalId);
         CharacterInventory.add(crossMapDeceased, "minecraft:diamond", 14);
         worldAuthority.registerMap("settlement:north", settlementPeople);
         worldAuthority.registerMap("__players__", playerPeople);
+        settlementPeople.prepareKinIndex(365L);
+        ok(settlementPeople.kinCandidates(crossMapDeceased).contains(playerHeir)
+                        && !settlementPeople.kinCandidates(crossMapDeceased).contains(unrelated),
+                "prepared family index returns cross-registry spouse candidates without scanning unrelated population");
         settlementPeople.kill(crossMapDeceased.id);
         ok(CharacterInventory.count(playerHeir, "minecraft:diamond") == 14
                         && CharacterInventory.count(crossMapDeceased, "minecraft:diamond") == 0
                         && "inherited".equals(crossMapDeceased.props.get("estate.status"))
                         && playerHeir.globalId.equals(crossMapDeceased.props.get("estate.recipient_global_id")),
                 "death estate resolves a spouse in the separate global player registry");
+        ok(worldAuthority.pendingEstateIncoming().size() == 1,
+                "estate recovery index contains only the incoming recipient/source UUID pair");
         CharacterInventory.reconcileEstates(worldAuthority);
+        ok(worldAuthority.pendingEstateIncoming().isEmpty()
+                        && settlementPeople.pendingBereavementEvents() > 0
+                        && settlementPeople.processPendingBereavementBatch(1) == 1
+                        && settlementPeople.activeAccessLeaseCount() == 0
+                        && playerPeople.activeAccessLeaseCount() == 0,
+                "cross-partition bereavement advances one UUID recipient at a time and releases every lease");
         ok(!crossMapDeceased.props.containsKey("estate.transfer_pending")
                         && crossMapDeceased.props.get("estate.transfer_receipt") instanceof String,
                 "completed cross-registry estate retires its active marker while preserving a durable receipt");
@@ -437,11 +468,14 @@ public final class CharacterInventoryTest {
         recoveredTransferAuthority.beginWorld(new WorldId(UUID.fromString("55555555-5555-4555-8555-555555555555")));
         recoveredTransferAuthority.registerMap("__players__", recoveredTransferSource);
         recoveredTransferAuthority.registerMap("settlement:recovery", recoveredTransferDestination);
+        ok(recoveredTransferAuthority.pendingInventoryTransfers().size() == 1,
+                "inventory WAL recovery indexes only the pending cross-partition UUID transaction");
         boolean transferRecovered = CharacterInventoryTransactions.reconcile(
                 recoveredTransferAuthority, character -> true);
         Character recoveredTransferPlayer = recoveredTransferAuthority.getGlobal(crashTransferPlayer.globalId);
         Character recoveredTransferOwner = recoveredTransferAuthority.getGlobal(crashTransferOwner.globalId);
         ok(!interruptedTransfer && transferRecovered
+                        && recoveredTransferAuthority.pendingInventoryTransfers().isEmpty()
                         && CharacterInventory.items(recoveredTransferPlayer).stream().mapToInt(CharacterInventory.Item::count).sum() == 4
                         && CharacterInventory.containerItems(recoveredTransferOwner, "recovery_store").stream()
                         .mapToInt(CharacterInventory.Item::count).sum() == 3
@@ -483,6 +517,8 @@ public final class CharacterInventoryTest {
         corruptDestinationMarker.put("role", "destination");
         corruptPlayer.props.put(corruptMarkerKey, corruptSourceMarker);
         corruptOwner.props.put(corruptMarkerKey, corruptDestinationMarker);
+        // Production execution publishes the sparse UUID index before persisting PREPARED.
+        corruptAuthority.noteInventoryTransfer(corruptTransactionId, corruptPlayer.globalId, corruptOwner.globalId);
         boolean corruptMarkerAccepted = CharacterInventoryTransactions.reconcile(
                 corruptAuthority, character -> true);
         ok(!corruptMarkerAccepted
@@ -494,8 +530,14 @@ public final class CharacterInventoryTest {
                 "mismatched WAL endpoint identities fail closed without clearing markers or mutating either inventory");
         corruptPlayer.props.remove(corruptMarkerKey);
         corruptOwner.props.remove(corruptMarkerKey);
+        corruptAuthority.clear();
         String malformedMarkerKey = CharacterInventory.TRANSFER_MARKER_PREFIX + "malformed";
         corruptPlayer.props.put(malformedMarkerKey, "not-a-marker-map");
+        // Simulate restart: malformed durable data is discovered while rebuilding the
+        // sparse recovery index from the restored partition, not by a population scan.
+        corruptAuthority.beginWorld(new WorldId(UUID.fromString("66666666-6666-4666-8666-666666666666")));
+        corruptAuthority.registerMap("__players__", corruptPlayers);
+        corruptAuthority.registerMap("settlement:corrupt", corruptKeep);
         boolean malformedMarkerAccepted = CharacterInventoryTransactions.reconcile(
                 corruptAuthority, character -> true);
         ok(!malformedMarkerAccepted && CharacterInventory.hasPendingTransfer(corruptPlayer)
@@ -530,8 +572,9 @@ public final class CharacterInventoryTest {
         ok(CharacterInventory.remove(overflowHeir, "minecraft:emerald", 1)
                         && overflowRegistry.kill(overflowDead.id).size() == 1
                         && CharacterInventory.count(overflowDead, "minecraft:emerald") == 0
-                        && CharacterInventory.count(overflowHeir, "minecraft:emerald") == 1_000_000,
-                "failed estate settlement can retry after capacity is available");
+                        && CharacterInventory.count(overflowHeir, "minecraft:emerald") == 1_000_000
+                        && overflowRegistry.activeAccessLeaseCount() == 0,
+                "failed estate settlement can retry after capacity is available and releases all leases");
         ok(deathEvents[0] == 1 && dismissEvents[0] == 1 && overflowDead.posts.isEmpty(),
                 "estate retry completes service dismissal and death lifecycle exactly once");
 

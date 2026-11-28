@@ -8,6 +8,8 @@ public final class Army {
     public final int id;
     public final String realm;
     public String name, commander = "";
+    /** Canonical People UUID; deliberately stores no Character object or registry reference. */
+    public String commanderGlobalId = "";
     public int martial;                                       // военное умение командира (+3% силы за единицу)
     public int location;                                      // id титула-баронства
     public double morale = 1.0, moveAcc, supply = 1.0;
@@ -22,6 +24,18 @@ public final class Army {
     public int men() { int n = 0; for (int v : units.values()) n += v; return n; }
 
     public int count(String type) { return units.getOrDefault(type, 0); }
+
+    /** Assigns or clears the commander by canonical People UUID; no object reference is retained. */
+    public void setCommanderGlobalId(String globalId) {
+        if (globalId == null || globalId.isBlank()) {
+            commanderGlobalId = "";
+            return;
+        }
+        try { commanderGlobalId = java.util.UUID.fromString(globalId).toString(); }
+        catch (IllegalArgumentException malformed) {
+            throw new IllegalArgumentException("Commander must be addressed by a canonical UUID", malformed);
+        }
+    }
 
     public void add(String type, int n) { if (n > 0) units.merge(type, n, Integer::sum); }
 

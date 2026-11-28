@@ -42,6 +42,15 @@ public final class CharacterMilitaryIdentityTest {
                         && PopulationSimulation.hasDuty(restoredPerson, Duty.SOLDIER),
                 "soldier identity and physical entity binding survive Character registry save/load");
 
+        int leasesBefore = restored.activeAccessLeaseCount();
+        try (var lease = restored.access().acquireGlobal(globalId)) {
+            check(lease != null && lease.get() == restoredPerson
+                            && restored.activeAccessLeaseCount() == leasesBefore + 1,
+                    "physical troop UUID resolves to the canonical Character through a scoped lease");
+        }
+        check(restored.activeAccessLeaseCount() == leasesBefore,
+                "closing the military Character lease releases the eviction pin exactly once");
+
         restored.unbindEntity(legacyId, "troop", troopEntity);
         String formerProfession = String.valueOf(restoredPerson.props.remove("population.pre_military_profession"));
         restored.changeProfession(legacyId, formerProfession, 302);
@@ -55,6 +64,18 @@ public final class CharacterMilitaryIdentityTest {
         check(restoredPerson.props.get("population.profession").equals(formerProfession)
                         && !restoredPerson.props.containsKey("population.entity_bindings"),
                 "civilian profession is restored and troop body binding is released");
+
+        Character fallen = restored.create("Fallen Soldier", "", "north", "m", 280);
+        String fallenGlobalId = fallen.globalId;
+        restored.kill(fallen.id);
+        try (var deathRecoveryLease = restored.access().acquireGlobal(fallenGlobalId)) {
+            check(deathRecoveryLease != null && deathRecoveryLease.get() == fallen
+                            && !deathRecoveryLease.get().alive,
+                    "death recovery can lease the canonical Character after its alive flag is cleared");
+        }
+        check(restored.activeAccessLeaseCount() == 0,
+                "dead Character recovery lease is released without leaving an eviction pin");
+
         if (failures > 0) throw new AssertionError(failures + " CharacterMilitaryIdentity tests failed");
         System.out.println("CharacterMilitaryIdentity: ALL OK");
     }

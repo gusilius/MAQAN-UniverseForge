@@ -32,10 +32,21 @@ public final class SettleCommands {
 
     public static void register(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("wfsettle")
-                .then(Commands.literal("found").requires(SettleCommands::op)
+                .then(Commands.literal("found")
                         .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> found(c.getSource(), StringArgumentType.getString(c, "name")))))
                 .then(Commands.literal("list").executes(c -> list(c.getSource())))
                 .then(Commands.literal("info").executes(c -> info(c.getSource())))
+                .then(Commands.literal("workers")
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                                        .executes(c -> order(c, colony -> {
+                                            var player = c.getSource().getPlayer();
+                                            if (player == null || !player.isCreative())
+                                                throw new Settlement.OrderException("Ручное создание жителей доступно владельцу поселения в творческом режиме; в обычном режиме население растёт через жильё, еду и настроение.");
+                                            int count = IntegerArgumentType.getInteger(c, "count");
+                                            for (int i = 0; i < count; i++) colony.s.addWorker(null);
+                                            return "Добавлено жителей: " + count + ". Канонические Character и физические тела будут материализованы штатной синхронизацией.";
+                                        })))))
                 .then(Commands.literal("schem")
                         .then(Commands.literal("list").executes(c -> {
                             var names = SchemLibrary.names();
@@ -47,6 +58,25 @@ public final class SettleCommands {
                             c.getSource().sendSuccess(() -> Component.literal("Схемы перечитаны: " + (rep.isEmpty() ? "файлов нет" : "\n" + String.join("\n", rep))), true);
                             return rep.size();
                         })))
+                .then(Commands.literal("identity").requires(SettleCommands::op)
+                        .then(Commands.literal("style")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.architectureStyleId = id;
+                                    return "Архитектурный стиль образования установлен: " + id
+                                            + ". Расовая архитектура остаётся отдельным слоем.";
+                                }))))
+                        .then(Commands.literal("formation")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.polityFormationId = id;
+                                    return "Форма образования установлена: " + id
+                                            + ". Политические постройки будут подбираться отдельно от расовых.";
+                                }))))
+                        .then(Commands.literal("show").executes(c -> order(c, colony ->
+                                "Раса=" + colony.identityRace + ", культура=" + colony.identityCulture
+                                        + ", правительство=" + colony.governmentId + ", форма=" + colony.polityFormationId
+                                        + ", стиль=" + colony.architectureStyleId + ", тип=" + colony.settlementType))))
                 .then(Commands.literal("build").requires(SettleCommands::op)
                         .then(Commands.argument("def", StringArgumentType.word())
                                 .suggests((c, b) -> SharedSuggestionProvider.suggest(SettleMod.DEFS == null ? java.util.List.of() : SettleMod.DEFS.buildings.keySet(), b))
@@ -63,11 +93,31 @@ public final class SettleCommands {
                         }))))
                 .then(Commands.literal("assign").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
-                                .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
-                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
-                                    col.s.assign(w, uid);
-                                    return "Рабочий #" + w + " отправлен в здание #" + uid;
-                                })))))
+                                .then(Commands.argument("uid", IntegerArgumentType.integer(1))
+                                        .executes(c -> order(c, col -> {
+                                            int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                            col.s.assign(w, uid);
+                                            return "Рабочий #" + w + " отправлен в здание #" + uid;
+                                        }))
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .suggests((c, b) -> {
+                                                    CommandSourceStack source = c.getSource();
+                                                    Colony colony = SettleMod.nearest(source.getLevel(),
+                                                            source.getPosition().x, source.getPosition().z);
+                                                    if (colony == null) return b.buildFuture();
+                                                    Building building = colony.s.building(
+                                                            IntegerArgumentType.getInteger(c, "uid"));
+                                                    if (building == null) return b.buildFuture();
+                                                    java.util.Set<String> roles = new java.util.TreeSet<>(building.def.jobs.keySet());
+                                                    if (building.state == Building.State.BUILDING) roles.add("builder");
+                                                    return SharedSuggestionProvider.suggest(roles, b);
+                                                })
+                                                .executes(c -> order(c, col -> {
+                                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                                    String role = StringArgumentType.getString(c, "role");
+                                                    col.s.assign(w, uid, role);
+                                                    return "Рабочий #" + w + " назначен на роль '" + role + "' в здании #" + uid;
+                                                }))))))
                 .then(Commands.literal("hauler").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
                                 .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
@@ -268,6 +318,12 @@ public final class SettleCommands {
 
     private static int executeAdminMutation(CommandSourceStack source, String actionId, String target,
                                               String payload, java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
+        return executeAdminMutation(source, actionId, target, payload, false, operation);
+    }
+
+    private static int executeAdminMutation(CommandSourceStack source, String actionId, String target,
+                                              String payload, boolean allowPlayerFounding,
+                                              java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
         String actor = source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
                 ? player.getUUID().toString() : "console";
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
@@ -283,7 +339,8 @@ public final class SettleCommands {
                         Colony targetColony = SettleMod.colony(req.targetId());
                         if (SettleMod.actionsBlocked())
                             return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
-                        return op(source) ? null : "Для этой операции нужны права владельца поселения или оператора";
+                        boolean mayFound = allowPlayerFounding && source.getEntity() instanceof net.minecraft.server.level.ServerPlayer;
+                        return op(source) || mayFound ? null : "Для этой операции нужны права владельца поселения или оператора";
                     },
                     (req, attempt) -> {
                         dev.worldforge.mod.api.ActionResult result = operation.get();
@@ -313,8 +370,9 @@ public final class SettleCommands {
         ServerLevel level = s.getLevel();
         BlockPos pos = BlockPos.containing(s.getPosition());
         String payload = level.dimension().location() + "|" + pos + "|" + name.trim();
-        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, () -> {
-            Colony colony = SettleMod.found(level, name.trim(), pos);
+        String foundingOperationId = "player:found:" + java.util.UUID.randomUUID();
+        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, true, () -> {
+            Colony colony = SettleMod.found(level, name.trim(), pos, foundingOperationId);
             if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
                 colony.owner = player.getUUID().toString();
             return dev.worldforge.mod.api.ActionResult.ok(
@@ -370,6 +428,13 @@ public final class SettleCommands {
             ServerLevel lv = col.level(c.getSource().getServer());
             if (lv != null) col.captureTerrain(lv, x - 16, z - 16, x + 16, z + 16);
             dev.worldforge.settle.Defs.Building definition = SettleMod.DEFS.buildings.get(def);
+            if (definition != null && !col.s.defs.isIdentityCompatible(def, col.identityRace, null,
+                    col.identityCulture, col.governmentId, col.settlementType,
+                    col.polityFormationId, col.architectureStyleId)) {
+                throw new Settlement.OrderException("Постройка '" + definition.name
+                        + "' несовместима с идентичностью образования. Выберите подходящий вариант каталога "
+                        + "или измените стиль/форму образования.");
+            }
             if (definition != null && !col.map.cells().isEmpty())
                 col.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
             Building b = col.s.place(def, x, z);

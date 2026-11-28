@@ -236,11 +236,17 @@ public class QuestsMod {
         ticks++;
         try {
             if (ticks % STEP == 0) {
-                int days = WorldForgeApi.clock().pull("wf_quests");
-                int today = day();
+                var clock = WorldForgeApi.clock();
+                int days = clock.pullLimited("wf_quests", 4);
+                long lastConsumedDay = clock.consumedDay("wf_quests");
+                long firstDay = lastConsumedDay - days + 1L;
                 List<String> ids = new ArrayList<>();
                 for (TitleData.Realm r : realms()) ids.add(r.id);
-                for (int i = days - 1; i >= 0; i--) { QUESTS.tick(today - i); QUESTS.rollEvents(today - i, RNG, ids, EVENT_CHANCE); }
+                for (int i = 0; i < days; i++) {
+                    int simulationDay = Math.toIntExact(firstDay + i);
+                    QUESTS.tick(simulationDay);
+                    QUESTS.rollEvents(simulationDay, RNG, ids, EVENT_CHANCE);
+                }
             }
             if (ticks % SAVE_EVERY == 0) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_quests: ошибка тика: {}", ex.toString()); }

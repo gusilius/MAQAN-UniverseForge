@@ -80,33 +80,64 @@ public final class WorldSimMod {
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     /** Avoid repeating unchanged world-census lines on every native compute frame. */
     private static final Map<String, String> LAST_GENESIS_DIAGNOSTIC_FINGERPRINT = new HashMap<>();
+    private static long LAST_GENESIS_DIAGNOSTIC_TICK = Long.MIN_VALUE;
+    private static final int GENESIS_DIAGNOSTIC_INTERVAL_TICKS = 200;
     private static final Deque<String> journal = new ArrayDeque<>();
     private static JsonObject emergenceState;
     private static JsonObject emergenceBindings = new JsonObject();
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
+    private static final int STRUCTURE_MATERIALIZATION_BUDGET_PER_TICK = 32;
     private static final int PEOPLE_MATERIALIZATION_BUDGET_PER_TICK = 256;
+    /** True while one or more authored image maps are being sampled off-thread. */
+    private static volatile boolean imageGeographyPending;
     private static WorldSimComputeScheduler.Result pendingApplyResult;
+    private static long serverTickSequence;
+    private static long pendingApplyRetryAtTick;
+    private static int pendingApplyFailureCount;
+    private static JsonObject pendingApplyEmergenceFrame;
+    private static JsonObject pendingApplyDecisionFrame;
     private static JsonObject pendingCandidateEmergenceState;
     private static EmergentPeopleProgress emergentPeopleProgress;
+    private static EmergentStructureProgress emergentStructureProgress;
 
     private static final class EmergentBandProgress {
-        final List<dev.worldforge.people.Character> residents;
+        final List<String> residents;
         final EmergentParents parents;
         int originCursor;
+        int residentIndexCursor;
+        final List<String> residentIds = new ArrayList<>();
+        final Set<String> residentIdSet = new HashSet<>();
+        boolean canonicalResidentsReplaced;
+        List<Worker> workerSnapshot;
+        int workerCleanupCursor;
+        int residentWorkerCursor;
         boolean settlementReconciled;
-        EmergentBandProgress(List<dev.worldforge.people.Character> residents, int year) {
-            this.residents = residents;
-            this.residents.sort(Comparator.comparingInt(person -> person.birthYear));
-            this.parents = EmergentParents.from(this.residents, year);
+        EmergentBandProgress(List<EmergentPopulationIndex.Resident> residents, int year) {
+            List<EmergentPopulationIndex.Resident> ordered = new ArrayList<>(residents);
+            ordered.sort(Comparator.comparingInt(EmergentPopulationIndex.Resident::birthYear)
+                    .thenComparing(EmergentPopulationIndex.Resident::globalId));
+            this.residents = ordered.stream().map(EmergentPopulationIndex.Resident::globalId)
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+            this.parents = EmergentParents.from(ordered, year);
         }
     }
 
     private static final class EmergentMapProgress {
         final EmergentPopulationIndex index;
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
+        final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
+        // Durable Character writes are submitted in bounded windows and observed without
+        // blocking the Minecraft server thread. Cursor advances only after every receipt
+        // in the current window has completed successfully.
+        int durableCursor;
+        List<java.util.concurrent.CompletableFuture<Boolean>> durableWrites = List.of();
         EmergentMapProgress(CharacterRegistry registry) {
-            this.index = new EmergentPopulationIndex(registry.all());
+            this.index = new EmergentPopulationIndex(registry);
+            List<String> reserved = new ArrayList<>(registry.houseNamesSnapshot());
+            RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
+                    .filter(value -> value != null && !value.isBlank()).forEach(reserved::add);
+            this.reservedHouseNames = PeopleMod.NAMES.reservations(reserved);
         }
     }
 
@@ -156,11 +187,12 @@ public final class WorldSimMod {
         List<EmergenceSource> sources = new ArrayList<>();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         Map<String, String> registeredMapSources = new HashMap<>();
-        // Enumerate the actual loaded ServerLevels, not only maps already touched by a
-        // generated chunk or command. This bootstraps a map planet's strategic geography
-        // from its complete .worldmap package even before a player visits that dimension.
+        // Enumerate registered levels, but do not open their map package or create a
+        // strategic source until a player has durably activated that planetary surface.
         if (server != null) for (ServerLevel level : server.getAllLevels()) {
             if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            String dimension = level.dimension().location().toString();
+            if (!WorldForgeMod.isPlanetDimensionActive(dimension)) continue;
             MapData map;
             try { map = generator.data(); }
             catch (RuntimeException unavailable) {
@@ -169,7 +201,6 @@ public final class WorldSimMod {
                 continue;
             }
             if (map == null) continue;
-            String dimension = level.dimension().location().toString();
             String previousDimension = registeredMapSources.putIfAbsent(map.name, dimension);
             if (previousDimension != null) {
                 if (!previousDimension.equals(dimension))
@@ -196,10 +227,26 @@ public final class WorldSimMod {
         return sources;
     }
 
+    /** Tick-budgeted, retry-safe settlement-site materialization for one immutable genesis frame. */
+    private static final class EmergentStructureProgress {
+        final JsonObject state;
+        final Set<String> completedBands = new HashSet<>();
+        boolean dirty;
+        java.util.concurrent.CompletableFuture<Boolean> durableSave;
+        EmergentStructureProgress(JsonObject state) { this.state = state; }
+    }
+
     private static final class EmergentPeopleProgress {
         final JsonObject state;
         final int year;
         final Map<String, EmergentMapProgress> maps = new HashMap<>();
+        final Map<String, String> workerColonyByPerson = new HashMap<>();
+        final Map<String, Integer> settlementNameCounts = new HashMap<>();
+        final Set<String> dirtySettlementSources = new HashSet<>();
+        final Set<String> dirtyBindingSources = new HashSet<>();
+        final Map<String, java.util.concurrent.CompletableFuture<Boolean>> settlementSaves = new HashMap<>();
+        dev.worldforge.mod.api.DomainMutationRevisions.Snapshot settlementRevision;
+        boolean settlementProjectionBuilt;
         EmergentPeopleProgress(JsonObject state, int year) { this.state = state; this.year = year; }
     }
 
@@ -230,6 +277,7 @@ public final class WorldSimMod {
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new VanillaWorldGeography());
+        MinecraftForge.EVENT_BUS.register(new LivingWorldAcceptanceLab());
         WorldForgeApi.events().addListener(item -> {
             recordChronicleEvent(item);
             publishPlatformTimelineEvent(item);
@@ -249,14 +297,24 @@ public final class WorldSimMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
+        // WorldSim chooses recruits from the registered settlement and physical-unit catalogs.
+        // Keep ArmyEngine's independent movement/war AI, but disable its legacy duplicate recruit pass
+        // only when the native decision provider actually loaded; otherwise preserve the addon fallback.
+        boolean nativeRecruitmentPlanner = NativeWorldSimulation.load();
+        ArmyMod.setWorldSimRecruitmentAuthority(nativeRecruitmentPlanner);
+        LOGGER.info("wf_worldsim: strategic recruitment planner={} (native={})",
+                nativeRecruitmentPlanner ? "worldsim" : "wf-army fallback", nativeRecruitmentPlanner);
         lifecycleEpoch++;
         LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.clear();
         COMPUTE_SCHEDULER.close();
         COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
         pendingComputeRevision = Long.MIN_VALUE;
         pendingApplyResult = null;
+        pendingApplyEmergenceFrame = null;
+        pendingApplyDecisionFrame = null;
         pendingCandidateEmergenceState = null;
         emergentPeopleProgress = null;
+        emergentStructureProgress = null;
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergenceState = null;
@@ -266,6 +324,7 @@ public final class WorldSimMod {
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
         loadState(event.getServer());
+        auditStructureIdentityCoverage();
         VanillaWorldGeography.load(event.getServer());
         // Backfill the book from the persisted canonical journal. This also migrates
         // worlds saved before the chronicle projection existed; seq-based identities
@@ -276,12 +335,52 @@ public final class WorldSimMod {
                 serverObserverCount(event.getServer()));
     }
 
+    /**
+     * Verifies that the shared identity resolver accepts every currently loaded race/subrace
+     * against every government definition. This is a runtime audit of the real datapack
+     * registries, not a hardcoded race/government allow-list.
+     */
+    private static void auditStructureIdentityCoverage() {
+        if (SettleMod.DEFS == null || !SettleMod.STRUCTURE_CATALOG.loaded()) {
+            LOGGER.error("wf_worldsim: structure identity audit blocked: settlement definitions/catalogue unavailable");
+            return;
+        }
+        Set<String> races = new TreeSet<>(OriginsMod.DEFS.races.keySet());
+        Set<String> governments = new TreeSet<>(RealmsMod.DEFS.govs.keySet());
+        if (races.isEmpty() || governments.isEmpty()) {
+            LOGGER.error("wf_worldsim: structure identity audit blocked: loaded races={} governments={}",
+                    races.size(), governments.size());
+            return;
+        }
+        int combinations = 0;
+        int missingFoundingHousing = 0;
+        for (String race : races) for (String government : governments) {
+            combinations++;
+            String selected = SettleMod.DEFS.selectIdentityBuilding("house", race, null, null,
+                    government, "village", null, null,
+                    Objects.hash(race, government, "structure-catalog-coverage"));
+            if (selected == null || selected.isBlank()) {
+                missingFoundingHousing++;
+                LOGGER.error("wf_worldsim: no compatible founding housing for race={} government={}",
+                        race, government);
+            }
+        }
+        LOGGER.info("wf_worldsim: structure identity coverage races={} governments={} combinations={} founding_housing_gaps={} building_definitions={} settlement_types={} structure_classes={} identity_dimensions={}",
+                races.size(), governments.size(), combinations, missingFoundingHousing,
+                SettleMod.DEFS.buildings.size(), SettleMod.TYPES.types.size(),
+                SettleMod.STRUCTURE_CATALOG.structureClasses().size(),
+                SettleMod.STRUCTURE_CATALOG.identityDimensions().size());
+    }
+
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent event) {
+        ArmyMod.setWorldSimRecruitmentAuthority(false);
         lifecycleEpoch++;
         COMPUTE_SCHEDULER.close();
         pendingComputeRevision = Long.MIN_VALUE;
         pendingApplyResult = null;
+        pendingApplyRetryAtTick = 0;
+        pendingApplyFailureCount = 0;
         pendingCandidateEmergenceState = null;
         emergentPeopleProgress = null;
         PROFILER.setGauge("worldsim.compute.busy", 0);
@@ -301,6 +400,9 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        // Contour 02 isolates canonical people/population. WorldSim Genesis and strategic
+        // domains have dedicated contours; PeopleMod still invokes population scheduling.
+        if (Boolean.getBoolean("wf.acceptance.contour02")) return;
         try (WorldSimProfiler.Scope ignored = PROFILER.begin("worldsim.server_tick_handler")) {
             processServerTick(event);
         }
@@ -309,10 +411,26 @@ public final class WorldSimMod {
     private void processServerTick(TickEvent.ServerTickEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        serverTickSequence++;
         if (++lodTicks % 20 == 0) publishObservers(server);
         if (!emergentRealmsRehydrated && emergenceState != null) {
-            syncEmergentPolities(server, emergenceState, emergenceYear(emergenceState, WorldForgeApi.clock().year()));
+            int rehydrationYear = emergenceYear(emergenceState, WorldForgeApi.clock().year());
+            // Restored worlds must obey the same genesis dependency order as a fresh frame:
+            // establish canonical settlement sites, reconcile their Characters, then restore
+            // political ownership. Rehydrating realms first creates orphan political overlays.
+            if (!syncEmergentSettlementStructures(server, emergenceState)) {
+                PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_structures", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_structures", 0);
+            if (!syncEmergentPeople(server, emergenceState, rehydrationYear)) {
+                PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_people", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_people", 0);
+            syncEmergentPolities(server, emergenceState, rehydrationYear);
             emergentRealmsRehydrated = true;
+            LOGGER.info("wf_worldsim: restored genesis order complete: structures -> canonical people -> polities");
         }
 
         String worldId = worldIdentity(server);
@@ -339,27 +457,46 @@ public final class WorldSimMod {
                             ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
                 } else {
                     pendingApplyResult = completed;
+                    pendingApplyEmergenceFrame = null;
+                    pendingApplyDecisionFrame = null;
                     pendingCandidateEmergenceState = null;
                     emergentPeopleProgress = null;
+                    pendingApplyFailureCount = 0;
+                    pendingApplyRetryAtTick = 0;
                 }
             }
         }
         if (pendingApplyResult != null) {
+            if (serverTickSequence < pendingApplyRetryAtTick) {
+                PROFILER.setGauge("worldsim.compute.retry_backoff", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.compute.retry_backoff", 0);
             try {
                 if (!applyComputeResult(server, pendingApplyResult)) {
                     PROFILER.setGauge("worldsim.compute.busy", 1);
                     return; // Continue the same authoritative frame on the next server tick.
                 }
                 pendingApplyResult = null;
+                pendingApplyEmergenceFrame = null;
+                pendingApplyDecisionFrame = null;
                 pendingCandidateEmergenceState = null;
                 emergentPeopleProgress = null;
                 pendingComputeRevision = Long.MIN_VALUE;
+                pendingApplyFailureCount = 0;
+                pendingApplyRetryAtTick = 0;
             } catch (Exception error) {
-                // Keep the frame and its staged native state. A transient save/materialization
-                // failure must not discard the only result or start a competing compute cycle.
+                // Preserve the authoritative frame, but do not hammer the same failing operation
+                // every 50 ms. Exponential backoff caps at 128 ticks (6.4 seconds).
+                pendingApplyFailureCount = Math.min(16, pendingApplyFailureCount + 1);
+                long retryDelay = Math.min(128L, 1L << Math.min(7, pendingApplyFailureCount - 1));
+                pendingApplyRetryAtTick = serverTickSequence + retryDelay;
                 PROFILER.setGauge("worldsim.compute.busy", 1);
-                LOGGER.error("wf_worldsim: authoritative frame remains pending at day {}; retrying next server tick",
-                        pendingComputeRevision, error);
+                PROFILER.setGauge("worldsim.compute.retry_failures", pendingApplyFailureCount);
+                if (pendingApplyFailureCount == 1 || pendingApplyFailureCount % 10 == 0) {
+                    LOGGER.error("wf_worldsim: authoritative frame remains pending at day {}; retry {} in {} server ticks",
+                            pendingComputeRevision, pendingApplyFailureCount, retryDelay, error);
+                }
                 return;
             }
         }
@@ -376,22 +513,47 @@ public final class WorldSimMod {
             PROFILER.setGauge("worldsim.compute.busy", 1);
             return;
         }
+        // Do not snapshot a half-loaded geography cache. Chunk observations drain first,
+        // then the immutable region projection is assembled in bounded per-tick batches.
+        if (VanillaWorldGeography.pendingChunkCount() > 0) {
+            PROFILER.setGauge("worldsim.geography.waiting_for_chunk_capture", 1);
+            return;
+        }
+        PROFILER.setGauge("worldsim.geography.waiting_for_chunk_capture", 0);
+        if (!VanillaWorldGeography.prepareSnapshotBatch()) {
+            PROFILER.setGauge("worldsim.geography.snapshot_building", 1);
+            return;
+        }
+        PROFILER.setGauge("worldsim.geography.snapshot_building", 0);
 
         try {
             long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
+            if (imageGeographyPending) return;
             if (!hasObservedGeography(snapshot)) {
                 PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 1);
                 return;
             }
             PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 0);
-            byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
-            JsonObject emergenceRequest = new JsonObject();
-            emergenceRequest.addProperty("schema_version", NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION);
-            emergenceRequest.add("snapshot", snapshot);
-            if (emergenceState != null) emergenceRequest.add("state", emergenceState.deepCopy());
-            byte[] emergenceInput = GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8);
+            // Serialize the large immutable world snapshot only once. The native decision
+            // endpoint consumes the bare snapshot; emergence consumes the same JSON document
+            // embedded in a small envelope with its evolving state. Serializing the JsonObject
+            // twice walked every geography cell, character and catalog payload twice per cycle.
+            String snapshotJson = GSON.toJson(snapshot);
+            byte[] input = snapshotJson.getBytes(StandardCharsets.UTF_8);
+            StringBuilder emergenceJson = new StringBuilder(snapshotJson.length()
+                    + (emergenceState == null ? 64 : 256));
+            emergenceJson.append("{\"schema_version\":")
+                    .append(NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION)
+                    .append(",\"snapshot\":")
+                    .append(snapshotJson);
+            if (emergenceState != null) {
+                emergenceJson.append(",\"state\":").append(GSON.toJson(emergenceState));
+            }
+            emergenceJson.append('}');
+            byte[] emergenceInput = emergenceJson.toString().getBytes(StandardCharsets.UTF_8);
             PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
+            logSnapshotFootprint(snapshot, input.length, emergenceInput.length);
 
             WorldSimComputeScheduler.Ticket ticket =
                     new WorldSimComputeScheduler.Ticket(worldId, "worldsim.compute.cycle", day, lifecycleEpoch,
@@ -420,12 +582,18 @@ public final class WorldSimMod {
     /** Applies a completed immutable native frame on the authoritative Minecraft server thread only. */
     private boolean applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
         long day = result.ticket().revision();
-        JsonObject snapshot = GSON.fromJson(new String(result.snapshot(), StandardCharsets.UTF_8), JsonObject.class);
-        JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
-        JsonObject frame = GSON.fromJson(new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        // Native output can be large. Reuse parsed frames across tick-sized materialization batches.
+        if (pendingApplyEmergenceFrame == null || pendingApplyDecisionFrame == null) {
+            pendingApplyEmergenceFrame = GSON.fromJson(
+                    new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
+            pendingApplyDecisionFrame = GSON.fromJson(
+                    new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        }
+        JsonObject emergenceFrame = pendingApplyEmergenceFrame;
+        JsonObject frame = pendingApplyDecisionFrame;
         requireNativeSuccess(emergenceFrame, "emergence");
         requireNativeSuccess(frame, "decision");
-        if (snapshot == null || emergenceFrame == null || !emergenceFrame.has("state")
+        if (emergenceFrame == null || !emergenceFrame.has("state")
                 || !emergenceFrame.get("state").isJsonObject()) {
             throw new IllegalStateException("Native emergence engine returned an invalid state frame");
         }
@@ -440,6 +608,14 @@ public final class WorldSimMod {
         JsonObject candidateEmergenceState = pendingCandidateEmergenceState;
         long phaseStarted = System.nanoTime();
         int materializationYear = emergenceYear(candidateEmergenceState, WorldForgeApi.clock().year());
+        // Phase 1: reserve/create canonical settlement structures from geography before
+        // any population, ruler, or political overlay is materialized. The following
+        // people pass attaches canonical Characters to these already-established sites.
+        phaseStarted = System.nanoTime();
+        boolean structuresComplete = syncEmergentSettlementStructures(server, candidateEmergenceState);
+        PROFILER.record("worldsim.sync_emergent_structures", System.nanoTime() - phaseStarted);
+        if (!structuresComplete) return false;
+        phaseStarted = System.nanoTime();
         boolean peopleComplete = syncEmergentPeople(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
         if (!peopleComplete) return false;
@@ -540,6 +716,15 @@ public final class WorldSimMod {
     private static void logWorldGenesisDiagnostics(MinecraftServer server, JsonObject state) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()
                 || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        // Diagnostics are observational: full-world census is deliberately throttled.
+        // Never let logging repeatedly traverse every resident/title/settlement per frame.
+        long diagnosticTick = server.getTickCount();
+        if (LAST_GENESIS_DIAGNOSTIC_TICK != Long.MIN_VALUE
+                && diagnosticTick - LAST_GENESIS_DIAGNOSTIC_TICK < GENESIS_DIAGNOSTIC_INTERVAL_TICKS) return;
+        LAST_GENESIS_DIAGNOSTIC_TICK = diagnosticTick;
+        // snapshot() deep-copies persisted geography; do it once per diagnostic pass,
+        // not once per dimension.
+        JsonArray vanillaGeography = VanillaWorldGeography.snapshot();
         for (EmergenceSource source : emergenceSources()) {
             long bands = state.getAsJsonArray("bands").asList().stream()
                     .filter(JsonObject.class::isInstance).map(JsonObject.class::cast)
@@ -552,11 +737,33 @@ public final class WorldSimMod {
             List<TitleData.Realm> realms = RealmsMod.emergentRealms().stream()
                     .filter(realm -> source.id.equals(String.valueOf(realm.props.getOrDefault("emergence.map_id", ""))))
                     .toList();
+            Set<String> sourceRealmIds = realms.stream().map(realm -> realm.id)
+                    .collect(java.util.stream.Collectors.toSet());
+            Set<String> sourceDynastyIds = realms.stream()
+                    .map(realm -> String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")))
+                    .filter(id -> !id.isBlank())
+                    .collect(java.util.stream.Collectors.toSet());
             Set<String> raceIds = new TreeSet<>();
-            if (source.registry != null) for (dev.worldforge.people.Character person : source.registry.all()) {
-                Object race = person.props.get("origin.race");
-                if (person.alive && race != null && !String.valueOf(race).isBlank())
-                    raceIds.add(String.valueOf(race));
+            long livingCharacters = 0;
+            long namedCharacters = 0;
+            long courtOffices = 0;
+            if (source.registry != null) {
+                for (int offset = 0, count = source.registry.size(); offset < count; offset += 256) {
+                    for (String localId : source.registry.idPage(offset, 256)) {
+                        try (var lease = source.registry.access().acquire(localId)) {
+                            if (lease == null) continue;
+                            dev.worldforge.people.Character person = lease.get();
+                            if (!person.alive) continue;
+                            livingCharacters++;
+                            if (person.name != null && !person.name.isBlank()) namedCharacters++;
+                            courtOffices += person.posts.stream()
+                                    .filter(post -> post.place != null && post.place.startsWith("realm:")).count();
+                            Object race = person.props.get("origin.race");
+                            if (race != null && !String.valueOf(race).isBlank())
+                                raceIds.add(String.valueOf(race));
+                        }
+                    }
+                }
             }
             List<Colony> sourceColonies = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
@@ -607,25 +814,16 @@ public final class WorldSimMod {
                 }
                 overlapBuckets.computeIfAbsent(bucketX + ":" + bucketZ, ignored -> new ArrayList<>()).add(colony);
             }
-            long livingCharacters = source.registry == null ? 0 : source.registry.all().stream()
-                    .filter(person -> person.alive).count();
-            long namedCharacters = source.registry == null ? 0 : source.registry.all().stream()
-                    .filter(person -> person.alive && person.name != null && !person.name.isBlank()).count();
             long namedPolities = realms.stream()
                     .filter(realm -> realm.name != null && !realm.name.isBlank()).count();
             long namedTitles = RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId)))
+                    .filter(title -> sourceRealmIds.contains(title.realmId))
                     .filter(title -> title.name != null && !title.name.isBlank()).count();
             long namedSettlements = activeColonies.stream()
                     .filter(colony -> colony.s.name != null && !colony.s.name.isBlank()).count();
-            long courtOffices = source.registry == null ? 0 : source.registry.all().stream()
-                    .filter(person -> person.alive)
-                    .flatMap(person -> person.posts.stream())
-                    .filter(post -> post.place != null && post.place.startsWith("realm:"))
-                    .count();
             long rulers = realms.stream().filter(realm -> {
                 Object id = realm.props.get("emergence.ruler_global_id");
-                return id != null && PeopleMod.authority().getGlobal(String.valueOf(id)) != null;
+                return id != null && PeopleMod.authority().registryForGlobal(String.valueOf(id)) != null;
             }).count();
             long governments = realms.stream().filter(realm -> {
                 var political = RealmsMod.REALMS.state(realm.id);
@@ -643,15 +841,14 @@ public final class WorldSimMod {
                     .collect(java.util.stream.Collectors.groupingBy(contract -> contract.subjectType.name(),
                             TreeMap::new, java.util.stream.Collectors.counting()));
             Map<String, Long> titleRanks = RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId)))
+                    .filter(title -> sourceRealmIds.contains(title.realmId))
                     .collect(java.util.stream.Collectors.groupingBy(title -> title.rank.name(), TreeMap::new,
                             java.util.stream.Collectors.counting()));
             long titles = RealmsMod.POLITICS.titles().stream()
                     .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId))).count();
             long dynasties = RealmsMod.POLITICS.dynasties().stream()
                     .filter(dynasty -> dynasty != null && dynasty.name != null && !dynasty.name.isBlank()
-                            && realms.stream().anyMatch(realm -> Objects.equals(
-                                    String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
+                            && sourceDynastyIds.contains(dynasty.houseId))
                     .count();
             long geographyCells = source.map == null
                     ? VanillaWorldGeography.sampledCellCount() : (long) source.map.w * source.map.h;
@@ -661,7 +858,7 @@ public final class WorldSimMod {
                     + "|" + livingCharacters + "|" + namedCharacters + "|" + namedSettlements + "|"
                     + courtOffices + "|" + realms.size() + "|" + namedPolities + "|" + rulers + "|"
                     + dynasties + "|" + titles + "|" + namedTitles + "|" + governments + "|"
-                    + raceIds + "|" + settlementTypeCounts + "|" + blueprintSiteTypeCounts + "|"
+                    + raceIds.size() + "|" + settlementTypeCounts + "|" + blueprintSiteTypeCounts + "|"
                     + governmentTypes + "|" + vassalContracts.size() + "|" + subjectTypes + "|" + titleRanks;
             String previousFingerprint = LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.put(source.id, fingerprint);
             if (!fingerprint.equals(previousFingerprint)) {
@@ -674,10 +871,12 @@ public final class WorldSimMod {
                         GSON.toJson(governmentTypes), duplicateSettlementCenters, nearbySettlementConflicts,
                         vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
             }
-            if (source.map == null) {
+            // The geography projection may be rebuilding after sovereignty changed.
+            // Diagnostics are observational and must never stall or fail authoritative frame commit.
+            if (source.map == null && vanillaGeography != null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
-                for (var geographyElement : VanillaWorldGeography.snapshot()) {
+                for (var geographyElement : vanillaGeography) {
                     if (!geographyElement.isJsonObject()) continue;
                     JsonObject geographyMap = geographyElement.getAsJsonObject();
                     if (!source.id.equals(geographyMap.has("map_id") ? geographyMap.get("map_id").getAsString() : "")) continue;
@@ -870,18 +1069,41 @@ public final class WorldSimMod {
         JsonArray diplomaticRelations = new JsonArray(), vassalContracts = new JsonArray(), wars = new JsonArray();
         JsonArray armies = new JsonArray(), socialRelations = new JsonArray(), namedEntities = new JsonArray();
         JsonArray geography = new JsonArray();
+        Set<String> catalogEntryKeys = new HashSet<>();
+        Set<String> namedEntityKeys = new HashSet<>();
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
+        boolean imageGeographyPending = false;
         for (EmergenceSource source : sources) {
-            if (source.map != null) geography.add(GSON.toJsonTree(MapGeography.describe(source.map)));
+            if (source.map == null) continue;
+            JsonObject prepared = MapGeography.snapshotIfReady(source.map,
+                    values -> GSON.toJsonTree(values).getAsJsonObject());
+            if (prepared == null) {
+                imageGeographyPending = true;
+                continue;
+            }
+            geography.add(prepared);
         }
+        WorldSimMod.imageGeographyPending = imageGeographyPending;
+        PROFILER.setGauge("worldsim.geography.pending", imageGeographyPending ? 1 : 0);
         // Every loaded vanilla-like dimension contributes its own observed geography.
         for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
         // WorldSim must never consume sovereignty or political borders from an image map.
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.
         Set<String> threatenedRealms = new HashSet<>();
+        Map<String, Long> lastWarDayByRealm = new HashMap<>();
+        // Build the realm-to-war projection once. Scanning the complete war list inside
+        // every realm iteration made snapshot cost O(realms × wars).
+        for (var war : RealmsMod.POLITICS.wars()) {
+            lastWarDayByRealm.merge(war.attackerRealm, (long) war.startDay, Math::max);
+            lastWarDayByRealm.merge(war.defenderRealm, (long) war.startDay, Math::max);
+            if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
+                threatenedRealms.add(war.attackerRealm);
+                threatenedRealms.add(war.defenderRealm);
+            }
+        }
         Map<String, Double> actualArmyPower = new HashMap<>();
         // wf-army owns its rosters and unit definitions. WorldSim reads every loaded map
         // through the module API; it never estimates an army from civilian population.
@@ -904,7 +1126,7 @@ public final class WorldSimMod {
                         ? dev.worldforge.realms.Statecraft.mapTitleId(map.name, map.titles.get(army.location).key) : "");
                 formation.add("unit_counts", GSON.toJsonTree(new TreeMap<>(army.units)));
                 formation.addProperty("power", finite(power));
-                addNamedEntity(namedEntities, map.name + ":" + army.id, "army", army.name, "", army.realm);
+                addNamedEntity(namedEntities, namedEntityKeys, map.name + ":" + army.id, "army", army.name, "", army.realm);
                 if (RealmsMod.realm(army.realm) != null) armies.add(formation);
             }
             for (TitleData.Realm realm : map.titles.realms.values()) {
@@ -912,7 +1134,7 @@ public final class WorldSimMod {
                 economy.addProperty("manpower_pool", Math.max(0, engine.pool(realm.id)));
                 economy.addProperty("gold", finite(engine.gold(realm.id)));
                 economy.addProperty("capital_title_id", engine.capital(realm.id));
-                addCatalogEntry(catalogEntries, "wf_army", "realm_economy", realm.id, realm.name, economy);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_army", "realm_economy", realm.id, realm.name, economy);
             }
             for (var unit : engine.types.values()) {
                 JsonObject definition = new JsonObject();
@@ -925,11 +1147,11 @@ public final class WorldSimMod {
                 definition.addProperty("upkeep", finite(unit.upkeep));
                 definition.addProperty("levy", unit.levy);
                 definition.add("counters", GSON.toJsonTree(unit.counters));
-                addCatalogEntry(catalogEntries, "wf_army", "unit_types", unit.id, unit.name, definition);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_army", "unit_types", unit.id, unit.name, definition);
             }
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
-            addNamedEntity(namedEntities, realm.id, "realm", realm.name, "", realm.id);
+            addNamedEntity(namedEntities, namedEntityKeys, realm.id, "realm", realm.name, "", realm.id);
             JsonObject item = new JsonObject();
             item.addProperty("id", realm.id);
             long population = (long) number(realm.props.get("population"), 0);
@@ -940,16 +1162,8 @@ public final class WorldSimMod {
             item.addProperty("stability", (int) number(realm.props.get("stability"), 50));
             item.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
             item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, number(realm.props.get("expansion_pressure"), 0))));
-            long lastWarDay = 0;
-            boolean atWar = false;
-            for (var war : RealmsMod.POLITICS.wars()) {
-                if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
-                lastWarDay = Math.max(lastWarDay, war.startDay);
-                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
-                    atWar = true;
-                    threatenedRealms.add(realm.id);
-                }
-            }
+            boolean atWar = threatenedRealms.contains(realm.id);
+            long lastWarDay = lastWarDayByRealm.getOrDefault(realm.id, 0L);
             item.addProperty("at_war", atWar);
             item.addProperty("last_war_day", lastWarDay);
             realms.add(item);
@@ -964,9 +1178,9 @@ public final class WorldSimMod {
             balance.addProperty("last_income", finite(treasury.lastIncome));
             balance.addProperty("last_expenses", finite(treasury.lastExpenses));
             balance.addProperty("tax_days", treasury.taxDays);
-            addCatalogEntry(catalogEntries, "wf_realms", "realm_treasuries",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "realm_treasuries",
                     treasuryRealm.id, treasuryRealm.name, balance);
-            addCatalogEntry(catalogEntries, "wf_realms", "inheritance_laws",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "inheritance_laws",
                     treasuryRealm.id, treasuryRealm.name,
                     GSON.toJsonTree(Map.of("law", RealmsMod.POLITICS.inheritanceLaw(treasuryRealm.id).name())));
         }
@@ -978,8 +1192,8 @@ public final class WorldSimMod {
             plotData.addProperty("kind", plot.kind.name()); plotData.addProperty("status", plot.status.name());
             plotData.addProperty("progress", finite(plot.progress)); plotData.addProperty("discovered", plot.discovered);
             plotData.add("backers", GSON.toJsonTree(new TreeSet<>(plot.backers)));
-            addCatalogEntry(catalogEntries, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
-            addNamedEntity(namedEntities, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
+            addNamedEntity(namedEntities, namedEntityKeys, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
         }
         // Export the complete authoritative Statecraft graph, not just at_war flags.
         for (var relation : RealmsMod.POLITICS.relations()) {
@@ -1011,20 +1225,20 @@ public final class WorldSimMod {
             wars.add(row);
         }
         for (var government : RealmsMod.DEFS.levels) {
-            addCatalogEntry(catalogEntries, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
-            addNamedEntity(namedEntities, government.id(), "government_level", government.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
+            addNamedEntity(namedEntities, namedEntityKeys, government.id(), "government_level", government.name(), "", "");
         }
         for (var terrain : RealmsMod.DEFS.terrains.values())
-            addCatalogEntry(catalogEntries, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
         for (var doctrineBranch : RealmsMod.DEFS.branches.values()) {
-            addCatalogEntry(catalogEntries, "wf_realms", "doctrine_branches", doctrineBranch.id(), doctrineBranch.name(), GSON.toJsonTree(doctrineBranch));
-            addNamedEntity(namedEntities, doctrineBranch.id(), "doctrine_branch", doctrineBranch.name(), "", "");
-            for (var node : doctrineBranch.nodes()) addNamedEntity(namedEntities, node.key(), "doctrine", node.name(), doctrineBranch.id(), "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "doctrine_branches", doctrineBranch.id(), doctrineBranch.name(), GSON.toJsonTree(doctrineBranch));
+            addNamedEntity(namedEntities, namedEntityKeys, doctrineBranch.id(), "doctrine_branch", doctrineBranch.name(), "", "");
+            for (var node : doctrineBranch.nodes()) addNamedEntity(namedEntities, namedEntityKeys, node.key(), "doctrine", node.name(), doctrineBranch.id(), "");
         }
         for (var law : RealmsMod.DEFS.laws.values()) {
-            addCatalogEntry(catalogEntries, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
-            addNamedEntity(namedEntities, law.id(), "law", law.name(), "", "");
-            for (var option : law.options()) addNamedEntity(namedEntities,
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
+            addNamedEntity(namedEntities, namedEntityKeys, law.id(), "law", law.name(), "", "");
+            for (var option : law.options()) addNamedEntity(namedEntities, namedEntityKeys,
                     law.id() + ":" + option.id(), "law_option", option.name(), law.id(), "");
         }
         // Shared pair set prevents exact province-adjacency borders from being
@@ -1048,7 +1262,7 @@ public final class WorldSimMod {
             definition.addProperty("doctrine_slots", government.doctrineSlots());
             definition.addProperty("law_slots", government.lawSlots());
             governmentDefinitions.add(definition);
-            addNamedEntity(namedEntities, government.id(), "government_type", government.name(), "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, government.id(), "government_type", government.name(), "", "");
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             var policy = RealmsMod.REALMS.state(realm.id);
@@ -1126,7 +1340,7 @@ public final class WorldSimMod {
                 title.add("neighbors", neighbors);
                 if (emittedPoliticalTitleIds.add(titleId)) {
                     politicalTitles.add(title);
-                    addNamedEntity(namedEntities, titleId, "title", sourceTitle.name, parentId, realmId);
+                    addNamedEntity(namedEntities, namedEntityKeys, titleId, "title", sourceTitle.name, parentId, realmId);
                 }
             }
         }
@@ -1157,16 +1371,16 @@ public final class WorldSimMod {
             title.add("claims", claims);
             title.add("neighbors", new JsonArray());
             politicalTitles.add(title);
-            addNamedEntity(namedEntities, political.id, "title", political.name, parent, political.realmId);
+            addNamedEntity(namedEntities, namedEntityKeys, political.id, "title", political.name, parent, political.realmId);
         }
         for (var dynasty : RealmsMod.POLITICS.dynasties()) {
-            addNamedEntity(namedEntities, dynasty.houseId, "dynasty", dynasty.name, "", "");
-            addNamedEntity(namedEntities, dynasty.houseId, "house_or_dynasty", dynasty.name, "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, dynasty.houseId, "dynasty", dynasty.name, "", "");
+            addNamedEntity(namedEntities, namedEntityKeys, dynasty.houseId, "house_or_dynasty", dynasty.name, "", "");
             JsonObject dynastyData = new JsonObject();
             dynastyData.addProperty("founder_character_id", dynasty.founderCharacterId);
             dynastyData.addProperty("prestige", dynasty.prestige);
             dynastyData.add("member_character_ids", GSON.toJsonTree(new TreeSet<>(dynasty.members)));
-            addCatalogEntry(catalogEntries, "wf_realms", "dynasties", dynasty.houseId, dynasty.name, dynastyData);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_realms", "dynasties", dynasty.houseId, dynasty.name, dynastyData);
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
@@ -1216,9 +1430,9 @@ public final class WorldSimMod {
             int roadSegments = s == null || colony.map == null ? 0 : colony.map.roads.values().stream()
                     .mapToInt(road -> Math.max(0, road.builtSegments)).sum();
             item.addProperty("roads", roadSegments);
-            addNamedEntity(namedEntities, s.id, "settlement", s.name, "", settlementRealm);
+            addNamedEntity(namedEntities, namedEntityKeys, s.id, "settlement", s.name, "", settlementRealm);
             for (Building building : s.buildings) if (building != null && building.def != null)
-                addNamedEntity(namedEntities, s.id + ":building:" + building.uid, "building",
+                addNamedEntity(namedEntities, namedEntityKeys, s.id + ":building:" + building.uid, "building",
                         building.def.name, "", s.id);
             // Export the actual infrastructure graph, not merely a road count.
             if (colony.map != null) {
@@ -1233,20 +1447,20 @@ public final class WorldSimMod {
                         nodes.add(point);
                     }
                     roadData.add("path", nodes);
-                    addCatalogEntry(catalogEntries, "wf_settle", "road_network",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "road_network",
                             s.id + ":road:" + road.id, "Road " + road.id, roadData);
                 }
                 for (var plan : colony.map.plans.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "construction_plans",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "construction_plans",
                             s.id + ":plan:" + plan.buildingUid, plan.buildingId, GSON.toJsonTree(plan));
                 for (var warehouse : colony.map.warehouses.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "warehouses",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "warehouses",
                             s.id + ":warehouse:" + warehouse.id, warehouse.id, GSON.toJsonTree(warehouse));
                 for (var job : colony.map.logistics.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "logistics_jobs",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "logistics_jobs",
                             s.id + ":logistics:" + job.id, job.resource, GSON.toJsonTree(job));
                 for (var parcel : colony.map.parcels.values())
-                    addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
+                    addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "land_parcels",
                             s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
             }
             JsonObject settlementIdentity = new JsonObject();
@@ -1279,7 +1493,7 @@ public final class WorldSimMod {
             settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
             settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
             settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
-            addCatalogEntry(catalogEntries, "wf_settle", "settlement_instances", s.id, s.name, settlementIdentity);
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "settlement_instances", s.id, s.name, settlementIdentity);
             item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
@@ -1308,95 +1522,89 @@ public final class WorldSimMod {
             workforce.add(w);
         }
         JsonObject namePools = GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()).getAsJsonObject();
-        addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools", namePools);
+        addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools", namePools);
         if (namePools.has("cultures") && namePools.get("cultures").isJsonObject())
             for (var culture : namePools.getAsJsonObject("cultures").entrySet())
-                addNamedEntity(namedEntities, culture.getKey(), "culture", culture.getKey(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, culture.getKey(), "culture", culture.getKey(), "", "");
         if (namePools.has("races") && namePools.get("races").isJsonObject())
             for (var race : namePools.getAsJsonObject("races").entrySet())
-                addNamedEntity(namedEntities, race.getKey(), "race", race.getKey(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, race.getKey(), "race", race.getKey(), "", "");
         // Feed native decisions from the full, already-loaded addon definitions.
         // The owning addons remain authoritative; this is a read-only projection of their
         // effective datapack registries, not a second set of hard-coded definitions.
-        int progressDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_progress",
+        int progressDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_progress",
                 "dev.worldforge.progress.mc.ProgressMod", "DEFS");
-        int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_genesis",
+        int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_genesis",
                 "dev.worldforge.genesis.mc.GenesisMod", "DEFS");
-        int formsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_forms",
+        int formsDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "DEFS");
-        int questsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_quests",
+        int questsDefinitionCount = exportDefinitionCatalogs(catalogEntries, catalogEntryKeys, "wf_quests",
                 "dev.worldforge.quests.mc.QuestsMod", "DEFS");
         JsonObject formsRuntime = exportOptionalFieldStoreSnapshot("wf_forms",
                 "dev.worldforge.forms.mc.FormsMod", "FORMS");
         if (formsRuntime != null) {
-            root.add("forms_runtime", formsRuntime);
-            addCatalogEntry(catalogEntries, "wf_forms", "runtime_state", "forms",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_forms", "runtime_state", "forms",
                     "Persisted character form and affliction state", formsRuntime);
         }
         JsonObject questsRuntime = exportOptionalFieldStoreSnapshot("wf_quests",
                 "dev.worldforge.quests.mc.QuestsMod", "QUESTS");
         if (questsRuntime != null) {
-            root.add("quests_runtime", questsRuntime);
-            addCatalogEntry(catalogEntries, "wf_quests", "runtime_state", "quests",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_quests", "runtime_state", "quests",
                     "Active quests, fired world events and durable quest history", questsRuntime);
         }
         JsonObject reputationSnapshot = exportOptionalStoreSnapshot("wf_reputation",
                 "dev.worldforge.reputation.mc.ReputationMod", "store");
         if (reputationSnapshot != null) {
-            root.add("reputation_runtime", reputationSnapshot);
-            addCatalogEntry(catalogEntries, "wf_reputation", "runtime_state", "reputation",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_reputation", "runtime_state", "reputation",
                     "Canonical scoped reputation and witness knowledge", reputationSnapshot);
         }
         JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
                 "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
         if (relationsSnapshot != null) {
-            root.add("relations_runtime", relationsSnapshot);
-            addCatalogEntry(catalogEntries, "wf_relations", "runtime_state", "relationships",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_relations", "runtime_state", "relationships",
                     "Canonical social bonds, requests and persistent history", relationsSnapshot);
         }
         JsonObject tradeSnapshot = exportOptionalModuleSnapshot("wf_trade",
                 "dev.worldforge.trade.mc.TradeMod", "worldSnapshotJson");
         if (tradeSnapshot != null) {
-            root.add("trade_runtime", tradeSnapshot);
             JsonObject goods = tradeSnapshot.has("goods") ? tradeSnapshot.getAsJsonObject("goods") : new JsonObject();
             for (var entry : goods.entrySet()) {
                 String goodId = entry.getKey();
                 String goodName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
                         ? entry.getValue().getAsJsonObject().get("name").getAsString() : goodId;
-                addCatalogEntry(catalogEntries, "wf_trade", "goods", goodId, goodName, entry.getValue());
-                addNamedEntity(namedEntities, goodId, "trade_good", goodName, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "goods", goodId, goodName, entry.getValue());
+                addNamedEntity(namedEntities, namedEntityKeys, goodId, "trade_good", goodName, "", "");
             }
             JsonObject markets = tradeSnapshot.has("markets") ? tradeSnapshot.getAsJsonObject("markets") : new JsonObject();
             for (var entry : markets.entrySet())
-                addCatalogEntry(catalogEntries, "wf_trade", "markets", entry.getKey(), entry.getKey(), entry.getValue());
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "markets", entry.getKey(), entry.getKey(), entry.getValue());
             JsonArray caravans = tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans") : new JsonArray();
             for (var element : caravans) if (element.isJsonObject()) {
                 JsonObject caravan = element.getAsJsonObject();
                 String id = caravan.get("id").getAsString();
-                addCatalogEntry(catalogEntries, "wf_trade", "caravans", id, "Caravan " + id, caravan);
-                addNamedEntity(namedEntities, id, "caravan", "Caravan " + id, "", caravan.has("owner") ? caravan.get("owner").getAsString() : "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "caravans", id, "Caravan " + id, caravan);
+                addNamedEntity(namedEntities, namedEntityKeys, id, "caravan", "Caravan " + id, "", caravan.has("owner") ? caravan.get("owner").getAsString() : "");
             }
             JsonArray ambushes = tradeSnapshot.has("ambushes") ? tradeSnapshot.getAsJsonArray("ambushes") : new JsonArray();
             for (var element : ambushes) if (element.isJsonObject()) {
                 JsonObject ambush = element.getAsJsonObject();
                 String id = ambush.get("id").getAsString();
-                addCatalogEntry(catalogEntries, "wf_trade", "ambushes", id, "Ambush " + id, ambush);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "ambushes", id, "Ambush " + id, ambush);
             }
-            addCatalogEntry(catalogEntries, "wf_trade", "runtime_state", "trade",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_trade", "runtime_state", "trade",
                     "Markets, caravans, ambushes and trade shocks", tradeSnapshot);
         }
         JsonObject troopSnapshot = exportOptionalModuleSnapshot("wf_troops",
                 "dev.worldforge.troops.mc.TroopsMod", "worldSnapshotJson");
         if (troopSnapshot != null) {
-            root.add("military_runtime", troopSnapshot);
             JsonObject unitDefinitions = troopSnapshot.has("unit_definitions")
                     ? troopSnapshot.getAsJsonObject("unit_definitions") : new JsonObject();
             for (var entry : unitDefinitions.entrySet()) {
                 String unitId = entry.getKey();
                 String unitName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
                         ? entry.getValue().getAsJsonObject().get("name").getAsString() : unitId;
-                addCatalogEntry(catalogEntries, "wf_troops", "physical_unit_types", unitId, unitName, entry.getValue());
-                addNamedEntity(namedEntities, unitId, "troop_type", unitName, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_troops", "physical_unit_types", unitId, unitName, entry.getValue());
+                addNamedEntity(namedEntities, namedEntityKeys, unitId, "troop_type", unitName, "", "");
             }
             JsonArray liveTroops = troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops") : new JsonArray();
             for (var element : liveTroops) if (element.isJsonObject()) {
@@ -1405,17 +1613,20 @@ public final class WorldSimMod {
                 String unitId = troop.has("unit_id") ? troop.get("unit_id").getAsString() : "";
                 String unitName = unitDefinitions.has(unitId) && unitDefinitions.getAsJsonObject(unitId).has("name")
                         ? unitDefinitions.getAsJsonObject(unitId).get("name").getAsString() : unitId;
-                addNamedEntity(namedEntities, entityId, "physical_troop", unitName, "", troop.has("realm_id") ? troop.get("realm_id").getAsString() : "");
+                addNamedEntity(namedEntities, namedEntityKeys, entityId, "physical_troop", unitName, "", troop.has("realm_id") ? troop.get("realm_id").getAsString() : "");
             }
             JsonArray squadRows = troopSnapshot.has("squads") ? troopSnapshot.getAsJsonArray("squads") : new JsonArray();
             for (var element : squadRows) if (element.isJsonObject()) {
                 JsonObject squad = element.getAsJsonObject();
-                addNamedEntity(namedEntities, squad.get("id").getAsString(), "squad",
+                addNamedEntity(namedEntities, namedEntityKeys, squad.get("id").getAsString(), "squad",
                         squad.get("name").getAsString(), "", squad.has("realm") ? squad.get("realm").getAsString() : "");
             }
-            addCatalogEntry(catalogEntries, "wf_troops", "runtime_state", "military",
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_troops", "runtime_state", "military",
                     "Physical military state and durable ledgers", troopSnapshot);
         }
+        // Native WorldSnapshot has no raw *_runtime fields. Their authoritative payloads are
+        // already projected into catalog_entries above; attaching the same complete JSON trees
+        // again as unknown top-level properties only duplicates bytes in both JNI requests.
         // CourtSim remains the owner of schemes, regencies, factions, pending events,
         // council opinions and court news; WorldSim reads its complete persisted state.
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
@@ -1424,7 +1635,7 @@ public final class WorldSimMod {
             if (court != null) {
                 JsonObject courtState = com.google.gson.JsonParser.parseString(court.toJson()).getAsJsonObject();
                 courtState.addProperty("world_year", WorldForgeApi.clock().year());
-                addCatalogEntry(catalogEntries, "wf_court", "court_states", map.name, map.name, courtState);
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_court", "court_states", map.name, map.name, courtState);
             }
         }
         // wf-war owns active campaigns, casus belli, occupation, peace terms and truces.
@@ -1432,7 +1643,7 @@ public final class WorldSimMod {
             if (map == null || map.titles == null) continue;
             WarEngine warEngine = WarMod.engine(map);
             for (var cb : warEngine.cbs.values())
-                addCatalogEntry(catalogEntries, "wf_war", "casus_belli", cb.id, cb.name, GSON.toJsonTree(cb));
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "casus_belli", cb.id, cb.name, GSON.toJsonTree(cb));
             for (var war : warEngine.wars.values()) {
                 JsonObject warData = new JsonObject();
                 warData.addProperty("id", war.id); warData.addProperty("attacker", war.attacker);
@@ -1451,56 +1662,56 @@ public final class WorldSimMod {
                 warData.addProperty("peace_offer_white", war.offerWhite);
                 warData.add("goals", GSON.toJsonTree(war.goals)); warData.add("occupied", GSON.toJsonTree(war.occupied));
                 warData.add("log", GSON.toJsonTree(war.log));
-                addCatalogEntry(catalogEntries, "wf_war", "war_instances",
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "war_instances",
                         map.name + ":" + war.id, "War " + war.id, warData);
-                addNamedEntity(namedEntities, map.name + ":" + war.id, "war", "War " + war.id, "", war.attacker);
+                addNamedEntity(namedEntities, namedEntityKeys, map.name + ":" + war.id, "war", "War " + war.id, "", war.attacker);
             }
-            addCatalogEntry(catalogEntries, "wf_war", "truces", map.name, map.name,
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_war", "truces", map.name, map.name,
                     GSON.toJsonTree(warEngine.truces));
         }
         if (SettleMod.DEFS != null) {
             for (var building : SettleMod.DEFS.buildings.values()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
-                addNamedEntity(namedEntities, building.id, "building_definition", building.name, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
+                addNamedEntity(namedEntities, namedEntityKeys, building.id, "building_definition", building.name, "", "");
             }
             for (var profession : SettleMod.DEFS.professions.values()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
-                addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
+                addNamedEntity(namedEntities, namedEntityKeys, profession.id, "profession", profession.name, "", "");
             }
             for (var resource : SettleMod.DEFS.resourceNames.entrySet()) {
-                addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
                                 "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0),
                                 "category", dev.worldforge.settle.Defs.resourceCategory(resource.getKey()))));
-                addNamedEntity(namedEntities, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
+                addNamedEntity(namedEntities, namedEntityKeys, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
             }
             for (var comfort : SettleMod.DEFS.comfort.entrySet())
-                addCatalogEntry(catalogEntries, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
-            addCatalogEntry(catalogEntries, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
+                addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
                     GSON.toJsonTree(SettleMod.DEFS.foodKinds));
         }
         for (var type : SettleMod.TYPES.types.values()) {
-            addCatalogEntry(catalogEntries, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
-            addNamedEntity(namedEntities, type.id(), "settlement_type", type.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
+            addNamedEntity(namedEntities, namedEntityKeys, type.id(), "settlement_type", type.name(), "", "");
         }
         // Export all loaded profession definitions and all configured race/class/origin
         // definitions from their owning modules, preserving their complete JSON shape.
         for (var profession : PeopleMod.PROFESSIONS.all()) {
-            addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
-            addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
+            addNamedEntity(namedEntities, namedEntityKeys, profession.id, "profession", profession.name, "", "");
         }
         for (var race : OriginsMod.ORIGINS.defs.races.values()) {
-            addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
-            addNamedEntity(namedEntities, race.id(), "race", race.name(), race.parent(), "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
+            addNamedEntity(namedEntities, namedEntityKeys, race.id(), "race", race.name(), race.parent(), "");
         }
         for (var cls : OriginsMod.ORIGINS.defs.classes.values()) {
-            addCatalogEntry(catalogEntries, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
-            addNamedEntity(namedEntities, cls.id(), "character_class", cls.name(), "", "");
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
+            addNamedEntity(namedEntities, namedEntityKeys, cls.id(), "character_class", cls.name(), "", "");
         }
         for (var profession : OriginsMod.DEFS.professions.values())
-            addCatalogEntry(catalogEntries, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
         for (var synergy : OriginsMod.DEFS.synergies.values())
-            addCatalogEntry(catalogEntries, "wf_origins", "synergies", synergy.id(), synergy.name(), GSON.toJsonTree(synergy));
+            addCatalogEntry(catalogEntries, catalogEntryKeys, "wf_origins", "synergies", synergy.id(), synergy.name(), GSON.toJsonTree(synergy));
         // Resolve band -> polity from the last committed emergence frame. Residents from
         // either geography source then enter the same Character snapshot by canonical UUID.
         Map<String, String> polityByBand = new HashMap<>();
@@ -1519,16 +1730,22 @@ public final class WorldSimMod {
         // which state a person belongs to from a physical chunk or legacy local ID.
         for (EmergenceSource source : sources) {
             if (source.registry == null) continue;
-            for (dev.worldforge.people.Character person : source.registry.all()) {
-                if (person == null || !person.alive) continue;
-                Object rawBand = person.props.get("emergence.band_id");
-                String polityId = rawBand == null ? "" : polityByBand.getOrDefault(String.valueOf(rawBand), "");
-                if (polityId.isBlank()) {
-                    person.props.remove("emergence.polity_id");
-                    person.props.remove("emergence.realm_id");
-                } else {
-                    person.props.put("emergence.polity_id", polityId);
-                    person.props.put("emergence.realm_id", "emergent-" + polityId);
+            for (int offset = 0, count = source.registry.size(); offset < count; offset += 256) {
+                for (String localId : source.registry.idPage(offset, 256)) {
+                    try (var lease = source.registry.access().acquire(localId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
+                        if (!person.alive) continue;
+                        Object rawBand = person.props.get("emergence.band_id");
+                        String polityId = rawBand == null ? "" : polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                        if (polityId.isBlank()) {
+                            person.props.remove("emergence.polity_id");
+                            person.props.remove("emergence.realm_id");
+                        } else {
+                            person.props.put("emergence.polity_id", polityId);
+                            person.props.put("emergence.realm_id", "emergent-" + polityId);
+                        }
+                    }
                 }
             }
         }
@@ -1537,7 +1754,11 @@ public final class WorldSimMod {
         for (EmergenceSource source : sources) {
             CharacterRegistry registry = source.registry;
             if (registry == null || !snapshotRegistries.add(registry)) continue;
-            for (dev.worldforge.people.Character person : registry.all()) {
+            for (int offset = 0, count = registry.size(); offset < count; offset += 128) {
+                for (String localId : registry.idPage(offset, 128)) {
+                    try (var lease = registry.access().acquire(localId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
                 if (person == null || person.globalId == null || person.globalId.isBlank()) continue;
                 String realmId = "";
                 // Realm office holders (rulers, stewards, marshals, councillors) are canonical
@@ -1603,7 +1824,7 @@ public final class WorldSimMod {
                 item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
                 item.addProperty("house_id", person.house == null ? "" : person.house);
                 item.addProperty("display_name", person.name == null ? "" : person.name);
-                addNamedEntity(namedEntities, person.globalId, "character", person.name, "", realmId);
+                addNamedEntity(namedEntities, namedEntityKeys, person.globalId, "character", person.name, "", realmId);
                 Origins.Build origin = OriginsMod.ORIGINS.peek("n:" + person.globalId);
                 item.addProperty("race_id", origin != null && origin.race != null ? origin.race
                         : String.valueOf(person.props.getOrDefault("origin.race", "")));
@@ -1708,6 +1929,8 @@ public final class WorldSimMod {
                 item.add("attributes", attributes);
                 item.add("needs", needs);
                 characters.add(item);
+                    }
+                }
             }
         }
         // Canonical JSON ordering is part of the native simulation contract:
@@ -1804,6 +2027,40 @@ public final class WorldSimMod {
     }
 
 
+    /**
+     * Reports the real JNI request sizes and cardinalities of their largest world domains.
+     * This is intentionally observational: it never truncates or mutates authoritative state.
+     */
+    private static void logSnapshotFootprint(JsonObject snapshot, int decisionBytes, int emergenceBytes) {
+        JsonObject counts = new JsonObject();
+        for (String key : List.of("geography", "titles", "borders", "realms", "settlements",
+                "characters", "social_relations", "catalog_entries", "diplomatic_relations",
+                "vassal_contracts", "wars", "armies", "named_entities", "workforce",
+                "capabilities", "government_definitions", "realm_governments")) {
+            if (!snapshot.has(key)) continue;
+            var value = snapshot.get(key);
+            if (value.isJsonArray()) counts.addProperty(key, value.getAsJsonArray().size());
+            else if (value.isJsonObject()) counts.addProperty(key, value.getAsJsonObject().size());
+        }
+        int geographyCells = 0;
+        if (snapshot.has("geography") && snapshot.get("geography").isJsonArray()) {
+            for (var map : snapshot.getAsJsonArray("geography")) {
+                if (map.isJsonObject() && map.getAsJsonObject().has("cells")
+                        && map.getAsJsonObject().get("cells").isJsonArray()) {
+                    geographyCells = (int) Math.min(Integer.MAX_VALUE,
+                            (long) geographyCells + map.getAsJsonObject().getAsJsonArray("cells").size());
+                }
+            }
+        }
+        PROFILER.setGauge("worldsim.jni.decision_input_bytes", decisionBytes);
+        PROFILER.setGauge("worldsim.jni.emergence_input_bytes", emergenceBytes);
+        PROFILER.setGauge("worldsim.snapshot.geography_cells", geographyCells);
+        if (decisionBytes >= 1024 * 1024 || emergenceBytes >= 1024 * 1024) {
+            LOGGER.info("wf_worldsim: JNI snapshot footprint decision_bytes={} emergence_bytes={} duplicated_snapshot_bytes={} geography_cells={} section_counts={}",
+                    decisionBytes, emergenceBytes, Math.min(decisionBytes, emergenceBytes), geographyCells, counts);
+        }
+    }
+
     private static String troopRecruitmentBuilding(String armyUnitId) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_troops")) return "barracks";
         try {
@@ -1827,7 +2084,7 @@ public final class WorldSimMod {
      * Map keys are stable domain IDs; collection entries use their declared id when
      * present and a deterministic ordinal only for genuinely anonymous rows.
      */
-    private static int exportDefinitionCatalogs(JsonArray target, String moduleId,
+    private static int exportDefinitionCatalogs(JsonArray target, Set<String> catalogEntryKeys, String moduleId,
                                                 String ownerClassName, String definitionsField) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return 0;
         int exported = 0;
@@ -1846,7 +2103,7 @@ public final class WorldSimMod {
                         String id = String.valueOf(entry.getKey());
                         if (id.isBlank()) continue;
                         String name = definitionName(entry.getValue(), id);
-                        addCatalogEntry(target, moduleId, catalogId, id, name, GSON.toJsonTree(entry.getValue()));
+                        addCatalogEntry(target, catalogEntryKeys, moduleId, catalogId, id, name, GSON.toJsonTree(entry.getValue()));
                         exported++;
                     }
                 } else if (value instanceof Collection<?> collection) {
@@ -1854,7 +2111,7 @@ public final class WorldSimMod {
                     for (Object entry : collection) {
                         String id = definitionId(entry);
                         if (id.isBlank()) id = String.format(Locale.ROOT, "%s:%06d", catalogId, ordinal);
-                        addCatalogEntry(target, moduleId, catalogId, id,
+                        addCatalogEntry(target, catalogEntryKeys, moduleId, catalogId, id,
                                 definitionName(entry, id), GSON.toJsonTree(entry));
                         ordinal++;
                         exported++;
@@ -1863,7 +2120,7 @@ public final class WorldSimMod {
                         || value instanceof String)) {
                     JsonObject settings = new JsonObject();
                     settings.addProperty(catalogId, String.valueOf(value));
-                    addCatalogEntry(target, moduleId, "settings", catalogId, catalogId, settings);
+                    addCatalogEntry(target, catalogEntryKeys, moduleId, "settings", catalogId, catalogId, settings);
                     exported++;
                 }
             }
@@ -1962,9 +2219,11 @@ public final class WorldSimMod {
         String candidate = globalValue instanceof String value && !value.isBlank()
                 ? value.trim() : localValue == null ? "" : localValue.trim();
         if (candidate.isBlank()) return "";
-        dev.worldforge.people.Character character = PeopleMod.authority().getGlobal(candidate);
-        if (character == null && registry != null) character = registry.get(candidate);
-        if (character != null) return character.globalId;
+        if (PeopleMod.authority().registryForGlobal(candidate) != null) return candidate;
+        if (registry != null) {
+            String globalId = registry.globalIdForLocalId(candidate);
+            if (globalId != null && !globalId.isBlank()) return globalId;
+        }
         try { return java.util.UUID.fromString(candidate).toString(); }
         catch (IllegalArgumentException ignored) { return ""; }
     }
@@ -2057,29 +2316,25 @@ public final class WorldSimMod {
         item.addProperty("entity_count", Math.max(0, entityCount)); target.add(item);
     }
 
-    private static void addCatalogEntry(JsonArray target, String moduleId, String catalogId,
+    private static void addCatalogEntry(JsonArray target, Set<String> keys, String moduleId, String catalogId,
                                         String entryId, String name, com.google.gson.JsonElement payload) {
         if (entryId == null || entryId.isBlank()) return;
-        for (var existing : target) if (existing.isJsonObject()) {
-            JsonObject row = existing.getAsJsonObject();
-            if (moduleId.equals(row.get("module_id").getAsString())
-                    && catalogId.equals(row.get("catalog_id").getAsString())
-                    && entryId.equals(row.get("entry_id").getAsString())) return;
-        }
+        String key = moduleId + '\u0000' + catalogId + '\u0000' + entryId;
+        if (!keys.add(key)) return;
         JsonObject item = new JsonObject();
         item.addProperty("module_id", moduleId); item.addProperty("catalog_id", catalogId);
         item.addProperty("entry_id", entryId); item.addProperty("name", name == null ? "" : name);
-        item.add("payload", payload == null ? new JsonObject() : payload.deepCopy());
+        // These projected payloads are newly created and become owned by this snapshot.
+        // Avoid recursively deep-copying every catalog row a second time.
+        item.add("payload", payload == null ? new JsonObject() : payload);
         target.add(item);
     }
 
-    private static void addNamedEntity(JsonArray target, String id, String kind, String name,
+    private static void addNamedEntity(JsonArray target, Set<String> keys, String id, String kind, String name,
                                        String parentId, String ownerId) {
         if (id == null || id.isBlank()) return;
-        for (var existing : target) if (existing.isJsonObject()) {
-            JsonObject row = existing.getAsJsonObject();
-            if (kind.equals(row.get("kind").getAsString()) && id.equals(row.get("id").getAsString())) return;
-        }
+        String key = kind + '\u0000' + id;
+        if (!keys.add(key)) return;
         JsonObject item = new JsonObject();
         item.addProperty("id", id); item.addProperty("kind", kind);
         item.addProperty("name", name == null ? "" : name);
@@ -2138,6 +2393,178 @@ public final class WorldSimMod {
      * Materializes canonical people incrementally. The native frame remains pending until every
      * resident and Origins record is reconciled; a large cohort can never monopolize one server tick.
      */
+    /**
+     * Establishes canonical settlement sites before creating residents or political overlays.
+     * The site is selected from existing map anchors / generated vanilla villages where possible;
+     * otherwise a durable empty Colony shell is created at the geography-derived location.
+     */
+    private static boolean syncEmergentSettlementStructures(MinecraftServer server, JsonObject state) {
+        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray())
+            return true;
+        if (emergentStructureProgress == null || emergentStructureProgress.state != state)
+            emergentStructureProgress = new EmergentStructureProgress(state);
+        EmergentStructureProgress progress = emergentStructureProgress;
+        int budget = STRUCTURE_MATERIALIZATION_BUDGET_PER_TICK;
+
+        // Build the polity membership index once, not once for every settlement band.
+        Map<String, String> foundingPolityByBand = new HashMap<>();
+        if (state.has("polities") && state.get("polities").isJsonArray()) {
+            for (var element : state.getAsJsonArray("polities")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject polity = element.getAsJsonObject();
+                String polityId = polity.has("id") ? polity.get("id").getAsString() : "";
+                if (polityId.isBlank() || !polity.has("settlement_ids")
+                        || !polity.get("settlement_ids").isJsonArray()) continue;
+                for (var member : polity.getAsJsonArray("settlement_ids"))
+                    if (member.isJsonPrimitive()) foundingPolityByBand.putIfAbsent(member.getAsString(), polityId);
+            }
+        }
+        Set<String> boundSettlementIds = emergenceBoundSettlementIds();
+        boolean remaining = false;
+        for (EmergenceSource source : emergenceSources()) {
+            if (source.registry == null) continue;
+            String dimension = source.settlementDimension(server);
+            if (dimension == null || dimension.isBlank()) {
+                LOGGER.warn("wf_worldsim: structure phase waits for physical dimension {}", source.id);
+                return false;
+            }
+            for (var element : state.getAsJsonArray("bands")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!source.id.equals(band.has("map_id") ? band.get("map_id").getAsString() : "")
+                        || !band.has("settled") || !band.get("settled").getAsBoolean()) continue;
+                String bandId = band.get("id").getAsString();
+                String progressKey = source.id + "|" + bandId;
+                if (progress.completedBands.contains(progressKey)) continue;
+                if (budget <= 0) {
+                    remaining = true;
+                    break;
+                }
+
+                String settlementId = settlementIdForBand(band);
+                Colony colony = SettleMod.colony(settlementId);
+                boolean colonyCreated = false;
+                int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+                int x = position[0], z = position[1];
+                if (colony == null && source.map != null) {
+                    int anchorRadius = (int) Math.max(64, Math.min(512,
+                            Math.round(96.0 * Math.max(0.001, source.blocksPerPixel))));
+                    colony = SettleMod.nearbyBlueprintSettlement(dimension, source.map.name,
+                            x, z, anchorRadius, boundSettlementIds);
+                } else if (colony == null) {
+                    colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64, boundSettlementIds);
+                }
+                if (colony == null) {
+                    // Keep each population band attached to its own resident ledger. If its
+                    // geographic center violates spacing, deterministically move only the
+                    // physical settlement anchor to the nearest available site.
+                    int[] foundingPosition = SettleMod.availableEmergentPosition(dimension, x, z, 1024);
+                    if (foundingPosition == null) {
+                        throw new IllegalStateException("No non-overlapping founding position within 1024 blocks for "
+                                + bandId + " in " + dimension);
+                    }
+                    if (foundingPosition[0] != x || foundingPosition[1] != z) {
+                        LOGGER.info("wf_worldsim: relocated founding anchor for band {} from {},{} to {},{} in {}",
+                                bandId, x, z, foundingPosition[0], foundingPosition[1], dimension);
+                        x = foundingPosition[0];
+                        z = foundingPosition[1];
+                    }
+                    // The band ID is a temporary structural label, not a final display name.
+                    colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
+                            settlementId, x, z, "worldsim:settlement:" + bandId);
+                    colonyCreated = true;
+                } else {
+                    settlementId = colony.s.id;
+                }
+                if (colony == null || colony.s == null)
+                    throw new IllegalStateException("Could not establish canonical settlement site for " + bandId);
+
+                colony.s.types = SettleMod.TYPES;
+                String previousType = colony.s.typeId;
+                String foundingPolityId = foundingPolityByBand.getOrDefault(bandId, "");
+                Map<String, Double> foundingRaceProfile = emergentFoundingRaceProfile(
+                        source.seed, foundingPolityId.isBlank() ? bandId : foundingPolityId);
+                int foundingPopulation = (int) Math.max(1L, Math.min(100_000L,
+                        band.has("population") ? band.get("population").getAsLong() : 1L));
+                String foundingType = colony.s.refreshType(foundingPopulation,
+                        emergentSettlementTerrain(source, band), foundingRaceProfile);
+                if (foundingType.isBlank()) {
+                    LOGGER.warn("wf_worldsim: settlement {} has no eligible founding type for population={} biome={}",
+                            bandId, foundingPopulation, emergentSettlementTerrain(source, band).keySet());
+                }
+                String priorBinding = settlementIdForBand(band);
+                bindPhysicalSettlement(bandId, settlementId);
+                boundSettlementIds.add(settlementId);
+                // If the site lies in terrain already generated before this emergence
+                // frame committed, no future ChunkEvent.Load is guaranteed. Request it
+                // once here, but only when the anchor chunk is already resident.
+                SettleMod.requestAutonomousInfrastructureIfLoaded(server, settlementId);
+                progress.dirty |= colonyCreated || !Objects.equals(previousType, foundingType)
+                        || !Objects.equals(priorBinding, settlementId);
+                progress.completedBands.add(progressKey);
+                budget--;
+            }
+            if (remaining) break;
+        }
+
+        if (remaining) {
+            PROFILER.setGauge("worldsim.genesis.structures.pending", 1);
+            return false;
+        }
+        // Save once after the complete staged batch. Capture on the server thread,
+        // but encode and publish the JSON snapshot on the bounded settlement writer.
+        // Keep this genesis cursor pending until its durable receipt completes.
+        if (progress.durableSave != null) {
+            if (!progress.durableSave.isDone()) return false;
+            boolean saved;
+            try { saved = Boolean.TRUE.equals(progress.durableSave.join()); }
+            catch (java.util.concurrent.CompletionException failure) { saved = false; }
+            progress.durableSave = null;
+            if (!saved) {
+                LOGGER.error("wf_worldsim: canonical settlement structures could not be persisted; population phase remains blocked");
+                return false;
+            }
+            progress.dirty = false;
+        }
+        if (progress.dirty) {
+            progress.durableSave = SettleMod.saveDurablyAsync(server);
+            return false;
+        }
+        emergentStructureProgress = null;
+        PROFILER.setGauge("worldsim.genesis.structures.pending", 0);
+        return true;
+    }
+
+    private static void refreshSettlementProjections(EmergentPeopleProgress progress) {
+        var revisions = WorldForgeApi.revisions();
+        var current = revisions.snapshot(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        if (progress.settlementProjectionBuilt && progress.settlementRevision != null && current.isPresent()
+                && revisions.isCurrent(progress.settlementRevision,
+                        dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)) return;
+
+        progress.workerColonyByPerson.clear();
+        progress.settlementNameCounts.clear();
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            if (colony == null || colony.s == null) continue;
+            for (Worker worker : colony.s.workers)
+                if (worker.person != null && !worker.person.isBlank())
+                    progress.workerColonyByPerson.putIfAbsent(worker.person, colony.s.id);
+            if (colony.s.name != null) {
+                String normalized = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                if (!normalized.isBlank()) progress.settlementNameCounts.merge(normalized, 1, Integer::sum);
+            }
+        }
+        progress.settlementRevision = current.orElse(null);
+        progress.settlementProjectionBuilt = current.isPresent();
+    }
+
+    private static void captureSettlementProjectionRevision(EmergentPeopleProgress progress) {
+        var current = WorldForgeApi.revisions().snapshot(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS);
+        progress.settlementRevision = current.orElse(null);
+        progress.settlementProjectionBuilt = current.isPresent();
+    }
+
     private static boolean syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return true;
         if (emergentPeopleProgress == null || emergentPeopleProgress.state != state || emergentPeopleProgress.year != year)
@@ -2145,7 +2572,11 @@ public final class WorldSimMod {
 
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
-        boolean settlementBindingsChanged = false;
+        // These projections are reused across ticks and rebuilt only after a committed
+        // settlement-domain mutation invalidates their revision.
+        refreshSettlementProjections(emergentPeopleProgress);
+        Map<String, String> workerColonyByPerson = emergentPeopleProgress.workerColonyByPerson;
+        Map<String, Integer> settlementNameCounts = emergentPeopleProgress.settlementNameCounts;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
         if (state.has("polities") && state.get("polities").isJsonArray()) {
@@ -2158,6 +2589,9 @@ public final class WorldSimMod {
             }
         }
         for (EmergenceSource source : emergenceSources()) {
+            // Each dimension/map has an independent checkpoint. A stalled source must not
+            // suppress durable progress for another source in the same server pass.
+            boolean sourceComplete = true;
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
             // Establish a provisional, deterministic racial composition before the
@@ -2181,7 +2615,6 @@ public final class WorldSimMod {
             String progressPartition = source.id;
             EmergentMapProgress sourceProgress = emergentPeopleProgress.maps.computeIfAbsent(
                     progressPartition, ignored -> new EmergentMapProgress(registry));
-            boolean hasSettledBands = false;
             for (var element : state.getAsJsonArray("bands")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
@@ -2189,23 +2622,30 @@ public final class WorldSimMod {
                 String bandId = band.get("id").getAsString();
                 int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
                 EmergentBandProgress bandProgress = sourceProgress.bands.computeIfAbsent(bandId,
-                        ignored -> new EmergentBandProgress(sourceProgress.index.livingResidents(bandId), year));
-                List<dev.worldforge.people.Character> residents = bandProgress.residents;
+                        ignored -> new EmergentBandProgress(sourceProgress.index.residentMetadata(bandId), year));
+                List<String> residents = bandProgress.residents;
 
                 while (bandProgress.originCursor < residents.size() && budget > 0) {
                     int ordinal = bandProgress.originCursor++;
-                    ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
+                    try (var lease = registry.access().acquireGlobal(residents.get(ordinal))) {
+                        if (lease != null) ensureEmergentOrigin(lease.get(), source, year, ordinal,
+                                realmByBand.getOrDefault(bandId, ""));
+                    }
                     budget--;
                 }
+                try (CharacterRegistry.MutationBatch membershipBatch = CharacterRegistry.beginMutationBatch()) {
                 while (residents.size() < target && budget > 0) {
                     int ordinal = residents.size();
                     dev.worldforge.people.Character created = createEmergentResident(
-                            registry, source, bandId, year, ordinal, bandProgress.parents);
+                            registry, source, bandId, year, ordinal, bandProgress.parents,
+                            sourceProgress.reservedHouseNames);
                     if (created == null) break;
                     sourceProgress.index.add(created);
+                    residents.add(created.globalId);
                     ensureEmergentOrigin(created, source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     bandProgress.originCursor = residents.size();
                     budget--;
+                }
                 }
 
                 boolean bandComplete = residents.size() >= target
@@ -2213,6 +2653,7 @@ public final class WorldSimMod {
                 band.addProperty("materialized_population", residents.size());
                 band.addProperty("population_target_gap", target - residents.size());
                 if (!bandComplete) {
+                    sourceComplete = false;
                     complete = false;
                     if (budget == 0) break;
                     continue;
@@ -2223,11 +2664,37 @@ public final class WorldSimMod {
                 }
                 if (bandProgress.settlementReconciled) continue;
 
+                // Build canonical resident membership in bounded slices. Previously the
+                // whole population was collected in one tick after the creation budget ended.
+                while (bandProgress.residentIndexCursor < residents.size() && budget > 0) {
+                    String residentGlobalId = residents.get(bandProgress.residentIndexCursor);
+                    try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
+                        if (lease == null) {
+                            LOGGER.warn("wf_worldsim: resident {} is temporarily unavailable while reconciling band {}; retrying next pass",
+                                    residentGlobalId, bandId);
+                            break;
+                        }
+                        dev.worldforge.people.Character resident = lease.get();
+                        if (resident.alive) {
+                            bandProgress.residentIds.add(resident.globalId);
+                            bandProgress.residentIdSet.add(resident.globalId);
+                        }
+                    }
+                    bandProgress.residentIndexCursor++;
+                    budget--;
+                }
+                if (bandProgress.residentIndexCursor < residents.size() || budget == 0) {
+                    sourceComplete = false;
+                    complete = false;
+                    break;
+                }
+
                 String settlementId = settlementIdForBand(band);
                 try {
                     int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
                     int x = position[0], z = position[1];
                     String display = "";
+                    boolean newlyCreatedSettlement = false;
                     String settlementDimension = source.settlementDimension(server);
                     if (settlementDimension == null || settlementDimension.isBlank())
                         throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
@@ -2248,87 +2715,188 @@ public final class WorldSimMod {
                         if (colony != null) {
                             settlementId = colony.s.id;
                             bindPhysicalSettlement(bandId, settlementId);
-                            settlementBindingsChanged = true;
+                            emergentPeopleProgress.dirtyBindingSources.add(source.id);
                         } else {
                             settlementId = "emg_" + bandId;
-                            display = emergentSettlementName(source, bandId, residents);
+                            display = emergentSettlementName(source, bandId, sourceProgress.index.residentMetadata(bandId));
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                            newlyCreatedSettlement = colony != null;
                             bindPhysicalSettlement(bandId, settlementId);
-                            settlementBindingsChanged = true;
+                            emergentPeopleProgress.dirtyBindingSources.add(source.id);
                         }
+                    }
+                    if (newlyCreatedSettlement && colony != null && colony.s != null && colony.s.name != null) {
+                        String createdName = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                        if (!createdName.isBlank()) settlementNameCounts.merge(createdName, 1, Integer::sum);
                     }
                     if (colony != null && colony.sourceMapId.isBlank() && colony.s != null) {
                         String currentSettlementName = colony.s.name == null ? "" : colony.s.name.trim();
                         String normalizedSettlementName = currentSettlementName.replaceAll("\\s+", " ")
                                 .toLowerCase(Locale.ROOT);
-                        Colony adoptedColony = colony;
-                        boolean duplicateSettlementName = SettleMod.COLONIES.values().stream()
-                                .anyMatch(other -> other != null && other != adoptedColony && other.s != null
-                                        && other.s.name != null
-                                        && other.s.name.trim().replaceAll("\\s+", " ")
-                                                .equalsIgnoreCase(normalizedSettlementName));
+                        boolean duplicateSettlementName = settlementNameCounts.getOrDefault(normalizedSettlementName, 0) > 1;
                         if (currentSettlementName.isBlank() || currentSettlementName.equals(colony.s.id)
                                 || duplicateSettlementName) {
-                            colony.s.name = emergentSettlementName(source, bandId, residents);
+                            if (!normalizedSettlementName.isBlank())
+                                settlementNameCounts.computeIfPresent(normalizedSettlementName,
+                                        (ignored, count) -> count <= 1 ? null : count - 1);
+                            colony.s.name = emergentSettlementName(source, bandId, sourceProgress.index.residentMetadata(bandId));
+                            String replacementName = colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                            if (!replacementName.isBlank()) settlementNameCounts.merge(replacementName, 1, Integer::sum);
                         }
                     }
-                    List<String> residentIds = residents.stream().filter(person -> person.alive)
-                            .map(person -> person.globalId).toList();
-                    if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
-                        throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
-                    colony.s.setCanonicalPopulation(residentIds.size());
-                    // Classify only after canonical residents are attached. This avoids
-                    // zero-population camp placeholders and uses local terrain plus the
-                    // actual race mix of this settlement's residents.
-                    colony.s.types = SettleMod.TYPES;
-                    colony.s.refreshType(residentIds.size(), emergentSettlementTerrain(source, band),
-                            emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
-                    for (Worker worker : new ArrayList<>(colony.s.workers)) {
-                        if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
-                        dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
-                        if (former == null) continue;
-                        String reason = !former.alive ? "death:emergence" : "transfer:emergence";
-                        colony.s.removeWorkerByPerson(worker.person, reason);
+                    if (!bandProgress.canonicalResidentsReplaced) {
+                        if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, bandProgress.residentIds))
+                            throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
+                        colony.s.setCanonicalPopulation(bandProgress.residentIds.size());
+                        colony.s.types = SettleMod.TYPES;
+                        colony.s.refreshType(bandProgress.residentIds.size(), emergentSettlementTerrain(source, band),
+                                emergentRaceShares(sourceProgress.index.residentMetadata(bandId)));
+                        bandProgress.canonicalResidentsReplaced = true;
+                        bandProgress.workerSnapshot = new ArrayList<>(colony.s.workers);
                     }
-                    for (String residentId : residentIds) {
-                        dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
-                        if (resident == null) continue;
-                        boolean workingAge = PopulationSimulation.age(resident, year) >= 18
-                                && PopulationSimulation.canWork(resident, year);
-                        if (!workingAge) {
-                            colony.s.removeWorkerByPerson(residentId, "transfer:underage");
-                            continue;
+
+                    while (bandProgress.workerCleanupCursor < bandProgress.workerSnapshot.size() && budget > 0) {
+                        Worker worker = bandProgress.workerSnapshot.get(bandProgress.workerCleanupCursor);
+                        if (worker.person != null && !worker.person.isBlank()
+                                && !bandProgress.residentIdSet.contains(worker.person)) {
+                            CharacterRegistry formerRegistry = PeopleMod.authority().registryForGlobal(worker.person);
+                            if (formerRegistry != null) {
+                                try (var formerLease = formerRegistry.access().acquireGlobal(worker.person)) {
+                                    if (formerLease != null) {
+                                        dev.worldforge.people.Character former = formerLease.get();
+                                        String reason = !former.alive ? "death:emergence" : "transfer:emergence";
+                                        colony.s.removeWorkerByPerson(worker.person, reason);
+                                        workerColonyByPerson.remove(worker.person, colony.s.id);
+                                    }
+                                }
+                            }
                         }
-                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId))
-                            throw new IllegalStateException("Canonical resident " + residentId
-                                    + " could not be attached to settlement " + settlementId);
+                        bandProgress.workerCleanupCursor++;
+                        budget--;
+                    }
+                    if (bandProgress.workerCleanupCursor < bandProgress.workerSnapshot.size()) {
+                        sourceComplete = false;
+                        complete = false;
+                        break;
+                    }
+
+                    while (bandProgress.residentWorkerCursor < bandProgress.residentIds.size() && budget > 0) {
+                        String residentId = bandProgress.residentIds.get(bandProgress.residentWorkerCursor);
+                        EmergentPopulationIndex.Resident metadata = sourceProgress.index.resident(residentId);
+                        try (var residentLease = registry.access().acquireGlobal(residentId)) {
+                        dev.worldforge.people.Character resident = residentLease == null ? null : residentLease.get();
+                        if (resident != null && !resident.alive) {
+                            colony.s.removeWorkerByPerson(residentId, "death:emergence");
+                            workerColonyByPerson.remove(residentId, colony.s.id);
+                        } else if (resident != null) {
+                            boolean workingAge = PopulationSimulation.age(resident, year) >= 18
+                                    && PopulationSimulation.canWork(resident, year);
+                            if (!workingAge) {
+                                colony.s.removeWorkerByPerson(residentId, "transfer:underage");
+                                workerColonyByPerson.remove(residentId, colony.s.id);
+                            } else if (!SettleMod.attachExistingCharacter(colony.s.id, residentId, workerColonyByPerson)) {
+                                throw new IllegalStateException("Canonical resident " + residentId
+                                        + " could not be attached to settlement " + settlementId);
+                            }
+                        }
+                        }
+                        bandProgress.residentWorkerCursor++;
+                        budget--;
+                    }
+                    if (bandProgress.residentWorkerCursor < bandProgress.residentIds.size()) {
+                        sourceComplete = false;
+                        complete = false;
+                        break;
                     }
                     bandProgress.settlementReconciled = true;
-                    hasSettledBands = true;
+                    emergentPeopleProgress.dirtySettlementSources.add(source.id);
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
+                    sourceComplete = false;
                     complete = false;
                 }
                 if (budget == 0) break;
             }
 
-            List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
-            boolean peopleDurable = emergentResidents.isEmpty()
-                    || PeopleMod.persistCharacter(emergentResidents.get(0), server);
-            if (!peopleDurable) {
-                LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
-                return false;
+            if (budget == 0) {
+                sourceComplete = false;
+                complete = false;
             }
-            if (hasSettledBands && !SettleMod.saveDurably(server)) {
-                LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
-                return false;
-            }
-            if (settlementBindingsChanged && !saveState(server)) {
-                LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
-                return false;
+            if (sourceComplete) {
+                List<String> emergentResidents = sourceProgress.index.emergentResidents();
+                if (!sourceProgress.durableWrites.isEmpty()) {
+                    // Do not wait on WAL futures from the server thread. Let the writer
+                    // finish its forced batch and resume on a later tick.
+                    if (sourceProgress.durableWrites.stream().anyMatch(future -> !future.isDone()))
+                        return false;
+                    boolean durableWindowSucceeded = true;
+                    for (var receipt : sourceProgress.durableWrites) {
+                        try {
+                            if (!Boolean.TRUE.equals(receipt.join())) durableWindowSucceeded = false;
+                        } catch (java.util.concurrent.CompletionException failure) {
+                            durableWindowSucceeded = false;
+                            LOGGER.error("wf_worldsim: asynchronous Character WAL receipt failed for source {}",
+                                    source.id, failure);
+                        }
+                    }
+                    sourceProgress.durableCursor += sourceProgress.durableWrites.size();
+                    sourceProgress.durableWrites = List.of();
+                    if (!durableWindowSucceeded) {
+                        LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
+                        return false;
+                    }
+                }
+                if (sourceProgress.durableCursor < emergentResidents.size()) {
+                    int end = Math.min(emergentResidents.size(), sourceProgress.durableCursor + 64);
+                    List<java.util.concurrent.CompletableFuture<Boolean>> window = new ArrayList<>(end - sourceProgress.durableCursor);
+                    for (int i = sourceProgress.durableCursor; i < end; i++) {
+                        String residentGlobalId = emergentResidents.get(i);
+                        try (var lease = registry.access().acquireGlobal(residentGlobalId)) {
+                            if (lease == null) {
+                                window.add(java.util.concurrent.CompletableFuture.completedFuture(false));
+                            } else {
+                                window.add(PeopleMod.persistCharacterAsync(lease.get(), server));
+                            }
+                        }
+                    }
+                    sourceProgress.durableWrites = List.copyOf(window);
+                    LOGGER.debug("wf_worldsim: queued durable Character window source={} range={}-{} total={}",
+                            source.id, sourceProgress.durableCursor, end, emergentResidents.size());
+                    return false;
+                }
+                if (emergentPeopleProgress.dirtySettlementSources.contains(source.id)) {
+                    java.util.concurrent.CompletableFuture<Boolean> settlementSave =
+                            emergentPeopleProgress.settlementSaves.get(source.id);
+                    if (settlementSave == null) {
+                        emergentPeopleProgress.settlementSaves.put(source.id, SettleMod.saveDurablyAsync(server));
+                        return false;
+                    }
+                    if (!settlementSave.isDone()) return false;
+                    boolean saved;
+                    try { saved = Boolean.TRUE.equals(settlementSave.join()); }
+                    catch (java.util.concurrent.CompletionException failure) { saved = false; }
+                    emergentPeopleProgress.settlementSaves.remove(source.id);
+                    if (!saved) {
+                        LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
+                        return false;
+                    }
+                    emergentPeopleProgress.dirtySettlementSources.remove(source.id);
+                }
+                if (emergentPeopleProgress.dirtyBindingSources.contains(source.id)) {
+                    if (!saveState(server)) {
+                        LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
+                        return false;
+                    }
+                    emergentPeopleProgress.dirtyBindingSources.remove(source.id);
+                }
+            } else {
+                // Genesis progress is staged in-memory. Avoid rewriting the growing canonical
+                // people JSON and settlement files on every tick while batches are incomplete.
+                complete = false;
             }
             if (budget == 0) complete = false;
+            captureSettlementProjectionRevision(emergentPeopleProgress);
         }
         if (complete) emergentPeopleProgress = null;
         return complete;
@@ -2419,6 +2987,125 @@ public final class WorldSimMod {
         return cells.size();
     }
 
+    /**
+     * Immutable per-source geography projection. Each band is indexed once; polity projections
+     * then touch only their own band IDs and nearby spatial buckets, not the entire world array.
+     */
+    private static final class EmergentGeographyIndex {
+        private record Point(String polityId, int x, int z) { }
+        private final int provinceBlocks;
+        private final int regionBlocks;
+        private final int bucketBlocks;
+        private final long maxDistanceSquared;
+        private final Map<String, String> provinceByBand = new HashMap<>();
+        private final Map<String, String> regionByBand = new HashMap<>();
+        private final Map<String, String> biomeByBand = new HashMap<>();
+        private final Map<String, List<Point>> pointsByPolity = new HashMap<>();
+        private final Map<Long, List<Point>> spatial = new HashMap<>();
+
+        EmergentGeographyIndex(JsonObject state, EmergenceSource source) {
+            provinceBlocks = emergentProvinceScale(source);
+            regionBlocks = provinceBlocks * 2;
+            double radius = source.map == null ? 64.0
+                    : Math.max(64.0, Math.min(source.width, source.height) * source.blocksPerPixel / 4.0);
+            bucketBlocks = Math.max(1, (int) Math.ceil(radius));
+            maxDistanceSquared = (long) Math.ceil(radius * radius);
+
+            Map<String, String> polityByBand = new HashMap<>();
+            if (state.has("polities") && state.get("polities").isJsonArray()) {
+                for (var element : state.getAsJsonArray("polities")) {
+                    if (!element.isJsonObject()) continue;
+                    JsonObject polity = element.getAsJsonObject();
+                    if (!source.id.equals(polity.get("map_id").getAsString())
+                            || !polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
+                    String polityId = polity.get("id").getAsString();
+                    for (var band : polity.getAsJsonArray("settlement_ids"))
+                        polityByBand.putIfAbsent(band.getAsString(), polityId);
+                }
+            }
+
+            if (!state.has("bands") || !state.get("bands").isJsonArray()) return;
+            for (var element : state.getAsJsonArray("bands")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!source.id.equals(band.get("map_id").getAsString())) continue;
+                String bandId = band.get("id").getAsString();
+                int px = band.get("x").getAsInt(), pz = band.get("z").getAsInt();
+                int[] position = source.blockPosition(px, pz);
+                provinceByBand.put(bandId, cellKey(position[0], position[1], provinceBlocks));
+                regionByBand.put(bandId, cellKey(position[0], position[1], regionBlocks));
+
+                String biome = "unknown";
+                if (source.map != null) {
+                    int x = Math.max(0, Math.min(source.map.w - 1, px));
+                    int z = Math.max(0, Math.min(source.map.h - 1, pz));
+                    String key = source.map.biomeKey(source.map.biomeAtPx(x, z));
+                    if (key != null && !key.isBlank()) biome = key;
+                } else {
+                    String key = VanillaWorldGeography.biomeAtWorldPosition(source.id, position[0], position[1]);
+                    if (key != null && !key.isBlank()) biome = key;
+                }
+                biomeByBand.put(bandId, biome);
+
+                String polityId = polityByBand.get(bandId);
+                if (polityId != null && !polityId.isBlank()) {
+                    Point point = new Point(polityId, position[0], position[1]);
+                    pointsByPolity.computeIfAbsent(polityId, ignored -> new ArrayList<>()).add(point);
+                    spatial.computeIfAbsent(bucketKey(position[0], position[1], bucketBlocks),
+                            ignored -> new ArrayList<>()).add(point);
+                }
+            }
+        }
+
+        private static String cellKey(int x, int z, int size) {
+            return Math.floorDiv(x, size) + ":" + Math.floorDiv(z, size);
+        }
+
+        private static long bucketKey(int x, int z, int size) {
+            long bx = Math.floorDiv(x, size), bz = Math.floorDiv(z, size);
+            return (bx << 32) ^ (bz & 0xffffffffL);
+        }
+
+        Set<String> neighbors(String polityId) {
+            Set<String> result = new TreeSet<>();
+            for (Point point : pointsByPolity.getOrDefault(polityId, List.of())) {
+                int bx = Math.floorDiv(point.x(), bucketBlocks);
+                int bz = Math.floorDiv(point.z(), bucketBlocks);
+                for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                    long key = ((long) (bx + dx) << 32) ^ ((bz + dz) & 0xffffffffL);
+                    for (Point other : spatial.getOrDefault(key, List.of())) {
+                        if (polityId.equals(other.polityId())) continue;
+                        long x = (long) point.x() - other.x();
+                        long z = (long) point.z() - other.z();
+                        if (x * x + z * z <= maxDistanceSquared)
+                            result.add("emergent-" + other.polityId());
+                    }
+                }
+            }
+            return result;
+        }
+
+        int provinceCount(Set<String> bandIds) { return countCells(bandIds, provinceByBand); }
+        int regionCount(Set<String> bandIds) { return countCells(bandIds, regionByBand); }
+
+        private static int countCells(Set<String> bandIds, Map<String, String> index) {
+            Set<String> cells = new HashSet<>();
+            for (String bandId : bandIds) {
+                String cell = index.get(bandId);
+                if (cell != null) cells.add(cell);
+            }
+            return cells.size();
+        }
+
+        String biomeSummary(Set<String> bandIds) {
+            Map<String, Integer> counts = new TreeMap<>();
+            for (String bandId : bandIds)
+                counts.merge(biomeByBand.getOrDefault(bandId, "unknown"), 1, Integer::sum);
+            return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
+                    .collect(java.util.stream.Collectors.joining(","));
+        }
+    }
+
     /** Neighbours come from physical proximity, never imported political borders. */
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
         Set<String> own = new HashSet<>();
@@ -2473,14 +3160,14 @@ public final class WorldSimMod {
 
     /** Unique settlement naming uses only race/culture pools supplied by wf-people datapacks. */
     private static String emergentSettlementName(EmergenceSource source, String bandId,
-            List<dev.worldforge.people.Character> residents) {
+            List<EmergentPopulationIndex.Resident> residents) {
         Map<String, Long> races = residents.stream()
-                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
         Map<String, Long> cultures = residents.stream()
-                .map(person -> person.culture == null ? "" : person.culture)
+                .map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -2548,11 +3235,10 @@ public final class WorldSimMod {
 
     /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
     private static Map<String, Double> emergentRaceShares(
-            List<dev.worldforge.people.Character> members) {
+            List<EmergentPopulationIndex.Resident> members) {
         Map<String, Double> counts = new TreeMap<>();
-        for (dev.worldforge.people.Character person : members) {
-            Object rawRace = person.props.get("origin.race");
-            String race = rawRace == null ? "" : String.valueOf(rawRace).trim();
+        for (EmergentPopulationIndex.Resident person : members) {
+            String race = person.race() == null ? "" : person.race().trim();
             if (race.isEmpty()) continue;
             // Count every subrace toward its full ancestry. Government and settlement
             // requirements target base races (elf/dwarf/orc), while names and traits
@@ -2646,15 +3332,15 @@ public final class WorldSimMod {
                     .replaceAll("\\s+", " ").equalsIgnoreCase(normalized));
             if (available) return existing.name;
         }
-        List<dev.worldforge.people.Character> residents = bandId == null || bandId.isBlank()
-                ? List.of() : populationIndex.livingResidents(bandId);
+        List<EmergentPopulationIndex.Resident> residents = bandId == null || bandId.isBlank()
+                ? List.of() : populationIndex.residentMetadata(bandId);
         Map<String, Long> races = residents.stream()
-                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
         Map<String, Long> cultures = residents.stream()
-                .map(person -> person.culture == null ? "" : person.culture)
+                .map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank())
                 .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                         java.util.stream.Collectors.counting()));
@@ -2682,8 +3368,12 @@ public final class WorldSimMod {
         var existing = RealmsMod.POLITICS.title(titleId);
         if (existing != null && existing.holderCharacterId != null
                 && !existing.holderCharacterId.isBlank()) {
-            var currentHolder = PeopleMod.authority().getGlobal(existing.holderCharacterId);
-            if (currentHolder != null && currentHolder.alive) return;
+            CharacterRegistry currentHolderRegistry = PeopleMod.authority().registryForGlobal(existing.holderCharacterId);
+            if (currentHolderRegistry != null) {
+                try (var currentHolderLease = currentHolderRegistry.access().acquireGlobal(existing.holderCharacterId)) {
+                    if (currentHolderLease != null && currentHolderLease.get().alive) return;
+                }
+            }
         }
         Set<String> alreadyHoldingRealmTitles = RealmsMod.POLITICS.titles().stream()
                 .filter(title -> title != null && existing != null
@@ -2691,15 +3381,15 @@ public final class WorldSimMod {
                 .map(title -> title.holderCharacterId)
                 .filter(holder -> holder != null && !holder.isBlank())
                 .collect(java.util.stream.Collectors.toSet());
-        var residents = populationIndex.livingResidents(bandId).stream()
-                .filter(person -> person.alive && PopulationSimulation.age(person, year) >= 18)
+        var residents = populationIndex.residentMetadata(bandId).stream()
+                .filter(person -> person.alive() && Math.max(0, year - person.birthYear()) >= 18)
                 // Prefer a distinct local notable for each county/duchy/kingdom.
                 // Reuse an existing holder only when the local adult population is exhausted.
-                .sorted(Comparator.comparing((dev.worldforge.people.Character person) ->
-                                alreadyHoldingRealmTitles.contains(person.globalId))
-                        .thenComparingInt(person -> person.birthYear)
-                        .thenComparing(person -> person.globalId)).toList();
-        String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId;
+                .sorted(Comparator.comparing((EmergentPopulationIndex.Resident person) ->
+                                alreadyHoldingRealmTitles.contains(person.globalId()))
+                        .thenComparingInt(EmergentPopulationIndex.Resident::birthYear)
+                        .thenComparing(EmergentPopulationIndex.Resident::globalId)).toList();
+        String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId();
         if (holder != null && !holder.isBlank()
                 && !RealmsMod.POLITICS.grantTitle(titleId, holder))
             LOGGER.warn("wf_worldsim: could not grant territorial title {} to Character {}: {}",
@@ -2869,13 +3559,13 @@ public final class WorldSimMod {
     }
 
     /** A deterministic culture/race-aware name is stored in the canonical emergence state once. */
-    private static String emergentRealmName(String polityId, List<dev.worldforge.people.Character> members,
+    private static String emergentRealmName(String polityId, List<EmergentPopulationIndex.Resident> members,
             Set<String> reservedNames) {
         if (members == null || members.isEmpty())
             throw new IllegalStateException("Cannot name a polity without canonical population: " + polityId);
-        Map<String, Long> races = members.stream().map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+        Map<String, Long> races = members.stream().map(EmergentPopulationIndex.Resident::race)
                 .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
-        Map<String, Long> cultures = members.stream().map(person -> person.culture == null ? "" : person.culture)
+        Map<String, Long> cultures = members.stream().map(EmergentPopulationIndex.Resident::culture)
                 .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
         String race = races.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
@@ -2922,7 +3612,8 @@ public final class WorldSimMod {
             boolean changed = false;
             boolean settlementMapMarkersChanged = false;
             EmergentPopulationIndex populationIndex = populationIndexes.computeIfAbsent(
-                    registry, ignored -> new EmergentPopulationIndex(registry.all()));
+                    registry, ignored -> new EmergentPopulationIndex(registry));
+            EmergentGeographyIndex geographyIndex = new EmergentGeographyIndex(state, source);
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
@@ -2935,21 +3626,18 @@ public final class WorldSimMod {
                 Set<String> bandIds = new LinkedHashSet<>();
                 if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
                     for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
-                List<dev.worldforge.people.Character> members = new ArrayList<>();
-                for (String bandId : bandIds) members.addAll(populationIndex.livingResidents(bandId));
-                Set<String> neighbors = emergentNeighbors(polity, state.getAsJsonArray("polities"),
-                        state.getAsJsonArray("bands"), source);
-                String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), source);
+                List<EmergentPopulationIndex.Resident> members = new ArrayList<>();
+                for (String bandId : bandIds) members.addAll(populationIndex.residentMetadata(bandId));
+                Set<String> neighbors = geographyIndex.neighbors(polityId);
+                String biomes = geographyIndex.biomeSummary(bandIds);
                 String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
                         ? polity.get("ruler_global_id").getAsString() : "";
                 TitleData.Realm initialProjection = RealmsMod.registerEmergentRealm(realmId,
                         polity.get("name").getAsString(), source.id, currentRuler,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
-                initialProjection.props.put("emergence.province_count", emergentProvinceCount(
-                        bandIds, state.getAsJsonArray("bands"), source));
-                initialProjection.props.put("emergence.region_count", emergentRegionCount(
-                        bandIds, state.getAsJsonArray("bands"), source));
+                initialProjection.props.put("emergence.province_count", geographyIndex.provinceCount(bandIds));
+                initialProjection.props.put("emergence.region_count", geographyIndex.regionCount(bandIds));
                 int territoryProvinceScale = emergentProvinceScale(source);
                 initialProjection.props.put("emergence.territory_grid", territoryProvinceScale
                         + "-block-provinces/" + (territoryProvinceScale * 2) + "-block-regions");
@@ -2973,94 +3661,87 @@ public final class WorldSimMod {
                         ? polity.get("ruler_global_id").getAsString()
                         : (binding.has("ruler_global_id") && !binding.get("ruler_global_id").isJsonNull()
                             ? binding.get("ruler_global_id").getAsString() : "");
-                dev.worldforge.people.Character ruler = members.stream()
-                        .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                EmergentPopulationIndex.Resident previous = populationIndex.resident(previousRulerId);
+                EmergentPopulationIndex.Resident ruler = members.stream()
+                        .filter(person -> person.globalId().equals(previousRulerId)).findFirst().orElse(null);
                 boolean foundedNewDynasty = false;
                 if (ruler == null) {
-                    dev.worldforge.people.Character previous = populationIndex.byGlobalId(previousRulerId);
                     ruler = members.stream()
-                            .filter(person -> dev.worldforge.people.PopulationSimulation.age(person, year) >= 18)
+                            .filter(person -> person.alive() && Math.max(0, year - person.birthYear()) >= 18)
                             .sorted(Comparator
-                                    .comparingInt((dev.worldforge.people.Character person) -> {
+                                    .comparingInt((EmergentPopulationIndex.Resident person) -> {
                                         if (previous == null) return 0;
-                                        if (person.father.equals(previous.id) || person.mother.equals(previous.id)) return 0;
-                                        if (previous.house != null && !previous.house.isBlank()
-                                                && previous.house.equals(person.house)) return 1;
+                                        if (previous.localId().equals(person.father())
+                                                || previous.localId().equals(person.mother())) return 0;
+                                        if (previous.house() != null && !previous.house().isBlank()
+                                                && previous.house().equals(person.house())) return 1;
                                         return 2;
                                     })
-                                    .thenComparingInt(person -> person.birthYear)
-                                    .thenComparing(person -> person.globalId))
+                                    .thenComparingInt(EmergentPopulationIndex.Resident::birthYear)
+                                    .thenComparing(EmergentPopulationIndex.Resident::globalId))
                             .findFirst().orElse(null);
                     if (ruler == null) continue;
                     boolean directHeir = previous != null
-                            && (ruler.father.equals(previous.id) || ruler.mother.equals(previous.id));
-                    boolean sameHouse = previous != null && previous.house != null
-                            && !previous.house.isBlank() && previous.house.equals(ruler.house);
+                            && (previous.localId().equals(ruler.father())
+                                || previous.localId().equals(ruler.mother()));
+                    boolean sameHouse = previous != null && previous.house() != null
+                            && !previous.house().isBlank() && previous.house().equals(ruler.house());
                     if (previous != null && !directHeir && !sameHouse) {
                         dynastyId = "house_" + UUID.nameUUIDFromBytes(
-                                (polityId + "|" + year + "|" + ruler.globalId).getBytes(StandardCharsets.UTF_8))
+                                (polityId + "|" + year + "|" + ruler.globalId()).getBytes(StandardCharsets.UTF_8))
                                 .toString().replace("-", "");
                         polity.addProperty("dynasty_id", dynastyId);
                         foundedNewDynasty = true;
                     }
-                    // Character.house is the unique family display name; dynastyId is stored separately.
-                    // Descendants inherit the family name through CharacterRegistry.addChild().
-                    ruler.props.put("emergence.polity_id", polityId);
-                    ruler.props.put("emergence.dynasty_id", dynastyId);
-                    ruler.props.put("emergence.polity_role", "ruler");
-                    registry.appoint(ruler.id, "emergent_ruler", polityId, year);
-                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
-                    // Political succession is committed only after the canonical Character is durable.
-                    if (!PeopleMod.persistCharacter(ruler, server)) {
+                }
+                String rulerName;
+                String rulerHouse;
+                try (var rulerLease = registry.access().acquireGlobal(ruler.globalId())) {
+                    if (rulerLease == null) continue;
+                    dev.worldforge.people.Character canonicalRuler = rulerLease.get();
+                    canonicalRuler.props.put("emergence.polity_id", polityId);
+                    canonicalRuler.props.put("emergence.dynasty_id", dynastyId);
+                    canonicalRuler.props.put("emergence.polity_role", "ruler");
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId()))
+                        registry.appoint(canonicalRuler.id, "emergent_ruler", polityId, year);
+                    if (!ensureEmergentCourtOffice(registry, canonicalRuler, realmId, year)) continue;
+                    if (!PeopleMod.persistCharacter(canonicalRuler, server)) {
                         LOGGER.error("wf_worldsim: canonical ruler {} for polity {} could not be persisted; succession remains pending",
-                                ruler.globalId, polityId);
+                                canonicalRuler.globalId, polityId);
                         continue;
                     }
-                    JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
-                            ? polity.getAsJsonArray("ruler_history") : new JsonArray();
-                    if (foundedNewDynasty) rulerHistory = new JsonArray();
-                    boolean alreadyRecorded = false;
-                    for (var recorded : rulerHistory) if (ruler.globalId.equals(recorded.getAsString())) {
-                        alreadyRecorded = true;
-                        break;
-                    }
-                    if (!alreadyRecorded) rulerHistory.add(ruler.globalId);
-                    polity.add("ruler_history", rulerHistory);
-                    binding.addProperty("ruler_global_id", ruler.globalId);
-                    int generation = rulerHistory.size();
-                    binding.addProperty("generation", generation);
-                    polity.addProperty("ruler_global_id", ruler.globalId);
-                    polity.addProperty("dynasty_generations", generation);
-                    polity.addProperty("last_succession_year", year);
-                    polity.addProperty("years_in_generation", 0);
-                    if (previousRulerId.isBlank()) {
-                        WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    } else if (foundedNewDynasty) {
-                        WorldForgeApi.postEvent("people", ruler.name + " founds a new ruling house in " + polity.get("name").getAsString(),
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    } else {
-                        WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
-                                        + ": " + ruler.name + " succeeds the previous ruler (dynastic generation " + generation + ")",
-                                List.of(), Math.max(0L, (long) year * 525600L));
-                    }
-                    changed = true;
-                } else {
-                    ruler.props.put("emergence.polity_id", polityId);
-                    ruler.props.put("emergence.dynasty_id", dynastyId);
-                    ruler.props.put("emergence.polity_role", "ruler");
-                    var canonicalRulerRole = PeopleMod.ROLES.ruler();
-                    if (canonicalRulerRole == null) continue;
-                    boolean missingEmergenceOffice = !ruler.has("emergent_ruler", polityId);
-                    boolean missingCourtOffice = !ruler.has(canonicalRulerRole.id,
-                            dev.worldforge.people.Courts.realmPlace(realmId));
-                    if (missingEmergenceOffice) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
-                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
-                    if (missingEmergenceOffice || missingCourtOffice) {
-                        if (!PeopleMod.persistCharacter(ruler, server)) {
-                            LOGGER.error("wf_worldsim: existing canonical ruler {} could not be persisted", ruler.globalId);
-                            continue;
+                    rulerName = canonicalRuler.name;
+                    rulerHouse = canonicalRuler.house == null ? "" : canonicalRuler.house;
+                    if (previousRulerId.isBlank() || !previousRulerId.equals(ruler.globalId())) {
+                        JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
+                                ? polity.getAsJsonArray("ruler_history") : new JsonArray();
+                        if (foundedNewDynasty) rulerHistory = new JsonArray();
+                        boolean alreadyRecorded = false;
+                        for (var recorded : rulerHistory) if (ruler.globalId().equals(recorded.getAsString())) {
+                            alreadyRecorded = true;
+                            break;
                         }
+                        if (!alreadyRecorded) rulerHistory.add(ruler.globalId());
+                        polity.add("ruler_history", rulerHistory);
+                        binding.addProperty("ruler_global_id", ruler.globalId());
+                        int generation = rulerHistory.size();
+                        binding.addProperty("generation", generation);
+                        polity.addProperty("ruler_global_id", ruler.globalId());
+                        polity.addProperty("dynasty_generations", generation);
+                        polity.addProperty("last_succession_year", year);
+                        polity.addProperty("years_in_generation", 0);
+                        if (previousRulerId.isBlank()) {
+                            WorldForgeApi.postEvent("people", rulerName + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        } else if (foundedNewDynasty) {
+                            WorldForgeApi.postEvent("people", rulerName + " founds a new ruling house in " + polity.get("name").getAsString(),
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        } else {
+                            WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
+                                            + ": " + rulerName + " succeeds the previous ruler (dynastic generation " + generation + ")",
+                                    List.of(), Math.max(0L, (long) year * 525600L));
+                        }
+                        changed = true;
                     }
                 }
                 // Reconcile Statecraft every pass, not only when a ruler changes. This also
@@ -3070,7 +3751,7 @@ public final class WorldSimMod {
                 if (politicalTitle == null) {
                     RealmsMod.POLITICS.createTitle(titleId, realmId,
                             emergentTitleRank(realmId), polityName);
-                    RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                    RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId());
                     RealmsMod.POLITICS.setInheritanceLaw(realmId,
                             dev.worldforge.realms.Statecraft.InheritanceLaw.PRIMOGENITURE);
                 } else {
@@ -3082,42 +3763,42 @@ public final class WorldSimMod {
                     }
                     politicalTitle.name = polityName;
                 }
-                if (politicalTitle != null && !politicalTitle.holderCharacterId.equals(ruler.globalId)) {
+                if (politicalTitle != null && !politicalTitle.holderCharacterId.equals(ruler.globalId())) {
                     if (!previousRulerId.isBlank() && politicalTitle.holderCharacterId.equals(previousRulerId)) {
-                        RealmsMod.POLITICS.addClaim(titleId, ruler.globalId);
-                        if (!RealmsMod.POLITICS.inheritTitle(titleId, previousRulerId, ruler.globalId))
-                            RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                        RealmsMod.POLITICS.addClaim(titleId, ruler.globalId());
+                        if (!RealmsMod.POLITICS.inheritTitle(titleId, previousRulerId, ruler.globalId()))
+                            RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId());
                     } else {
-                        RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                        RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId());
                     }
                 }
                 var canonicalDynasty = RealmsMod.POLITICS.dynasty(dynastyId);
                 if (canonicalDynasty == null || canonicalDynasty.name.equals(dynastyId)) {
-                    String houseName = ruler.house;
+                    String houseName = rulerHouse;
                     if (houseName == null || houseName.isBlank())
                         throw new IllegalStateException("Ruling Character has no canonical family name: "
-                                + ruler.globalId);
+                                + ruler.globalId());
                     if (canonicalDynasty == null)
-                        RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId, houseName);
+                        RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId(), houseName);
                     else if (!RealmsMod.POLITICS.setDynastyName(dynastyId, houseName))
                         throw new IllegalStateException("Could not bind unique family name to dynasty "
                                 + dynastyId + ": " + RealmsMod.POLITICS.lastError);
                 } else {
-                    RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
+                    RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId());
                 }
-                for (dev.worldforge.people.Character member : members) {
-                    if (member.house != null && !member.house.isBlank()
-                            && member.house.equals(ruler.house))
-                        RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId);
+                for (EmergentPopulationIndex.Resident member : members) {
+                    if (member.house() != null && !member.house().isBlank()
+                            && member.house().equals(rulerHouse))
+                        RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId());
                 }
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
-                        polityName, source.id, ruler.globalId,
+                        polityName, source.id, ruler.globalId(),
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
-                politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
+                politicalActor.ruler = rulerName + (rulerHouse == null || rulerHouse.isBlank() ? "" : " " + rulerHouse);
                 Set<String> territorialTitleIds = reconcileEmergentTerritorialTitles(
                         polityId, realmId, titleId, polityName, bandIds,
-                        state.getAsJsonArray("bands"), source, populationIndex, year, ruler.globalId);
+                        state.getAsJsonArray("bands"), source, populationIndex, year, ruler.globalId());
                 politicalActor.props.put("emergence.statecraft_title_ids",
                         String.join(",", territorialTitleIds));
                 politicalActor.props.put("emergence.title_count", territorialTitleIds.size());
@@ -3169,7 +3850,7 @@ public final class WorldSimMod {
                 politicalActor.props.put("emergence.settlement_ids", settlementIdsProjection);
                 politicalActor.props.put("emergence.settlement_names", settlementNamesProjection);
                 politicalActor.props.put("emergence.settlement_centers", settlementCentersProjection);
-                politicalActor.props.put("emergence.ruler_global_id", ruler.globalId);
+                politicalActor.props.put("emergence.ruler_global_id", ruler.globalId());
                 politicalActor.props.put("emergence.dynasty_id", dynastyId);
                 for (String bandId : bandIds) {
                     String settlementId = settlementIdForBand(state.getAsJsonArray("bands"), bandId);
@@ -3180,10 +3861,10 @@ public final class WorldSimMod {
                 }
                 polity.addProperty("dynasty_id", dynastyId);
                 if (!polity.has("ruler_global_id") || polity.get("ruler_global_id").isJsonNull())
-                    polity.addProperty("ruler_global_id", ruler.globalId);
+                    polity.addProperty("ruler_global_id", ruler.globalId());
                 if (!polity.has("dynasty_generations"))
                     polity.addProperty("dynasty_generations", binding.has("generation") ? binding.get("generation").getAsInt() : 1);
-                binding.addProperty("ruler_global_id", ruler.globalId);
+                binding.addProperty("ruler_global_id", ruler.globalId());
                 binding.addProperty("dynasty_id", dynastyId);
                 emergenceBindings.add(polityId, binding);
                 int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
@@ -3196,12 +3877,22 @@ public final class WorldSimMod {
             // The same realm-level court materializer runs for image and vanilla worlds.
             // Do not backfill offices from pre-authored political overlays on an image map.
             if (changed) {
-                dev.worldforge.people.Character durable = registry.all().stream()
-                        .filter(person -> person.alive && (person.props.containsKey("emergence.polity_id")
-                                || person.posts.stream().anyMatch(post -> post.place.startsWith("realm:"))))
-                        .findFirst().orElse(null);
-                if (durable != null && !PeopleMod.persistCharacter(durable, server))
-                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", source.id);
+                boolean durable = false;
+                for (int offset = 0, count = registry.size(); offset < count && !durable; offset += 128) {
+                    for (String localId : registry.idPage(offset, 128)) {
+                        try (var lease = registry.access().acquire(localId)) {
+                            if (lease == null) continue;
+                            dev.worldforge.people.Character person = lease.get();
+                            if (!person.alive || (!person.props.containsKey("emergence.polity_id")
+                                    && person.posts.stream().noneMatch(post -> post.place != null && post.place.startsWith("realm:"))))
+                                continue;
+                            durable = PeopleMod.persistCharacter(person, server);
+                            break;
+                        }
+                    }
+                }
+                if (!durable)
+                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be durably persisted", source.id);
             }
             if (settlementMapMarkersChanged && source.map != null)
                 dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(source.map);
@@ -3306,7 +3997,7 @@ public final class WorldSimMod {
             if (map == null || map.titles == null) continue;
             CharacterRegistry mapRegistry = PeopleMod.registry(map);
             EmergentPopulationIndex populationIndex = mapRegistry == null
-                    ? null : new EmergentPopulationIndex(mapRegistry.all());
+                    ? null : new EmergentPopulationIndex(mapRegistry);
             boolean namesChanged = ensureImagePoliticalNames(map);
             Map<String, List<int[]>> seedsByRealm = new TreeMap<>();
             Map<String, List<String>> bandsByRealm = new TreeMap<>();
@@ -3362,7 +4053,13 @@ public final class WorldSimMod {
                     var persistedTitle = RealmsMod.POLITICS.title(
                             dev.worldforge.realms.Statecraft.mapTitleId(map.name, ancestor.key));
                     if (persistedTitle == null) continue;
-                    if (realms.containsKey(persistedTitle.realmId)) persistedOwner = persistedTitle.realmId;
+                    // Initial map import creates neutral placeholders for every
+                    // geographic title. Those placeholders must not block genesis
+                    // ownership; only a title previously held by a real realm is a
+                    // historical claim that requires an explicit transfer.
+                    String persistedRealm = persistedTitle.realmId == null ? "" : persistedTitle.realmId;
+                    if (persistedRealm.isBlank() || persistedRealm.startsWith("unclaimed:")) continue;
+                    if (realms.containsKey(persistedRealm)) persistedOwner = persistedRealm;
                     else historicalClaim = true;
                     break;
                 }
@@ -3467,7 +4164,7 @@ public final class WorldSimMod {
                 Set<String> kingdomedDuchyIds = new HashSet<>();
                 int duchySerial = 0;
                 for (List<TitleData.Title> group : regionGroups) {
-                    if (group.size() < 2) continue;
+                    if (group.isEmpty()) continue;
                     duchySerial++;
                     String groupKey = group.stream().map(title -> Integer.toString(title.id))
                             .sorted().collect(java.util.stream.Collectors.joining("|"));
@@ -3493,6 +4190,65 @@ public final class WorldSimMod {
                     }
                     importedIds.put(duchyId, realmId);
                     duchyIds.add(duchyId);
+                }
+
+                // A fragmented polity may own provinces without owning an entire
+                // pre-authored region. Build a canonical county -> duchy layer over its
+                // owned provinces instead of leaving its political hierarchy flat.
+                if (duchyIds.isEmpty()) {
+                    List<TitleData.Title> ownedProvinces = map.titles.allTitles().stream()
+                            .filter(title -> title != null && title.tier == 0)
+                            .filter(title -> realmId.equals(importedIds.get(
+                                    dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))))
+                            .sorted(Comparator.comparingInt(title -> title.id)).toList();
+                    Map<String, String> countyByProvinceKey = new TreeMap<>();
+                    for (TitleData.Title province : ownedProvinces) {
+                        String provinceTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, province.key);
+                        String countyId = emergentTerritoryTitleId("county", polityId, province.key);
+                        String capitalBand = nearestEmergentBand(province.capX, province.capZ,
+                                realmBands, bands, hierarchySource);
+                        String countyName = populationIndex == null
+                                ? (province.name == null || province.name.isBlank()
+                                    ? entry.getValue().name + " County" : province.name + " County")
+                                : uniqueTerritorialName(countyId, "provinces", capitalBand,
+                                        populationIndex, polityId + "|county|" + province.key);
+                        ensureEmergentTerritoryTitle(countyId, realmId,
+                                dev.worldforge.realms.Statecraft.Rank.COUNTY, countyName);
+                        if (populationIndex != null)
+                            grantEmergentTerritoryHolder(countyId, capitalBand, populationIndex, year, fallbackHolder);
+                        linkEmergentTerritoryTitle(provinceTitleId, countyId);
+                        importedIds.put(countyId, realmId);
+                        countyByProvinceKey.put(province.key, countyId);
+                    }
+                    List<List<TitleData.Title>> provinceGroups = connectedTitleGroups(ownedProvinces, 3);
+                    int fallbackDuchySerial = 0;
+                    for (List<TitleData.Title> group : provinceGroups) {
+                        if (group.isEmpty()) continue;
+                        List<String> countyIds = group.stream().map(province -> countyByProvinceKey.get(province.key))
+                                .filter(Objects::nonNull).sorted().toList();
+                        if (countyIds.isEmpty()) continue;
+                        fallbackDuchySerial++;
+                        String groupKey = group.stream().map(province -> province.key).sorted()
+                                .collect(java.util.stream.Collectors.joining("|"));
+                        double centerX = group.stream().mapToDouble(province ->
+                                hierarchySource.blockPosition(province.capX, province.capZ)[0]).average().orElse(0);
+                        double centerZ = group.stream().mapToDouble(province ->
+                                hierarchySource.blockPosition(province.capX, province.capZ)[1]).average().orElse(0);
+                        String capitalBand = nearestEmergentBand(centerX, centerZ, realmBands, bands,
+                                hierarchySource);
+                        String duchyId = emergentTerritoryTitleId("duchy", polityId, groupKey);
+                        String duchyName = populationIndex == null
+                                ? entry.getValue().name + " Duchy " + fallbackDuchySerial
+                                : uniqueTerritorialName(duchyId, "regions", capitalBand,
+                                        populationIndex, polityId + "|duchy|" + groupKey);
+                        ensureEmergentTerritoryTitle(duchyId, realmId,
+                                dev.worldforge.realms.Statecraft.Rank.DUCHY, duchyName);
+                        if (populationIndex != null)
+                            grantEmergentTerritoryHolder(duchyId, capitalBand, populationIndex, year, fallbackHolder);
+                        for (String countyId : countyIds) linkEmergentTerritoryTitle(countyId, duchyId);
+                        importedIds.put(duchyId, realmId);
+                        duchyIds.add(duchyId);
+                    }
                 }
 
                 List<String> kingdomIds = new ArrayList<>();
@@ -3703,16 +4459,29 @@ public final class WorldSimMod {
         }
     }
 
+    private static final class EmergentFamily {
+        private EmergentPopulationIndex.Resident father;
+        private EmergentPopulationIndex.Resident mother;
+        private String house = "";
+    }
+
     private static final class EmergentParents {
-        private dev.worldforge.people.Character father;
-        private dev.worldforge.people.Character mother;
-        private static EmergentParents from(List<dev.worldforge.people.Character> residents, int year) {
+        private final Map<Integer, EmergentFamily> families = new HashMap<>();
+
+        private EmergentFamily family(int index) {
+            return families.computeIfAbsent(index, ignored -> new EmergentFamily());
+        }
+
+        private static EmergentParents from(List<EmergentPopulationIndex.Resident> residents, int year) {
             EmergentParents parents = new EmergentParents();
-            for (dev.worldforge.people.Character candidate : residents) {
-                if (!candidate.alive || dev.worldforge.people.PopulationSimulation.age(candidate, year) < 18) continue;
-                if ("m".equals(candidate.gender) && parents.father == null) parents.father = candidate;
-                if ("f".equals(candidate.gender) && parents.mother == null) parents.mother = candidate;
-                if (parents.father != null && parents.mother != null) break;
+            for (EmergentPopulationIndex.Resident candidate : residents) {
+                if (!candidate.alive()) continue;
+                int index = candidate.familyGroupIndex();
+                if (index < 0) continue;
+                EmergentFamily family = parents.family(index);
+                if (family.house.isBlank() && candidate.house() != null) family.house = candidate.house();
+                if ("m".equals(candidate.gender()) && family.father == null) family.father = candidate;
+                if ("f".equals(candidate.gender()) && family.mother == null) family.mother = candidate;
             }
             return parents;
         }
@@ -3720,54 +4489,109 @@ public final class WorldSimMod {
 
     private static dev.worldforge.people.Character createEmergentResident(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            int year, int ordinal, EmergentParents parents) {
-        dev.worldforge.people.Character father = parents.father, mother = parents.mother;
-        if (father != null && !father.spouse.isBlank() && (mother == null || !father.spouse.equals(mother.id)))
-            parents.father = father = null;
-        if (mother != null && !mother.spouse.isBlank() && (father == null || !mother.spouse.equals(father.id)))
-            parents.mother = mother = null;
-        if (father == null || mother == null || !father.spouse.equals(mother.id) || !mother.spouse.equals(father.id)) {
-            String gender = father == null ? "m" : (mother == null ? "f" : (ordinal % 2 == 0 ? "m" : "f"));
-            dev.worldforge.people.Character adult = createEmergentAdult(registry, source, bandId, gender, year, ordinal);
-            if (adult == null) return null;
-            if ("m".equals(gender)) parents.father = adult; else parents.mother = adult;
-            father = parents.father; mother = parents.mother;
-            if (father != null && mother != null && father.spouse.isBlank() && mother.spouse.isBlank()) {
-                try { registry.marry(father.id, mother.id, year); } catch (RuntimeException ignored) { }
+            int year, int ordinal, EmergentParents parents,
+            dev.worldforge.people.NameBank.NameReservations reservedHouseNames) {
+        int familyIndex = dev.worldforge.worldsim.EmergentHouseholdPlan.householdIndex(ordinal);
+        dev.worldforge.worldsim.EmergentHouseholdPlan.Role role =
+                dev.worldforge.worldsim.EmergentHouseholdPlan.role(ordinal);
+        EmergentFamily family = parents.family(familyIndex);
+        String householdId = dev.worldforge.worldsim.EmergentHouseholdPlan.householdId(bandId, ordinal);
+
+        if (role == dev.worldforge.worldsim.EmergentHouseholdPlan.Role.FATHER) {
+            dev.worldforge.people.Character father = createEmergentAdult(
+                    registry, source, bandId, "m", year, ordinal, reservedHouseNames, family.house);
+            if (father == null) return null;
+            family.father = residentMetadata(father, familyIndex);
+            if (family.house.isBlank()) family.house = father.house;
+            tagEmergentResident(father, bandId, source, householdId, familyIndex);
+            family.father = residentMetadata(father, familyIndex);
+            return father;
+        }
+        if (role == dev.worldforge.worldsim.EmergentHouseholdPlan.Role.MOTHER) {
+            String sharedHouse = family.house;
+            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house();
+            dev.worldforge.people.Character mother = createEmergentAdult(
+                    registry, source, bandId, "f", year, ordinal, reservedHouseNames, sharedHouse);
+            if (mother == null) return null;
+            if (family.house.isBlank()) family.house = mother.house;
+            if (family.father != null) {
+                try (var fatherLease = registry.access().acquireGlobal(family.father.globalId())) {
+                    var father = fatherLease == null ? null : fatherLease.get();
+                    if (father != null && father.spouse.isBlank() && mother.spouse.isBlank())
+                        registry.marry(father.id, mother.id, year);
+                } catch (RuntimeException error) {
+                    LOGGER.warn("wf_worldsim: founding household marriage deferred for {} ({})", householdId, error.getMessage());
+                }
             }
-            return adult;
+            tagEmergentResident(mother, bandId, source, householdId, familyIndex);
+            family.mother = residentMetadata(mother, familyIndex);
+            return mother;
         }
-        // Founding populations need a realistic adult base, not one married couple
-        // surrounded by newborns. Most generated residents are independent adults who
-        // can form their own households; a bounded minority are children of the founding
-        // family, with a deterministic 0-17 year age distribution.
-        if (Math.floorMod(ordinal, 4) != 0) {
+
+        if (family.father == null || family.mother == null) {
+            String gender = family.father == null ? "m" : "f";
+            String sharedHouse = family.house;
+            if (sharedHouse.isBlank() && family.father != null) sharedHouse = family.father.house();
+            dev.worldforge.people.Character partner = createEmergentAdult(
+                    registry, source, bandId, gender, year, ordinal, reservedHouseNames, sharedHouse);
+            if (partner == null) return null;
+            if ("m".equals(gender)) family.father = residentMetadata(partner, familyIndex);
+            else family.mother = residentMetadata(partner, familyIndex);
+            if (family.house.isBlank()) family.house = partner.house;
+            if (family.father != null && family.mother != null) {
+                try (var fatherLease = registry.access().acquireGlobal(family.father.globalId());
+                     var motherLease = registry.access().acquireGlobal(family.mother.globalId())) {
+                    var father = fatherLease == null ? null : fatherLease.get();
+                    var mother = motherLease == null ? null : motherLease.get();
+                    if (father != null && mother != null && father.spouse.isBlank() && mother.spouse.isBlank())
+                        registry.marry(father.id, mother.id, year);
+                } catch (RuntimeException error) {
+                    LOGGER.warn("wf_worldsim: repaired household marriage deferred for {} ({})", householdId, error.getMessage());
+                }
+            }
+            tagEmergentResident(partner, bandId, source, householdId, familyIndex);
+            return partner;
+        }
+
+        try (var fatherLease = registry.access().acquireGlobal(family.father.globalId());
+             var motherLease = registry.access().acquireGlobal(family.mother.globalId())) {
+            var father = fatherLease == null ? null : fatherLease.get();
+            var mother = motherLease == null ? null : motherLease.get();
+            if (father == null || mother == null) return null;
             String gender = ordinal % 2 == 0 ? "m" : "f";
-            return createEmergentAdult(registry, source, bandId, gender, year, ordinal);
+            String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
+            int childAge = Math.floorMod((int) (source.seed ^ bandId.hashCode()
+                    ^ (long) ordinal * 0x9E3779B97F4A7C15L), 18);
+            dev.worldforge.people.Character child = registry.addChild(
+                    father, mother, name, gender, year - childAge);
+            tagEmergentResident(child, bandId, source, householdId, familyIndex);
+            return child;
         }
-        String gender = ordinal % 2 == 0 ? "m" : "f";
-        String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
-        int childAge = Math.floorMod((int) (source.seed ^ bandId.hashCode() ^ (long) ordinal * 0x9E3779B97F4A7C15L), 18);
-        dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year - childAge);
-        tagEmergentResident(child, bandId, source);
-        return child;
+    }
+
+    private static EmergentPopulationIndex.Resident residentMetadata(
+            dev.worldforge.people.Character character, int familyIndex) {
+        Object race = character.props.get("origin.race");
+        return new EmergentPopulationIndex.Resident(character.globalId, character.id, character.alive,
+                character.birthYear, character.gender == null ? "" : character.gender, familyIndex,
+                character.house == null ? "" : character.house,
+                race == null ? "" : String.valueOf(race), character.culture == null ? "" : character.culture,
+                character.father == null ? "" : character.father,
+                character.mother == null ? "" : character.mother);
     }
 
     private static dev.worldforge.people.Character createEmergentAdult(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            String gender, int year, int ordinal) {
+            String gender, int year, int ordinal,
+            dev.worldforge.people.NameBank.NameReservations reservedHouseNames, String sharedHouse) {
         String culture = PeopleMod.NAMES.culture("");
         String name = emergentName(source, bandId, culture, gender, ordinal, year);
-        Set<String> reservedHouseNames = registry.all().stream()
-                .map(person -> person.house).filter(value -> value != null && !value.isBlank())
-                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
-        RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
-                .filter(value -> value != null && !value.isBlank()).forEach(reservedHouseNames::add);
-        String house = PeopleMod.NAMES.generateUnique("", culture, "houses",
-                new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames);
+        String house = sharedHouse == null || sharedHouse.isBlank()
+                ? PeopleMod.NAMES.generateUnique("", culture, "houses",
+                    new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames)
+                : sharedHouse;
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
-                year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
-        tagEmergentResident(person, bandId, source);
+                year - (24 + Math.floorMod(bandId.hashCode() + ordinal * 13, 22)));
         person.props.put("identity.source", "autonomous-emergence");
         return person;
     }
@@ -3810,9 +4634,10 @@ public final class WorldSimMod {
     }
 
     private static void tagEmergentResident(dev.worldforge.people.Character person, String bandId,
-            EmergenceSource source) {
+            EmergenceSource source, String householdId, int familyIndex) {
         person.props.put("emergence.band_id", bandId);
-        person.props.put("emergence.household_id", bandId);
+        person.props.put("emergence.household_id", householdId);
+        person.props.put("emergence.family_group_index", familyIndex);
         person.props.put("population.location", bandId);
         person.props.put("emergence.origin", "shared-world-simulation");
         person.props.put("emergence.world_space_id", source.id);
@@ -3870,14 +4695,22 @@ public final class WorldSimMod {
                 }
                 case "dynastic_marriage" -> {
                     String first = action.get("first").getAsString(), second = action.get("second").getAsString();
-                    dev.worldforge.people.Character a = PeopleMod.authority().getGlobal(first);
-                    dev.worldforge.people.Character b = PeopleMod.authority().getGlobal(second);
-                    if (a == null || b == null) yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
-                    if (second.equals(a.spouse) && first.equals(b.spouse))
-                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED;
-                    if (a.alive && b.alive && a.spouse.isEmpty() && b.spouse.isEmpty())
-                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
-                    yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    CharacterRegistry firstRegistry = PeopleMod.authority().registryForGlobal(first);
+                    CharacterRegistry secondRegistry = PeopleMod.authority().registryForGlobal(second);
+                    if (firstRegistry == null || secondRegistry == null)
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    try (var firstLease = firstRegistry.access().acquireGlobal(first);
+                         var secondLease = secondRegistry.access().acquireGlobal(second)) {
+                        if (firstLease == null || secondLease == null)
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                        dev.worldforge.people.Character a = firstLease.get();
+                        dev.worldforge.people.Character b = secondLease.get();
+                        if (second.equals(a.spouse) && first.equals(b.spouse))
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED;
+                        if (a.alive && b.alive && a.spouse.isEmpty() && b.spouse.isEmpty())
+                            yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    }
                 }
                 case "declare_war" -> {
                     String attacker = action.get("attacker").getAsString();
@@ -3948,7 +4781,7 @@ public final class WorldSimMod {
             if (colony == null || colony.s == null || wanted <= 0) return false;
             if (!colony.s.defs.professions.containsKey(to)) return false;
             int changed = 0;
-            List<dev.worldforge.people.Character> pendingProfessionTransitions = new ArrayList<>();
+            List<String> pendingProfessionTransitionIds = new ArrayList<>();
             List<Worker> candidates = new ArrayList<>(colony.s.workers);
             candidates.sort(Comparator.comparingInt(worker -> worker.id));
             for (Worker worker : candidates) {
@@ -3960,45 +4793,52 @@ public final class WorldSimMod {
                 if (!workerSource && !workerTarget) continue;
                 if (worker.person == null || worker.person.isBlank()) continue;
 
-                // A settlement Worker is only a projection of its canonical Character.
-                // Reconcile either side of an interrupted legacy transition, but never
-                // change a worker whose authoritative Character is missing or unrelated.
-                var person = PeopleMod.authority().getGlobal(worker.person);
                 CharacterRegistry owner = PeopleMod.authority().registryForGlobal(worker.person);
-                if (person == null || owner == null || !person.alive) continue;
-                String canonicalProfession = PopulationSimulation.profession(person);
-                boolean characterSource = "unemployed".equals(from)
-                        ? canonicalProfession.isBlank() || "laborer".equals(canonicalProfession)
-                                || "general_worker".equals(canonicalProfession)
-                        : from.equals(canonicalProfession);
-                boolean characterTarget = to.equals(canonicalProfession);
-                if (!characterSource && !characterTarget) continue;
-                if (characterSource) {
-                    if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
-                    Map<String, Object> transition = new LinkedHashMap<>();
-                    transition.put("request_id", requestId);
-                    transition.put("settlement", settlementId);
-                    transition.put("worker_id", worker.id);
-                    transition.put("character_id", person.globalId);
-                    transition.put("from", from);
-                    transition.put("profession", to);
-                    person.props.put("population.pending_settlement_profession", transition);
-                    owner.changeProfession(person.id, to, PeopleMod.YEAR);
+                if (owner == null) continue;
+                try (var personLease = owner.access().acquireGlobal(worker.person)) {
+                    if (personLease == null) continue;
+                    dev.worldforge.people.Character person = personLease.get();
+                    if (!person.alive) continue;
+                    String canonicalProfession = PopulationSimulation.profession(person);
+                    boolean characterSource = "unemployed".equals(from)
+                            ? canonicalProfession.isBlank() || "laborer".equals(canonicalProfession)
+                                    || "general_worker".equals(canonicalProfession)
+                            : from.equals(canonicalProfession);
+                    boolean characterTarget = to.equals(canonicalProfession);
+                    if (!characterSource && !characterTarget) continue;
+                    if (characterSource) {
+                        if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
+                        Map<String, Object> transition = new LinkedHashMap<>();
+                        transition.put("request_id", requestId);
+                        transition.put("settlement", settlementId);
+                        transition.put("worker_id", worker.id);
+                        transition.put("character_id", person.globalId);
+                        transition.put("from", from);
+                        transition.put("profession", to);
+                        person.props.put("population.pending_settlement_profession", transition);
+                        owner.changeProfession(person.id, to, PeopleMod.YEAR);
+                    }
+                    // Persist the Character and its projection-recovery marker first. The
+                    // settlement synchronizer will honor this marker after restart instead of
+                    // overwriting the canonical profession with a stale Worker snapshot.
+                    if (!PeopleMod.persistCharacter(person, server)) return false;
+                    if (workerSource) colony.s.setProfession(worker.id, to);
+                    if (characterSource) pendingProfessionTransitionIds.add(person.globalId);
+                    changed++;
                 }
-                // Persist the Character and its projection-recovery marker first. The
-                // settlement synchronizer will honor this marker after restart instead of
-                // overwriting the canonical profession with a stale Worker snapshot.
-                if (!PeopleMod.persistCharacter(person, server)) return false;
-                if (workerSource) colony.s.setProfession(worker.id, to);
-                if (characterSource) pendingProfessionTransitions.add(person);
-                changed++;
             }
             if (changed == 0 || !SettleMod.saveDurably(server)) return false;
-            for (dev.worldforge.people.Character person : pendingProfessionTransitions) {
-                Object marker = person.props.remove("population.pending_settlement_profession");
-                if (!PeopleMod.persistCharacter(person, server)) {
-                    if (marker != null) person.props.put("population.pending_settlement_profession", marker);
-                    return false;
+            for (String globalId : pendingProfessionTransitionIds) {
+                CharacterRegistry owner = PeopleMod.authority().registryForGlobal(globalId);
+                if (owner == null) return false;
+                try (var personLease = owner.access().acquireGlobal(globalId)) {
+                    if (personLease == null) return false;
+                    dev.worldforge.people.Character person = personLease.get();
+                    Object marker = person.props.remove("population.pending_settlement_profession");
+                    if (!PeopleMod.persistCharacter(person, server)) {
+                        if (marker != null) person.props.put("population.pending_settlement_profession", marker);
+                        return false;
+                    }
                 }
             }
             return true;
@@ -4036,17 +4876,20 @@ public final class WorldSimMod {
         }
         if ("dynastic_marriage".equals(type)) {
             String first = action.get("first").getAsString(), second = action.get("second").getAsString();
-            for (MapData map : WorldForgeMod.loadedMaps().values()) {
-                if (map.titles == null) continue;
+            CharacterRegistry firstRegistry = PeopleMod.authority().registryForGlobal(first);
+            CharacterRegistry secondRegistry = PeopleMod.authority().registryForGlobal(second);
+            if (firstRegistry == null || secondRegistry == null || firstRegistry != secondRegistry) return false;
+            for (Map.Entry<MapData, CharacterRegistry> entry : PeopleMod.registries().entrySet()) {
+                if (entry.getValue() != firstRegistry || entry.getKey().titles == null) continue;
+                MapData map = entry.getKey();
                 var court = CourtMod.court(map);
-                if (court == null) continue;
-                var a = court.reg.all().stream().filter(person -> first.equals(person.globalId)).findFirst().orElse(null);
-                var b = court.reg.all().stream().filter(person -> second.equals(person.globalId)).findFirst().orElse(null);
-                if (a != null && b != null) {
-                    var result = Marriages.propose(court, a.id, b.id);
+                if (court == null) return false;
+                try (var firstLease = firstRegistry.acquireGlobal(first);
+                     var secondLease = secondRegistry.acquireGlobal(second)) {
+                    if (firstLease == null || secondLease == null) return false;
+                    var result = Marriages.propose(court, firstLease.localId(), secondLease.localId());
                     if (!result.ok) return false;
-                    // Use the court addon's canonical crash-recoverable persistence path.
-                    // The in-memory marriage is not reported as committed unless its state is durable.
+                    // The marriage is acknowledged only after the court WAL/checkpoint path is durable.
                     return CourtMod.persistNow(server, map);
                 }
             }
@@ -4152,8 +4995,9 @@ public final class WorldSimMod {
                 scopes.add("character:" + characterId);
                 for (EmergenceSource source : emergenceSources()) {
                     if (source.registry == null) continue;
-                    for (dev.worldforge.people.Character person : source.registry.all()) {
-                        if (!characterId.equals(person.globalId)) continue;
+                    try (var lease = source.registry.access().acquireGlobal(characterId)) {
+                        if (lease == null) continue;
+                        dev.worldforge.people.Character person = lease.get();
                         if (person.house != null && !person.house.isBlank())
                             scopes.add("dynasty:" + person.house);
                         Object planet = person.props.get("emergence.world_space_id");

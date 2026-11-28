@@ -24,10 +24,11 @@ public final class PlatformShellScreen extends Screen {
     private static final int BG = WorkspaceTheme.BACKGROUND;
     private static final int SURFACE = WorkspaceTheme.SURFACE;
     private static final int SURFACE_ALT = WorkspaceTheme.SURFACE_RAISED;
+    private static final int SURFACE_INSET = WorkspaceTheme.SURFACE_INSET;
     private static final int EDGE = WorkspaceTheme.BORDER;
     private static final int TEXT = WorkspaceTheme.TEXT;
     private static final int MUTED = WorkspaceTheme.TEXT_MUTED;
-    private static final int CYAN = WorkspaceTheme.ACCENT;
+    private static int CYAN = WorkspaceTheme.ACCENT;
 
     private enum Profile {
         COSMOS("◎", "COSMOS", "maqan.atlas.cosmos"),
@@ -46,7 +47,7 @@ public final class PlatformShellScreen extends Screen {
         String title;
         int x, y, w, h;
         boolean visible = true, minimized, pinned;
-        String dock = "FLOAT";
+        String dock = "DOCK";
         Panel(String id, String title, int x, int y, int w, int h) {
             this.id=id; this.title=title; this.x=x; this.y=y; this.w=w; this.h=h;
         }
@@ -55,13 +56,19 @@ public final class PlatformShellScreen extends Screen {
 
     private final Map<String, Panel> panels = new LinkedHashMap<>();
     private final java.util.Set<String> hiddenPanels = new java.util.LinkedHashSet<>();
+    /** RTS panels are opt-in overlays; the battlefield is unobstructed by default. */
+    private final java.util.Set<String> rtsOverlayPanels = new java.util.LinkedHashSet<>();
+    // Panels hidden only because the current viewport cannot fit them without overlap.
+    private final java.util.Set<String> viewportSuppressedPanels = new java.util.LinkedHashSet<>();
     private Profile profile = Profile.COSMOS;
     private String selectedDomain = "COSMOS";
     private String selectedCapabilityId = "maqan.atlas.cosmos";
     private String draggingPanel;
     private String resizingPanel;
-    private String resizingSplitterPath;
-    private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY;
+    private String resizingSplitterPath, draggingPopup;
+    private boolean panelDragMoved;
+    private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY, dragStartX, dragStartY;
+    private int settingsX=-1, settingsY=-1, managerX=-1, managerY=-1, notificationsX=-1, notificationsY=-1;
     private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
     private WorkspaceDockTree.Node workspaceRoot;
     private WorkspaceProfileStore profileStore;
@@ -86,7 +93,10 @@ public final class PlatformShellScreen extends Screen {
     private int previewLayer = 0;
     private int navigationScroll;
     private boolean workspaceStateLoaded;
-    private static final int WORKSPACE_SCHEMA = 1;
+    private Screen initializedView;
+    private int initializedViewWidth = -1, initializedViewHeight = -1;
+    private boolean providerMouseCaptured;
+    private static final int WORKSPACE_SCHEMA = 2;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -126,29 +136,71 @@ public final class PlatformShellScreen extends Screen {
 
     private boolean attachProviderView(CapabilityRegistry.Capability capability, Screen view) {
         if (capability == null || view == null) return false;
+        WorkspaceMapState.setViewType(mapViewType(view, capability));
         try {
             view.getClass().getMethod("setEmbeddedInMaqan", boolean.class).invoke(view, true);
         } catch (ReflectiveOperationException ignored) {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
         // Selection is a world-level navigation context. Switching provider views must not erase it.
+        if ("TACTICAL".equals(capability.domain())) {
+            closeTransientOverlays();
+            rtsOverlayPanels.clear();
+        }
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
-        selectedCapabilityId = capability.id();
-        Screen previous = providerViews.put(capability.id(), view);
+        // MapScreen is the canonical political workspace even when opened through
+        // the generic worldforge.map capability. Keep one stable key so switching
+        // between profile tabs never falls back to the empty workspace preview.
+        String viewKey = "POLITICS".equals(capability.domain())
+                && "dev.worldforge.mod.client.MapScreen".equals(view.getClass().getName())
+                ? "worldforge.realms.politics" : capability.id();
+        selectedCapabilityId = viewKey;
+        Screen previous = providerViews.put(viewKey, view);
         if (previous != null && previous != view) previous.removed();
-        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        if (width > 0 && height > 0) {
+            layoutWorkspace();
+            initViewInContent(view);
+        }
         return true;
+    }
+
+    private static WorkspaceMapState.ViewType mapViewType(Screen view,
+                                                               CapabilityRegistry.Capability capability) {
+        String className = view.getClass().getName();
+        if (className.endsWith(".MapScreen")) return WorkspaceMapState.ViewType.POLITICAL;
+        if (className.endsWith(".NavigatorSurfaceMapScreen"))
+            return WorkspaceMapState.ViewType.EXPLORATION;
+        if (className.endsWith(".NavigatorTerrain3DScreen"))
+            return WorkspaceMapState.ViewType.DIORAMA_3D;
+        if (className.endsWith(".NavigatorScreen"))
+            return WorkspaceMapState.ViewType.NAVIGATION;
+        if ("POLITICS".equals(capability.domain())) return WorkspaceMapState.ViewType.POLITICAL;
+        return WorkspaceMapState.viewType();
+    }
+
+    /** True only while this exact provider view is the active content of the shared shell. */
+    public static boolean isHostedProviderViewActive(Screen view) {
+        Minecraft mc = Minecraft.getInstance();
+        return view != null && mc.screen instanceof PlatformShellScreen host && host.activeView() == view;
     }
 
     /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
     public static void openProviderView(String providerModId, Screen view) {
-        Minecraft.getInstance().setScreen(wrapProviderView(providerModId, view));
+        Minecraft mc = Minecraft.getInstance();
+        // Reuse the live MAQAN shell when a provider is opened from inside it.
+        // Replacing the shell here discarded workspace state and could leave the
+        // provider's camera/input lifecycle detached from the visible host.
+        if (mc.screen instanceof PlatformShellScreen current) {
+            if (current.attachProviderView(providerModId, view)) return;
+        }
+        mc.setScreen(wrapProviderView(providerModId, view));
     }
 
     @Override public boolean isPauseScreen() { return false; }
 
     @Override protected void init() {
+        CYAN = ThemeManager.accentColor();
         if (panels.isEmpty()) {
             panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
@@ -172,18 +224,19 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (profile == Profile.COSMOS) ensureAtlasView();
-        if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
-        Screen providerView = providerViews.get(selectedCapabilityId);
-        if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
+        if (profile == Profile.POLITICS) ensurePoliticalMapView();
         layoutWorkspace();
         clampPanels();
+        initViewInContent(activeView());
     }
 
     private WorkspaceDockTree.Node defaultWorkspaceTree() {
-        return new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 190,
+        // Match the supplied 1368x760 concept composition: left navigation,
+        // dominant center workspace, right inspector, and a 23% lower strip.
+        return new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 220,
                 new WorkspaceDockTree.Panel("navigation"),
-                new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 760,
-                        new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.VERTICAL, 820,
+                new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 690,
+                        new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.VERTICAL, 770,
                                 new WorkspaceDockTree.Panel("content"),
                                 new WorkspaceDockTree.Panel("timeline")),
                         new WorkspaceDockTree.Tabs(List.of(
@@ -191,30 +244,98 @@ public final class PlatformShellScreen extends Screen {
                                 new WorkspaceDockTree.Panel("tools")), 0)));
     }
 
+    /** Convert reference-skin coordinates to the current Minecraft GUI-scaled viewport. */
+    private int ux(double logicalX) { return (int) Math.round(logicalX * width / 1368); }
+    private int uy(double logicalY) { return (int) Math.round(logicalY * height / 760); }
+    private int railTop(int index) { return uy(46 + index * 61); }
+    private int railBottom(int index) { return uy(46 + index * 61 + 56); }
+    private boolean railHit(double mouseX, double mouseY, int index) {
+        return mouseX >= 0 && mouseX < ux(58)
+                && mouseY >= railTop(index) && mouseY < railBottom(index);
+    }
+
+    private boolean compactViewport() { return width < 900 || height < 520; }
+    private boolean immersiveRts() { return profile == Profile.RTS && commandCameraActive(); }
+    /** Maps own the whole game viewport: sidebars and workspace chrome must not shrink or cover cartography. */
+    private boolean immersiveMapWorkspace() {
+        Screen view=activeView();
+        if(view==null)return false;
+        String name=view.getClass().getName();
+        return name.endsWith(".NavigatorSurfaceMapScreen")
+                ||name.endsWith(".NavigatorTerrain3DScreen")
+                ||name.equals("dev.worldforge.mod.client.MapScreen");
+    }
+    private boolean compactTopbar() { return width < 720; }
+    private int profileStartX() { return compactTopbar() ? ux(48) : Math.max(ux(178),width/2-ux(112)); }
+    private int profileButtonWidth() { return compactTopbar() ? ux(28) : ux(48); }
+    private int profileButtonStep() { return compactTopbar() ? ux(32) : ux(52); }
+    private int cameraControlX() { return compactTopbar() ? profileStartX()+4*profileButtonStep()+ux(8) : width-ux(326); }
+    /** Only the political overview suppresses the lower timeline; RTS keeps its command/order strip. */
+    private boolean politicalCameraWorkspace() { return profile == Profile.POLITICS; }
+    private WorkspaceDockTree.Node layoutRoot() {
+        return politicalCameraWorkspace() && workspaceRoot != null
+                ? WorkspaceDockTree.remove(workspaceRoot, "timeline") : workspaceRoot;
+    }
     private WorkspaceDockTree.Rect workspaceBounds() {
-        return new WorkspaceDockTree.Rect(44, 35, Math.max(1, width - 44), Math.max(1, height - 35));
+        return new WorkspaceDockTree.Rect(ux(44), uy(35), Math.max(1, width - ux(44)), Math.max(1, height - uy(35)));
+    }
+
+    /** Shared constraints for layout, splitter hit-testing and drag/drop geometry. */
+    private Map<String, WorkspaceDockTree.MinimumSize> workspaceMinimums() {
+        double scale = Math.min(1.0, Math.min(width / (double) 1368,
+                height / (double) 760));
+        return Map.of(
+                "navigation", new WorkspaceDockTree.MinimumSize(Math.max(72, (int) (150 * scale)), Math.max(64, (int) (120 * scale))),
+                "content", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (220 * scale)), Math.max(84, (int) (160 * scale))),
+                "inspector", new WorkspaceDockTree.MinimumSize(Math.max(76, (int) (180 * scale)), Math.max(76, (int) (140 * scale))),
+                "tools", new WorkspaceDockTree.MinimumSize(Math.max(76, (int) (180 * scale)), Math.max(64, (int) (120 * scale))),
+                "timeline", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (160 * scale)), Math.max(40, (int) (64 * scale))));
     }
 
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
-        Map<String, WorkspaceDockTree.Rect> layout = WorkspaceDockTree.layout(workspaceRoot,
-                workspaceBounds(), Map.of(
-                        "navigation", new WorkspaceDockTree.MinimumSize(150, 120),
-                        "content", new WorkspaceDockTree.MinimumSize(220, 160),
-                        "inspector", new WorkspaceDockTree.MinimumSize(180, 140),
-                        "tools", new WorkspaceDockTree.MinimumSize(180, 120),
-                        "timeline", new WorkspaceDockTree.MinimumSize(180, 64)));
+        boolean immersiveMap=immersiveMapWorkspace();
+        WorkspaceDockTree.Rect bounds = immersiveRts() || immersiveMap
+                ? new WorkspaceDockTree.Rect(0, 0, Math.max(1, width), Math.max(1, height))
+                : workspaceBounds();
+        WorkspaceDockTree.Node root = layoutRoot();
+        Map<String, WorkspaceDockTree.Rect> layout;
+        if (compactViewport()) layout = Map.of("content", bounds);
+        else {
+            layout = WorkspaceDockTree.layout(root, bounds, workspaceMinimums());
+        }
+        if (immersiveRts() || immersiveMap) {
+            Panel content = panels.get("content");
+            if (content != null) {
+                content.x = 0; content.y = 0; content.w = Math.max(1, width); content.h = Math.max(1, height);
+                content.visible = true;
+            }
+            for (Panel panel : panels.values()) {
+                if (panel.id.equals("content")) continue;
+                panel.visible = !immersiveMap && rtsOverlayPanels.contains(panel.id) && !hiddenPanels.contains(panel.id);
+                if (panel.visible && "FLOAT".equals(panel.dock)) {
+                    panel.x = Math.max(8, Math.min(panel.x, width - panel.w - 8));
+                    panel.y = Math.max(8, Math.min(panel.y, height - panel.h - 8));
+                }
+            }
+            return;
+        }
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
             Panel panel = panels.get(entry.getKey());
-            if (panel == null) continue;
+            if (panel == null || "FLOAT".equals(panel.dock)) continue;
             WorkspaceDockTree.Rect rect = entry.getValue();
             panel.x = rect.x(); panel.y = rect.y(); panel.w = rect.width(); panel.h = rect.height();
             panel.visible = !hiddenPanels.contains(panel.id);
         }
         for (String id : List.of("navigation", "content", "inspector", "tools", "timeline")) {
             Panel panel = panels.get(id);
-            if (panel != null && !layout.containsKey(id)) panel.visible = false;
+            if (panel == null) continue;
+            if (!layout.containsKey(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
+            if ("FLOAT".equals(panel.dock)) panel.visible = !hiddenPanels.contains(id);
+            if (compactViewport() && !"content".equals(id) && !"FLOAT".equals(panel.dock)) panel.visible = false;
+            if (politicalCameraWorkspace() && "timeline".equals(id)) panel.visible = false;
         }
+        clampPanels();
     }
 
     private Preferences workspacePreferences() {
@@ -240,8 +361,14 @@ public final class PlatformShellScreen extends Screen {
                 panel.pinned = prefs.getBoolean(key + "pinned", panel.pinned);
                 panel.dock = prefs.get(key + "dock", panel.dock);
             }
+            if (schema < WORKSPACE_SCHEMA) {
+                for (Panel panel : panels.values()) panel.dock = "DOCK";
+            }
             ambientGrid = prefs.getBoolean("ambient_grid", ambientGrid);
-            panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
+            panelShadows=prefs.getBoolean("panel_shadows",panelShadows);
+            settingsX=prefs.getInt("popup.settings.x",-1);settingsY=prefs.getInt("popup.settings.y",-1);
+            managerX=prefs.getInt("popup.manager.x",-1);managerY=prefs.getInt("popup.manager.y",-1);
+            notificationsX=prefs.getInt("popup.notifications.x",-1);notificationsY=prefs.getInt("popup.notifications.y",-1);
         }
         try {
             String activeName = profileStore.activeProfile();
@@ -264,6 +391,9 @@ public final class PlatformShellScreen extends Screen {
             prefs.put("capability", selectedCapabilityId);
             prefs.putBoolean("ambient_grid", ambientGrid);
             prefs.putBoolean("panel_shadows", panelShadows);
+            prefs.putInt("popup.settings.x",settingsX);prefs.putInt("popup.settings.y",settingsY);
+            prefs.putInt("popup.manager.x",managerX);prefs.putInt("popup.manager.y",managerY);
+            prefs.putInt("popup.notifications.x",notificationsX);prefs.putInt("popup.notifications.y",notificationsY);
             for (String id : List.of("navigation", "inspector", "tools", "timeline"))
                 prefs.putBoolean("hidden." + id, hiddenPanels.contains(id));
             for (Panel panel : panels.values()) {
@@ -272,7 +402,7 @@ public final class PlatformShellScreen extends Screen {
                 prefs.putInt(key + "y", panel.y);
                 prefs.putInt(key + "w", panel.w);
                 prefs.putInt(key + "h", panel.h);
-                prefs.putBoolean(key + "visible", panel.visible);
+                prefs.putBoolean(key + "visible", panel.visible || viewportSuppressedPanels.contains(panel.id));
                 prefs.putBoolean(key + "minimized", panel.minimized);
                 prefs.putBoolean(key + "pinned", panel.pinned);
                 prefs.put(key + "dock", panel.dock);
@@ -282,6 +412,35 @@ public final class PlatformShellScreen extends Screen {
         } catch (Exception error) {
             LOGGER.warn("Unable to persist MAQAN workspace layout", error);
         }
+    }
+
+    /**
+     * Political mode is a map-first workspace. Reuse a map view already opened
+     * by either political or generic WorldForge navigation; otherwise mount the
+     * provider's real MapScreen in the central content panel.
+     */
+    private void ensurePoliticalMapView() {
+        Screen map = providerViews.get("worldforge.realms.politics");
+        if (map == null) {
+            map = providerViews.remove("worldforge.map");
+            if (map != null) providerViews.put("worldforge.realms.politics", map);
+        }
+        if (map == null) {
+            try {
+                Class<?> type = Class.forName("dev.worldforge.mod.client.MapScreen");
+                Object instance = type.getDeclaredConstructor().newInstance();
+                if (!(instance instanceof Screen screen)) return;
+                try { type.getMethod("setEmbeddedInMaqan", boolean.class).invoke(screen, true); }
+                catch (ReflectiveOperationException ignored) { }
+                providerViews.put("worldforge.realms.politics", screen);
+                map = screen;
+            } catch (ReflectiveOperationException | LinkageError unavailable) {
+                LOGGER.warn("Political map provider is unavailable; keeping the politics workspace fallback");
+                return;
+            }
+        }
+        selectedCapabilityId = "worldforge.realms.politics";
+        initViewInContent(map);
     }
 
     private void ensureAtlasView() {
@@ -302,9 +461,9 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void resizeEmbeddedView() {
-        if (embeddedView == null) return;
-        embeddedView.init(Minecraft.getInstance(), width, height);
-        embeddedViewReady = true;
+        layoutWorkspace();
+        initViewInContent(activeView());
+        embeddedViewReady = embeddedView != null;
     }
 
     /** Route Atlas views and WorldForge views into their respective shared workspace slots. */
@@ -314,12 +473,12 @@ public final class PlatformShellScreen extends Screen {
             Screen previous = embeddedView;
             embeddedView = view;
             if (previous != null && previous != view) previous.removed();
-            if (width > 0 && height > 0) embeddedView.init(Minecraft.getInstance(), width, height);
+            if (width > 0 && height > 0) { layoutWorkspace(); initViewInContent(view); }
             return;
         }
         Screen previous = providerViews.put(selectedCapabilityId, view);
         if (previous != null && previous != view) previous.removed();
-        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        if (width > 0 && height > 0) { layoutWorkspace(); initViewInContent(view); }
     }
 
     /** Close a hosted provider view without dismissing the MAQAN workspace itself. */
@@ -348,33 +507,182 @@ public final class PlatformShellScreen extends Screen {
         return profile == Profile.COSMOS ? embeddedView : providerViews.get(selectedCapabilityId);
     }
 
+    private Panel contentPanel() { return panels.get("content"); }
+
+    private void initViewInContent(Screen view) {
+        Panel content = contentPanel();
+        if (view == null || content == null || width <= 0 || height <= 0) return;
+        int viewWidth = Math.max(1, content.w);
+        int viewHeight = Math.max(1, content.h);
+        if (view == initializedView && viewWidth == initializedViewWidth && viewHeight == initializedViewHeight) return;
+        view.init(Minecraft.getInstance(), viewWidth, viewHeight);
+        initializedView = view;
+        initializedViewWidth = viewWidth;
+        initializedViewHeight = viewHeight;
+    }
+
+    private boolean forwardViewMouseClicked(double mouseX, double mouseY, int button) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null
+                || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
+        providerMouseCaptured = view.mouseClicked(mouseX - content.x, mouseY - content.y, button);
+        return providerMouseCaptured;
+    }
+
+    private boolean forwardViewMouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null || !providerMouseCaptured) return false;
+        return view.mouseDragged(mouseX - content.x, mouseY - content.y, button, dx, dy);
+    }
+
+    private boolean forwardViewMouseReleased(double mouseX, double mouseY, int button) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null || !providerMouseCaptured) return false;
+        boolean handled = view.mouseReleased(mouseX - content.x, mouseY - content.y, button);
+        providerMouseCaptured = false;
+        return handled;
+    }
+
+    private boolean forwardViewMouseScrolled(double mouseX, double mouseY, double delta) {
+        Screen view = activeView();
+        Panel content = contentPanel();
+        if (view == null || content == null
+                || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
+        return view.mouseScrolled(mouseX - content.x, mouseY - content.y, delta);
+    }
+
     private void clampPanels() {
-        for (Panel p : panels.values()) {
-            p.w = Math.max(150, Math.min(p.w, width - 24));
-            p.h = Math.max(54, Math.min(p.h, height - 48));
-            p.x = Math.max(44, Math.min(p.x, width - p.w - 8));
-            p.y = Math.max(38, Math.min(p.y, height - (p.minimized ? 26 : p.h) - 8));
+        // Restore viewport-suppressed panels before recomputing placement. A larger
+        // window can then bring them back; intentional user-hidden panels stay hidden.
+        for (String id : new ArrayList<>(viewportSuppressedPanels)) {
+            Panel panel = panels.get(id);
+            if (panel != null && "FLOAT".equals(panel.dock) && !hiddenPanels.contains(id))
+                panel.visible = true;
         }
+        viewportSuppressedPanels.clear();
+        List<Panel> floating = new ArrayList<>();
+        for (Panel p : panels.values()) {
+            if (!"FLOAT".equals(p.dock) || !p.visible) continue;
+            int mw = Math.max(1, width - 56), mh = Math.max(26, height - 44);
+            p.w = Math.max(Math.min(140, mw), Math.min(p.w, mw));
+            p.h = Math.max(Math.min(54, mh), Math.min(p.h, mh));
+            int visibleHeight = p.minimized ? 26 : p.h;
+            int maxX = Math.max(44, width - p.w - 4);
+            int maxY = Math.max(35, height - visibleHeight - 4);
+            p.x = Math.max(44, Math.min(p.x, maxX));
+            p.y = Math.max(35, Math.min(p.y, maxY));
+            floating.add(p);
+        }
+
+        // Floating windows share one collision-free layer. Resolve saved/dragged
+        // positions deterministically, while keeping every rectangle in the viewport.
+        List<Panel> placed = new ArrayList<>();
+        for (Panel panel : floating) {
+            if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                placed.add(panel);
+                continue;
+            }
+            int originalX = panel.x, originalY = panel.y;
+            boolean resolved = false;
+            for (int ring = 1; ring <= 16 && !resolved; ring++) {
+                int step = 28 * ring;
+                int[][] candidates = {
+                        {originalX + step, originalY}, {originalX, originalY + step},
+                        {originalX - step, originalY}, {originalX, originalY - step},
+                        {originalX + step, originalY + step}, {originalX - step, originalY + step}
+                };
+                for (int[] candidate : candidates) {
+                    int maxX = Math.max(44, width - panel.w - 4);
+                    int maxY = Math.max(35, height - (panel.minimized ? 26 : panel.h) - 4);
+                    panel.x = Math.max(44, Math.min(candidate[0], maxX));
+                    panel.y = Math.max(35, Math.min(candidate[1], maxY));
+                    if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                        resolved = true;
+                        break;
+                    }
+                }
+            }
+            if (!resolved) {
+                // Compact fallback: cascade into the first free viewport slot.
+                int maxY = Math.max(35, height - (panel.minimized ? 26 : panel.h) - 4);
+                int maxX = Math.max(44, width - panel.w - 4);
+                for (int y = 35; y <= maxY && !resolved; y += 30) {
+                    for (int x = 44; x <= maxX; x += 30) {
+                        panel.x = x; panel.y = y;
+                        if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
+                            resolved = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!resolved) {
+                // Never leave two floating windows painted over one another just
+                // because a tiny viewport has no remaining collision-free slot.
+                panel.x = originalX;
+                panel.y = originalY;
+                panel.visible = false;
+                viewportSuppressedPanels.add(panel.id);
+                continue;
+            }
+            placed.add(panel);
+        }
+    }
+
+    private static boolean overlaps(Panel a, Panel b) {
+        int ah = a.minimized ? 26 : a.h;
+        int bh = b.minimized ? 26 : b.h;
+        return a.x < b.x + b.w && a.x + a.w > b.x
+                && a.y < b.y + bh && a.y + ah > b.y;
+    }
+    private int popupW(int preferred) { return Math.max(1,Math.min(preferred,width-16)); }
+    private int popupH(int preferred) { return Math.max(28,Math.min(preferred,height-42)); }
+    private int popupX(int saved,int preferred,boolean right) {
+        int w=popupW(preferred), fallback=right?width-w-12:(width-w)/2;
+        return Math.max(8,Math.min(saved>=0?saved:fallback,Math.max(8,width-w-8)));
+    }
+    private int popupY(int saved,int preferred,int fallback) {
+        int h=popupH(preferred);
+        return Math.max(34,Math.min(saved>=0?saved:fallback,Math.max(34,height-h-8)));
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
-        g.fill(0, 0, width, height, BG);
+        boolean immersive = immersiveRts() || immersiveMapWorkspace();
+        // The shell must not paint an opaque workspace background over Minecraft's live 3D scene.
+        if (!immersive) g.fill(0, 0, width, height, BG);
         Panel content = panels.get("content");
         if (content != null && content.visible) {
             g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
             Screen view = activeView();
-            if (view != null) view.render(g, mouseX, mouseY, partialTick);
-            else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
-            WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
+            if (view != null) {
+                initViewInContent(view);
+                g.pose().pushPose();
+                g.pose().translate(content.x, content.y, 0.0D);
+                view.render(g, mouseX - content.x, mouseY - content.y, partialTick);
+                g.pose().popPose();
+            } else {
+                WorkspacePreviewRenderer.render(g, font, content.w, content.h, profile.name(),
+                        previewLayer, mouseX - content.x, mouseY - content.y, ambientGrid);
+            }
+            if (!immersiveRts() && !immersiveMapWorkspace()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        drawTopBar(g, mouseX, mouseY);
-        drawRail(g, mouseX, mouseY);
-        for (Panel p : panels.values())
+        // The shared skin is rendered by the shell itself, not by individual providers.
+        // Keep the live map/3D scene underneath the transparent frame artwork.
+        if (!immersive) ThemeManager.renderChrome(g, width, height, profile == Profile.RTS);
+        drawRtsMiniMap(g);
+        if (!immersive) {
+            drawTopBar(g, mouseX, mouseY);
+            drawRail(g, mouseX, mouseY);
+            drawDockSplitters(g, mouseX, mouseY);
+        }
+        if(!immersiveMapWorkspace()) for (Panel p : panels.values())
             if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
         if (settingsVisible) drawSettings(g, mouseX, mouseY);
-        drawDockSplitters(g, mouseX, mouseY);
         if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
         if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
         if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
@@ -382,8 +690,21 @@ public final class PlatformShellScreen extends Screen {
         super.render(g, mouseX, mouseY, partialTick);
     }
 
+    private void drawRtsMiniMap(GuiGraphics g){
+        if(!immersiveRts())return;
+        Screen view=activeView();
+        if(view==null||!view.getClass().getName().endsWith(".CommandScreen"))return;
+        try{
+            Class<?> miniMap=Class.forName("dev.worldforge.mod.client.MiniMap");
+            miniMap.getMethod("renderWorkspace",GuiGraphics.class,int.class,int.class)
+                    .invoke(null,g,width,height);
+        }catch(ReflectiveOperationException|LinkageError unavailable){
+            // WorldForge's minimap is optional; the shared shell remains usable without it.
+        }
+    }
+
     private void drawDockSplitters(GuiGraphics g, int mx, int my) {
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+        for (WorkspaceDockTree.Splitter splitter : (compactViewport() ? List.<WorkspaceDockTree.Splitter>of() : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums()))) {
             boolean horizontal = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL;
             int left = horizontal ? splitter.position() - 2 : splitter.start();
             int top = horizontal ? splitter.start() : splitter.position() - 2;
@@ -460,55 +781,207 @@ public final class PlatformShellScreen extends Screen {
         searchVisible = false;
     }
 
+    private boolean commandCameraActive() {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            return Boolean.TRUE.equals(mode.getMethod("isCommandCameraActive").invoke(null));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    private String worldClockDate() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            Object value = clock.getMethod("date").invoke(null);
+            return value instanceof String text && !text.isBlank() ? text : "—";
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return "—";
+        }
+    }
+
+    private int worldClockSpeedIndex() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            return ((Number) clock.getMethod("speedIndex").invoke(null)).intValue();
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return -1;
+        }
+    }
+
+    private boolean worldClockPaused() {
+        try {
+            Class<?> clock = Class.forName("dev.worldforge.mod.client.ClientClock");
+            return Boolean.TRUE.equals(clock.getMethod("paused").invoke(null));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    private boolean canControlWorldClock() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.player != null && (mc.hasSingleplayerServer() || mc.player.hasPermissions(2));
+    }
+
+    private int clockControlX() {
+        if (commandCameraActive()) return cameraControlX() - ux(188);
+        return profileStartX() + 4 * profileButtonStep() + ux(10);
+    }
+
+    private void sendWorldClockCommand(String command) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!canControlWorldClock() || mc.player == null || mc.player.connection == null) {
+            LOGGER.warn("World clock control requires trusted server permissions");
+            return;
+        }
+        mc.player.connection.sendCommand("wftime " + command);
+    }
+
+    private String commandCameraView() {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            Object value = mode.getMethod("commandCameraView").invoke(null);
+            return value instanceof String text ? text : "";
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return "";
+        }
+    }
+
+    private void setCommandCameraView(String view) {
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            mode.getMethod("setCommandCameraView", String.class).invoke(null, view);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            LOGGER.warn("RTS camera control is unavailable: {}", view);
+        }
+    }
+
+    private boolean openUnifiedRts() {
+        if (!ModList.get().isLoaded("wf_troops")) return false;
+        try {
+            Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+            mode.getMethod("openUnified").invoke(null);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            LOGGER.warn("Unable to open unified RTS command workspace", unavailable);
+            return false;
+        }
+    }
+
+    private void openProfile(Profile target) {
+        if (target == Profile.COSMOS) {
+            setProfile(target);
+            return;
+        }
+        if (target == Profile.RTS && openUnifiedRts()) return;
+        String capabilityId = switch (target) {
+            case POLITICS -> "worldforge.realms.politics";
+            case SETTLEMENTS -> "worldforge.settlements";
+            case RTS -> "worldforge.rts";
+            default -> "";
+        };
+        CapabilityRegistry.all().stream().filter(c -> c.id().equals(capabilityId)).findFirst()
+                .ifPresentOrElse(this::openCapability, () -> setProfile(target));
+    }
+
     private void drawTopBar(GuiGraphics g, int mx, int my) {
-        g.fill(0, 0, width, 34, SURFACE_ALT);
-        g.fill(0, 33, width, 35, EDGE);
-        g.drawString(font, "M", 15, 12, CYAN, false);
-        g.fill(34, 9, 35, 25, EDGE);
-        int x = Math.max(178, width / 2 - 112);
+        g.drawString(font, "M", ux(15), uy(12), CYAN, false);
+        g.fill(ux(34), uy(9), ux(35), uy(25), EDGE);
+        int x = profileStartX(), buttonWidth = profileButtonWidth(), buttonStep = profileButtonStep();
         for (Profile p : Profile.values()) {
             if (!profileAvailable(p)) continue;
             boolean active = p == profile;
-            g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
-            if (active) g.fill(x, 28, x + 48, 30, CYAN);
-            g.drawCenteredString(font, p.icon, x + 24, 8, active ? CYAN : MUTED);
-            if (mx >= x && mx < x + 48 && my >= 5 && my < 30)
+            g.fill(x, uy(5), x + buttonWidth, uy(29), active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, uy(28), x + buttonWidth, uy(30), CYAN);
+            g.drawCenteredString(font, p.icon, x + buttonWidth/2, uy(8), active ? CYAN : MUTED);
+            if (mx >= x && mx < x + buttonWidth && my >= uy(5) && my < uy(30))
                 g.renderTooltip(font, Component.literal(p.label), mx, my);
-            x += 52;
+            x += buttonStep;
         }
-        g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
-        g.drawCenteredString(font, "▤", width - 76, 13, workspaceManagerVisible ? CYAN : MUTED);
-        g.drawCenteredString(font, "◷", width - 48, 13, notificationCenterVisible ? CYAN : MUTED);
-        g.drawCenteredString(font, "×", width - 18, 13, MUTED);
-        if (mx >= width - 88 && mx < width - 64 && my < 34)
+        if (!compactTopbar())
+            g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", ux(46), uy(13), MUTED, false);
+        int clockX = clockControlX();
+        if (width >= 720 && clockX > ux(48) && clockX + ux(180) < width - ux(92)) {
+            String date = worldClockDate();
+            g.drawString(font, date, clockX, uy(13), TEXT, false);
+            int controlsX = clockX + ux(86);
+            String[] clockLabels = {"Ⅱ", "1", "2", "4"};
+            int[] clockSpeeds = {0, 1, 2, 3};
+            int activeSpeed = worldClockSpeedIndex();
+            for (int i = 0; i < clockLabels.length; i++) {
+                int bx = controlsX + i * ux(23);
+                boolean activeClock = i == 0 ? worldClockPaused() : activeSpeed == clockSpeeds[i];
+                int color = activeClock ? CYAN : MUTED;
+                g.fill(bx, uy(5), bx + ux(20), uy(29), activeClock ? 0x553B9FB5 : SURFACE_ALT);
+                if (activeClock) g.fill(bx, uy(28), bx + ux(20), uy(30), CYAN);
+                g.drawCenteredString(font, clockLabels[i], bx + ux(10), uy(13), color);
+                if (mx >= bx && mx < bx + ux(20) && my >= uy(5) && my < uy(30)) {
+                    String tip = i == 0 ? "Пауза / продолжить время"
+                            : "Скорость мирового времени ×" + clockLabels[i];
+                    g.renderTooltip(font, Component.literal(tip), mx, my);
+                }
+            }
+            if (!canControlWorldClock() && mx >= controlsX && mx < controlsX + ux(92)
+                    && my >= uy(5) && my < uy(30))
+                g.renderTooltip(font, Component.literal("Недостаточно прав для управления временем"), mx, my);
+        }
+        if (commandCameraActive() && width >= 480) {
+            String current = commandCameraView();
+            String[] ids = {"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"};
+            String[] labels = {"RTS", "ISO", "FREE", "TOP", "POL"};
+            int cameraX = cameraControlX();
+            if (!compactTopbar()) g.drawString(font, "CAM", cameraX - ux(28), uy(13), MUTED, false);
+            for (int i = 0; i < ids.length; i++) {
+                int cameraButtonX = cameraX + i * ux(34);
+                boolean activeCamera = ids[i].equals(current);
+                g.fill(cameraButtonX, uy(5), cameraButtonX + ux(30), uy(29), activeCamera ? 0x663B9FB5 : SURFACE_ALT);
+                if (activeCamera) g.fill(cameraButtonX, uy(28), cameraButtonX + ux(30), uy(30), CYAN);
+                g.drawCenteredString(font, labels[i], cameraButtonX + ux(15), uy(13), activeCamera ? CYAN : TEXT);
+                if (mx >= cameraButtonX && mx < cameraButtonX + ux(30) && my >= uy(5) && my < uy(30))
+                    g.renderTooltip(font, Component.literal(switch (ids[i]) {
+                        case "SKY" -> "Классическая RTS-камера";
+                        case "TACTICS" -> "Изометрическая тактическая камера";
+                        case "FREE" -> "Свободная Total War камера";
+                        case "TOP_DOWN" -> "Строгий вид сверху";
+                        default -> "Стратегический обзор";
+                    }), mx, my);
+            }
+        }
+        g.drawCenteredString(font, "▤", width - ux(76), uy(13), workspaceManagerVisible ? CYAN : MUTED);
+        g.drawCenteredString(font, "◷", width - ux(48), uy(13), notificationCenterVisible ? CYAN : MUTED);
+        g.drawCenteredString(font, "×", width - ux(18), uy(13), MUTED);
+        if (mx >= width - ux(88) && mx < width - ux(64) && my < uy(34))
             g.renderTooltip(font, Component.literal("Workspace profiles"), mx, my);
-        if (mx >= width - 58 && mx < width - 38 && my < 34)
+        if (mx >= width - ux(58) && mx < width - ux(38) && my < uy(34))
             g.renderTooltip(font, Component.literal("Notifications and event history"), mx, my);
-        if (mx >= width - 30 && mx < width - 6 && my < 34)
+        if (mx >= width - ux(30) && mx < width - ux(6) && my < uy(34))
             g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
-        if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
+        if (mx >= ux(8) && mx < ux(30) && my < uy(34)) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
     }
 
     private void drawRail(GuiGraphics g, int mx, int my) {
-        g.fill(0, 35, 44, height, SURFACE_ALT);
-        g.fill(43, 35, 44, height, EDGE);
-        String[] icons = {"☷", "◈", "⌕", "◷"};
-        String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
+        // The left-column PNG already contains seven tactile icon buttons.
+        // Highlights and hit regions use the same reference-space geometry as that texture.
+        String[] tips = {"Module catalogue", "Object inspector", "Global search",
+                "Timeline / chronicle", "Political workspace", "Settlement workspace", "RTS command workspace"};
         boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
-                panels.get("tools").visible, panels.get("timeline").visible};
-        for (int i=0;i<icons.length;i++) {
-            int y=49+i*40;
-            if (active[i]) g.fill(5,y-5,39,y+25,0x443A9FB5);
-            g.drawCenteredString(font, icons[i], 22, y+3, active[i] ? CYAN : MUTED);
-            if(mx<44 && my>=y-5 && my<y+25) g.renderTooltip(font, Component.literal(tips[i]), mx, my);
+                searchVisible, panels.get("timeline").visible, profile == Profile.POLITICS,
+                profile == Profile.SETTLEMENTS, profile == Profile.RTS};
+        for (int i = 0; i < tips.length; i++) {
+            int top = railTop(i), bottom = railBottom(i);
+            if (active[i]) g.fill(ux(5), top + uy(5), ux(53), bottom - uy(5), 0x443A9FB5);
+            if (mx >= 0 && mx < ux(58) && my >= top && my < bottom)
+                g.renderTooltip(font, Component.literal(tips[i]), mx, my);
         }
-        g.drawCenteredString(font, "⚙", 22, height-25, settingsVisible ? CYAN : MUTED);
-        if(mx<44 && my>=height-42) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
+        int settingsTop = height - uy(52);
+        if (settingsVisible) g.fill(ux(5), settingsTop, ux(53), height - uy(4), 0x443A9FB5);
+        g.drawCenteredString(font, "⚙", ux(29), height - uy(25), settingsVisible ? CYAN : MUTED);
+        if (mx < ux(58) && my >= settingsTop)
+            g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
     }
 
     private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
-        int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
-        int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
+        int w=popupW(360),h=popupH(270),x=popupX(managerX,360,false),y=popupY(managerY,270,(height-h)/2);
         g.fill(0, 35, width, height, 0x99000000);
         g.fill(x, y, x + w, y + h, SURFACE);
         g.fill(x, y, x + w, y + 28, SURFACE_ALT);
@@ -537,8 +1010,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawNotificationCenter(GuiGraphics g, int mx, int my) {
-        int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
-        int x = width - w - 12, y = 42;
+        int w=popupW(440),h=popupH(300),x=popupX(notificationsX,440,true),y=popupY(notificationsY,300,42);
         g.fill(0, 35, width, height, 0x66000000);
         g.fill(x, y, x + w, y + h, SURFACE);
         g.fill(x, y, x + w, y + 28, SURFACE_ALT);
@@ -567,30 +1039,85 @@ public final class PlatformShellScreen extends Screen {
         if (events.isEmpty()) g.drawString(font, "No events have been published yet", x + 12, rowY + 8, MUTED, false);
     }
 
+    private void closeTransientOverlays() {
+        settingsVisible = false;
+        workspaceManagerVisible = false;
+        notificationCenterVisible = false;
+        searchVisible = false;
+        contextMenuVisible = false;
+    }
+
+    private boolean handleSettingsClick(double mx, double my) {
+        int w=popupW(260),h=popupH(220),sx=popupX(settingsX,260,false),sy=popupY(settingsY,220,height-h-12);
+        if(mx>=sx+w-28&&mx<sx+w&&my>=sy&&my<sy+26){settingsVisible=false;return true;}
+        if(mx>=sx&&mx<sx+w-28&&my>=sy&&my<sy+26){
+            draggingPopup="settings";pointerOffsetX=(int)mx-sx;pointerOffsetY=(int)my-sy;return true;
+        }
+        if(mx>=sx&&mx<sx+w&&my>=sy+32&&my<sy+59){ambientGrid=!ambientGrid;saveWorkspaceState();return true;}
+        if(mx>=sx&&mx<sx+w&&my>=sy+59&&my<sy+86){panelShadows=!panelShadows;saveWorkspaceState();return true;}
+        if(mx>=sx&&mx<sx+w&&my>=sy+91&&my<sy+119){
+            String[] themes=ThemeManager.themes();
+            String current=ThemeManager.selectedTheme();
+            int index=0;
+            for(int i=0;i<themes.length;i++)if(themes[i].equals(current)){index=i;break;}
+            String next=themes[(index+1)%themes.length];
+            if(ThemeManager.setTheme(next)){
+                CYAN=ThemeManager.accentColor();
+                WorkspaceRuntime.publish(WorkspaceRuntime.Severity.SUCCESS,"maqan.platform","theme",
+                        "Interface theme changed to "+next,"","");
+            }else{
+                WorkspaceRuntime.publish(WorkspaceRuntime.Severity.ERROR,"maqan.platform","theme",
+                        "Unable to load interface theme "+next,"","");
+            }
+            return true;
+        }
+        // Settings is modal: clicking outside closes it but never activates a control underneath.
+        settingsVisible=false;
+        return true;
+    }
+
     private void drawSettings(GuiGraphics g, int mx, int my) {
-        int w=224,h=146,x=52,y=Math.max(42,height-h-12);
+        int w=popupW(260),h=popupH(220),x=popupX(settingsX,260,false),y=popupY(settingsY,220,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
-        g.fill(x,y,x+w,y+h,SURFACE);
-        g.fill(x,y,x+w,y+26,SURFACE_ALT);
+        drawCodeWindow(g, x, y, w, h, "SETTINGS", "settings");
+        g.enableScissor(x,y,x+w,y+h);
+        g.fill(x + 8, y + 6, x + w - 8, y + 22, 0x55101824);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
-        g.drawString(font,"WORKSPACE",x+28,y+9,TEXT,false);
+        g.drawString(font,"WORKSPACE / APPEARANCE",x+28,y+9,TEXT,false);
         g.drawCenteredString(font,"×",x+w-15,y+8,MUTED);
         g.drawString(font,"Background grid",x+12,y+42,TEXT,false);
         g.drawString(font,ambientGrid?"✓":"—",x+w-26,y+42,ambientGrid?CYAN:MUTED,false);
         g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
-        g.drawString(font,"Panels remain draggable and resizable",x+12,y+103,MUTED,false);
-        g.drawString(font,"MAQAN / UI CORE",x+12,y+126,CYAN,false);
+        g.drawString(font,"Interface theme",x+12,y+101,TEXT,false);
+        g.drawString(font,ThemeManager.selectedTheme().toUpperCase(java.util.Locale.ROOT)+"  ›",x+w-78,y+101,CYAN,false);
+        g.drawString(font,"Renderer",x+12,y+137,TEXT,false);
+        g.drawString(font,"JAVA + THEMED SKIN",x+12,y+155,CYAN,false);
+        if(h>178)g.drawString(font,"Shared MAQAN texture renderer",x+12,y+181,MUTED,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
+        g.disableScissor();
+    }
+
+    private void drawCodeWindow(GuiGraphics g, int x, int y, int w, int h, String title, String panelId) {
+        // Retain a safe fallback if a user resource pack omits or corrupts a skin.
+        g.fill(x, y, x + w, y + h, WorkspaceTheme.SURFACE);
+        g.fill(x, y, x + w, y + 1, WorkspaceTheme.ACCENT);
+        g.fill(x, y + 1, x + 1, y + h, WorkspaceTheme.BORDER);
+        g.fill(x + w - 1, y + 1, x + w, y + h, WorkspaceTheme.BORDER);
+        g.fill(x, y + h - 1, x + w, y + h, WorkspaceTheme.BORDER);
+        if (ThemeManager.isThemeLoaded()) ThemeManager.renderWindow(g, x, y, w, h, panelId);
+        g.fill(x + 1, y + 1, x + w - 1, Math.min(y + h, y + 26), 0xBB14202D);
+        g.drawString(font, title == null ? "PANEL" : title.toUpperCase(java.util.Locale.ROOT), x + 9, y + 8, WorkspaceTheme.TEXT, false);
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         int visibleH = p.minimized ? 26 : p.h;
         if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
-        g.fill(p.x,p.y,p.x+p.w,p.y+visibleH,SURFACE);
-        g.fill(p.x,p.y,p.x+p.w,p.y+26,SURFACE_ALT);
-        g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
+        drawCodeWindow(g, p.x, p.y, p.w, visibleH, p.title, p.id);
+        // Do not paint an opaque title strip over the supplied frame art.
+        // A low-alpha backing keeps live text readable while preserving the skin.
+        g.fill(p.x + 8, p.y + 6, p.x + p.w - 8, p.y + 22, 0x55101824);
         String icon = panelIcon(p.id);
         g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
         if (p.id.equals("inspector") || p.id.equals("tools")) {
@@ -612,6 +1139,7 @@ public final class PlatformShellScreen extends Screen {
         if(mouseX>=p.x&&mouseX<=p.x+26&&mouseY>=p.y&&mouseY<=p.y+26)
             g.renderTooltip(font,Component.literal(p.title),mouseX,mouseY);
         if (p.minimized) return;
+        g.enableScissor(p.x + 1, p.y + 26, p.x + p.w - 1, p.y + p.h - 1);
         switch (p.id) {
             case "navigation" -> drawNavigationPanel(g,p);
             case "inspector" -> drawInspectorPanel(g,p);
@@ -619,6 +1147,7 @@ public final class PlatformShellScreen extends Screen {
             case "tools" -> drawCommandPanel(g,p);
             default -> {}
         }
+        g.disableScissor();
         g.fill(p.x+p.w-7,p.y+p.h-7,p.x+p.w-2,p.y+p.h-2,0xFF426174);
     }
 
@@ -740,9 +1269,12 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, trimInspector(selected.summary(), p.w - 24),
                     left, p.y + 192, TEXT, false);
         }
+        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
+        int actionCount = Math.min(3, actions.size());
+        int actionTop = p.y + p.h - actionCount * 23 - 8;
         int y = p.y + 210;
         for (WorkspaceRuntime.InspectorField field : WorkspaceRuntime.inspect(selected)) {
-            if (y + 24 > p.y + p.h - 8) break;
+            if (y + 24 > (actionCount > 0 ? actionTop - 5 : p.y + p.h - 8)) break;
             if (!field.section().isBlank()) {
                 g.drawString(font, trimInspector(field.section().toUpperCase(java.util.Locale.ROOT), p.w - 24),
                         left, y, CYAN, false);
@@ -753,9 +1285,35 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, trimInspector(field.value(), p.w - 24), left, y, TEXT, false);
             y += 16;
         }
-        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
-        if (!actions.isEmpty() && y + 12 < p.y + p.h)
-            g.drawString(font, actions.size() + " CONTEXT ACTIONS · RIGHT CLICK", left, y, CYAN, false);
+        for (int i = 0; i < actionCount; i++) {
+            WorkspaceRuntime.Action action = actions.get(i);
+            int top = actionTop + i * 23;
+            g.fill(left, top, right, top + 20, 0xAA171D28);
+            g.fill(left, top, left + 2, top + 20, CYAN);
+            g.drawString(font, trimInspector(action.label(), p.w - 42), left + 9, top + 6, TEXT, false);
+            g.drawString(font, "›", right - 10, top + 5, CYAN, false);
+        }
+        if (actions.size() > actionCount && actionCount > 0)
+            g.drawString(font, "+" + (actions.size() - actionCount) + " ещё · ПКМ", left, actionTop - 11, MUTED, false);
+    }
+
+    private boolean executeInspectorActionAt(double mx, double my, Panel panel) {
+        PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
+        if (selection == null) return false;
+        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selection);
+        int count = Math.min(3, actions.size());
+        if (count == 0) return false;
+        int top = panel.y + panel.h - count * 23 - 8;
+        if (mx < panel.x + 10 || mx >= panel.x + panel.w - 10
+                || my < top || my >= top + count * 23) return false;
+        int index = (int) ((my - top) / 23);
+        if (index < 0 || index >= count) return false;
+        WorkspaceRuntime.Action action = actions.get(index);
+        if (WorkspaceRuntime.executeAction(action.id(), selection)) {
+            WorkspaceRuntime.publish(WorkspaceRuntime.Severity.SUCCESS, action.providerId(),
+                    "ui-action", action.label(), selection.entityId(), selection.worldId());
+        }
+        return true;
     }
 
     private String trimInspector(String value, int maxWidth) {
@@ -797,8 +1355,14 @@ public final class PlatformShellScreen extends Screen {
             if (y + 14 > p.y + p.h - 6) break;
             g.drawString(font, WorkspaceMapLayerRegistry.isVisible(layer.id()) ? "✓" : "—",
                     p.x + 12, y, WorkspaceTheme.ACCENT, false);
-            g.drawString(font, trimInspector(layer.label(), p.w - 44),
+            g.drawString(font, trimInspector(layer.label(), p.w - 142),
                     p.x + 28, y, TEXT, false);
+            g.drawString(font, "−", p.x + p.w - 112, y, MUTED, false);
+            g.drawString(font, "+", p.x + p.w - 94, y, MUTED, false);
+            g.drawString(font, Math.round(WorkspaceMapLayerRegistry.opacity(layer.id()) * 100) + "%",
+                    p.x + p.w - 70, y, MUTED, false);
+            g.drawString(font, "↑", p.x + p.w - 34, y, MUTED, false);
+            g.drawString(font, "↓", p.x + p.w - 18, y, MUTED, false);
             y += 16;
         }
     }
@@ -810,23 +1374,32 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
+        if (button != 0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible
+                || searchVisible || contextMenuVisible)) return true;
+        if (button == 1 && immersiveRts()) {
+            // In command mode RMB is a native move/attack order, not a shell context menu.
+            return forwardViewMouseClicked(mx, my, button);
+        }
         if (button == 1) {
+            Panel content = panels.get("content");
+            if (content == null || !content.visible
+                    || !WorkspaceUi.contains(mx, my, content.x, content.y, content.w, content.h)) return true;
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
             if (!contextActions.isEmpty()) {
+                closeTransientOverlays();
                 contextMenuX = (int) mx; contextMenuY = (int) my;
                 contextMenuVisible = true;
                 return true;
             }
-            return activeView() != null ? activeView().mouseClicked(mx, my, button) : true;
+            return forwardViewMouseClicked(mx, my, button);
         }
-        if (button != 0) return activeView() != null
-                ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
+        if (button != 0) return forwardViewMouseClicked(mx, my, button);
         if (workspaceManagerVisible) {
-            int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
-            int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
-            if (mx < x || mx >= x + w || my < y || my >= y + h) { workspaceManagerVisible = false; return true; }
-            if (my < y + 28 && mx >= x + w - 28) { workspaceManagerVisible = false; return true; }
+            int w=popupW(360),h=popupH(270),x=popupX(managerX,360,false),y=popupY(managerY,270,(height-h)/2);
+            if (mx < x || mx >= x+w || my < y || my >= y+h) { workspaceManagerVisible=false; return true; }
+            if (my < y+28 && mx >= x+w-28) { workspaceManagerVisible=false; return true; }
+            if (my < y+28) { draggingPopup="manager"; pointerOffsetX=(int)mx-x; pointerOffsetY=(int)my-y; return true; }
             int buttonY = y + h - 38;
             if (my >= buttonY && my < buttonY + 25) {
                 if (mx >= x + 10 && mx < x + 112) {
@@ -856,13 +1429,12 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if (notificationCenterVisible) {
-            int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
-            int x = width - w - 12, y = 42;
+            int w=popupW(440),h=popupH(300),x=popupX(notificationsX,440,true),y=popupY(notificationsY,300,42);
             if (mx >= x + w - 28 && mx < x + w && my >= y && my < y + 28) {
                 notificationCenterVisible = false;
-            } else if (mx < x || mx >= x + w || my < y || my >= y + h) {
-                notificationCenterVisible = false;
-            }
+            } else if (my >= y && my < y+28 && mx >= x && mx < x+w-28) {
+                draggingPopup="notifications"; pointerOffsetX=(int)mx-x; pointerOffsetY=(int)my-y;
+            } else if (mx < x || mx >= x+w || my < y || my >= y+h) notificationCenterVisible=false;
             return true;
         }
         if (searchVisible) {
@@ -885,65 +1457,103 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false;
             return true;
         }
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+        if (settingsVisible && handleSettingsClick(mx, my)) return true;
+        if (!immersiveRts()) for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums())) {
             boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
                     ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
             if (hit) { resizingSplitterPath = splitter.path(); return true; }
         }
-        if (my<34) {
-            if (mx >= width - 88 && mx < width - 64) {
-                workspaceManagerVisible = !workspaceManagerVisible;
-                notificationCenterVisible = false;
+        if (!immersiveRts() && my < uy(34)) {
+            if (mx >= width - ux(88) && mx < width - ux(64)) {
+                boolean open = !workspaceManagerVisible;
+                closeTransientOverlays();
+                workspaceManagerVisible = open;
                 return true;
             }
-            if (mx >= width - 58 && mx < width - 38) {
-                notificationCenterVisible = !notificationCenterVisible;
-                workspaceManagerVisible = false;
+            if (mx >= width - ux(58) && mx < width - ux(38)) {
+                boolean open = !notificationCenterVisible;
+                closeTransientOverlays();
+                notificationCenterVisible = open;
                 return true;
             }
-            if (mx >= width - 30 && mx < width - 6) {
+            if (mx >= width - ux(30) && mx < width - ux(6)) {
                 Screen view = activeView();
                 if (view != null) detachProviderView(view);
                 else onClose();
                 return true;
             }
-            int x=Math.max(178,width/2-112);
+            int clockX = clockControlX();
+            if (width >= ux(720) && clockX > ux(48) && clockX + ux(180) < width - ux(92)
+                    && my >= uy(5) && my < uy(30)) {
+                int controlsX = clockX + ux(86);
+                for (int i = 0; i < 4; i++) {
+                    int bx = controlsX + i * ux(23);
+                    if (mx >= bx && mx < bx + ux(20)) {
+                        if (i == 0) sendWorldClockCommand("toggle");
+                        else sendWorldClockCommand("speed " + i);
+                        return true;
+                    }
+                }
+                if (mx >= clockX && mx < controlsX) return true;
+            }
+            if (commandCameraActive() && width >= 480) {
+                int cameraX = cameraControlX();
+                if (my >= uy(5) && my < uy(30) && mx >= cameraX && mx < cameraX + ux(170)) {
+                    int index = (int) ((mx - cameraX) / Math.max(1, ux(34)));
+                    if (index >= 0 && index < 5 && mx < cameraX + index * ux(34) + ux(30)) {
+                        setCommandCameraView(new String[]{"SKY", "TACTICS", "FREE", "TOP_DOWN", "STRATEGIC"}[index]);
+                        return true;
+                    }
+                }
+            }
+            int x=profileStartX(),buttonWidth=profileButtonWidth(),step=profileButtonStep();
             for(Profile p:Profile.values()) {
                 if (!profileAvailable(p)) continue;
-                if(mx>=x&&mx<x+48) { setProfile(p); return true; }
-                x+=52;
+                if(mx>=x&&mx<x+buttonWidth) { openProfile(p); return true; }
+                x+=step;
             }
             return true;
         }
-        if(mx<44) {
-            if(my>=height-44) { settingsVisible=!settingsVisible; return true; }
-            int index=(int)((my-44)/40);
-            if(index==0 && profile==Profile.COSMOS && embeddedView!=null) {
-                invokeAtlasRailAction("toggleListPanel"); return true;
-            }
-            if(index==1 && profile==Profile.COSMOS && embeddedView!=null) {
-                invokeAtlasRailAction("toggleInfoPanel"); return true;
-            }
-            if(index==0) { toggleWorkspacePanel("navigation"); return true; }
-            if(index==1) {
-                if (panels.get("inspector").visible) toggleWorkspacePanel("inspector");
-                else { hiddenPanels.remove("inspector"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "inspector"); layoutWorkspace(); saveWorkspaceState(); }
+        if(!immersiveRts() && mx < ux(58)) {
+            if(my >= height - uy(52)) {
+                boolean open = !settingsVisible;
+                closeTransientOverlays();
+                settingsVisible = open;
                 return true;
             }
-            if(index==2) {
-                hiddenPanels.remove("tools"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "tools");
-                layoutWorkspace(); saveWorkspaceState(); return true;
+            for (int index = 0; index < 7; index++) {
+                if (!railHit(mx, my, index)) continue;
+                switch (index) {
+                    case 0 -> {
+                        if (profile == Profile.COSMOS && embeddedView != null) invokeAtlasRailAction("toggleListPanel");
+                        else toggleWorkspacePanel("navigation");
+                    }
+                    case 1 -> {
+                        if (profile == Profile.COSMOS && embeddedView != null) invokeAtlasRailAction("toggleInfoPanel");
+                        else if (panels.get("inspector").visible) toggleWorkspacePanel("inspector");
+                        else {
+                            hiddenPanels.remove("inspector");
+                            workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "inspector");
+                            layoutWorkspace(); saveWorkspaceState();
+                        }
+                    }
+                    case 2 -> {
+                        boolean open = !searchVisible;
+                        closeTransientOverlays();
+                        searchVisible = open;
+                        searchQuery = "";
+                        searchResults = List.of();
+                    }
+                    case 3 -> toggleWorkspacePanel("timeline");
+                    case 4 -> openProfile(Profile.POLITICS);
+                    case 5 -> openProfile(Profile.SETTLEMENTS);
+                    case 6 -> openProfile(Profile.RTS);
+                    default -> { }
+                }
+                return true;
             }
-            if(index==3) { toggleWorkspacePanel("timeline"); return true; }
             return true;
-        }
-        if(settingsVisible) {
-            int sx=52,sy=Math.max(42,height-158);
-            if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+146) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
             int x=58;
@@ -955,6 +1565,9 @@ public final class PlatformShellScreen extends Screen {
             if(!p.visible || p.id.equals("content")) continue;
             int ph=p.minimized?26:p.h;
             if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
+            if ("FLOAT".equals(p.dock) && !p.minimized && mx>=p.x+p.w-14 && my>=p.y+p.h-14) {
+                resizingPanel=p.id; resizeStartX=(int)mx; resizeStartY=(int)my; resizeStartW=p.w; resizeStartH=p.h; return true;
+            }
             if (my <= p.y + 26) {
                 if ((p.id.equals("inspector") || p.id.equals("tools"))
                         && mx >= p.x + 28 && mx < p.x + 116) {
@@ -969,18 +1582,33 @@ public final class PlatformShellScreen extends Screen {
                     if (!p.pinned) hiddenPanels.add(p.id);
                     layoutWorkspace(); saveWorkspaceState(); return true;
                 }
-                return true;
+                if(p.pinned) return true;
+                if((p.id.equals("inspector")||p.id.equals("tools"))&&mx>=p.x+28&&mx<p.x+116) return true;
+                draggingPanel=p.id; panelDragMoved=false;
+                pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
+                dragMouseX=(int)mx; dragMouseY=(int)my; dragStartX=(int)mx; dragStartY=(int)my; return true;
             }
             if (p.id.equals("tools")) {
                 List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
                 int layerIndex = (int) ((my - (p.y + 122)) / 16);
                 if (layerIndex >= 0 && layerIndex < layers.size()) {
                     WorkspaceMapLayerRegistry.Layer layer = layers.get(layerIndex);
-                    WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
+                    if (mx >= p.x + p.w - 42) {
+                        WorkspaceMapLayerRegistry.move(layer.id(), mx < p.x + p.w - 20 ? -1 : 1);
+                    } else if (mx >= p.x + p.w - 116 && mx < p.x + p.w - 98) {
+                        WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                                Math.max(0f, WorkspaceMapLayerRegistry.opacity(layer.id()) - 0.05f));
+                    } else if (mx >= p.x + p.w - 98 && mx < p.x + p.w - 80) {
+                        WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                                Math.min(1f, WorkspaceMapLayerRegistry.opacity(layer.id()) + 0.05f));
+                    } else {
+                        WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
+                    }
                     saveWorkspaceState();
                     return true;
                 }
             }
+            if (p.id.equals("inspector") && executeInspectorActionAt(mx, my, p)) return true;
             if(p.id.equals("navigation")) {
                 int top = navigationViewportTop(p);
                 int bottom = navigationViewportBottom(p);
@@ -996,14 +1624,13 @@ public final class PlatformShellScreen extends Screen {
             }
             return true;
         }
-        return activeView() != null
-                ? activeView().mouseClicked(mx,my,button) : true;
+        return forwardViewMouseClicked(mx, my, button);
     }
 
     private void applyPanelDrop(String sourceId, int mouseX, int mouseY) {
         if (sourceId == null || sourceId.equals("content")) return;
         Map<String, WorkspaceDockTree.Rect> rectangles =
-                WorkspaceDockTree.layout(workspaceRoot, workspaceBounds());
+                WorkspaceDockTree.layout(layoutRoot(), workspaceBounds(), workspaceMinimums());
         String targetId = null;
         WorkspaceDockTree.Rect targetRect = null;
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : rectangles.entrySet()) {
@@ -1013,7 +1640,20 @@ public final class PlatformShellScreen extends Screen {
                 targetId = entry.getKey(); targetRect = rect; break;
             }
         }
-        if (targetId == null || targetRect == null) return;
+        Panel source = panels.get(sourceId);
+        if (targetId == null || targetRect == null) {
+            workspaceRoot = WorkspaceDockTree.remove(workspaceRoot, sourceId);
+            if (source != null) {
+                source.dock = "FLOAT";
+                source.x = mouseX - source.w / 2;
+                source.y = mouseY - 12;
+                source.visible = !hiddenPanels.contains(source.id);
+                clampPanels();
+            }
+            WorkspaceDockTree.validate(workspaceRoot);
+            return;
+        }
+        if (source != null) source.dock = "DOCK";
         int relativeX = mouseX - targetRect.x();
         int relativeY = mouseY - targetRect.y();
         double nx = relativeX / (double) Math.max(1, targetRect.width());
@@ -1075,10 +1715,35 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void toggleWorkspacePanel(String id) {
-        if (hiddenPanels.contains(id)) hiddenPanels.remove(id);
-        else hiddenPanels.add(id);
-        layoutWorkspace();
-        saveWorkspaceState();
+        if (immersiveRts() && !"content".equals(id)) {
+            boolean open = !rtsOverlayPanels.contains(id) || hiddenPanels.contains(id);
+            if (open) {
+                rtsOverlayPanels.add(id);
+                hiddenPanels.remove(id);
+            } else {
+                rtsOverlayPanels.remove(id);
+                hiddenPanels.add(id);
+            }
+            Panel overlay = panels.get(id);
+            if (overlay != null) {
+                overlay.dock = "FLOAT";
+                overlay.visible = open;
+                if (overlay.x + overlay.w > width) overlay.x = Math.max(8, width - overlay.w - 8);
+                if (overlay.y + overlay.h > height) overlay.y = Math.max(8, height - overlay.h - 8);
+            }
+            return;
+        }
+        Panel panel=panels.get(id);
+        boolean currentlyVisible=panel!=null && panel.visible && !hiddenPanels.contains(id);
+        if(!currentlyVisible) {
+            hiddenPanels.remove(id);
+            if(compactViewport() && panel!=null && !id.equals("content")) {
+                panel.dock="FLOAT";
+                panel.x=Math.max(48,width-panel.w-16);
+                panel.y=Math.max(42,Math.min(48,height-panel.h-8));
+            }
+        } else hiddenPanels.add(id);
+        layoutWorkspace();saveWorkspaceState();
     }
 
     private void invokeAtlasRailAction(String methodName) {
@@ -1092,6 +1757,10 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         if (profile != next) PlatformSelectionContext.clear(null);
+        if (next == Profile.RTS && profile != next) {
+            closeTransientOverlays();
+            rtsOverlayPanels.clear();
+        }
         profile=next;
         navigationScroll = 0;
         selectedCapabilityId = switch (next) {
@@ -1102,10 +1771,12 @@ public final class PlatformShellScreen extends Screen {
         };
         if (next == Profile.COSMOS) {
             ensureAtlasView();
-            if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
+            if (embeddedView != null) initViewInContent(embeddedView);
+        } else if (next == Profile.POLITICS) {
+            ensurePoliticalMapView();
         } else {
             Screen view = providerViews.get(selectedCapabilityId);
-            if (view != null) view.init(Minecraft.getInstance(), width, height);
+            if (view != null) initViewInContent(view);
         }
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
@@ -1141,9 +1812,31 @@ public final class PlatformShellScreen extends Screen {
         setProfile(target);
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
+        if ("maqan.atlas.exploration".equals(capability.id())) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return;
+            try {
+                Class<?> parentType = Class.forName("com.maqan.galacticnavigator.client.NavigatorScreen");
+                Screen parent = (Screen) parentType.getDeclaredConstructor().newInstance();
+                Class<?> mapType = Class.forName("com.maqan.galacticnavigator.client.NavigatorSurfaceMapScreen");
+                Screen map = (Screen) mapType.getConstructor(String.class, Screen.class)
+                        .newInstance(mc.level.dimension().location().toString(), parent);
+                Screen previous = embeddedView;
+                if (previous != null && previous != map) previous.removed();
+                embeddedView = map;
+                initializedView = null;
+                WorkspaceMapState.setViewType(WorkspaceMapState.ViewType.EXPLORATION);
+                initViewInContent(map);
+                saveWorkspaceState();
+                return;
+            } catch (ReflectiveOperationException | LinkageError error) {
+                LOGGER.warn("Unable to open the native exploration map", error);
+                return;
+            }
+        }
         Screen view = activeView();
         if (view != null) {
-            view.init(Minecraft.getInstance(), width, height);
+            initViewInContent(view);
             return;
         }
         // Some providers expose a complete no-argument screen (for example the
@@ -1187,14 +1880,29 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
+        if(button!=0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible))
+            return true;
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-            if (activeView() != null)
-                handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
+            handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
             return handled;
         }
+        if (draggingPopup == null && (settingsVisible || workspaceManagerVisible
+                || notificationCenterVisible || searchVisible || contextMenuVisible)) return true;
+        if (draggingPopup != null) {
+            int pw=draggingPopup.equals("manager")?360:draggingPopup.equals("notifications")?440:260;
+            int ph=draggingPopup.equals("manager")?270:draggingPopup.equals("notifications")?300:190;
+            int x=Math.max(8,Math.min((int)mx-pointerOffsetX,Math.max(8,width-popupW(pw)-8)));
+            int y=Math.max(34,Math.min((int)my-pointerOffsetY,Math.max(34,height-popupH(ph)-8)));
+            switch(draggingPopup) {
+                case "manager" -> {managerX=x;managerY=y;}
+                case "notifications" -> {notificationsX=x;notificationsY=y;}
+                case "settings" -> {settingsX=x;settingsY=y;}
+            }
+            return true;
+        }
         if (resizingSplitterPath != null) {
-            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds())) {
                 if (!splitter.path().equals(resizingSplitterPath)) continue;
                 int span = Math.max(1, splitter.end() - splitter.start());
                 int coordinate = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL ? (int) mx : (int) my;
@@ -1207,42 +1915,48 @@ public final class PlatformShellScreen extends Screen {
             }
         }
         if (draggingPanel != null) {
-            dragMouseX = (int) mx; dragMouseY = (int) my;
+            if (Math.hypot(mx - dragStartX, my - dragStartY) > 4) panelDragMoved=true;
+            dragMouseX=(int)mx; dragMouseY=(int)my;
+            Panel p=panels.get(draggingPanel);
+            if(p!=null&&"FLOAT".equals(p.dock)){p.x=(int)mx-pointerOffsetX;p.y=(int)my-pointerOffsetY;clampPanels();}
             return true;
         }
         if(resizingPanel!=null) {
             Panel p=panels.get(resizingPanel);
-            p.w=Math.max(160,resizeStartW+(int)mx-resizeStartX);
-            p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);
-            clampPanels(); return true;
+            if(p!=null){p.w=Math.max(140,resizeStartW+(int)mx-resizeStartX);p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);clampPanels();}
+            return true;
         }
         boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-        if (activeView() != null)
-            handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
+        handled = forwardViewMouseDragged(mx, my, button, dx, dy) || handled;
         return handled;
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
+        boolean modalCaptured = settingsVisible || workspaceManagerVisible || notificationCenterVisible
+                || searchVisible || contextMenuVisible || draggingPopup != null;
         if (button == 0) {
-            boolean changed = draggingPanel != null || resizingPanel != null || resizingSplitterPath != null;
-            if (draggingPanel != null) applyPanelDrop(draggingPanel, (int) mx, (int) my);
-            draggingPanel = null; resizingPanel = null; resizingSplitterPath = null;
-            if (changed) { layoutWorkspace(); saveWorkspaceState(); }
+            boolean changed=draggingPanel!=null||resizingPanel!=null||resizingSplitterPath!=null||draggingPopup!=null;
+            if(draggingPanel!=null && panelDragMoved) applyPanelDrop(draggingPanel,(int)mx,(int)my);
+            draggingPanel=null;panelDragMoved=false;resizingPanel=null;resizingSplitterPath=null;draggingPopup=null;
+            if(changed){layoutWorkspace();saveWorkspaceState();}
         }
         boolean handled = super.mouseReleased(mx,my,button);
-        if (activeView() != null)
-            handled = activeView().mouseReleased(mx,my,button) || handled;
+        if (modalCaptured) return true;
+        handled = forwardViewMouseReleased(mx, my, button) || handled;
         return handled;
     }
 
     @Override public boolean keyReleased(int keyCode,int scanCode,int modifiers) {
         boolean handled = super.keyReleased(keyCode,scanCode,modifiers);
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible)
+            return handled;
         if (activeView() != null)
             handled = activeView().keyReleased(keyCode,scanCode,modifiers) || handled;
         return handled;
     }
 
     @Override public boolean charTyped(char codePoint,int modifiers) {
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || contextMenuVisible) return true;
         if (searchVisible) {
             if (!Character.isISOControl(codePoint) && searchQuery.length() < 96) {
                 searchQuery += codePoint;
@@ -1257,6 +1971,22 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        if (settingsVisible || workspaceManagerVisible || notificationCenterVisible || searchVisible || contextMenuVisible)
+            return true;
+        Panel toolsPanel = panels.get("tools");
+        if (toolsPanel != null && toolsPanel.visible && !toolsPanel.minimized
+                && mouseX >= toolsPanel.x && mouseX <= toolsPanel.x + toolsPanel.w
+                && mouseY >= toolsPanel.y + 122 && mouseY < toolsPanel.y + toolsPanel.h - 4) {
+            int index = (int) ((mouseY - (toolsPanel.y + 122)) / 16);
+            List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
+            if (index >= 0 && index < layers.size()) {
+                WorkspaceMapLayerRegistry.Layer layer = layers.get(index);
+                float opacity = WorkspaceMapLayerRegistry.opacity(layer.id());
+                WorkspaceMapLayerRegistry.setOpacity(layer.id(),
+                        Math.max(0f, Math.min(1f, opacity + (delta > 0 ? 0.05f : -0.05f))));
+                return true;
+            }
+        }
         Panel nav = panels.get("navigation");
         if (nav != null && nav.visible && !nav.minimized
                 && mouseX >= nav.x && mouseX <= nav.x + nav.w
@@ -1267,9 +1997,13 @@ public final class PlatformShellScreen extends Screen {
             navigationScroll = Math.max(0, Math.min(navigationMaxScroll(nav), navigationScroll + direction * 2));
             return true;
         }
+        for (Panel panel : panels.values()) {
+            if (panel.visible && !panel.id.equals("content")
+                    && WorkspaceUi.contains(mouseX, mouseY, panel.x, panel.y, panel.w,
+                    panel.minimized ? 26 : panel.h)) return true;
+        }
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
-        if (activeView() != null)
-            handled = activeView().mouseScrolled(mouseX,mouseY,delta) || handled;
+        handled = forwardViewMouseScrolled(mouseX, mouseY, delta) || handled;
         return handled;
     }
 
@@ -1287,21 +2021,26 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false; return true;
         }
         if (keyCode == GLFW.GLFW_KEY_K && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
-            searchVisible = true; searchQuery = ""; searchResults = List.of(); contextMenuVisible = false;
+            closeTransientOverlays();
+            searchVisible = true;
+            searchQuery = "";
+            searchResults = List.of();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_P
                 && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
                 == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
-            workspaceManagerVisible = !workspaceManagerVisible;
-            notificationCenterVisible = false;
+            boolean open = !workspaceManagerVisible;
+            closeTransientOverlays();
+            workspaceManagerVisible = open;
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_N
                 && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
                 == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
-            notificationCenterVisible = !notificationCenterVisible;
-            workspaceManagerVisible = false;
+            boolean open = !notificationCenterVisible;
+            closeTransientOverlays();
+            notificationCenterVisible = open;
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -1311,9 +2050,13 @@ public final class PlatformShellScreen extends Screen {
             if (contextMenuVisible) { contextMenuVisible = false; return true; }
             onClose(); return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_F6) {
-            toggleWorkspacePanel("timeline");
-            return true;
+        if (workspaceManagerVisible || notificationCenterVisible || settingsVisible || contextMenuVisible) return true;
+        if (keyCode == GLFW.GLFW_KEY_F6) { toggleWorkspacePanel("timeline"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F7) { toggleWorkspacePanel("navigation"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F8) { toggleWorkspacePanel("inspector"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F9) { toggleWorkspacePanel("tools"); return true; }
+        if ((immersiveRts() || immersiveMapWorkspace()) && keyCode == GLFW.GLFW_KEY_F10) {
+            boolean open=!settingsVisible;closeTransientOverlays();settingsVisible=open;return true;
         }
         java.util.Optional<WorkspaceRuntime.Shortcut> registered =
                 WorkspaceRuntime.shortcutFor(keyCode, modifiers);
@@ -1342,9 +2085,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
-        super.resize(minecraft, width, height);
-        resizeEmbeddedView();
-        for (Screen view : providerViews.values()) view.init(minecraft, width, height);
+        super.resize(minecraft,width,height);
+        clampPanels();layoutWorkspace();initializedView=null;initViewInContent(activeView());
     }
 
 }

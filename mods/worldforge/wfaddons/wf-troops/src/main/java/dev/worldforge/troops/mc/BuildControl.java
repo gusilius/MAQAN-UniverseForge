@@ -27,8 +27,23 @@ final class BuildControl {
     static void sendList(ServerPlayer p, double x, double z) {
         Colony c = SettleMod.nearest(p.serverLevel(), x, z);
         Map<String, Object> m = new LinkedHashMap<>();
+        List<Object> units=new ArrayList<>();
+        for(var unitEntry:TroopsMod.DEFS.units.entrySet()){
+            var unit=unitEntry.getValue();
+            Map<String,Object> row=new LinkedHashMap<>();
+            row.put("id",unit.id());
+            row.put("name",unit.name());
+            row.put("role",unit.role());
+            row.put("cost",unit.cost());
+            row.put("upkeep",unit.upkeep());
+            row.put("building",TroopsMod.DEFS.recruitmentBuilding(unit));
+            row.put("supply",new LinkedHashMap<>(TroopsMod.DEFS.recruitmentCost(unit)));
+            row.put("description",unit.desc());
+            units.add(row);
+        }
+        m.put("units",units);
         if (c == null || SettleMod.DEFS == null) {
-            m.put("error", "Рядом нет поселения. Основать: /wfsettle found <имя>");
+            m.put("error", "Рядом нет поселения. В творческом режиме найм доступен без поселения; для обычного найма основайте поселение.");
             WFNet.sendView(p, VIEW, Json.write(m));
             return;
         }
@@ -63,6 +78,11 @@ final class BuildControl {
             Colony.Site site = c.sites.get(building.uid);
             if (site == null) continue;
             Blueprints.Plan plan = Blueprints.get(p.serverLevel(), building.def);
+            if (!plan.valid() || plan.blocks().isEmpty()) {
+                m.put("constructionError", plan.error() == null || plan.error().isBlank()
+                        ? "Чертёж не содержит доступных блоков" : plan.error());
+                continue;
+            }
             for (int i = Math.max(0, site.placed); i < plan.blocks().size(); i++) {
                 Blueprints.Entry entry = plan.blocks().get(i);
                 BlockPos pos = new BlockPos(site.x + entry.x(), site.y + entry.y(), site.z + entry.z());

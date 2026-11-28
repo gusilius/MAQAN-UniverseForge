@@ -325,9 +325,19 @@ public class RealmsMod {
 
         int today = REALMS.hooks.today();
         int governmentCooldown = Math.max(0, Realms.GOV_COOLDOWN - (today - state.govChanged));
+        // Build expensive demographic snapshots once per realm projection, not once per government option.
+        boolean needsRaceSnapshot = DEFS.govs.values().stream()
+                .anyMatch(option -> !option.reqRaces().isEmpty() || !option.forbidRaces().isEmpty());
+        boolean needsTerrainSnapshot = DEFS.govs.values().stream()
+                .anyMatch(option -> !option.reqTerrain().isEmpty());
+        Map<String, Double> raceSnapshot = needsRaceSnapshot
+                ? REALMS.hooks.races(realm.id) : Map.of();
+        Map<String, Double> terrainSnapshot = needsTerrainSnapshot
+                ? REALMS.hooks.terrain(realm.id) : Map.of();
         List<String> governmentOptions = new ArrayList<>();
         for (RealmDefs.Gov option : DEFS.govs.values()) {
-            String reason = option.id().equals(state.gov) ? "Уже действует" : REALMS.why(realm.id, option);
+            String reason = option.id().equals(state.gov) ? "Уже действует"
+                    : REALMS.why(realm.id, option, raceSnapshot, terrainSnapshot);
             if (reason.isEmpty() && governmentCooldown > 0)
                 reason = "Смена строя через " + governmentCooldown + " дн.";
             governmentOptions.add(option.id() + "|" + option.name() + "|" + reason);
@@ -359,51 +369,31 @@ public class RealmsMod {
         realm.props.put("politics.doctrine_options", String.join(";", doctrineOptions));
     }
 
-    private static String characterText(Object character, String field) {
-        try {
-            Object value = character.getClass().getField(field).get(character);
-            return value == null ? "" : String.valueOf(value);
-        } catch (ReflectiveOperationException | SecurityException ignored) {
-            return "";
+    private static String characterName(CharacterRegistry registry, String globalId) {
+        if (registry == null || globalId == null || globalId.isBlank()) return "";
+        try (var lease = registry.acquireGlobal(globalId)) {
+            return lease == null ? "" : lease.get().name;
         }
     }
 
-    private static String characterPropText(Object character, String key) {
-        try {
-            Object value = character.getClass().getField("props").get(character);
-            if (value instanceof Map<?, ?> props) {
-                Object property = props.get(key);
-                return property == null ? "" : String.valueOf(property);
-            }
-        } catch (ReflectiveOperationException | SecurityException ignored) { }
-        return "";
+    private static String characterDynastyId(CharacterRegistry registry, String mapId, String globalId) {
+        if (registry == null || globalId == null || globalId.isBlank()) return "";
+        try (var lease = registry.acquireGlobal(globalId)) {
+            if (lease == null) return "";
+            Character character = lease.get();
+            Object explicit = character.props.get("emergence.dynasty_id");
+            String houseName = explicit instanceof String value && !value.isBlank()
+                    ? value : character.house;
+            return Statecraft.stableDynastyId(mapId, character.culture, houseName);
+        }
     }
 
-    private static String characterDynastyId(Object character, String mapId) {
-        String explicit = characterPropText(character, "emergence.dynasty_id");
-        String house = explicit.isBlank() ? characterText(character, "house") : explicit;
-        return Statecraft.stableDynastyId(mapId, characterText(character, "culture"), house);
-    }
-
-    private static String dynastyDisplayName(Object founder, String mapId, String dynastyId) {
-        if (founder == null) return "Дом " + dynastyId;
-        String race = characterPropText(founder, "origin.race");
-        String culture = characterText(founder, "culture");
+    private static String dynastyDisplayName(String race, String culture, String house, String mapId, String dynastyId) {
         long seed = 0x44594E415354594CL ^ ((long) mapId.hashCode() << 32) ^ dynastyId.hashCode();
         try {
             return PeopleMod.NAMES.generate(race, culture, "dynasties", new Random(seed));
         } catch (RuntimeException missingPool) {
-            String house = characterText(founder, "house");
-            return house.isBlank() ? "Дом " + dynastyId : "Дом " + house;
-        }
-    }
-
-    private static int characterNumber(Object character, String field) {
-        try {
-            Object value = character.getClass().getField(field).get(character);
-            return value instanceof Number number ? number.intValue() : 0;
-        } catch (ReflectiveOperationException | SecurityException ignored) {
-            return 0;
+            return house == null || house.isBlank() ? "Дом " + dynastyId : "Дом " + house;
         }
     }
 
@@ -421,44 +411,43 @@ public class RealmsMod {
             if (editor == null) continue;
             boolean changed = false;
             CharacterRegistry people = PeopleMod.registry(map);
-            Map<String, String> characterNames = new HashMap<>();
             if (people != null) {
-                // wf-realms is intentionally compiled against the stable people API jar, which can
-                // lag the source module in the addon build order. Read optional dynasty metadata
-                // reflectively so this bridge remains binary-compatible without copying Character.
+                // The registry scan is page-bounded and every Character is read under a short lease.
+                // Only compact dynasty/name metadata is retained after the callback returns.
                 Map<String, String> founders = new LinkedHashMap<>();
-                Map<String, Object> founderCharacters = new LinkedHashMap<>();
                 Map<String, Integer> founderYears = new LinkedHashMap<>();
+                Map<String, String> founderRaces = new LinkedHashMap<>();
+                Map<String, String> founderCultures = new LinkedHashMap<>();
+                Map<String, String> founderHouses = new LinkedHashMap<>();
                 Map<String, String> dynastyNames = new LinkedHashMap<>();
-                Map<String, String> characterHouses = new LinkedHashMap<>();
-                for (Object character : people.all()) {
-                    String globalId = characterText(character, "globalId");
-                    if (!globalId.isBlank()) characterNames.put(globalId, characterText(character, "name"));
-                    String house = characterDynastyId(character, map.name);
-                    if (house.isBlank()) continue;
-                    int birthYear = characterNumber(character, "birthYear");
+                forEachCanonicalCharacter(people, character -> {
+                    String globalId = character.globalId;
+                    Object explicitDynasty = character.props.get("emergence.dynasty_id");
+                    String houseName = explicitDynasty instanceof String value && !value.isBlank()
+                            ? value : character.house;
+                    String house = Statecraft.stableDynastyId(map.name, character.culture, houseName);
+                    if (house.isBlank()) return;
+                    int birthYear = character.birthYear;
                     if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
-                        founders.put(house, characterText(character, "globalId"));
-                        founderCharacters.put(house, character);
+                        founders.put(house, globalId);
                         founderYears.put(house, birthYear);
+                        Object race = character.props.get("origin.race");
+                        founderRaces.put(house, race == null ? "" : String.valueOf(race));
+                        founderCultures.put(house, character.culture);
+                        founderHouses.put(house, character.house);
                     }
-                    if (!globalId.isBlank()) characterHouses.put(globalId, house);
-                }
+                    if (!globalId.isBlank()) POLITICS.addDynastyMember(house, globalId);
+                });
                 for (Map.Entry<String, String> entry : founders.entrySet()) {
                     String house = entry.getKey();
-                    Object founder = founderCharacters.get(house);
-                    String displayName = dynastyDisplayName(founder, map.name, house);
+                    String displayName = dynastyDisplayName(founderRaces.getOrDefault(house, ""),
+                            founderCultures.getOrDefault(house, ""), founderHouses.getOrDefault(house, ""),
+                            map.name, house);
                     dynastyNames.put(house, displayName);
                     Statecraft.Dynasty dynasty = POLITICS.dynasty(house);
                     if (dynasty == null) POLITICS.registerDynasty(house, entry.getValue(), displayName);
                     else if (dynasty.name == null || dynasty.name.isBlank() || dynasty.name.equals(house))
                         POLITICS.setDynastyName(house, displayName);
-                }
-                for (Object character : people.all()) {
-                    String house = characterDynastyId(character, map.name);
-                    String globalId = characterText(character, "globalId");
-                    if (house.isBlank() || globalId.isBlank()) continue;
-                    POLITICS.addDynastyMember(house, globalId);
                 }
                 // One canonical bridge owns the initial map-court -> Statecraft crown-holder link.
                 PoliticalIdentitySynchronizer.Report rulerSync =
@@ -472,8 +461,8 @@ public class RealmsMod {
                 // Keep the ruler's dynasty label on the realm projection as well as in Statecraft.
                 for (TitleData.Realm realm : map.titles.realmList()) {
                     String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", ""));
-                    String house = characterHouses.get(rulerId);
-                    String dynastyName = house == null ? "" : dynastyNames.getOrDefault(house, "");
+                    String house = characterDynastyId(people, map.name, rulerId);
+                    String dynastyName = house.isBlank() ? "" : dynastyNames.getOrDefault(house, "");
                     if (!dynastyName.isBlank()
                             && !dynastyName.equals(String.valueOf(realm.props.getOrDefault("identity.dynasty_name", "")))) {
                         editor.setRealmProp(realm.id, "identity.dynasty_name", dynastyName);
@@ -484,7 +473,7 @@ public class RealmsMod {
             for (TitleData.Title title : map.titles.allTitles()) {
                 Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
                 String holder = political == null ? "" : political.holderCharacterId;
-                String holderName = characterNames.getOrDefault(holder, "");
+                String holderName = characterName(people, holder);
                 String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
                 int count = political == null ? 0 : political.claims.size();
                 changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
@@ -700,7 +689,11 @@ public class RealmsMod {
     }
 
     private static void save(MinecraftServer s) {
-        if (!persistNow(s)) LOGGER.error("wf_realms: coordinated identity checkpoint remains dirty");
+        // Routine cadence is not a cross-domain transaction: Character WAL and settlement
+        // durability are managed by their own stores. Coordinating a full identity snapshot
+        // every 6000 ticks serialized every population partition on the server thread.
+        if (s == null || !persistPoliticalOnly(s))
+            LOGGER.error("wf_realms: periodic political checkpoint remains dirty");
     }
 
     @SubscribeEvent
@@ -988,4 +981,17 @@ public class RealmsMod {
         if (result == 0) return 0;
         return info(source, realm);
     }
+    /** Bounded UUID pages and short canonical leases; the callback must not retain Character. */
+    private static void forEachCanonicalCharacter(CharacterRegistry registry,
+                                                   java.util.function.Consumer<Character> visitor) {
+        final int pageSize = 256;
+        for (int offset = 0, count = registry.size(); offset < count; offset += pageSize) {
+            for (String id : registry.idPage(offset, pageSize)) {
+                try (dev.worldforge.people.CharacterAccessService.Lease lease = registry.acquire(id)) {
+                    if (lease != null) visitor.accept(lease.get());
+                }
+            }
+        }
+    }
+
 }

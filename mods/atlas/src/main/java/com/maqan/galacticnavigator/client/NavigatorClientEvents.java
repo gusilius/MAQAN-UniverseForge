@@ -14,6 +14,10 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.LevelChunk;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -25,6 +29,8 @@ public final class NavigatorClientEvents {
     private static int lastExploredChunkX=Integer.MIN_VALUE;
     private static int lastExploredChunkZ=Integer.MIN_VALUE;
     private static int lastExploredSectionY=Integer.MIN_VALUE;
+    private static long lastLoadedCaptureTick=Long.MIN_VALUE;
+    private static String lastLoadedCaptureDimension="";
     private static boolean deathWaypointRecorded;
     private static int deathWaypointSequence;
 
@@ -45,6 +51,8 @@ public final class NavigatorClientEvents {
             CosmicPlayerSpaceAdapter.clearForWorldExit();
             lastExploredDimension="";
             lastExploredChunkX=lastExploredChunkZ=lastExploredSectionY=Integer.MIN_VALUE;
+            lastLoadedCaptureTick=Long.MIN_VALUE;
+            lastLoadedCaptureDimension="";
         }
 
         if (NavigatorScreen.OPEN_KEY.consumeClick() && minecraft.screen == null)
@@ -158,13 +166,71 @@ public final class NavigatorClientEvents {
                         surfaceY,biomeId,biome.getWaterColor(),terrainColors,terrainHeights);
             }
             if(newVerticalLayer){
+                // Sample the actual blocks of the section the player just entered.
+                int[] blockColors=new int[256],blockHeights=new int[256];
+                BlockPos.MutableBlockPos blockSample=new BlockPos.MutableBlockPos();
+                int sectionMin=sectionY*16,sectionMax=sectionMin+15;
+                for(int localZ=0;localZ<16;localZ++)for(int localX=0;localX<16;localX++){
+                    int index=localZ*16+localX,worldX=(chunkX<<4)+localX,worldZ=(chunkZ<<4)+localZ;
+                    int foundY=position.getY();
+                    for(int sampleY=sectionMax;sampleY>=sectionMin;sampleY--){
+                        if(sampleY<level.getMinBuildHeight()||sampleY>=level.getMaxBuildHeight())continue;
+                        blockSample.set(worldX,sampleY,worldZ);
+                        var state=level.getBlockState(blockSample);
+                        if(!state.isAir()||!state.getFluidState().isEmpty()){
+                            foundY=sampleY;blockColors[index]=state.getMapColor(level,blockSample).col;break;
+                        }
+                    }
+                    blockHeights[index]=foundY;
+                }
                 NavigatorExplorationStore.recordPlayerLayer(dimension,chunkX,chunkZ,sectionY,
-                        position.getY(),biomeId,biome.getWaterColor());
+                        position.getY(),biomeId,biome.getWaterColor(),blockColors,blockHeights);
             }
             lastExploredDimension=dimension;
             lastExploredChunkX=chunkX;
             lastExploredChunkZ=chunkZ;
             lastExploredSectionY=sectionY;
         }
+        captureLoadedSurfaceNeighborhood(minecraft,level,dimension,chunkX,chunkZ);
+    }
+
+    /**
+     * Capture a compact 5x5 neighborhood from the client chunk cache. getChunk(..., false)
+     * is deliberately non-loading: unseen server chunks are never requested or revealed.
+     */
+    private static void captureLoadedSurfaceNeighborhood(Minecraft minecraft,Level level,
+            String dimension,int centerChunkX,int centerChunkZ){
+        long tick=level.getGameTime();
+        if(dimension.equals(lastLoadedCaptureDimension)&&lastLoadedCaptureTick!=Long.MIN_VALUE
+                &&tick-lastLoadedCaptureTick<20L)return;
+        lastLoadedCaptureDimension=dimension;
+        lastLoadedCaptureTick=tick;
+        List<NavigatorExplorationStore.ChunkSample> samples=new ArrayList<>();
+        BlockPos.MutableBlockPos sample=new BlockPos.MutableBlockPos();
+        for(int dz=-2;dz<=2;dz++)for(int dx=-2;dx<=2;dx++){
+            int chunkX=centerChunkX+dx,chunkZ=centerChunkZ+dz;
+            if(NavigatorExplorationStore.explored(dimension,chunkX,chunkZ))continue;
+            var chunkAccess=level.getChunkSource().getChunk(chunkX,chunkZ,ChunkStatus.FULL,false);
+            if(!(chunkAccess instanceof LevelChunk chunk))continue;
+            int[] colors=new int[256],heights=new int[256];
+            int originX=chunkX<<4,originZ=chunkZ<<4;
+            for(int localZ=0;localZ<16;localZ++)for(int localX=0;localX<16;localX++){
+                int index=localZ*16+localX;
+                int worldX=originX+localX,worldZ=originZ+localZ;
+                int topY=level.getHeight(Heightmap.Types.WORLD_SURFACE,worldX,worldZ);
+                heights[index]=topY;
+                sample.set(worldX,Math.max(level.getMinBuildHeight(),
+                        Math.min(level.getMaxBuildHeight()-1,topY-1)),worldZ);
+                colors[index]=level.getBlockState(sample).getMapColor(level,sample).col;
+            }
+            int centerY=level.getHeight(Heightmap.Types.WORLD_SURFACE,originX+8,originZ+8);
+            BlockPos center=new BlockPos(originX+8,Math.max(level.getMinBuildHeight(),
+                    Math.min(level.getMaxBuildHeight()-1,centerY-1)),originZ+8);
+            var biomeHolder=level.getBiome(center);
+            String biomeId=biomeHolder.unwrapKey().map(key->key.location().toString()).orElse("unknown");
+            samples.add(new NavigatorExplorationStore.ChunkSample(chunkX,chunkZ,centerY,
+                    biomeId,biomeHolder.value().getWaterColor(),colors,heights));
+        }
+        NavigatorExplorationStore.recordLoadedChunks(dimension,samples);
     }
 }

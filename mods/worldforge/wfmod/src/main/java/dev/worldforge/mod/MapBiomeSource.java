@@ -65,11 +65,27 @@ public class MapBiomeSource extends BiomeSource {
 
     @Override
     protected Stream<Holder<Biome>> collectPossibleBiomes() {
-        return resolve().stream().distinct();
+        // Registry discovery is cheap and does not decode the planet's raster.
+        // Actual map-specific biome selection starts only after first player visit.
+        Registry<Biome> reg = WorldForgeMod.biomeRegistry();
+        return reg == null ? Stream.empty() : reg.holders().map(holder -> (Holder<Biome>) holder);
+    }
+
+    private Holder<Biome> fallbackBiome() {
+        Registry<Biome> reg = WorldForgeMod.biomeRegistry();
+        if (reg == null) throw new IllegalStateException("WorldForge: biome registry is not ready");
+        return reg.getHolderOrThrow(ResourceKey.create(Registries.BIOME,
+                new ResourceLocation("minecraft", "plains")));
     }
 
     @Override
     public Holder<Biome> getNoiseBiome(int qx, int qy, int qz, Climate.Sampler sampler) {
+        // A biome query is a real terrain-generation request; map data is loaded lazily here,
+        // not during dimension registration or global biome enumeration.
+        // Registered but unvisited planetary surfaces must not load their map package
+        // just because Minecraft probes a biome during dimension startup.
+        // The real raster is read only after durable first-visit activation.
+        if (!WorldForgeMod.isMapActive(mapName)) return fallbackBiome();
         MapData m = WorldForgeMod.map(mapName);
         int idx = m.biomeIndexAt(QuartPos.toBlock(qx) + 2, QuartPos.toBlock(qz) + 2);
         return resolve().get(idx);

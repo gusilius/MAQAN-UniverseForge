@@ -2,6 +2,7 @@ package dev.worldforge.people.mc;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
@@ -15,6 +16,8 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -25,11 +28,120 @@ final class PeopleCommands {
     private PeopleCommands() {}
 
     static void register(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("wfpeople").requires(s -> s.hasPermission(2))
-                .then(Commands.literal("court").then(Commands.argument("realm", StringArgumentType.greedyString()).executes(c -> court(c.getSource(), StringArgumentType.getString(c, "realm")))))
-                .then(Commands.literal("org").then(Commands.argument("id", StringArgumentType.word()).then(Commands.argument("org", StringArgumentType.word()).executes(c -> setOrg(c.getSource(), StringArgumentType.getString(c, "id"), StringArgumentType.getString(c, "org"))))))
-                .then(Commands.literal("who").executes(c -> who(c.getSource())))
-                .then(Commands.literal("kill").then(Commands.argument("id", StringArgumentType.word()).executes(c -> kill(c.getSource(), StringArgumentType.getString(c, "id"))))));
+        d.register(Commands.literal("wfpeople")
+                .then(Commands.literal("spawn")
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                                        .executes(c -> spawnOwned(c.getSource(),
+                                                StringArgumentType.getString(c, "name"),
+                                                IntegerArgumentType.getInteger(c, "count"))))))
+                .then(Commands.literal("court").requires(s -> s.hasPermission(2)).then(Commands.argument("realm", StringArgumentType.greedyString()).executes(c -> court(c.getSource(), StringArgumentType.getString(c, "realm")))))
+                .then(Commands.literal("org").requires(s -> s.hasPermission(2)).then(Commands.argument("id", StringArgumentType.word()).then(Commands.argument("org", StringArgumentType.word()).executes(c -> setOrg(c.getSource(), StringArgumentType.getString(c, "id"), StringArgumentType.getString(c, "org"))))))
+                .then(Commands.literal("who").requires(s -> s.hasPermission(2)).executes(c -> who(c.getSource())))
+                .then(Commands.literal("kill").requires(s -> s.hasPermission(2)).then(Commands.argument("id", StringArgumentType.word()).executes(c -> kill(c.getSource(), StringArgumentType.getString(c, "id"))))));
+    }
+
+    /**
+     * Creative NPC authoring: creates canonical Characters and their physical WFNpc bodies.
+     * No political title, settlement or pre-existing village is required. The same Character
+     * registry/WAL and body binding path is used as for generated people.
+     */
+    private static int spawnOwned(CommandSourceStack source,String requestedName,int count) throws CommandSyntaxException {
+        ServerPlayer player=source.getPlayerOrException();
+        if(!player.isCreative()){
+            source.sendFailure(Component.literal("Создание произвольных NPC доступно в творческом режиме."));
+            return 0;
+        }
+        String baseName=requestedName==null?"":requestedName.trim();
+        if(baseName.isBlank()||baseName.length()>64){
+            source.sendFailure(Component.literal("Имя NPC должно содержать от 1 до 64 символов."));
+            return 0;
+        }
+        var level=player.serverLevel();
+        CharacterRegistry registry=PeopleMod.registryFor(level);
+        if(registry==null||!PeopleMod.playerRegistryAvailable()){
+            source.sendFailure(Component.literal("Реестр персонажей этого измерения не готов; NPC не создавались."));
+            return 0;
+        }
+        List<WFNpc> prepared=new ArrayList<>(count);
+        List<Character> characters=new ArrayList<>(count);
+        String owner=player.getUUID().toString();
+        for(int i=0;i<count;i++){
+            int ring=i/12;
+            double angle=(i%12)*Math.PI/6.0+ring*0.37;
+            double radius=2.5+ring*2.0;
+            int x=(int)Math.floor(player.getX()+Math.cos(angle)*radius);
+            int z=(int)Math.floor(player.getZ()+Math.sin(angle)*radius);
+            if(!level.hasChunkAt(new BlockPos(x,level.getMinBuildHeight()+1,z))){
+                for(WFNpc body:prepared)body.discard();
+                source.sendFailure(Component.literal("Создание отменено: зона появления выходит за загруженные чанки."));
+                return 0;
+            }
+            int y=level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
+            if(y<=level.getMinBuildHeight()+1||y>=level.getMaxBuildHeight()-2){
+                for(WFNpc body:prepared)body.discard();
+                source.sendFailure(Component.literal("Не найдена безопасная поверхность для NPC."));
+                return 0;
+            }
+            String name=count==1?baseName:baseName+" "+(i+1);
+            Character character=registry.create(name,"","","m",PeopleMod.YEAR);
+            character.props.put("npc.owner_uuid",owner);
+            character.props.put("npc.origin","creative_spawn");
+            CharacterRegistry.recordCharacterMutation(character);
+            WFNpc body=PeopleMod.NPC.get().create(level);
+            if(body==null){
+                character.alive=false;
+                PeopleMod.persistCharacter(character,source.getServer());
+                for(WFNpc old:prepared)old.discard();
+                source.sendFailure(Component.literal("Не удалось создать тело NPC; операция остановлена."));
+                return 0;
+            }
+            body.moveTo(x+0.5,y,z+0.5,player.getYRot(),0);
+            body.bind(character);
+            body.setOwnerId(owner);
+            body.setPost(x,z);
+            if(!registry.bindEntity(character.id,"npc",body.getUUID().toString())){
+                body.discard();
+                character.alive=false;
+                PeopleMod.persistCharacter(character,source.getServer());
+                for(WFNpc old:prepared)old.discard();
+                source.sendFailure(Component.literal("Не удалось закрепить тело за Character; операция остановлена."));
+                return 0;
+            }
+            characters.add(character);
+            prepared.add(body);
+        }
+        int spawned=0;
+        for(int i=0;i<prepared.size();i++){
+            WFNpc body=prepared.get(i);
+            Character character=characters.get(i);
+            if(!level.addFreshEntity(body)){
+                body.discard();
+                registry.unbindEntity(character.id,"npc",body.getUUID().toString());
+                character.alive=false;
+                CharacterRegistry.recordCharacterMutation(character);
+                for(int j=i+1;j<prepared.size();j++){
+                    prepared.get(j).discard();
+                    Character pending=characters.get(j);
+                    registry.unbindEntity(pending.id,"npc",prepared.get(j).getUUID().toString());
+                    pending.alive=false;
+                    CharacterRegistry.recordCharacterMutation(pending);
+                }
+                for(int j=0;j<characters.size();j++)PeopleMod.persistCharacter(characters.get(j),source.getServer());
+                source.sendFailure(Component.literal("Мир отклонил создание NPC; незаспавненные записи помечены недействующими."));
+                return spawned;
+            }
+            spawned++;
+        }
+        boolean durable=true;
+        for(Character character:characters)durable&=PeopleMod.persistCharacter(character,source.getServer());
+        if(!durable){
+            source.sendFailure(Component.literal("NPC появились, но WAL не подтвердил все записи. Не продолжайте массовое создание до проверки сохранения."));
+            return spawned;
+        }
+        final int spawnedCount=spawned;
+        source.sendSuccess(()->Component.literal("Создано NPC: "+spawnedCount+" · Character ID и тела связаны · владелец: "+player.getGameProfile().getName()),true);
+        return spawnedCount;
     }
 
     private static void say(CommandSourceStack s, String line) {
@@ -187,10 +299,25 @@ final class PeopleCommands {
     }
 
     private static int setOrgDirect(CommandSourceStack s, String id, String org) {
-        Character c = PeopleMod.findNpc(id);
-        if (c == null) { s.sendFailure(Component.literal("Нет персонажа " + id)); return 0; }
-        if (org.equals("none")) c.props.remove("org"); else c.props.put("org", org);
-        s.sendSuccess(() -> Component.literal(c.name + (org.equals("none") ? ": больше не представитель" : ": представитель " + org)), true);
-        return 1;
+        Character resolved = PeopleMod.findNpc(id);
+        if (resolved == null) { s.sendFailure(Component.literal("Нет персонажа " + id)); return 0; }
+        CharacterRegistry owner = PeopleMod.authority().registryForGlobal(resolved.globalId);
+        if (owner == null) { s.sendFailure(Component.literal("Не найден реестр персонажа " + id)); return 0; }
+        try (dev.worldforge.people.CharacterAccessService.Lease lease =
+                     owner.access().acquireGlobal(resolved.globalId)) {
+            if (lease == null) { s.sendFailure(Component.literal("Персонаж временно недоступен " + id)); return 0; }
+            Character character = lease.get();
+            if (org.equals("none")) character.props.remove("org");
+            else character.props.put("org", org);
+            CharacterRegistry.recordCharacterMutation(character);
+            if (!PeopleMod.persistCharacter(character, s.getServer())) {
+                s.sendFailure(Component.literal("Изменение не подтверждено WAL; повторите команду позже."));
+                return 0;
+            }
+            String name = character.name;
+            s.sendSuccess(() -> Component.literal(name + (org.equals("none")
+                    ? ": больше не представитель" : ": представитель " + org)), true);
+            return 1;
+        }
     }
 }

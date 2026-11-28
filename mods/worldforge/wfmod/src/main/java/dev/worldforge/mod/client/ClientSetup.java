@@ -20,9 +20,11 @@ public final class ClientSetup {
 
     public static void register(IEventBus modBus) {
         ClientViews.register("wf:clock", ClientClock::update);
+        modBus.addListener(WorldObjectVisualCatalog::registerReloadListener);
         modBus.addListener(ClientSetup::keys);
         modBus.addListener(ClientSetup::overlays);
         MinecraftForge.EVENT_BUS.register(new ClientSetup());
+        MinecraftForge.EVENT_BUS.register(new ClientPerformanceTelemetry());
     }
 
     /**

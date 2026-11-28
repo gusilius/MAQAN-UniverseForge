@@ -67,7 +67,16 @@ final class SettleBridge {
             }
             if (c.genesisProvisioningStep < 4) {
                 int n = 0;
-                for (String b : tier.buildings()) {
+                for (String requestedBuilding : tier.buildings()) {
+                    String effectiveRace = c.identityRace == null || c.identityRace.isBlank() ? d.race : c.identityRace;
+                    String b = s.defs.selectIdentityBuilding(requestedBuilding, effectiveRace, null,
+                            c.identityCulture, c.governmentId, c.settlementType, c.polityFormationId,
+                            c.architectureStyleId, name.hashCode() * 31L + n);
+                    if (b.isEmpty()) {
+                        SettleMod.LOGGER.warn("wf_settle: Genesis skipped incompatible building '{}' (race={}, culture={}, government={}, settlementType={})",
+                                requestedBuilding, effectiveRace, c.identityCulture, c.governmentId, c.settlementType);
+                        continue;
+                    }
                     if (!s.defs.buildings.containsKey(b)) continue;
                     boolean placed = false;
                     for (int attempt = 0; attempt < 12; attempt++) {

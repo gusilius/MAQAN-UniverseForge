@@ -24,9 +24,11 @@ public final class Dispatch {
                 case "priority": s.setPriority(Integer.parseInt(t[2]), Integer.parseInt(t[3])); return "priority";
                 case "auto": s.auto = t[2].equals("on"); return "auto";
                 case "priority-work": {
-                    Worker w = s.worker(Integer.parseInt(t[2]));
-                    if (w == null) throw new Settlement.OrderException("Нет рабочего " + t[2]);
-                    if (prios != null) prios.set(w, t[3], Integer.parseInt(t[4]));
+                    int workerId = Integer.parseInt(t[2]);
+                    int priority = Integer.parseInt(t[4]);
+                    s.setWorkPriority(workerId, t[3], priority);
+                    Worker w = s.worker(workerId);
+                    if (prios != null) prios.set(w, t[3], priority);
                     return "priority-work";
                 }
                 default: throw new Settlement.OrderException("Неизвестная команда: " + t[1]);

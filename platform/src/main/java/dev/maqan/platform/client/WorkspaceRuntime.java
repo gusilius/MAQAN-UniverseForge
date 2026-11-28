@@ -119,8 +119,15 @@ public final class WorkspaceRuntime {
         if (entry == null) return false;
         Consumer<SearchEntry> opener = ENTITY_OPENERS.get(entry.providerId());
         if (opener == null) return false;
-        opener.accept(entry);
-        return true;
+        try {
+            opener.accept(entry);
+            return true;
+        } catch (RuntimeException error) {
+            publish(Severity.WARNING, entry.providerId(), "search",
+                    "Unable to open " + entry.name() + ": " + error.getMessage(),
+                    entry.id(), entry.worldId());
+            return false;
+        }
     }
 
     public static void removeIndexed(String providerId, String entityId) {
@@ -203,8 +210,17 @@ public final class WorkspaceRuntime {
     public static boolean executeAction(String actionId, PlatformSelectionContext.Selection selection) {
         Action action = ACTIONS.get(actionId);
         if (action == null || selection == null || !safeVisible(action, selection)) return false;
-        action.execute().accept(selection);
-        return true;
+        try {
+            action.execute().accept(selection);
+            return true;
+        } catch (RuntimeException error) {
+            String detail = error.getMessage() == null || error.getMessage().isBlank()
+                    ? error.getClass().getSimpleName() : error.getMessage();
+            publish(Severity.ERROR, action.providerId(), "action",
+                    "Action '" + action.label() + "' failed: " + detail,
+                    selection.entityId(), selection.worldId());
+            return false;
+        }
     }
 
     private static boolean safeVisible(Action action, PlatformSelectionContext.Selection selection) {

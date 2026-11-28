@@ -7,6 +7,9 @@ use crate::emergence::{advance, EmergenceRequest};
 /// Must match NativeWorldSimulation.NATIVE_ABI_VERSION in the Java host.
 pub const NATIVE_ABI_VERSION: i32 = 6;
 
+const MAX_JNI_INPUT_BYTES: i32 = 64 * 1024 * 1024;
+const MAX_JNI_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
 type JNIEnvPtr = *mut *const *const c_void;
 type JObject = *mut c_void;
 
@@ -19,13 +22,16 @@ unsafe fn read_bytes(env: JNIEnvPtr, array: JObject, max_len: i32) -> Option<Vec
     let exception: extern "system" fn(JNIEnvPtr) -> u8 = mem::transmute(*table.add(228));
     let len = get_len(env, array);
     if len < 0 || len > max_len { return None; }
-    let mut bytes = vec![0_i8; len as usize];
-    if len > 0 { get_region(env, array, 0, len, bytes.as_mut_ptr()); }
+    // Allocate the final byte buffer directly. The previous i8 buffer followed by
+    // from_raw_parts(...).to_vec() briefly held two full native copies of every JNI
+    // request, which is costly for geography-heavy world snapshots.
+    let mut bytes = vec![0_u8; len as usize];
+    if len > 0 { get_region(env, array, 0, len, bytes.as_mut_ptr().cast::<i8>()); }
     if exception(env) != 0 { return None; }
-    Some(std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), bytes.len()).to_vec())
+    Some(bytes)
 }
 unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
-    if env.is_null() || bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 { return std::ptr::null_mut(); }
+    if env.is_null() || bytes.is_empty() || bytes.len() > MAX_JNI_OUTPUT_BYTES { return std::ptr::null_mut(); }
     let table = *env;
     if table.is_null() { return std::ptr::null_mut(); }
     let new_array: extern "system" fn(JNIEnvPtr, i32) -> JObject = mem::transmute(*table.add(176));
@@ -37,11 +43,11 @@ unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
     if exception(env) != 0 { return std::ptr::null_mut(); }
     array
 }
-fn has_supported_schema(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|value| value.get("schema_version").and_then(|v| v.as_u64()))
-        == Some(1)
+#[derive(serde::Deserialize)]
+struct VersionedPayload<T> {
+    schema_version: u32,
+    #[serde(flatten)]
+    payload: T,
 }
 
 fn error_json(status: &str, error: &str) -> Vec<u8> {
@@ -61,11 +67,13 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeDecide(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
-    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => error_json("invalid_input", "JNI input unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected snapshot schema_version=1"),
-        Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
-            Ok(snapshot) => match decide(&snapshot) {
+    let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
+        None => error_json("invalid_input", "decision input unavailable or exceeds 64 MiB"),
+        // Decode the version envelope and the typed snapshot in one serde pass.
+        Some(bytes) => match serde_json::from_slice::<VersionedPayload<WorldSnapshot>>(&bytes) {
+            Ok(envelope) if envelope.schema_version != 1 =>
+                error_json("unsupported_schema", "expected snapshot schema_version=1"),
+            Ok(envelope) => match decide(&envelope.payload) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "decision frame")),
                 Err(error) => error_json("rejected", &format!("{error:?}")),
             },
@@ -96,11 +104,13 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceEmergence(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
-    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => error_json("invalid_input", "emergence input unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected emergence request schema_version=1"),
-        Some(bytes) => match serde_json::from_slice::<EmergenceRequest>(&bytes) {
-            Ok(request) => match advance(request) {
+    let response = match read_bytes(env, input, MAX_JNI_INPUT_BYTES) {
+        None => error_json("invalid_input", "emergence input unavailable or exceeds 64 MiB"),
+        // The outer schema envelope and nested snapshot/state are decoded together.
+        Some(bytes) => match serde_json::from_slice::<VersionedPayload<EmergenceRequest>>(&bytes) {
+            Ok(envelope) if envelope.schema_version != 1 =>
+                error_json("unsupported_schema", "expected emergence request schema_version=1"),
+            Ok(envelope) => match advance(envelope.payload) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "emergence frame")),
                 Err(error) => error_json("emergence_rejected", &error),
             },
@@ -116,8 +126,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 16 * 1024 * 1024) {
         None => error_json("invalid_input", "population input unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected population schema_version=1"),
+        // Population::advance validates schema_version after the typed decode. Avoid
+        // parsing the entire large population payload into serde_json::Value first.
         Some(bytes) => match serde_json::from_slice::<crate::population::Request>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected population schema_version=1"),
             Ok(request) => match crate::population::advance(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "population frame")),
                 Err(error) => error_json("population_rejected", &error),
@@ -134,8 +147,11 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army combat snapshot unavailable or too large"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army combat schema_version=1"),
+        // CombatRequest::simulate performs the same schema gate on the typed request.
+        // Decode once instead of materializing a generic JSON tree before the real decode.
         Some(bytes) => match serde_json::from_slice::<crate::army::CombatRequest>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected army combat schema_version=1"),
             Ok(request) => match crate::army::simulate(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "army combat frame")),
                 Err(error) => error_json("army_combat_rejected", &error),
@@ -152,8 +168,10 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army combat batch unavailable or exceeds 8 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army combat batch schema_version=1"),
+        // CombatBatchRequest::simulate_batch validates the typed schema itself.
         Some(bytes) => match serde_json::from_slice::<crate::army::CombatBatchRequest>(&bytes) {
+            Ok(request) if request.schema_version != 1 =>
+                error_json("unsupported_schema", "expected army combat batch schema_version=1"),
             Ok(request) => match crate::army::simulate_batch(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "army combat batch frame")),
                 Err(error) => error_json("army_combat_batch_rejected", &error),
@@ -188,7 +206,7 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "army strategic snapshot unavailable or exceeds 8 MiB"),
-        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army strategic schema_version=1"),
+        // strategic_army::compute performs the typed operation/schema validation.
         Some(bytes) => match crate::strategic_army::compute(&bytes) {
             Ok(frame) => frame,
             Err(error) => error_json("army_strategic_rejected", &error),
@@ -200,6 +218,12 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 
 #[cfg(test)]
 mod abi_tests {
+    #[test]
+    fn emergence_input_and_output_limits_are_64_mib() {
+        assert_eq!(super::MAX_JNI_INPUT_BYTES, 64 * 1024 * 1024);
+        assert_eq!(super::MAX_JNI_OUTPUT_BYTES, 64 * 1024 * 1024);
+    }
+
     #[test]
     fn native_abi_matches_java_host_contract() {
         assert_eq!(super::NATIVE_ABI_VERSION, 6);

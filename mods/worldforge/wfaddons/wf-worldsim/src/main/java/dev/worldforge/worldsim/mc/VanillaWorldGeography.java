@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -12,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.settle.mc.SettleMod;
 import dev.worldforge.mod.MapChunkGenerator;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.TickEvent;
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -51,13 +54,30 @@ public final class VanillaWorldGeography {
     private static final int WORLD_COORDINATE_OFFSET = 30_000_000;
     private static final int WORLD_COORDINATE_EXTENT = WORLD_COORDINATE_OFFSET * 2 + 1;
     private static final int SAMPLE_STEP = 4;
-    private static final int SCHEMA = 1;
+    private static final int SCHEMA = 2;
     private static final Map<String, Region> REGIONS = new TreeMap<>();
+    /** Durable index of every observed vanilla or mod-provided structure start. */
+    private static final TreeMap<String, JsonObject> STRUCTURES = new TreeMap<>();
+    /** Optional explicit classification hook for structure mods; no hard dependency on their classes. */
+    public enum StructureRole { SETTLEMENT, RESIDENTIAL, MILITARY, ECONOMIC, RELIGIOUS, INFRASTRUCTURE, LANDMARK, DUNGEON, OTHER }
+    private static final Map<ResourceLocation, StructureRole> STRUCTURE_ROLE_OVERRIDES = new TreeMap<>();
+
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING = new TreeMap<>();
     private static final Set<String> PENDING_KEYS = new HashSet<>();
     private static final int MAX_CAPTURE_CHUNKS_PER_TICK = 8;
+    /** Bound first-time snapshot projection work; a million-cell map is never copied in one tick. */
+    private static final int MAX_SNAPSHOT_REGIONS_PER_TICK = 8;
     private static boolean loaded;
     private static boolean dirty;
+    /** Immutable-by-convention projection reused until an authoritative geography mutation. */
+    private static JsonArray cachedSnapshot;
+    private static SnapshotBuild snapshotBuild;
+
+    private static final class SnapshotBuild {
+        final Iterator<Region> regions = REGIONS.values().iterator();
+        final Map<String, JsonObject> maps = new TreeMap<>();
+        final Map<String, Boolean> political = new TreeMap<>();
+    }
     private static long lastPersistGameTime = Long.MIN_VALUE;
     private static MinecraftServer activeServer;
 
@@ -183,6 +203,8 @@ public final class VanillaWorldGeography {
                     sample.add("discovered_year", previous.has("discovered_year")
                             ? previous.get("discovered_year").deepCopy()
                             : new com.google.gson.JsonPrimitive(0));
+                    if (previous.has("founding_site") && previous.get("founding_site").getAsBoolean())
+                        sample.addProperty("founding_site", true);
                 } else {
                     sample.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
                 }
@@ -192,8 +214,142 @@ public final class VanillaWorldGeography {
                 }
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
+        // Every valid StructureStart is indexed, regardless of namespace or owning mod.
+        // Only structures classified as inhabited settlement anchors found a community;
+        // fortresses, dungeons, temples, mines and other structures remain available to
+        // later settlement, economy, military and political layers without becoming towns.
+        captureStructureStarts(level, chunk);
     }
+
+    /** Mods may explicitly classify their registered structure type without a compile-time dependency. */
+    public static synchronized void registerStructureRole(ResourceLocation structureType, StructureRole role) {
+        if (structureType == null || role == null) throw new IllegalArgumentException("structure type and role are required");
+        STRUCTURE_ROLE_OVERRIDES.put(structureType, role);
+    }
+
+    private static StructureRole classifyStructure(ResourceLocation key) {
+        StructureRole override = STRUCTURE_ROLE_OVERRIDES.get(key);
+        if (override != null) return override;
+        String path = key.getPath().toLowerCase(java.util.Locale.ROOT);
+        var catalogue = SettleMod.STRUCTURE_CATALOG;
+        if (catalogue.matchesStructureClass("settlement_anchor", key.toString())
+                || containsAny(path, "village", "settlement", "town", "city", "hamlet", "colony",
+                        "camp", "homestead", "outpost", "tribe")) return StructureRole.SETTLEMENT;
+        if (catalogue.matchesStructureClass("residential", key.toString())
+                || containsAny(path, "house", "home", "dwelling", "cabin", "hut", "farmhouse", "manor"))
+            return StructureRole.RESIDENTIAL;
+        if (catalogue.matchesStructureClass("military", key.toString())
+                || containsAny(path, "fortress", "fort", "castle", "citadel", "barrack", "keep", "watchtower"))
+            return StructureRole.MILITARY;
+        if (catalogue.matchesStructureClass("agriculture", key.toString())
+                || catalogue.matchesStructureClass("industry", key.toString())
+                || catalogue.matchesStructureClass("commerce", key.toString())
+                || containsAny(path, "mine", "farm", "market", "workshop", "factory", "warehouse", "mill", "port"))
+            return StructureRole.ECONOMIC;
+        if (catalogue.matchesStructureClass("religious", key.toString())
+                || containsAny(path, "temple", "shrine", "church", "monastery", "sanctuary"))
+            return StructureRole.RELIGIOUS;
+        if (catalogue.matchesStructureClass("infrastructure", key.toString())
+                || containsAny(path, "bridge", "road", "tunnel", "canal", "rail", "aqueduct"))
+            return StructureRole.INFRASTRUCTURE;
+        if (containsAny(path, "dungeon", "spawner", "crypt", "catacomb"))
+            return StructureRole.DUNGEON;
+        if (containsAny(path, "ruin", "monument", "pyramid", "obelisk", "landmark"))
+            return StructureRole.LANDMARK;
+        return StructureRole.OTHER;
+    }
+
+    private static boolean containsAny(String value, String... needles) {
+        for (String needle : needles) if (value.contains(needle)) return true;
+        return false;
+    }
+
+    private static void captureStructureStarts(ServerLevel level, ChunkAccess chunk) {
+        String dimension = level.dimension().location().toString();
+        ChunkPos startChunk = chunk.getPos();
+        long discoveredYear = Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L);
+        for (var entry : chunk.getAllStarts().entrySet()) {
+            var start = entry.getValue();
+            if (start == null || !start.isValid()) continue;
+            ResourceLocation typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
+            if (typeKey == null) continue;
+            var bounds = start.getBoundingBox();
+            int centerX = (bounds.minX() + bounds.maxX()) / 2;
+            int centerZ = (bounds.minZ() + bounds.maxZ()) / 2;
+            StructureRole role = classifyStructure(typeKey);
+            String id = dimension + "|" + typeKey + "|" + startChunk.x + "|" + startChunk.z;
+            JsonObject record = new JsonObject();
+            record.addProperty("id", id);
+            record.addProperty("dimension", dimension);
+            record.addProperty("type", typeKey.toString());
+            record.addProperty("namespace", typeKey.getNamespace());
+            record.addProperty("path", typeKey.getPath());
+            record.addProperty("role", role.name().toLowerCase(java.util.Locale.ROOT));
+            record.addProperty("settlement_anchor", role == StructureRole.SETTLEMENT);
+            record.addProperty("start_chunk_x", startChunk.x);
+            record.addProperty("start_chunk_z", startChunk.z);
+            record.addProperty("center_x", centerX);
+            record.addProperty("center_z", centerZ);
+            record.addProperty("min_x", bounds.minX());
+            record.addProperty("min_y", bounds.minY());
+            record.addProperty("min_z", bounds.minZ());
+            record.addProperty("max_x", bounds.maxX());
+            record.addProperty("max_y", bounds.maxY());
+            record.addProperty("max_z", bounds.maxZ());
+            record.addProperty("discovered_year", discoveredYear);
+            JsonObject previous = STRUCTURES.put(id, record);
+            if (previous == null || !previous.equals(record)) dirty = true;
+            if (role == StructureRole.SETTLEMENT)
+                markStructureFoundingSite(level, chunk, centerX, centerZ);
+        }
+    }
+
+    private static void markStructureFoundingSite(ServerLevel level, ChunkAccess startChunk,
+                                                   int centerX, int centerZ) {
+        int centerChunkX = Math.floorDiv(centerX, 16);
+        int centerChunkZ = Math.floorDiv(centerZ, 16);
+        ChunkAccess centerChunk = level.getChunkSource().getChunkNow(centerChunkX, centerChunkZ);
+        boolean exactCenterLoaded = centerChunk != null;
+        // If the structure center is not resident, anchor to the actual start chunk,
+        // not to an unloaded center chunk. This avoids mismatching sampled terrain with
+        // geographic coordinates and never force-loads the center.
+        int anchorChunkX = exactCenterLoaded ? centerChunkX : startChunk.getPos().x;
+        int anchorChunkZ = exactCenterLoaded ? centerChunkZ : startChunk.getPos().z;
+        if (!exactCenterLoaded) centerChunk = startChunk;
+        int localX = exactCenterLoaded ? Math.floorMod(centerX, 16) : 8;
+        int localZ = exactCenterLoaded ? Math.floorMod(centerZ, 16) : 8;
+        int regionX = Math.floorDiv(anchorChunkX, REGION_CHUNKS);
+        int regionZ = Math.floorDiv(anchorChunkZ, REGION_CHUNKS);
+        String id = mapId(level.dimension().location().toString(), regionX, regionZ);
+        Region region = REGIONS.computeIfAbsent(id, Region::new);
+        int x = Math.floorMod(anchorChunkX, REGION_CHUNKS) * 16 + localX;
+        int z = Math.floorMod(anchorChunkZ, REGION_CHUNKS) * 16 + localZ;
+        long key = (long) z * REGION_BLOCKS + x;
+        JsonObject cell = region.cells.get(key);
+        if (cell == null) {
+            cell = sample(level, centerChunk, localX, localZ, x, z);
+            cell.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
+            region.cells.put(key, cell);
+        }
+        if (!cell.has("founding_site") || !cell.get("founding_site").getAsBoolean()) {
+            cell.addProperty("founding_site", true);
+            dirty = true;
+            cachedSnapshot = null;
+            snapshotBuild = null;
+        }
+    }
+
+    /** Stable read-only copy for settlement/building/economy/military consumers. */
+    public static synchronized JsonArray structuresForDimension(String dimension) {
+        JsonArray result = new JsonArray();
+        if (dimension == null || dimension.isBlank()) return result;
+        for (JsonObject structure : STRUCTURES.values())
+            if (dimension.equals(structure.get("dimension").getAsString())) result.add(structure.deepCopy());
+        return result;
+    }
+
+    public static synchronized int discoveredStructureCount() { return STRUCTURES.size(); }
 
     private static JsonObject sample(ServerLevel level, ChunkAccess chunk,
                                      int localX, int localZ, int regionX, int regionZ) {
@@ -222,6 +378,7 @@ public final class VanillaWorldGeography {
         cell.addProperty("land", land);
         cell.addProperty("suitability", suitability);
         cell.addProperty("owner_realm_id", "");
+        cell.addProperty("founding_site", false);
         return cell;
     }
 
@@ -249,7 +406,8 @@ public final class VanillaWorldGeography {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
                 .filter(region -> {
                     RegionAddress address = regionAddress(region.id);
-                    return address != null && !isImageMapDimension(address.dimension());
+                    return address != null && !isImageMapDimension(address.dimension())
+                            && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension());
                 })
                 .map(region -> region.id).toList();
     }
@@ -257,7 +415,8 @@ public final class VanillaWorldGeography {
     public static synchronized java.util.List<String> simulationMapIds() {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
                 .map(region -> regionAddress(region.id)).filter(java.util.Objects::nonNull)
-                .filter(address -> !isImageMapDimension(address.dimension()))
+                .filter(address -> !isImageMapDimension(address.dimension())
+                        && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension()))
                 .map(RegionAddress::dimension).distinct().sorted()
                 .map(dimension -> "vanilla-world:" + dimension).toList();
     }
@@ -278,7 +437,10 @@ public final class VanillaWorldGeography {
      * the map package and once from observed chunks), duplicating bands, settlements and polities.
      */
     public static boolean isOrdinaryGeographyLevel(ServerLevel level) {
-        return level != null && !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator);
+        return level != null
+                && !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator)
+                && dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(
+                        level.dimension().location().toString());
     }
 
     private static boolean isImageMapDimension(String dimension) {
@@ -330,16 +492,51 @@ public final class VanillaWorldGeography {
      * remote frontier cells remain neutral. The same owner IDs feed Rust snapshots,
      * save data and later map/UI projections.
      */
+    private static final int POLITICAL_BUCKET_BLOCKS = 512;
+    private static long politicalBucketKey(int x, int z) {
+        long bx = Math.floorDiv(x, POLITICAL_BUCKET_BLOCKS);
+        long bz = Math.floorDiv(z, POLITICAL_BUCKET_BLOCKS);
+        return (bx << 32) ^ (bz & 0xffffffffL);
+    }
+
+    private static Map<Long, List<PoliticalSeed>> politicalSeedIndex(List<PoliticalSeed> seeds) {
+        Map<Long, List<PoliticalSeed>> index = new java.util.HashMap<>();
+        if (seeds != null) for (PoliticalSeed seed : seeds) {
+            if (seed == null || seed.realmId.isBlank()) continue;
+            index.computeIfAbsent(politicalBucketKey(seed.x, seed.z), ignored -> new ArrayList<>()).add(seed);
+        }
+        return index;
+    }
+
+    private static String nearestPoliticalOwner(int x, int z, Map<Long, List<PoliticalSeed>> index) {
+        long bestDistance = Long.MAX_VALUE;
+        String owner = "";
+        int bx = Math.floorDiv(x, POLITICAL_BUCKET_BLOCKS);
+        int bz = Math.floorDiv(z, POLITICAL_BUCKET_BLOCKS);
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            long key = ((long) (bx + dx) << 32) ^ ((bz + dz) & 0xffffffffL);
+            for (PoliticalSeed seed : index.getOrDefault(key, List.of())) {
+                long ox = (long) x - seed.x, oz = (long) z - seed.z;
+                long distance = ox * ox + oz * oz;
+                if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
+            }
+        }
+        return bestDistance <= (long) POLITICAL_BUCKET_BLOCKS * POLITICAL_BUCKET_BLOCKS ? owner : "";
+    }
+
     public static synchronized int applyPoliticalOwnership(
             Map<String, List<PoliticalSeed>> seedsByWorld) {
         int owned = 0;
         boolean changed = false;
-        long maxDistanceSquared = 512L * 512L;
+        Map<String, Map<Long, List<PoliticalSeed>>> seedIndexes = new java.util.HashMap<>();
+        if (seedsByWorld != null) seedsByWorld.forEach((world, seeds) -> {
+            Map<Long, List<PoliticalSeed>> index = politicalSeedIndex(seeds);
+            if (!index.isEmpty()) seedIndexes.put(world, index);
+        });
         for (Region region : REGIONS.values()) {
             RegionAddress address = regionAddress(region.id);
             if (address == null || isImageMapDimension(address.dimension())) continue;
-            List<PoliticalSeed> seeds = seedsByWorld == null ? List.of()
-                    : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
+            Map<Long, List<PoliticalSeed>> seeds = seedIndexes.get("vanilla-world:" + address.dimension);
             for (JsonObject cell : region.cells.values()) {
                 String previous = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
                 // Existing sovereignty is immutable during ordinary simulation ticks.
@@ -347,28 +544,22 @@ public final class VanillaWorldGeography {
                 // recomputed from moving settlement centres or a changing seed list.
                 String owner = previous;
                 boolean land = cell.has("land") && cell.get("land").getAsBoolean();
-                if (!seeds.isEmpty() && !land) {
+                if (seeds != null && !land) {
                     // One-time sanitation of legacy invalid water ownership.
                     owner = "";
-                } else if (land && previous.isBlank() && !seeds.isEmpty()) {
+                } else if (land && previous.isBlank() && seeds != null) {
                     // PoliticalSeed positions are Minecraft block coordinates, not
-                    // unsigned WorldSim snapshot coordinates.
+                    // unsigned WorldSim snapshot coordinates. Only nearby spatial buckets
+                    // can contain a seed within the 512-block ownership radius.
                     int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
                     int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
-                    long bestDistance = Long.MAX_VALUE;
-                    for (PoliticalSeed seed : seeds) {
-                        if (seed.realmId.isBlank()) continue;
-                        long dx = (long) x - seed.x, dz = (long) z - seed.z;
-                        long distance = dx * dx + dz * dz;
-                        if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
-                    }
-                    if (bestDistance > maxDistanceSquared) owner = "";
+                    owner = nearestPoliticalOwner(x, z, seeds);
                 }
                 if (!previous.equals(owner)) { cell.addProperty("owner_realm_id", owner); changed = true; }
                 if (!owner.isBlank()) owned++;
             }
         }
-        if (changed) dirty = true;
+        if (changed) { dirty = true; cachedSnapshot = null; snapshotBuild = null; }
         return owned;
     }
 
@@ -425,6 +616,8 @@ public final class VanillaWorldGeography {
             cell.addProperty("ownership_event_cause", cause.name().toLowerCase(java.util.Locale.ROOT));
         }
         dirty = true;
+        cachedSnapshot = null;
+        snapshotBuild = null;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null)
             throw new IllegalStateException("Cannot durably commit political transfer without an active server");
@@ -439,45 +632,93 @@ public final class VanillaWorldGeography {
         return cell == null || !cell.has("biome") ? "" : cell.get("biome").getAsString();
     }
 
-    public static synchronized JsonArray snapshot() {
-        JsonArray result = new JsonArray();
-        for (String mapId : simulationMapIds()) {
-            String dimension = dimensionFromMapId(mapId);
-            WorldBounds world = bounds(dimension);
-            if (world == null) continue;
-            JsonObject map = new JsonObject();
-            map.addProperty("map_id", mapId);
-            // Stable coordinates across all discoveries in this dimension. The current
-            // observed bounds are deliberately not used as an origin, because they grow
-            // when the player explores into a new region.
-            map.addProperty("width_px", WORLD_COORDINATE_EXTENT);
-            map.addProperty("height_px", WORLD_COORDINATE_EXTENT);
-            map.addProperty("blocks_per_pixel_milli", 1000);
-            map.addProperty("sample_stride", SAMPLE_STEP);
-            JsonArray cells = new JsonArray();
-            boolean political = false;
-            for (Region region : REGIONS.values()) {
-                RegionAddress address = regionAddress(region.id);
-                if (address == null || !dimension.equals(address.dimension)) continue;
-                for (JsonObject original : region.cells.values()) {
-                    JsonObject cell = original.deepCopy();
-                    cell.addProperty("x", WORLD_COORDINATE_OFFSET + address.x * REGION_BLOCKS + original.get("x").getAsInt());
-                    cell.addProperty("z", WORLD_COORDINATE_OFFSET + address.z * REGION_BLOCKS + original.get("z").getAsInt());
-                    if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank()) political = true;
-                    cells.add(cell);
-                }
+    /**
+     * Returns a read-only cached projection. Callers must not mutate the returned JsonArray
+     * or its children; it is invalidated only when captured terrain or sovereignty changes.
+     * This prevents a full deep-copy of every persisted cell on every WorldSim cycle.
+     */
+    /**
+     * Advances the immutable geography projection by a bounded number of regions.
+     * Returns false while more regions remain; callers must not submit a partial snapshot.
+     */
+    public static synchronized boolean prepareSnapshotBatch() {
+        if (cachedSnapshot != null) return true;
+        if (snapshotBuild == null) snapshotBuild = new SnapshotBuild();
+        SnapshotBuild build = snapshotBuild;
+        int processed = 0;
+        while (processed < MAX_SNAPSHOT_REGIONS_PER_TICK && build.regions.hasNext()) {
+            Region region = build.regions.next();
+            RegionAddress address = regionAddress(region.id);
+            if (address == null || region.cells.isEmpty() || isImageMapDimension(address.dimension())
+                    || !dev.worldforge.mod.WorldForgeMod.isPlanetDimensionActive(address.dimension())) {
+                processed++;
+                continue;
             }
-            map.addProperty("political_layers_present", political);
-            map.add("cells", cells);
-            result.add(map);
+            String mapId = "vanilla-world:" + address.dimension();
+            JsonObject map = build.maps.computeIfAbsent(mapId, id -> {
+                JsonObject value = new JsonObject();
+                value.addProperty("map_id", id);
+                value.addProperty("width_px", WORLD_COORDINATE_EXTENT);
+                value.addProperty("height_px", WORLD_COORDINATE_EXTENT);
+                value.addProperty("blocks_per_pixel_milli", 1000);
+                value.addProperty("sample_stride", SAMPLE_STEP);
+                value.add("cells", new JsonArray());
+                value.add("structures", new JsonArray());
+                return value;
+            });
+            JsonArray cells = map.getAsJsonArray("cells");
+            boolean political = build.political.getOrDefault(mapId, false);
+            for (JsonObject original : region.cells.values()) {
+                JsonObject cell = original.deepCopy();
+                cell.addProperty("x", WORLD_COORDINATE_OFFSET
+                        + address.x * REGION_BLOCKS + original.get("x").getAsInt());
+                cell.addProperty("z", WORLD_COORDINATE_OFFSET
+                        + address.z * REGION_BLOCKS + original.get("z").getAsInt());
+                if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank())
+                    political = true;
+                cells.add(cell);
+            }
+            build.political.put(mapId, political);
+            processed++;
         }
-        return result;
+        if (build.regions.hasNext()) return false;
+
+        // Keep the complete mod-agnostic structure catalog beside the geography
+        // snapshot. Native emergence may ignore unknown metadata fields, while Java
+        // settlement/building/military adapters can consume the exact same records.
+        for (JsonObject structure : STRUCTURES.values()) {
+            String mapId = "vanilla-world:" + structure.get("dimension").getAsString();
+            JsonObject map = build.maps.get(mapId);
+            if (map != null) map.getAsJsonArray("structures").add(structure.deepCopy());
+        }
+
+        JsonArray result = new JsonArray();
+        for (var entry : build.maps.entrySet()) {
+            entry.getValue().addProperty("political_layers_present",
+                    build.political.getOrDefault(entry.getKey(), false));
+            result.add(entry.getValue());
+        }
+        cachedSnapshot = result;
+        snapshotBuild = null;
+        return true;
     }
+
+    /**
+     * Returns only a fully completed projection. Reading the cache never advances a build:
+     * diagnostics and other observers must not perform hidden work or block authoritative apply.
+     */
+    public static synchronized JsonArray snapshot() {
+        return cachedSnapshot;
+    }
+
 
     public static synchronized void load(MinecraftServer server) {
         if (server == null) return;
         if (activeServer != server) {
             REGIONS.clear();
+            STRUCTURES.clear();
+            cachedSnapshot = null;
+            snapshotBuild = null;
             PENDING.clear(); PENDING_KEYS.clear();
             dirty = false;
             loaded = false;
@@ -490,7 +731,8 @@ public final class VanillaWorldGeography {
         if (!Files.isRegularFile(file)) return;
         try {
             JsonObject root = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonObject.class);
-            if (root == null || !root.has("schema_version") || root.get("schema_version").getAsInt() != SCHEMA
+            if (root == null || !root.has("schema_version")
+                    || (root.get("schema_version").getAsInt() != 1 && root.get("schema_version").getAsInt() != SCHEMA)
                     || !root.has("regions") || !root.get("regions").isJsonArray())
                 throw new IOException("unsupported vanilla geography cache schema");
             for (var item : root.getAsJsonArray("regions")) {
@@ -509,6 +751,14 @@ public final class VanillaWorldGeography {
                     region.cells.put((long) z * REGION_BLOCKS + x, cell.deepCopy());
                 }
                 REGIONS.put(id, region);
+            }
+            if (root.has("structures") && root.get("structures").isJsonArray()) {
+                for (var structureElement : root.getAsJsonArray("structures")) {
+                    if (!structureElement.isJsonObject()) continue;
+                    JsonObject structure = structureElement.getAsJsonObject();
+                    if (!structure.has("id") || !structure.has("dimension") || !structure.has("type")) continue;
+                    STRUCTURES.put(structure.get("id").getAsString(), structure.deepCopy());
+                }
             }
         } catch (Exception error) {
             // Fail closed: a corrupt cache must not silently be overwritten by partial observations.
@@ -540,6 +790,9 @@ public final class VanillaWorldGeography {
                 regions.add(item);
             }
             root.add("regions", regions);
+            JsonArray structures = new JsonArray();
+            STRUCTURES.values().forEach(structure -> structures.add(structure.deepCopy()));
+            root.add("structures", structures);
             Path temp = file.resolveSibling(file.getFileName() + ".tmp");
             Files.writeString(temp, GSON.toJson(root), StandardCharsets.UTF_8);
             try {

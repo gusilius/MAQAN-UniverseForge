@@ -10,6 +10,16 @@ import java.util.*;
  * Датапаки могут дополнять, но не затирать уже загруженные списки.
  */
 public final class NameBank {
+    /** Incremental uniqueness index for large genesis batches; each name is normalized once. */
+    public static final class NameReservations {
+        private final Set<String> normalized = new HashSet<>();
+        public NameReservations(Collection<String> existing) {
+            if (existing != null) for (String value : existing)
+                if (value != null && !value.isBlank()) normalized.add(normalizeName(value));
+        }
+        private boolean reserve(String value) { return normalized.add(normalizeName(value)); }
+    }
+
     public static final class Pool {
         public final List<String> male = new ArrayList<>(), female = new ArrayList<>(),
                 surnames = new ArrayList<>(), houses = new ArrayList<>(), dynasties = new ArrayList<>(),
@@ -272,10 +282,28 @@ public final class NameBank {
      * Allocates a world-unique name from authoritative mod/datapack pools.
      * It never fabricates suffixes or morphology when a pool is exhausted.
      */
+    public NameReservations reservations(Collection<String> existing) {
+        return new NameReservations(existing);
+    }
+
+    /**
+     * Allocates a world-unique name from authoritative mod/datapack pools.
+     * The reservation index is incremental, so large world genesis batches stay near O(1)
+     * per allocation instead of rescanning every existing household on each new resident.
+     */
     public String generateUnique(String race, String culture, String category,
                                  Random random, Set<String> reservedNames) {
-        Objects.requireNonNull(random, "random");
         Objects.requireNonNull(reservedNames, "reservedNames");
+        NameReservations reservations = new NameReservations(reservedNames);
+        String result = generateUnique(race, culture, category, random, reservations);
+        reservedNames.add(result);
+        return result;
+    }
+
+    public String generateUnique(String race, String culture, String category,
+                                 Random random, NameReservations reservations) {
+        Objects.requireNonNull(random, "random");
+        Objects.requireNonNull(reservations, "reservations");
         String key = category == null ? "" : category.toLowerCase(Locale.ROOT);
         Pool pool = poolForRace(race, culture);
         List<String> values = list(pool, key);
@@ -286,17 +314,10 @@ public final class NameBank {
         if (values.isEmpty())
             throw new IllegalStateException("Нет пула уникальных имён '" + category
                     + "' для расы '" + race + "' и культуры '" + culture + "'");
-        Set<String> normalized = new HashSet<>();
-        for (String value : reservedNames) if (value != null && !value.isBlank())
-            normalized.add(normalizeName(value));
         int start = random.nextInt(values.size());
         for (int offset = 0; offset < values.size(); offset++) {
             String candidate = values.get((start + offset) % values.size()).trim();
-            String keyName = normalizeName(candidate);
-            if (!candidate.isBlank() && normalized.add(keyName)) {
-                reservedNames.add(candidate);
-                return candidate;
-            }
+            if (!candidate.isBlank() && reservations.reserve(candidate)) return candidate;
         }
 
         // Large worlds can exhaust the literal list. Extend it only by composing
@@ -316,10 +337,7 @@ public final class NameBank {
                 if (secondOffset == firstOffset) continue;
                 String second = fragments.get((start + secondOffset) % fragmentCount);
                 String candidate = first + " " + second;
-                if (normalized.add(normalizeName(candidate))) {
-                    reservedNames.add(candidate);
-                    return candidate;
-                }
+                if (reservations.reserve(candidate)) return candidate;
             }
         }
         for (int firstOffset = 0; firstOffset < fragmentCount; firstOffset++) {
@@ -331,10 +349,7 @@ public final class NameBank {
                     if (thirdOffset == firstOffset || thirdOffset == secondOffset) continue;
                     String third = fragments.get((start + thirdOffset) % fragmentCount);
                     String candidate = first + " " + second + " " + third;
-                    if (normalized.add(normalizeName(candidate))) {
-                        reservedNames.add(candidate);
-                        return candidate;
-                    }
+                    if (reservations.reserve(candidate)) return candidate;
                 }
             }
         }

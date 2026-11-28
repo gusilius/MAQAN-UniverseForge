@@ -27,6 +27,13 @@ public final class PopulationComputeCoordinator {
     private static boolean nativeDisabled;
     private static long lastScannedWorldDay = Long.MIN_VALUE;
     private static long lastScannedRegistryGeneration = Long.MIN_VALUE;
+    private static final int CAPTURE_MEMBERS_PER_TICK = 512;
+    private static PopulationComputeBridge.Scan activeScan;
+    private static int scanRegistryCursor;
+    private static int scanMemberCursor;
+    private static long scanTargetWorldDay = Long.MIN_VALUE;
+    private static long scanRegistryGeneration = Long.MIN_VALUE;
+    private static int scanYear;
 
     private record Pending(PopulationComputeBridge.Captured captured,
                            WorldForgeComputeRuntime.Ticket ticket,long registryGeneration) {}
@@ -39,6 +46,8 @@ public final class PopulationComputeCoordinator {
             activeServer=server;lifecycleEpoch++;
             lastScannedWorldDay=Long.MIN_VALUE;
             lastScannedRegistryGeneration=Long.MIN_VALUE;
+            activeScan=null;scanRegistryCursor=0;scanMemberCursor=0;
+            scanTargetWorldDay=Long.MIN_VALUE;scanRegistryGeneration=Long.MIN_VALUE;
         }
         if(nativeDisabled||!NativeWorldSimulation.load()) return false;
 
@@ -53,26 +62,44 @@ public final class PopulationComputeCoordinator {
             return false;
         }
 
+        long registryGeneration=PeopleMod.populationRegistryGeneration();
+        List<CharacterRegistry> currentRegistries=registries();
+        if(activeScan!=null&&!activeScan.matches(currentRegistries)){
+            // Only a wholesale registry restore/repartition invalidates the scan. Appends are
+            // handled as tail ranges without rebuilding or sorting the existing population.
+            activeScan=null;scanRegistryCursor=0;scanMemberCursor=0;
+        }
+
         if(completed!=null){
             Pending done=pending;
             pending=null;
             if(done!=null&&done.ticket.lifecycleEpoch()==lifecycleEpoch
-                    &&done.registryGeneration()==PeopleMod.populationRegistryGeneration()
+                    &&done.registryGeneration()==registryGeneration
                     &&done.ticket.matches(done.captured.worldId(),OPERATION_KEY,done.captured.targetWorldDay(),
                     lifecycleEpoch,PopulationComputeBridge.SCHEMA_VERSION,NativeWorldSimulation.NATIVE_ABI_VERSION)
                     &&completed.ticket().matches(done.captured.worldId(),OPERATION_KEY,done.captured.targetWorldDay(),
                     lifecycleEpoch,PopulationComputeBridge.SCHEMA_VERSION,NativeWorldSimulation.NATIVE_ABI_VERSION)){
                 try {
-                    List<CharacterRegistry> registries=registries();
-                    boolean applied=PopulationComputeBridge.apply(done.captured,completed.first(),registries);
-                    if(applied) {
-                        PeopleMod.markPopulationProcessed(done.captured.targetWorldDay());
-                        lastScannedWorldDay=done.captured.targetWorldDay();
-                        lastScannedRegistryGeneration=done.registryGeneration();
+                    boolean applied=PopulationComputeBridge.apply(done.captured,completed.first(),currentRegistries);
+                    if(applied){
+                        scanRegistryCursor=done.captured.nextRegistryCursor();
+                        scanMemberCursor=done.captured.nextMemberCursor();
+                        if(done.captured.scanComplete()){
+                            PopulationComputeBridge.Scan appended=done.captured.scan().appendedTail();
+                            if(appended!=null){
+                                activeScan=appended;scanRegistryCursor=0;
+                                scanMemberCursor=appended.firstMemberCursor();
+                            }else{
+                                PeopleMod.markPopulationProcessed(done.captured.targetWorldDay());
+                                lastScannedWorldDay=done.captured.targetWorldDay();
+                                lastScannedRegistryGeneration=done.registryGeneration();
+                                activeScan=null;scanRegistryCursor=0;scanMemberCursor=0;
+                            }
+                        }
+                    } else {
+                        LOGGER.debug("wf_worldsim: population slice became stale; retrying from the same append-only cursor");
                     }
                 } catch(RuntimeException rejected) {
-                    // The bridge validates the entire frame before the first canonical write.
-                    // Keep Rust ownership and retry from per-Character receipts; never double-run Java here.
                     LOGGER.error("wf_worldsim: population result rejected; retaining unacknowledged world days for retry",rejected);
                 }
             } else {
@@ -82,37 +109,46 @@ public final class PopulationComputeCoordinator {
         if(pending!=null) return true;
         if(runtime.busy()) return true;
 
+        if(activeScan==null){
+            if(currentWorldDay==lastScannedWorldDay
+                    &&registryGeneration==lastScannedRegistryGeneration) return true;
+            activeScan=PopulationComputeBridge.beginScan(currentRegistries);
+            scanRegistryCursor=0;scanMemberCursor=activeScan.firstMemberCursor();
+            scanTargetWorldDay=currentWorldDay;scanRegistryGeneration=registryGeneration;scanYear=year;
+        }
         long fallbackStartDay=PeopleMod.populationBaselineDay();
-        long registryGeneration=PeopleMod.populationRegistryGeneration();
-        // The process cursor is not durable proof that every Character partition was saved.
-        // Inspect receipts once per world day and canonical registry generation, not every tick.
-        // A completed scan is valid for this exact world day and registry generation,
-        // regardless of whether the day is before or after the durable baseline. The old
-        // baseline-only guard rescanned every living Character on every server tick after
-        // the first simulated day, repeatedly rebuilding the same empty/already-acknowledged
-        // request and starving the authoritative WorldSim tick under large registries.
-        if(currentWorldDay==lastScannedWorldDay
-                &&registryGeneration==lastScannedRegistryGeneration) return true;
         String worldId=WorldForgeMod.worldId()==null
                 ?server.overworld().dimension().location().toString()
                 :WorldForgeMod.worldId().toString();
         PopulationComputeBridge.Captured captured;
         try {
-            captured=PopulationComputeBridge.captureForWorldDay(worldId,year,currentWorldDay,fallbackStartDay,registries());
+            captured=PopulationComputeBridge.captureForWorldDay(worldId,scanYear,scanTargetWorldDay,
+                    fallbackStartDay,currentRegistries,activeScan,scanRegistryCursor,scanMemberCursor,
+                    CAPTURE_MEMBERS_PER_TICK);
         } catch(IllegalStateException busyOrChanging) {
-            // A canonical writer is active or the snapshot raced a mutation. Retry next server tick.
             return true;
         }
         if(!captured.hasWork()){
-            PeopleMod.markPopulationProcessed(currentWorldDay);
-            lastScannedWorldDay=currentWorldDay;
-            lastScannedRegistryGeneration=registryGeneration;
+            scanRegistryCursor=captured.nextRegistryCursor();
+            scanMemberCursor=captured.nextMemberCursor();
+            if(captured.scanComplete()){
+                PopulationComputeBridge.Scan appended=activeScan.appendedTail();
+                if(appended!=null){
+                    activeScan=appended;scanRegistryCursor=0;
+                    scanMemberCursor=appended.registryCount()==0?0:appended.start(0);
+                }else{
+                    PeopleMod.markPopulationProcessed(scanTargetWorldDay);
+                    lastScannedWorldDay=scanTargetWorldDay;
+                    lastScannedRegistryGeneration=registryGeneration;
+                    activeScan=null;scanRegistryCursor=0;scanMemberCursor=0;
+                }
+            }
             return true;
         }
         WorldForgeComputeRuntime.Ticket ticket=new WorldForgeComputeRuntime.Ticket(
-                worldId,OPERATION_KEY,currentWorldDay,lifecycleEpoch,
+                worldId,OPERATION_KEY,scanTargetWorldDay,lifecycleEpoch,
                 PopulationComputeBridge.SCHEMA_VERSION,NativeWorldSimulation.NATIVE_ABI_VERSION);
-        boolean submitted=runtime.submit(ticket,captured.request(),EMPTY_SECONDARY,
+        boolean submitted=captured.submit(runtime,ticket,EMPTY_SECONDARY,
                 (primary,secondary)->new WorldForgeComputeRuntime.Output(
                         NativeWorldSimulation.advancePopulation(primary),EMPTY_SECONDARY));
         if(submitted) pending=new Pending(captured,ticket,registryGeneration);
@@ -121,10 +157,6 @@ public final class PopulationComputeCoordinator {
     }
 
     private static List<CharacterRegistry> registries(){
-        List<CharacterRegistry> result=new ArrayList<>(PeopleMod.registries().values());
-        result.add(PeopleMod.worldRegistry());
-        result.addAll(PeopleMod.dimensionRegistries().values());
-        result.add(PeopleMod.playerRegistry());
-        return result;
+        return PeopleMod.populationRegistriesSnapshot();
     }
 }

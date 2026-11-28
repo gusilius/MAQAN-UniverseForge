@@ -25,124 +25,170 @@ public final class Succession {
         }
     }
 
-    private static List<Result> onDeathBatched(CharacterRegistry reg, RoleDefs defs, TitleData d, TitleEditor ed, NameBank names, long seed, String id, int year, String law) {
-        Character dead = reg.get(id);
-        if (dead == null) throw new IllegalArgumentException("Нет персонажа " + id);
-        List<Character.Post> posts = PopulationSimulation.die(reg, id, year, "unspecified");
-        List<Result> out = new ArrayList<>();
-        for (Character.Post p : posts) {
-            Role role = defs.get(p.role);
-            if (role == null || !role.ruler) continue;
-            Character heir = chooseHeir(reg, dead, law, p.place);
-            boolean usurper = false;
-            if (heir == null) {
-                Random r = new Random(seed ^ dead.id.hashCode() ^ p.place.hashCode());
-                NameBank.Pool pool = names.pool(names.culture(dead.culture));
-                boolean male = r.nextBoolean();
-                heir = reg.create(pool.male.isEmpty() ? "?" : (male ? pool.male : pool.female).get(r.nextInt((male ? pool.male : pool.female).size())), pool.houses.get(r.nextInt(pool.houses.size())), dead.culture, male ? "m" : "f", year - 30);
-                CharacterStats.addTrait(heir, "usurper");
-                usurper = true;
-            }
-            reg.appoint(heir.id, role.id, p.place);
-            final Character successor = heir;
-            if (p.place.startsWith("realm:")) {
-                String realmId = p.place.substring(6);
-                // Character ownership/posts are covered by the outer Character batch.
-                // TitleEditor.group is the single canonical REALMS_POLITICS writer boundary:
-                // include ruler and holder metadata in that same group so the lane advances once.
-                Runnable updatePoliticalState = () -> {
-                    String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + successor.house);
-                    if (ed != null) ed.setRuler(realmId, rulerName);
-                    String deceasedGlobalId = dead.globalId;
-                    String heirGlobalId = successor.globalId;
-                    for (TitleData.Title title : d.allTitles()) {
-                        Object holder = title.props.get("holderCharacterId");
-                        if (holder instanceof String holderId
-                                && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
-                            title.props.put("holderCharacterId", heirGlobalId);
-                            title.props.put("succession.last_deceased", deceasedGlobalId);
-                            title.props.put("succession.last_heir", heirGlobalId);
-                            title.props.put("succession.last_year", year);
-                        }
-                    }
-                };
-                if (ed != null) {
-                    ed.group(updatePoliticalState);
-                } else {
-                    // Fallback for headless callers without a TitleEditor: preserve the
-                    // same single lane owner and revision semantics.
-                    try (DomainMutationRevisions.Mutation realmMutation =
-                                 WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
-                        TitleData.Realm realm = d.realms.get(realmId);
-                        String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
-                        boolean changed = realm != null && !Objects.equals(realm.ruler, rulerName);
-                        for (TitleData.Title title : d.allTitles()) {
-                            Object holder = title.props.get("holderCharacterId");
-                            if (holder instanceof String holderId
-                                    && (holderId.equals(dead.globalId) || holderId.equals(dead.id))) {
-                                changed |= !Objects.equals(holder, heir.globalId)
-                                        || !Objects.equals(title.props.get("succession.last_deceased"), dead.globalId)
-                                        || !Objects.equals(title.props.get("succession.last_heir"), heir.globalId)
-                                        || !Objects.equals(title.props.get("succession.last_year"), year);
+    private static List<Result> onDeathBatched(CharacterRegistry reg, RoleDefs defs, TitleData d,
+                                                    TitleEditor ed, NameBank names, long seed,
+                                                    String id, int year, String law) {
+        try (CharacterAccessService.Lease deadLease = reg.acquire(id)) {
+            if (deadLease == null) throw new IllegalArgumentException("Нет персонажа " + id);
+            Character dead = deadLease.get();
+            Candidate deadSnapshot = snapshot(dead);
+            List<Character.Post> posts = PopulationSimulation.die(reg, id, year, "unspecified");
+            List<Result> out = new ArrayList<>();
+            for (Character.Post post : posts) {
+                Role role = defs.get(post.role);
+                if (role == null || !role.ruler) continue;
+                String heirId = chooseHeirId(reg, deadSnapshot, law, post.place);
+                boolean usurper = heirId == null;
+                if (usurper) {
+                    Random random = new Random(seed ^ dead.id.hashCode() ^ post.place.hashCode());
+                    NameBank.Pool pool = names.pool(names.culture(dead.culture));
+                    boolean male = random.nextBoolean();
+                    List<String> namesForGender = male ? pool.male : pool.female;
+                    String name = namesForGender.isEmpty() ? "?" : namesForGender.get(random.nextInt(namesForGender.size()));
+                    String house = pool.houses.isEmpty() ? "" : pool.houses.get(random.nextInt(pool.houses.size()));
+                    heirId = reg.create(name, house, dead.culture, male ? "m" : "f", year - 30).id;
+                }
+                try (CharacterAccessService.Lease heirLease = reg.acquire(heirId)) {
+                    if (heirLease == null) throw new IllegalStateException("Не удалось восстановить наследника " + heirId);
+                    Character heir = heirLease.get();
+                    if (usurper) CharacterStats.addTrait(heir, "usurper");
+                    reg.appoint(heir.id, role.id, post.place);
+                    final Character successor = heir;
+                    if (post.place.startsWith("realm:")) {
+                        String realmId = post.place.substring(6);
+                        Runnable updatePoliticalState = () -> {
+                            String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + successor.house);
+                            if (ed != null) ed.setRuler(realmId, rulerName);
+                            String deceasedGlobalId = dead.globalId;
+                            String heirGlobalId = successor.globalId;
+                            for (TitleData.Title title : d.allTitles()) {
+                                Object holder = title.props.get("holderCharacterId");
+                                if (holder instanceof String holderId
+                                        && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
+                                    title.props.put("holderCharacterId", heirGlobalId);
+                                    title.props.put("succession.last_deceased", deceasedGlobalId);
+                                    title.props.put("succession.last_heir", heirGlobalId);
+                                    title.props.put("succession.last_year", year);
+                                }
+                            }
+                        };
+                        if (ed != null) {
+                            ed.group(updatePoliticalState);
+                        } else {
+                            try (DomainMutationRevisions.Mutation realmMutation =
+                                         WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+                                TitleData.Realm realm = d.realms.get(realmId);
+                                String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
+                                boolean changed = realm != null && !Objects.equals(realm.ruler, rulerName);
+                                for (TitleData.Title title : d.allTitles()) {
+                                    Object holder = title.props.get("holderCharacterId");
+                                    if (holder instanceof String holderId
+                                            && (holderId.equals(dead.globalId) || holderId.equals(dead.id))) {
+                                        changed |= !Objects.equals(holder, heir.globalId)
+                                                || !Objects.equals(title.props.get("succession.last_deceased"), dead.globalId)
+                                                || !Objects.equals(title.props.get("succession.last_heir"), heir.globalId)
+                                                || !Objects.equals(title.props.get("succession.last_year"), year);
+                                    }
+                                }
+                                updatePoliticalState.run();
+                                if (changed) realmMutation.commit();
                             }
                         }
-                        updatePoliticalState.run();
-                        if (changed) realmMutation.commit();
                     }
+                    out.add(new Result(dead, heir, usurper, post.place));
                 }
             }
-            out.add(new Result(dead, heir, usurper, p.place));
+            return out;
         }
-        return out;
     }
 
-    private static Character chooseHeir(CharacterRegistry reg, Character dead, String law, String place) {
-        // Preserve a deceased elder child's branch through its living descendants.
-        // Keep deceased children in the ordered branch list: their descendants may inherit
-        // by representation. Filtering to living children here would erase the entire branch.
-        List<Character> kids = new ArrayList<>();
-        for (String childId : dead.children) {
-            Character child = reg.get(childId);
-            if (child != null) kids.add(child);
+    private record Candidate(String id, String gender, int birthYear, boolean alive,
+                             String father, String house, List<String> children) {}
+
+    private static Candidate snapshot(Character character) {
+        return new Candidate(character.id, character.gender, character.birthYear, character.alive,
+                character.father == null ? "" : character.father,
+                character.house == null ? "" : character.house,
+                List.copyOf(character.children));
+    }
+
+    private static Candidate readCandidate(CharacterRegistry registry, String localId) {
+        if (localId == null || localId.isBlank()) return null;
+        try (CharacterAccessService.Lease lease = registry.acquire(localId)) {
+            return lease == null ? null : snapshot(lease.get());
         }
-        sort(kids, law);
+    }
+
+    private static String chooseHeirId(CharacterRegistry reg, Candidate dead, String law, String place) {
+        // Preserve a deceased elder child's branch through living descendants.
+        List<Candidate> children = new ArrayList<>();
+        for (String childId : dead.children()) {
+            Candidate child = readCandidate(reg, childId);
+            if (child != null) children.add(child);
+        }
+        sortCandidates(children, law);
         Set<String> visited = new HashSet<>();
-        for (Character child : kids) {
-            Character branchHeir = heirBranch(reg, child, law, visited);
+        for (Candidate child : children) {
+            String branchHeir = heirBranchId(reg, child, law, visited);
             if (branchHeir != null) return branchHeir;
         }
-        List<Character> sibs = new ArrayList<>();
-        for (Character c : reg.all()) if (c.alive && c != dead && !dead.father.isEmpty() && dead.father.equals(c.father)) sibs.add(c);
-        sort(sibs, law);
-        if (!sibs.isEmpty()) return sibs.get(0);
-        List<Character> nobles = new ArrayList<>();                    // придворная знать того же места
-        for (Character c : reg.all()) if (c.alive && !c.house.isEmpty() && c.posts.stream().anyMatch(po -> po.place.equals(place))) nobles.add(c);
-        nobles.sort(Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.id));
-        return nobles.isEmpty() ? null : nobles.get(0);
+
+        // Siblings are resolved through the father's canonical child IDs; no Character list survives.
+        if (!dead.father().isBlank()) {
+            Candidate father = readCandidate(reg, dead.father());
+            if (father != null) {
+                List<Candidate> siblings = new ArrayList<>();
+                for (String siblingId : father.children()) {
+                    if (siblingId.equals(dead.id())) continue;
+                    Candidate sibling = readCandidate(reg, siblingId);
+                    if (sibling != null && sibling.alive() && dead.father().equals(sibling.father()))
+                        siblings.add(sibling);
+                }
+                sortCandidates(siblings, law);
+                if (!siblings.isEmpty()) return siblings.get(0).id();
+            }
+        }
+
+        // Fallback to living nobles at this title; IDs are read from the reverse post index.
+        Candidate best = null;
+        for (String holderId : reg.idsAtPlace(place)) {
+            Candidate holder = readCandidate(reg, holderId);
+            if (holder == null || !holder.alive() || holder.house().isBlank()) continue;
+            if (best == null || compareCandidates(holder, best, law) < 0) best = holder;
+        }
+        return best == null ? null : best.id();
     }
 
-    private static Character heirBranch(CharacterRegistry reg, Character branch, String law, Set<String> visited) {
-        if (branch == null || !visited.add(branch.id)) return null;
-        if (branch.alive) return branch;
-        // Representation applies recursively, not only to the first deceased child.
-        // A dead grandchild must not erase a great-grandchild's place in the same branch.
-        List<Character> descendants = new ArrayList<>();
-        for (String childId : branch.children) {
-            Character child = reg.get(childId);
+    private static String heirBranchId(CharacterRegistry reg, Candidate branch, String law,
+                                       Set<String> visited) {
+        if (branch == null || !visited.add(branch.id())) return null;
+        if (branch.alive()) return branch.id();
+        List<Candidate> descendants = new ArrayList<>();
+        for (String childId : branch.children()) {
+            Candidate child = readCandidate(reg, childId);
             if (child != null) descendants.add(child);
         }
-        sort(descendants, law);
-        for (Character descendant : descendants) {
-            Character heir = heirBranch(reg, descendant, law, visited);
+        sortCandidates(descendants, law);
+        for (Candidate descendant : descendants) {
+            String heir = heirBranchId(reg, descendant, law, visited);
             if (heir != null) return heir;
         }
         return null;
     }
 
-    private static void sort(List<Character> l, String law) {
-        Comparator<Character> byAge = Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.id);
-        if ("ultimogeniture".equals(law)) l.sort(byAge.reversed());
-        else if ("cognatic".equals(law)) l.sort(byAge);
-        else l.sort(Comparator.comparingInt((Character c) -> c.gender.equals("m") ? 0 : 1).thenComparing(byAge));
+    private static void sortCandidates(List<Candidate> candidates, String law) {
+        candidates.sort((a, b) -> compareCandidates(a, b, law));
     }
+
+    private static int compareCandidates(Candidate a, Candidate b, String law) {
+        int age = Integer.compare(a.birthYear(), b.birthYear());
+        if ("ultimogeniture".equals(law)) age = -age;
+        else if (!"cognatic".equals(law)) {
+            int gender = Integer.compare(a.gender().equals("m") ? 0 : 1,
+                    b.gender().equals("m") ? 0 : 1);
+            if (gender != 0) return gender;
+        }
+        return age != 0 ? age : a.id().compareTo(b.id());
+    }
+
 }

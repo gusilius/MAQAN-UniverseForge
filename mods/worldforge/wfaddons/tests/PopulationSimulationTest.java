@@ -495,6 +495,7 @@ public final class PopulationSimulationTest {
         registry.marry(deceased.id, widow.id, 260);
         ResidentSocial.socialize(deceased, trustedFriend, 75);
         PopulationSimulation.die(registry, deceased.id, 304, "battle");
+        registry.processPendingBereavementBatch(32);
         int widowGrief = CharacterDevelopment.stress(widow);
         int childGrief = CharacterDevelopment.stress(orphanedChild);
         int friendGrief = CharacterDevelopment.stress(trustedFriend);
@@ -521,6 +522,67 @@ public final class PopulationSimulationTest {
                         && requestText.contains(bridgeChild.globalId) && requestText.contains("custom_need")
                         && requestText.contains("\"simulated_days\":\"0\""),
                 "population snapshot uses canonical global UUIDs, preserves extension needs and excludes dead Characters");
+        boolean idsReadOnly = false;
+        try { captured.characterIds().add("not-a-character"); }
+        catch (UnsupportedOperationException expected) { idsReadOnly = true; }
+        byte[] detachedRequest = captured.request();
+        detachedRequest[0] = 0;
+        ok(idsReadOnly && new String(captured.request(), java.nio.charset.StandardCharsets.UTF_8).startsWith("{"),
+                "captured population IDs stay immutable and request access remains defensive");
+
+        CharacterRegistry cursorRegistry = new CharacterRegistry();
+        Character cursorA = cursorRegistry.create("Cursor A", "", "north", "m", 280);
+        Character cursorB = cursorRegistry.create("Cursor B", "", "north", "f", 282);
+        Character cursorC = cursorRegistry.create("Cursor C", "", "north", "m", 284);
+        PopulationComputeBridge.Scan cursorScan = PopulationComputeBridge.beginScan(java.util.List.of(cursorRegistry));
+        Character cursorFirst = cursorScan.nextCharacter(0, 0);
+        Character cursorSecond = cursorScan.nextCharacter(0, 1);
+        cursorRegistry.create("Cursor Appended", "", "north", "f", 286);
+        Character cursorThird = cursorScan.nextCharacter(0, 2);
+        ok(cursorFirst == cursorA && cursorSecond == cursorB && cursorThird == cursorC,
+                "population scan resolves stable key-only ID snapshots after registry append");
+        java.util.Iterator<Character> orderedBeforeAppend = cursorRegistry.iteratorAfter("");
+        Character iteratorFirst = orderedBeforeAppend.next();
+        cursorRegistry.create("Iterator Appended", "", "north", "m", 289);
+        java.util.List<String> iteratorPrefix = new java.util.ArrayList<>();
+        iteratorPrefix.add(iteratorFirst.id);
+        while (orderedBeforeAppend.hasNext()) iteratorPrefix.add(orderedBeforeAppend.next().id);
+        ok(iteratorPrefix.equals(java.util.List.of(cursorA.id, cursorB.id, cursorC.id,
+                        cursorRegistry.idAt(3)))
+                        && !orderedBeforeAppend.hasNext(),
+                "HashMap-backed registry traversal preserves insertion order and excludes mid-pass appends");
+        String anchorId = cursorRegistry.idAt(1);
+        java.util.Iterator<Character> afterAnchor = cursorRegistry.iteratorAfter(anchorId);
+        ok(afterAnchor.hasNext() && afterAnchor.next().id.equals(cursorC.id),
+                "iteratorAfter resumes from the ordered ID directory rather than HashMap iteration");
+        java.util.Iterator<String> idCursor = cursorRegistry.idIteratorAfter(cursorA.id);
+        String firstAfterA = idCursor.next();
+        cursorRegistry.create("ID Iterator Appended", "", "north", "m", 290);
+        java.util.List<String> idCursorTail = new java.util.ArrayList<>();
+        idCursorTail.add(firstAfterA);
+        while (idCursor.hasNext()) idCursorTail.add(idCursor.next());
+        ok(idCursorTail.equals(java.util.List.of(cursorB.id, cursorC.id,
+                        cursorRegistry.idAt(3), cursorRegistry.idAt(4)))
+                        && !idCursor.hasNext(),
+                "key iterator remains stable when an NPC is appended mid-pass");
+        java.util.Iterator<Character> allCursor = cursorRegistry.all().iterator();
+        Character firstAll = allCursor.next();
+        cursorRegistry.create("All View Appended", "", "north", "f", 291);
+        int allCount = 1;
+        while (allCursor.hasNext()) { allCursor.next(); allCount++; }
+        ok(firstAll == cursorA && allCount == 6,
+                "legacy all() iterator has a stable boundary and does not fail on append");
+        java.util.List<String> stableIds = cursorRegistry.idSnapshot();
+        int capturedIdCount = stableIds.size();
+        Character cursorLater = cursorRegistry.create("Cursor Later", "", "north", "m", 288);
+        ok(stableIds.size() == capturedIdCount && !stableIds.contains(cursorLater.id)
+                        && stableIds.equals(cursorRegistry.idPage(0, capturedIdCount))
+                        && cursorRegistry.size() == capturedIdCount + 1,
+                "ID snapshot is detached from Character values and remains stable when new members are appended");
+        ok(cursorRegistry.idPage(1, 2).equals(java.util.List.of(cursorB.id, cursorC.id))
+                        && cursorRegistry.idAt(capturedIdCount).equals(cursorLater.id)
+                        && cursorRegistry.idPage(cursorRegistry.size(), 8).isEmpty(),
+                "bounded ID pages and indexed ID lookup avoid full-population snapshots");
         java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
         resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
         resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);
@@ -535,6 +597,11 @@ public final class PopulationSimulationTest {
         bridgeRegistry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { bridgeEvents.add(event); }
         });
+        // Other test registries were intentionally mutated above. Capture again only after
+        // fixture construction so this validation test exercises frame rejection/application,
+        // not the independent global revision fence for unrelated prior mutations.
+        captured = PopulationComputeBridge.capture(
+                "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
         java.util.Map<String, Object> invalidRoot = new java.util.LinkedHashMap<>(resultRoot);
         java.util.Map<String, Object> invalidPerson = new java.util.LinkedHashMap<>(resultPerson);
         java.util.Map<String, Object> invalidNeeds = new java.util.LinkedHashMap<>(resultNeeds);
@@ -558,6 +625,43 @@ public final class PopulationSimulationTest {
                         && bridgeEvents.stream().anyMatch(event -> event.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
                                 && event.from().equals("infant") && event.to().equals("child")),
                 "validated population frame applies one Character batch and preserves lifecycle events");
+        // The sorted population index must retain the correct owning registry for every result.
+        CharacterRegistry firstOwnerRegistry = new CharacterRegistry();
+        Character firstOwnerPerson = firstOwnerRegistry.create("First Owner", "", "north", "m", 280);
+        CharacterRegistry secondOwnerRegistry = new CharacterRegistry();
+        Character secondOwnerPerson = secondOwnerRegistry.create("Second Owner", "", "south", "f", 285);
+        java.util.List<CharacterRegistry> multiOwnerRegistries =
+                java.util.List.of(firstOwnerRegistry, secondOwnerRegistry);
+        PopulationComputeBridge.Captured multiOwnerCapture = PopulationComputeBridge.capture(
+                "population-multi-owner-test", 301, 1, multiOwnerRegistries);
+        java.util.List<Object> multiOwnerPeople = new java.util.ArrayList<>();
+        for (Character person : java.util.List.of(firstOwnerPerson, secondOwnerPerson)) {
+            java.util.Map<String,Object> result = new java.util.LinkedHashMap<>();
+            result.put("id", person.globalId);
+            result.put("needs", java.util.Map.of("hunger", 50, "rest", 50, "social", 50, "purpose", 50, "leisure", 50));
+            result.put("intent", "idle");
+            int age = 301 - person.birthYear;
+            result.put("age_years", age);
+            result.put("life_stage", age < 6 ? "infant" : age < 13 ? "child" : age < 18 ? "adolescent" : age < 60 ? "adult" : "elder");
+            result.put("simulated_days", "1");
+            result.put("last_simulated_year", 301);
+            result.put("world_day", "1");
+            multiOwnerPeople.add(result);
+        }
+        java.util.Map<String,Object> multiOwnerRoot = new java.util.LinkedHashMap<>();
+        multiOwnerRoot.put("schema_version", 1);
+        multiOwnerRoot.put("world_id", "population-multi-owner-test");
+        multiOwnerRoot.put("year", 301);
+        multiOwnerRoot.put("elapsed_days", 1);
+        multiOwnerRoot.put("world_day", "1");
+        multiOwnerRoot.put("characters", multiOwnerPeople);
+        ok(PopulationComputeBridge.apply(multiOwnerCapture,
+                        dev.worldforge.mod.Json.write(multiOwnerRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        multiOwnerRegistries)
+                        && Long.parseLong(String.valueOf(firstOwnerPerson.props.get("population.simulated_days"))) == 1
+                        && Long.parseLong(String.valueOf(secondOwnerPerson.props.get("population.simulated_days"))) == 1,
+                "cached owner index applies sorted multi-registry results to the correct canonical registries");
+
         PopulationComputeBridge.Captured staleCapture = PopulationComputeBridge.capture(
                 "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
         PopulationSimulation.setNeed(bridgeChild, Need.HUNGER, 9);
@@ -565,6 +669,66 @@ public final class PopulationSimulationTest {
                         dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         java.util.List.of(bridgeRegistry)),
                 "population bridge rejects stale revision before applying a result");
+
+        CharacterRegistry replacementRegistry = new CharacterRegistry();
+        Character beforeReplacement = replacementRegistry.create("Replace Me", "", "north", "f", 280);
+        PopulationComputeBridge.Captured replacementCapture = PopulationComputeBridge.capture(
+                "population-replacement-test", 301, 1, java.util.List.of(replacementRegistry));
+        String replacementRecord = replacementRegistry.toJsonRecord(beforeReplacement);
+        replacementRegistry.applyJsonRecord(replacementRecord, "population-replacement-test", beforeReplacement.globalId);
+        Character afterReplacement = replacementRegistry.getByGlobalId(beforeReplacement.globalId);
+        ok(afterReplacement != null && afterReplacement != beforeReplacement
+                        && !PopulationComputeBridge.apply(replacementCapture, new byte[0], java.util.List.of(replacementRegistry)),
+                "population compute acknowledgement resolves the current canonical UUID and rejects a replaced Character instance");
+
+        CharacterRegistry incrementalRegistry = new CharacterRegistry();
+        java.util.List<Character> batchedPeople = new java.util.ArrayList<>();
+        for (int i = 0; i < 600; i++) {
+            Character person = incrementalRegistry.create("Batch " + i, "", "north", "n", 270);
+            PopulationSimulation.setNeed(person, Need.HUNGER, 5);
+            batchedPeople.add(person);
+        }
+        boolean firstBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        long firstBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!firstBatchComplete && firstBatchApplied == 256
+                        && "0".equals(String.valueOf(batchedPeople.get(256).props.get("population.last_simulated_world_day"))),
+                "world-day fallback advances a bounded 256-Character batch without scanning the remaining population"
+                        + " (complete=" + firstBatchComplete + ", applied=" + firstBatchApplied
+                        + ", nextReceipt=" + batchedPeople.get(256).props.get("population.last_simulated_world_day")
+                        + ", registrySize=" + incrementalRegistry.size() + ")");
+        boolean secondBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        boolean thirdBatchComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        long allBatchApplied = batchedPeople.stream()
+                .filter(person -> "1".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))).count();
+        ok(!secondBatchComplete && thirdBatchComplete && allBatchApplied == 600
+                        && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "resumable world-day cursor completes all batches exactly once and preserves per-Character receipts");
+        boolean stableComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        ok(stableComplete && PopulationSimulation.need(batchedPeople.get(599), Need.HUNGER) == 15,
+                "completed world-day cursor does not replay already acknowledged population state");
+        Character appendedDuringBatch = incrementalRegistry.create("Late Arrival", "", "north", "n", 270);
+        PopulationSimulation.setNeed(appendedDuringBatch, Need.HUNGER, 5);
+        boolean appendedTailComplete = PopulationSimulation.advanceToWorldDayBatch(
+                incrementalRegistry, 1, 0, 301, 256);
+        ok(appendedTailComplete && PopulationSimulation.need(appendedDuringBatch, Need.HUNGER) == 15
+                        && PopulationSimulation.need(batchedPeople.get(0), Need.HUNGER) == 15,
+                "new Characters append to the completed cursor without replaying the existing population");
+        CharacterRegistry replacedRegistry = new CharacterRegistry();
+        Character replaced = replacedRegistry.create("Before Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(replaced, Need.HUNGER, 5);
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        CharacterRegistry replacementSource = new CharacterRegistry();
+        Character restoredPerson = replacementSource.create("After Restore", "", "north", "n", 270);
+        PopulationSimulation.setNeed(restoredPerson, Need.HUNGER, 5);
+        replacedRegistry.fromJson(replacementSource.toJson(), "test-generation-reset");
+        PopulationSimulation.advanceToWorldDayBatch(replacedRegistry, 1, 0, 301, 256);
+        ok(PopulationSimulation.need(replacedRegistry.all().get(0), Need.HUNGER) == 15,
+                "wholesale registry replacement resets the cursor and catches up restored Characters");
 
         CharacterRegistry resumableRegistry = new CharacterRegistry();
         Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
@@ -613,12 +777,31 @@ public final class PopulationSimulationTest {
             ok(false, "durable Population baseline initializes, reloads and validates world identity");
         }
 
+        // Regression: cached registry membership must not cache the mutable alive flag.
+        CharacterRegistry cachedLifeStateRegistry = new CharacterRegistry();
+        Character cachedLifeState = cachedLifeStateRegistry.create("Cached Life State", "", "north", "m", 270);
+        PopulationComputeBridge.Scan lifeStateScan =
+                PopulationComputeBridge.beginScan(java.util.List.of(cachedLifeStateRegistry));
+        PopulationComputeBridge.captureForWorldDay("population-life-state-test", 300, 1, 0,
+                java.util.List.of(cachedLifeStateRegistry), lifeStateScan, 0,
+                lifeStateScan.firstMemberCursor(), Integer.MAX_VALUE);
+        PopulationSimulation.die(cachedLifeStateRegistry, cachedLifeState.id, 300, "test");
+        PopulationComputeBridge.Captured afterCachedDeath = PopulationComputeBridge.captureForWorldDay(
+                "population-life-state-test", 300, 2, 0, java.util.List.of(cachedLifeStateRegistry),
+                lifeStateScan, 0, lifeStateScan.firstMemberCursor(), Integer.MAX_VALUE);
+        ok(afterCachedDeath.characterIds().isEmpty(),
+                "cached population membership re-filters mutable alive state after death");
+
+        PopulationComputeBridge.Scan resumeScan =
+                PopulationComputeBridge.beginScan(java.util.List.of(resumableRegistry));
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
-                "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry));
+                "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry),
+                resumeScan, 0, resumeScan.firstMemberCursor(), Integer.MAX_VALUE);
         ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 0,
                 "same-day Rust retry excludes Characters already acknowledged by durable receipts, even when the global cursor equals the target");
         PopulationComputeBridge.Captured nextDayCapture = PopulationComputeBridge.captureForWorldDay(
-                "population-resume-test", 300, 14, 10, java.util.List.of(resumableRegistry));
+                "population-resume-test", 300, 14, 10, java.util.List.of(resumableRegistry),
+                resumeScan, 0, resumeScan.firstMemberCursor(), Integer.MAX_VALUE);
         Map<?,?> nextDayRequest = (Map<?,?>) Json.parse(new String(nextDayCapture.request(), java.nio.charset.StandardCharsets.UTF_8));
         Map<?,?> nextDayPerson = (Map<?,?>) ((java.util.List<?>) nextDayRequest.get("characters")).get(0);
         ok(nextDayCapture.characterIds().equals(java.util.List.of(resumable.globalId))
@@ -681,6 +864,85 @@ public final class PopulationSimulationTest {
             fixtureFailure.printStackTrace(System.out);
             ok(false, "shared Java/Rust population parity fixture loads and matches");
         }
+
+        CharacterRegistry rolloverRegistry = new CharacterRegistry();
+        java.util.List<Character> rolloverPeople = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            Character person = rolloverRegistry.create("Rollover " + i, "", "north", "n", 270);
+            PopulationSimulation.setNeed(person, Need.HUNGER, 5);
+            rolloverPeople.add(person);
+        }
+        boolean rolloverDayOne = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 1, 0, 301, 2);
+        boolean rolloverDayTwoA = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean rolloverDayTwoB = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean rolloverComplete = false;
+        int rolloverGuard = 0;
+        while (!rolloverComplete && rolloverGuard++ < 10)
+            rolloverComplete = PopulationSimulation.advanceToWorldDayBatch(rolloverRegistry, 2, 0, 301, 2);
+        boolean allAtNewestDay = rolloverPeople.stream().allMatch(person ->
+                "2".equals(String.valueOf(person.props.get("population.last_simulated_world_day")))
+                        && "2".equals(String.valueOf(person.props.get("population.simulated_days")))
+                        && PopulationSimulation.need(person, Need.HUNGER) == 25);
+        ok(!rolloverDayOne && !rolloverDayTwoA && !rolloverDayTwoB
+                        && rolloverComplete && rolloverGuard <= 10 && allAtNewestDay,
+                "world-day rollover preserves unfinished population cursor and catches every Character up without starvation"
+                        + " (complete=" + rolloverComplete + ", guard=" + rolloverGuard + ", allAtNewestDay=" + allAtNewestDay + ")");
+
+        CharacterRegistry rangeRegistry = new CharacterRegistry();
+        Character rangeA = rangeRegistry.create("Range A", "", "", "n", 270);
+        Character rangeB = rangeRegistry.create("Range B", "", "", "n", 270);
+        Character rangeC = rangeRegistry.create("Range C", "", "", "n", 270);
+        ok(rangeRegistry.range(1, 3).equals(java.util.List.of(rangeB, rangeC))
+                        && rangeRegistry.range(2, 2).isEmpty(),
+                "bounded registry range preserves insertion order and supports empty windows");
+        boolean invalidRangeRejected = false;
+        try { rangeRegistry.range(0, 4); }
+        catch (IndexOutOfBoundsException expected) { invalidRangeRejected = true; }
+        ok(invalidRangeRejected, "bounded registry range rejects a window beyond captured membership");
+
+        CharacterRegistry iteratorRegistry = new CharacterRegistry();
+        Character iteratorA = iteratorRegistry.create("Iterator A", "", "", "n", 270);
+        Character iteratorB = iteratorRegistry.create("Iterator B", "", "", "n", 270);
+        Character iteratorC = iteratorRegistry.create("Iterator C", "", "", "n", 270);
+        java.util.Iterator<Character> stableCursor = iteratorRegistry.iteratorAfter("");
+        ok(stableCursor.next() == iteratorA && stableCursor.next() == iteratorB,
+                "registry scheduler iterator advances in canonical insertion order");
+        Character iteratorD = iteratorRegistry.create("Iterator D", "", "", "n", 270);
+        boolean appendInvalidates = false;
+        Character stableThird = stableCursor.next();
+        boolean stableBoundary = !stableCursor.hasNext() && stableThird == iteratorC;
+        java.util.Iterator<Character> resumedCursor = iteratorRegistry.iteratorAfter(iteratorB.id);
+        ok(stableBoundary && resumedCursor.next() == iteratorC && resumedCursor.next() == iteratorD,
+                "scheduler iterator recovers after append without replaying acknowledged Characters");
+
+        CharacterRegistry scheduledAppendRegistry = new CharacterRegistry();
+        Character scheduledA = scheduledAppendRegistry.create("Scheduled A", "", "", "n", 270);
+        Character scheduledB = scheduledAppendRegistry.create("Scheduled B", "", "", "n", 270);
+        Character scheduledC = scheduledAppendRegistry.create("Scheduled C", "", "", "n", 270);
+        boolean scheduledFirst = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        Character scheduledD = scheduledAppendRegistry.create("Scheduled D", "", "", "n", 270);
+        boolean scheduledSecond = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        boolean scheduledThird = PopulationSimulation.advanceToWorldDayBatch(scheduledAppendRegistry, 1, 0, 301, 2);
+        ok(!scheduledFirst && scheduledSecond && scheduledThird
+                        && PopulationSimulation.need(scheduledA, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledB, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledC, Need.HUNGER) == 10
+                        && PopulationSimulation.need(scheduledD, Need.HUNGER) == 10,
+                "population scheduler resumes after append and simulates each new Character exactly once");
+
+        CharacterRegistry completedAppendRegistry = new CharacterRegistry();
+        Character completedAppendA = completedAppendRegistry.create("Completed Append A", "", "", "n", 270);
+        Character completedAppendB = completedAppendRegistry.create("Completed Append B", "", "", "n", 270);
+        boolean initialPassComplete = PopulationSimulation.advanceToWorldDayBatch(
+                completedAppendRegistry, 1, 0, 301, 8);
+        Character completedAppendC = completedAppendRegistry.create("Completed Append C", "", "", "n", 270);
+        boolean appendedPassComplete = PopulationSimulation.advanceToWorldDayBatch(
+                completedAppendRegistry, 1, 0, 301, 8);
+        ok(initialPassComplete && appendedPassComplete
+                        && PopulationSimulation.need(completedAppendA, Need.HUNGER) == 10
+                        && PopulationSimulation.need(completedAppendB, Need.HUNGER) == 10
+                        && PopulationSimulation.need(completedAppendC, Need.HUNGER) == 10,
+                "completed population cursor releases its snapshot and resumes at the appended tail without replaying the acknowledged prefix");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);

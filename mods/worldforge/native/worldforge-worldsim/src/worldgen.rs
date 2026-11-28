@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::stable_hash;
 use std::collections::BTreeSet;
 
+/// Per-request output safety budget. It bounds generated records, never world dimensions.
+const MAX_GENERATED_ANCHORS: u64 = 262_144;
+/// Macro coordinates are independent of Minecraft's loaded-chunk window.
+const MAX_WORLD_AXIS: u32 = 1_048_576;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldGenRequest {
     pub seed: u64,
@@ -67,31 +72,48 @@ fn roll(seed: u64, domain: &str, index: u64, max: u64) -> u64 {
     stable_hash(seed, domain, &index.to_string(), "geography", 0) % max
 }
 
+/// Select a deterministic unique macro-coordinate without scanning the entire world.
+/// This keeps generation cost proportional to the number of requested anchors, not world area.
 fn unique_point(seed: u64, domain: &str, index: u64, width: u32, height: u32,
                 used: &mut BTreeSet<(u32, u32)>) -> (u32, u32) {
     let area = u64::from(width) * u64::from(height);
     let start = roll(seed, domain, index, area);
-    for offset in 0..area {
-        let point = (start + offset) % area;
-        let x = (point % u64::from(width)) as u32;
-        let z = (point / u64::from(width)) as u32;
-        if used.insert((x, z)) { return (x, z); }
+    // A few independently hashed probes make collisions negligible even on enormous maps.
+    for attempt in 0..64_u64 {
+        let point = if attempt == 0 { start } else {
+            roll(seed, domain, index.wrapping_add(attempt.wrapping_mul(0x9e37_79b9)), area)
+        };
+        let candidate = ((point % u64::from(width)) as u32,
+                         (point / u64::from(width)) as u32);
+        if used.insert(candidate) { return candidate; }
     }
-    unreachable!("validated geography dimensions provide enough unique points")
+    // Deterministic collision fallback. In normal sparse worlds this path is rare;
+    // unlike the old implementation it is never entered just because the map is large.
+    for offset in 0..area {
+        let point = start.wrapping_add(offset) % area;
+        let candidate = ((point % u64::from(width)) as u32,
+                         (point / u64::from(width)) as u32);
+        if used.insert(candidate) { return candidate; }
+    }
+    unreachable!("validated macro-world dimensions provide enough unique points")
 }
 
 pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, WorldGenError> {
-    if request.width < 64 || request.height < 64 || request.width > 8192 || request.height > 8192 {
+    if request.width < 64 || request.height < 64
+        || request.width > MAX_WORLD_AXIS || request.height > MAX_WORLD_AXIS {
         return Err(WorldGenError::InvalidDimensions);
     }
-    if request.region_count == 0 || request.region_count > 128
-        || u64::from(request.region_count) > u64::from(request.width) * u64::from(request.height) {
+    let world_area = u64::from(request.width) * u64::from(request.height);
+    if request.region_count == 0
+        || u64::from(request.region_count) > world_area
+        || u64::from(request.region_count) > MAX_GENERATED_ANCHORS {
         return Err(WorldGenError::InvalidRegionCount);
     }
     let required_points = u64::from(request.region_count)
         .saturating_mul(u64::from(request.provinces_per_region).saturating_add(1));
-    if request.provinces_per_region == 0 || request.provinces_per_region > 64
-        || required_points > u64::from(request.width) * u64::from(request.height) {
+    if request.provinces_per_region == 0
+        || required_points > world_area
+        || required_points > MAX_GENERATED_ANCHORS {
         return Err(WorldGenError::InvalidProvinceCount);
     }
 

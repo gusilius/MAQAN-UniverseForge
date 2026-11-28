@@ -122,7 +122,7 @@ public class RelationsTest {
         Relations r3 = new Relations(); r3.fromJson(r.toJson());
         ok(r3.bond(P, w.id).wage == r.bond(P, w.id).wage && r3.openRequest(w.id) != null && r3.openRequest(w.id).item.equals(q3.item), "save/load");
 
-        String vj = r3.viewJson(P, reg::get, x -> "", 101);
+        String vj = r3.viewJson(P, reg::acquire, x -> "", 101);
         ok(vj.contains("Ганс") && vj.contains("\"req\""), "viewJson: знакомые и открытая просьба");
 
         // ---- диалоги ----

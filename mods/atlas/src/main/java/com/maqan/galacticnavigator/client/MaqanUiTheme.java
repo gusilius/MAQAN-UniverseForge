@@ -1,6 +1,5 @@
 package com.maqan.galacticnavigator.client;
 
-import com.maqan.galacticnavigator.navigation.NavigatorNativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -32,7 +31,6 @@ public final class MaqanUiTheme {
 
     /** Quiet near-black canvas. The actual celestial scene remains untouched. */
     public static void backdrop(GuiGraphics g, int width, int height) {
-        if (NavigatorNativeBridge.renderChrome(g, Minecraft.getInstance().font, width, height, 0.0f, 0)) return;
         g.fill(0, 0, width, height, BACKGROUND);
         // A single low-contrast horizon line gives the workspace depth without
         // competing with planet models, orbit paths or map annotations.
@@ -43,7 +41,6 @@ public final class MaqanUiTheme {
     /** Flat translucent surface; no bevels, corner cuts or decorative brackets. */
     public static void panel(GuiGraphics g, int left, int top, int right, int bottom) {
         if (right <= left || bottom <= top) return;
-        if (NavigatorNativeBridge.renderPanel(g, left, top, right, bottom, CYAN)) return;
         g.fill(left, top, right, bottom, PANEL);
         g.fill(left, top, right, top + 1, PANEL_EDGE);
         g.fill(left, bottom - 1, right, bottom, 0x333E5265);
@@ -52,7 +49,6 @@ public final class MaqanUiTheme {
     /** Minimal rectangular button with a precise active signal. */
     public static void button(GuiGraphics g, Font font, Button button) {
         if (button == null || !button.visible) return;
-        if (NavigatorNativeBridge.renderButton(g, button)) return;
         int x = button.getX(), y = button.getY(), w = button.getWidth(), h = button.getHeight();
         boolean hover = button.isHoveredOrFocused();
         boolean enabled = button.active;
@@ -84,7 +80,6 @@ public final class MaqanUiTheme {
     public static void sectionHeader(GuiGraphics g, Font font, String label,
                                      int x, int y, int width, int height) {
         if (label == null || width <= 0 || height <= 0) return;
-        if (NavigatorNativeBridge.renderSectionHeader(g, font, label, x, y, width, height)) return;
         g.drawString(font, label, x, y, CYAN, false);
         int lineY = y + Math.max(13, height - 2);
         g.fill(x, lineY, x + width, lineY + 1, 0x443D5265);
@@ -92,7 +87,6 @@ public final class MaqanUiTheme {
     }
 
     public static void titleRight(GuiGraphics g, Font font, String title, String subtitle, int width) {
-        if (NavigatorNativeBridge.renderTitleRight(g, font, title, subtitle, width)) return;
         g.drawString(font, title, 18, 13, TEXT, false);
         if (subtitle != null && !subtitle.isBlank())
             g.drawString(font, subtitle, Math.max(18, width - 18 - font.width(subtitle)), 27, MUTED, false);
@@ -101,7 +95,6 @@ public final class MaqanUiTheme {
     }
 
     public static void title(GuiGraphics g, Font font, String title, String subtitle, int width) {
-        if (NavigatorNativeBridge.renderTitle(g, font, title, subtitle, width)) return;
         g.drawString(font, title, 18, 13, TEXT, false);
         if (subtitle != null && !subtitle.isBlank()) g.drawString(font, subtitle, 18, 27, MUTED, false);
         g.fill(12, 42, width - 12, 43, 0x443D5265);

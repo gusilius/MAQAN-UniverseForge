@@ -44,7 +44,7 @@ import net.minecraft.world.level.ChunkPos;
  */
 public final class VanillaVillageAdapter {
     private static final int RECONCILE_RADIUS = 64;
-    private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 2;
+    private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 1;
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING_INFRASTRUCTURE = new LinkedHashMap<>();
     private static final Set<String> PENDING_INFRASTRUCTURE_KEYS = new HashSet<>();
     private static final Set<Colony> DIRTY_INFRASTRUCTURE_COLONIES = new LinkedHashSet<>();
@@ -60,13 +60,16 @@ public final class VanillaVillageAdapter {
             StructureStart start = entry.getValue();
             if (start == null || !start.isValid()) continue;
             var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
-            if (typeKey == null || !typeKey.getPath().contains("village")) continue;
+            if (typeKey == null) continue;
             BoundingBox bounds = start.getBoundingBox();
             int x = (bounds.minX() + bounds.maxX()) / 2;
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
-            adopt(level, x, z, typeKey.toString());
+            if (isSettlementAnchor(typeKey.getPath())) adopt(level, x, z, typeKey.toString());
+            else adoptCataloguedStructure(level, x, z, typeKey.toString());
         }
-        enqueueInfrastructureChunk(level, chunk.getPos());
+        // Only chunks near an already-known vanilla village can contain adoptable
+        // infrastructure. Synthetic/strategic colonies must not trigger this scan.
+        if (hasNearbyVillage(level, chunk.getPos())) enqueueInfrastructureChunk(level, chunk.getPos());
     }
 
     /**
@@ -113,6 +116,71 @@ public final class VanillaVillageAdapter {
                 lastInfrastructureSaveTick = tick;
             }
         }
+    }
+
+    /** Namespace-independent settlement-anchor rules for vanilla and arbitrary structure mods. */
+    private static boolean isSettlementAnchor(String path) {
+        String value = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        if (SettleMod.STRUCTURE_CATALOG.matchesStructureClass("settlement_anchor", value)) return true;
+        // Backward-compatible fallback for older datapacks that have not yet loaded
+        // the extended catalogue; namespaces are intentionally ignored.
+        return value.contains("village") || value.contains("settlement") || value.contains("hamlet")
+                || value.contains("town") || value.contains("city") || value.contains("colony")
+                || value.contains("homestead") || value.contains("outpost") || value.contains("camp")
+                || value.contains("tribal");
+    }
+
+    /** Existing modded houses, farms, halls, forts and workshops join the nearest canonical settlement. */
+    private static void adoptCataloguedStructure(ServerLevel level, int x, int z, String structureType) {
+        if (SettleMod.DEFS == null || !SettleMod.STRUCTURE_CATALOG.loaded()) return;
+        String matchedClass = SettleMod.STRUCTURE_CATALOG.structureClasses().stream()
+                .filter(classId -> SettleMod.STRUCTURE_CATALOG.matchesStructureClass(classId, structureType))
+                .sorted().findFirst().orElse("");
+        if (matchedClass.isBlank()) return;
+        var definition = SettleMod.DEFS.buildings.values().stream()
+                .filter(building -> matchedClass.equals(building.structureClass))
+                .sorted(java.util.Comparator.comparing(building -> building.id))
+                .findFirst().orElse(null);
+        if (definition == null) return;
+        String dimension = level.dimension().location().toString();
+        Colony colony = SettleMod.COLONIES.values().stream()
+                .filter(candidate -> candidate != null && candidate.s != null
+                        && dimension.equals(candidate.dim))
+                .filter(candidate -> {
+                    long dx = (long) candidate.cx - x, dz = (long) candidate.cz - z;
+                    return dx * dx + dz * dz <= 256L * 256L;
+                })
+                .min(java.util.Comparator.comparingLong(candidate -> {
+                    long dx = (long) candidate.cx - x, dz = (long) candidate.cz - z;
+                    return dx * dx + dz * dz;
+                })).orElse(null);
+        if (colony == null) return; // It remains in the durable world structure registry for later linkage.
+        String request = "mc.structure." + Integer.toUnsignedString(
+                (dimension + "|" + structureType + "|" + x + "|" + z).hashCode(), 36);
+        try {
+            colony.s.adoptExistingBuilding(request, definition.id, x - colony.cx, z - colony.cz);
+            DIRTY_INFRASTRUCTURE_COLONIES.add(colony);
+        } catch (RuntimeException failure) {
+            SettleMod.LOGGER.debug("wf_settle: could not link mod structure {} to {}: {}",
+                    structureType, colony.s.id, failure.getMessage());
+        }
+    }
+
+    private static boolean isSettlementOperation(String operation) {
+        return operation != null && (operation.startsWith("worldforge:structure:")
+                || operation.startsWith("minecraft:village:"));
+    }
+
+    private static boolean hasNearbyVillage(ServerLevel level, ChunkPos position) {
+        String dimension = level.dimension().location().toString();
+        double centerX = position.getMinBlockX() + 8.0;
+        double centerZ = position.getMinBlockZ() + 8.0;
+        for (Colony colony : ColonyInterestIndex.nearbyAt(
+                dimension, centerX, centerZ, RECONCILE_RADIUS + 12.0)) {
+            if (colony != null && colony.genesisOperationId != null
+                    && isSettlementOperation(colony.genesisOperationId)) return true;
+        }
+        return false;
     }
 
     private static void enqueueInfrastructureChunk(ServerLevel level, ChunkPos position) {
@@ -197,10 +265,11 @@ public final class VanillaVillageAdapter {
 
         String dimension = level.dimension().location().toString();
         String stableLocationId = java.util.UUID.nameUUIDFromBytes(
-                (dimension + ":" + x + ":" + z).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                (dimension + ":" + structureType + ":" + x + ":" + z)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .toString().replace("-", "");
-        String id = "vanilla_village_" + stableLocationId;
-        String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
+        String id = "world_structure_" + stableLocationId;
+        String operation = "worldforge:structure:" + dimension + ":" + structureType + ":" + x + ":" + z;
         // If autonomous emergence already materialized this location, adopt that exact
         // canonical colony instead of registering a second settlement for the structure.
         // Prefer the exact stable village ID on repeat discovery; only then reconcile
@@ -254,63 +323,71 @@ public final class VanillaVillageAdapter {
                 colony.cz - RECONCILE_RADIUS, colony.cx + RECONCILE_RADIUS + 1,
                 level.getMaxBuildHeight(), colony.cz + RECONCILE_RADIUS + 1);
         List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
-        Map<String, Character> byEntity = new LinkedHashMap<>();
-        for (Character person : registry.all()) {
-            Object raw = person.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings) {
-                Object uuid = bindings.get("villager");
-                if (uuid instanceof String value) byEntity.put(value, person);
-            }
-            Object legacy = person.props.get("minecraft.villager_uuid");
-            if (legacy instanceof String value) byEntity.putIfAbsent(value, person);
-        }
-
         Set<String> residentIds = new LinkedHashSet<>();
         for (String existingId : colony.residentCharacterIds) {
-            Character existing = PeopleMod.authority().getGlobal(existingId);
-            if (existing != null && existing.alive) residentIds.add(existingId);
+            try (var lease = registry.access().acquireGlobal(existingId)) {
+                if (lease != null && lease.get() != null && lease.get().alive) residentIds.add(existingId);
+            }
         }
-        List<Character> changed = new ArrayList<>();
+        Set<String> changedIds = new LinkedHashSet<>();
         int year = WorldForgeApi.clock().year();
         for (Villager villager : villagers) {
             String uuid = villager.getUUID().toString();
-            Character person = byEntity.get(uuid);
-            if (person == null) {
-                person = registry.create(villager.getName().getString(), "", "", "m", year - 25);
-                person.props.put("minecraft.villager_uuid", uuid);
-                person.props.put("population.location", colony.s.id);
-                person.props.put("population.employer", "settlement:" + colony.s.id);
+            String globalId = registry.entityBindingOwner(uuid);
+            boolean created = globalId == null || globalId.isBlank();
+            if (created) globalId = registry.create(villager.getName().getString(), "", "", "m", year - 25).globalId;
+            try (var lease = registry.access().acquireGlobal(globalId)) {
+                if (lease == null) continue;
+                Character person = lease.get();
+                if (person == null || !person.alive) continue;
+                boolean changed = created;
+                if (!uuid.equals(person.props.get("minecraft.villager_uuid"))) {
+                    person.props.put("minecraft.villager_uuid", uuid);
+                    changed = true;
+                }
+                if (!(person.props.get("origin.race") instanceof String race) || race.isBlank()) {
+                    person.props.put("origin.race", "human");
+                    person.props.put("origin.source", "minecraft-village");
+                    changed = true;
+                }
+                if (person.culture == null || person.culture.isBlank()) {
+                    person.culture = PeopleMod.NAMES.culture("northern");
+                    changed = true;
+                }
+                if (!colony.s.id.equals(person.props.get("population.location"))) {
+                    person.props.put("population.location", colony.s.id);
+                    changed = true;
+                }
+                String employer = "settlement:" + colony.s.id;
+                if (!employer.equals(person.props.get("population.employer"))) {
+                    person.props.put("population.employer", employer);
+                    changed = true;
+                }
+                boolean bindingChanged = !uuid.equals(registry.entityBindingUuidForGlobal(globalId, "villager"));
                 if (!registry.bindEntity(person.id, "villager", uuid)) continue;
-                changed.add(person);
-                byEntity.put(uuid, person);
+                if (changed || bindingChanged) {
+                    CharacterRegistry.recordCharacterMutation();
+                    changedIds.add(globalId);
+                }
+                residentIds.add(globalId);
             }
-            // Vanilla villagers are native human inhabitants, not unclassified placeholders.
-            // Keep their identity in the same origin/culture schema used by emergent Characters.
-            boolean identityChanged = false;
-            if (!(person.props.get("origin.race") instanceof String race) || race.isBlank()) {
-                person.props.put("origin.race", "human");
-                person.props.put("origin.source", "minecraft-village");
-                identityChanged = true;
+        }
+
+        // Persist every changed canonical resident before publishing the settlement projection.
+        for (String changedId : changedIds) {
+            try (var lease = registry.access().acquireGlobal(changedId)) {
+                if (lease == null || !PeopleMod.persistCharacter(lease.get(), level.getServer())) {
+                    SettleMod.LOGGER.error("wf_settle: canonical villager {} for {} could not be persisted; adoption will retry",
+                            changedId, colony.s.id);
+                    return;
+                }
             }
-            if (person.culture == null || person.culture.isBlank()) {
-                person.culture = PeopleMod.NAMES.culture("northern");
-                identityChanged = true;
-            }
-            if (identityChanged) CharacterRegistry.recordCharacterMutation();
-            person.props.put("population.location", colony.s.id);
-            person.props.put("population.employer", "settlement:" + colony.s.id);
-            residentIds.add(person.globalId);
         }
 
         if (!residentIds.equals(colony.residentCharacterIds)) {
             SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds);
             colony.s.setCanonicalPopulation(residentIds.size());
             for (String id : residentIds) SettleMod.attachExistingCharacter(colony.s.id, id);
-            if (!changed.isEmpty() && !PeopleMod.persistCharacter(changed.get(0), level.getServer())) {
-                SettleMod.LOGGER.error("wf_settle: canonical villagers for {} could not be persisted; village adoption will retry",
-                        colony.s.id);
-                return;
-            }
             if (!SettleMod.saveDurably(level.getServer()))
                 SettleMod.LOGGER.error("wf_settle: adopted village {} could not be durably saved", colony.s.id);
         } else if (!colony.s.hasCanonicalPopulation()) {
@@ -337,8 +414,31 @@ public final class VanillaVillageAdapter {
     private static void reconcileInfrastructureChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunkPos) {
         int minX = chunkPos.getMinBlockX(), minZ = chunkPos.getMinBlockZ();
         String dimension = level.dimension().location().toString();
-        for (Colony colony : SettleMod.COLONIES.values()) {
+        // A structure may have been discovered before any settlement existed nearby.
+        // Revisit starts only in already-loaded chunks around a known settlement so
+        // modded houses, farms, forts and civic buildings can be linked later.
+        ChunkAccess loadedChunk = level.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z);
+        if (loadedChunk != null) {
+            for (Map.Entry<net.minecraft.world.level.levelgen.structure.Structure, StructureStart> entry
+                    : loadedChunk.getAllStarts().entrySet()) {
+                StructureStart start = entry.getValue();
+                if (start == null || !start.isValid()) continue;
+                var typeKey = BuiltInRegistries.STRUCTURE_TYPE.getKey(entry.getKey().type());
+                if (typeKey == null) continue;
+                BoundingBox bounds = start.getBoundingBox();
+                int centerX = (bounds.minX() + bounds.maxX()) / 2;
+                int centerZ = (bounds.minZ() + bounds.maxZ()) / 2;
+                if (isSettlementAnchor(typeKey.getPath())) adopt(level, centerX, centerZ, typeKey.toString());
+                else adoptCataloguedStructure(level, centerX, centerZ, typeKey.toString());
+            }
+        }
+        // Restrict this block/heightmap scan to village colonies in the spatial
+        // neighborhood; never walk the complete strategic settlement registry per chunk.
+        for (Colony colony : ColonyInterestIndex.nearbyAt(
+                dimension, minX + 8.0, minZ + 8.0, RECONCILE_RADIUS + 12.0)) {
             if (colony == null || colony.s == null || !dimension.equals(colony.dim)
+                    || colony.genesisOperationId == null
+                    || !colony.genesisOperationId.startsWith("minecraft:village:")
                     || Math.abs(minX + 8 - colony.cx) > RECONCILE_RADIUS
                     || Math.abs(minZ + 8 - colony.cz) > RECONCILE_RADIUS) continue;
             String chunkKey = chunkPos.x + ":" + chunkPos.z;
@@ -419,13 +519,16 @@ public final class VanillaVillageAdapter {
         CharacterRegistry registry = PeopleMod.registryFor(level);
         if (registry == null) return;
         String uuid = villager.getUUID().toString();
-        for (Character person : registry.all()) {
-            Object raw = person.props.get("population.entity_bindings");
-            if (!(raw instanceof Map<?, ?> bindings) || !uuid.equals(bindings.get("villager"))) continue;
+        String globalId = registry.entityBindingOwner(uuid);
+        if (globalId == null || globalId.isBlank()) return;
+        try (var lease = registry.access().acquireGlobal(globalId)) {
+            if (lease == null) return;
+            Character person = lease.get();
+            if (person == null) return;
             if (person.alive) PopulationSimulation.die(registry, person.id,
                     WorldForgeApi.clock().year(), "vanilla-villager-death");
-            PeopleMod.persistCharacter(person, level.getServer());
-            break;
+            if (!PeopleMod.persistCharacter(person, level.getServer()))
+                SettleMod.LOGGER.error("wf_settle: deceased vanilla villager {} could not be durably persisted", globalId);
         }
     }
 }

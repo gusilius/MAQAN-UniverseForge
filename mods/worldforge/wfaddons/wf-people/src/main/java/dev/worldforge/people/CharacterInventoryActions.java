@@ -97,7 +97,7 @@ public final class CharacterInventoryActions {
         return journal.execute(request,
                 req -> actor.alive && CharacterInventory.canAccessContainer(owner, containerId, actor)
                         ? null : "Inventory actor is dead or has no access to this container",
-                (req, attempt) -> CharacterInventoryTransactions.executeExact(
+                (req, attempt) -> CharacterInventoryTransactions.executeExactStorageAware(
                         req.requestId(), authority, owner, actor, containerId, itemId, data,
                         playerSlot, amount, true, persist)
                         ? ActionResult.ok("Items deposited")
@@ -118,7 +118,7 @@ public final class CharacterInventoryActions {
         return journal.execute(request,
                 req -> actor.alive && CharacterInventory.canAccessContainer(owner, containerId, actor)
                         ? null : "Inventory actor is dead or has no access to this container",
-                (req, attempt) -> CharacterInventoryTransactions.executeExact(
+                (req, attempt) -> CharacterInventoryTransactions.executeExactStorageAware(
                         req.requestId(), authority, owner, actor, containerId, itemId, data,
                         -1, amount, false, persist)
                         ? ActionResult.ok("Items withdrawn")

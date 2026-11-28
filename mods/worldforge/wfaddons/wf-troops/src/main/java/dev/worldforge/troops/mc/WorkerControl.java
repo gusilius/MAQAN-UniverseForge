@@ -34,9 +34,9 @@ final class WorkerControl {
     static ActionResult workArea(ServerPlayer p, OrderPacket o) {
         int accepted = 0;
         boolean denied = false;
-        String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest", "honey", "herbs"};
-        String[] roles = {"lumberjack", "stonemason", "miner", "builder", "builder", "farmer", "beekeeper", "herbalist"};
-        String[] labels = {"вырубать целые деревья", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок", "собирать зрелые культуры", "собирать мёд", "собирать лекарственные растения"};
+        String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest", "honey", "herbs", "demolish"};
+        String[] roles = {"lumberjack", "stonemason", "miner", "builder", "builder", "farmer", "beekeeper", "herbalist", "builder"};
+        String[] labels = {"вырубать целые деревья", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок", "собирать зрелые культуры", "собирать мёд", "собирать лекарственные растения", "снести указанный блок"};
         String[] params = o.target().split(":", 4);
         int overlay = 2, level = 0;
         try { if (params.length > 0) overlay = Math.max(0, Math.min(2, Integer.parseInt(params[0]))); }
@@ -49,6 +49,7 @@ final class WorkerControl {
         try { if (params.length > 3) halfZ = Math.max(0, Math.min(64, Integer.parseInt(params[3]))); }
         catch (NumberFormatException ignored) {}
         String mode = modes[o.kind()];
+        if ("demolish".equals(mode) && o.arg() != 0) return ActionResult.fail("Точечный снос принимает только один явно указанный блок");
         for (String id : o.ids()) {
             Entity entity;
             try { entity = p.serverLevel().getEntity(UUID.fromString(id)); }

@@ -16,6 +16,22 @@ import net.minecraft.server.level.ServerPlayer;
 public final class MapCommands {
     private MapCommands() {}
 
+    private static final java.util.List<String> VISUAL_HINTS = java.util.List.of(
+            "auto", "worldforge:capital", "worldforge:city", "worldforge:settlement",
+            "worldforge:village", "worldforge:castle", "worldforge:port", "worldforge:mine",
+            "worldforge:temple", "worldforge:ruin", "worldforge:camp", "worldforge:caravan",
+            "worldforge:army", "maqan:army.infantry", "maqan:army.cavalry",
+            "maqan:army.siege", "maqan:commander.knight", "maqan:commander.banneret",
+            "maqan:city.walled", "maqan:castle.royal", "maqan:village.rural");
+
+    private static com.mojang.brigadier.suggestion.SuggestionProvider<CommandSourceStack> visualSuggestions() {
+        return (context, builder) -> {
+            String remaining = builder.getRemaining().toLowerCase(java.util.Locale.ROOT);
+            for (String id : VISUAL_HINTS) if (id.startsWith(remaining)) builder.suggest(id);
+            return builder.buildFuture();
+        };
+    }
+
     private static MapData data(CommandSourceStack s) {
         MapData m = EditorManager.dataFor(s.getLevel());
         if (m == null) s.sendFailure(Component.literal("В этом измерении нет карты worldforge"));
@@ -39,6 +55,80 @@ public final class MapCommands {
                                 s.sendFailure(Component.literal(e.getMessage()));
                                 return 0;
                             }
+                        }))))
+                .then(Commands.literal("addwith").then(Commands.argument("type", StringArgumentType.word())
+                        .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
+                        .then(Commands.argument("visual", StringArgumentType.word()).suggests(visualSuggestions())
+                                .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
+                                    CommandSourceStack s = c.getSource();
+                                    MapData m = data(s);
+                                    if (m == null) return 0;
+                                    String type = StringArgumentType.getString(c, "type");
+                                    String visual = StringArgumentType.getString(c, "visual");
+                                    try {
+                                        Markers.Marker mk = EditorManager.markers(s.getServer(), m).add(
+                                                StringArgumentType.getString(c, "name"), type,
+                                                (int) s.getPosition().x, (int) s.getPosition().z, 0xFFFFFF);
+                                        EditorManager.markers(s.getServer(), m).setVisualProfile(mk.id,
+                                                "auto".equalsIgnoreCase(visual) ? "" : visual);
+                                        s.sendSuccess(() -> Component.literal("Метка '" + mk.name
+                                                + "' добавлена · визуальный профиль: "
+                                                + (mk.visualProfile.isBlank() ? "автоматический" : mk.visualProfile)), true);
+                                        return 1;
+                                    } catch (IllegalArgumentException e) {
+                                        s.sendFailure(Component.literal(e.getMessage()));
+                                        return 0;
+                                    }
+                                })))))
+                .then(Commands.literal("addat").then(Commands.argument("type", StringArgumentType.word())
+                        .suggests((c, b) -> { for (String t : Markers.TYPES) b.suggest(t); return b.buildFuture(); })
+                        .then(Commands.argument("visual", StringArgumentType.word()).suggests(visualSuggestions())
+                                .then(Commands.argument("x", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> {
+                                                    CommandSourceStack s = c.getSource();
+                                                    MapData m = data(s);
+                                                    if (m == null) return 0;
+                                                    String type = StringArgumentType.getString(c, "type");
+                                                    String visual = StringArgumentType.getString(c, "visual");
+                                                    try {
+                                                        Markers markers = EditorManager.markers(s.getServer(), m);
+                                                        Markers.Marker marker = markers.add(
+                                                                StringArgumentType.getString(c, "name"), type,
+                                                                IntegerArgumentType.getInteger(c, "x"),
+                                                                IntegerArgumentType.getInteger(c, "z"), 0xFFFFFF);
+                                                        markers.setVisualProfile(marker.id,
+                                                                "auto".equalsIgnoreCase(visual) ? "" : visual);
+                                                        s.sendSuccess(() -> Component.literal("Политический объект '"
+                                                                + marker.name + "' создан в " + marker.x + ", " + marker.z
+                                                                + " · визуал: " + ("auto".equalsIgnoreCase(visual) ? "автоматический" : visual)), true);
+                                                        return 1;
+                                                    } catch (IllegalArgumentException e) {
+                                                        s.sendFailure(Component.literal(e.getMessage()));
+                                                        return 0;
+                                                    }
+                                                })))))))
+                .then(Commands.literal("visual").then(Commands.argument("id", StringArgumentType.word())
+                        .then(Commands.argument("profile", StringArgumentType.word()).suggests(visualSuggestions()).executes(c -> {
+                            CommandSourceStack s = c.getSource();
+                            MapData m = data(s);
+                            if (m == null) return 0;
+                            String markerId = StringArgumentType.getString(c, "id");
+                            String profile = StringArgumentType.getString(c, "profile");
+                            if (!"auto".equalsIgnoreCase(profile)
+                                    && net.minecraft.resources.ResourceLocation.tryParse(profile) == null) {
+                                s.sendFailure(Component.literal("Профиль должен иметь формат namespace:id или auto"));
+                                return 0;
+                            }
+                            boolean updated = EditorManager.markers(s.getServer(), m).setVisualProfile(markerId,
+                                    "auto".equalsIgnoreCase(profile) ? "" : profile);
+                            if (!updated) {
+                                s.sendFailure(Component.literal("Не удалось сохранить визуальный профиль объекта"));
+                                return 0;
+                            }
+                            s.sendSuccess(() -> Component.literal("Визуальный профиль объекта " + markerId
+                                    + " обновлён: " + ("auto".equalsIgnoreCase(profile) ? "автоматический" : profile)), true);
+                            return 1;
                         }))))
                 .then(Commands.literal("remove").then(Commands.argument("id", StringArgumentType.greedyString()).executes(c -> {
                     CommandSourceStack s = c.getSource();

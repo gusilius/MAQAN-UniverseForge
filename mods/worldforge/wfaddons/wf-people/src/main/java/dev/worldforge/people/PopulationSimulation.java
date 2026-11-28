@@ -10,6 +10,33 @@ import java.util.*;
  * never independent people. This class is deliberately free of Minecraft classes.
  */
 public final class PopulationSimulation {
+    private static final int DEFAULT_WORLD_DAY_BATCH_SIZE = 256;
+    private static final class WorldDayCursor {
+        final long targetDay;
+        final long fallbackDay;
+        final int year;
+        final long membershipResetGeneration;
+        long membershipAppendGeneration;
+        int snapshotSize;
+        int nextIndex;
+        boolean complete;
+        boolean catchUpPass;
+        WorldDayCursor(long targetDay, long fallbackDay, int year, long membershipResetGeneration,
+                       long membershipAppendGeneration, int snapshotSize, int nextIndex, boolean catchUpPass) {
+            this.targetDay = targetDay;
+            this.fallbackDay = fallbackDay;
+            this.year = year;
+            this.membershipResetGeneration = membershipResetGeneration;
+            this.membershipAppendGeneration = membershipAppendGeneration;
+            this.snapshotSize = snapshotSize;
+            this.nextIndex = nextIndex;
+            this.catchUpPass = catchUpPass;
+        }
+    }
+    /** Read-only scheduler progress for diagnostics; does not advance or mutate the cursor. */
+    public record WorldDayProgress(long targetDay, long membershipGeneration,
+                                   int nextIndex, boolean catchUpPass) { }
+    private static final Map<CharacterRegistry, WorldDayCursor> WORLD_DAY_CURSORS = new WeakHashMap<>();
     public static final int MAX_NEED = 100;
     public static final int SKILL_XP_PER_RANK = 100;
     public static final int MAX_SKILL_RANK = 20;
@@ -91,7 +118,7 @@ public final class PopulationSimulation {
         if (target.equals(next)) return;
         target.clear();
         target.putAll(next);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static int age(Character character, int year) {
@@ -160,7 +187,7 @@ public final class PopulationSimulation {
         if (previous.equals(next) && Objects.equals(character.props.get("population.profession_started_year"), year)) return;
         character.props.put(PROFESSION, next);
         character.props.put("population.profession_started_year", year);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static List<String> professionHistory(Character character) {
@@ -184,7 +211,7 @@ public final class PopulationSimulation {
         List<Object> duties = listProp(character, DUTIES);
         if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) {
             duties.add(duty.name().toLowerCase(Locale.ROOT));
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -196,7 +223,7 @@ public final class PopulationSimulation {
 
     private static void removeDutyBatched(Character character, Duty duty) {
         if (listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT)))
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
     }
 
     public static boolean hasDuty(Character character, Duty duty) {
@@ -216,12 +243,12 @@ public final class PopulationSimulation {
         requireAlive(character);
         Object previous = character.props.get("population.command");
         if (commandId == null || commandId.isBlank()) {
-            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation();
+            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation(character);
         } else {
             String next = normalizeId(commandId, "command");
             if (!Objects.equals(previous, next)) {
                 character.props.put("population.command", next);
-                CharacterRegistry.recordCharacterMutation();
+                CharacterRegistry.recordCharacterMutation(character);
             }
         }
     }
@@ -250,7 +277,7 @@ public final class PopulationSimulation {
         int next = clamp(deficit, 0, MAX_NEED);
         if (need(needs, need) != next) {
             setNeed(needs, need, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -268,7 +295,7 @@ public final class PopulationSimulation {
         int next = clamp(previous + delta, 0, MAX_NEED);
         if (previous == next) return;
         setNeed(needs, need, next);
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     private static int need(Map<String, Object> needs, Need need) {
@@ -306,7 +333,7 @@ public final class PopulationSimulation {
         String id = normalizeId(skillId, "skill");
         if (!Objects.equals(training.get(id), xp)) {
             training.put(id, xp);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -323,7 +350,7 @@ public final class PopulationSimulation {
         int next = clamp(rank, 0, MAX_SKILL_RANK);
         if (!Objects.equals(skills.get(id), next)) {
             skills.put(id, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -354,7 +381,7 @@ public final class PopulationSimulation {
         if (nextRank != rank || !Objects.equals(training.get(id), remaining)) {
             skills.put(id, nextRank);
             training.put(id, remaining);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
         return nextRank - rank;
     }
@@ -370,7 +397,7 @@ public final class PopulationSimulation {
         String next = normalizeId(skillId, "skill");
         if (!Objects.equals(character.props.get(TRAINING_TARGET), next)) {
             character.props.put(TRAINING_TARGET, next);
-            CharacterRegistry.recordCharacterMutation();
+            CharacterRegistry.recordCharacterMutation(character);
         }
     }
 
@@ -439,7 +466,7 @@ public final class PopulationSimulation {
         if (persistedNonNegativeLong(rawWorldDay) != lastWorldDay || !(rawWorldDay instanceof String)) {
             character.props.put("population.last_simulated_world_day", Long.toString(lastWorldDay)); changed = true;
         }
-        if (changed) CharacterRegistry.recordCharacterMutation();
+        if (changed) CharacterRegistry.recordCharacterMutation(character);
     }
 
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
@@ -462,7 +489,7 @@ public final class PopulationSimulation {
             character.props.put(LAST_INTENT, intent.key);
             character.props.put("population.age_years", nextAge);
             character.props.put("population.life_stage", nextStage);
-            if (changed) CharacterRegistry.recordCharacterMutation();
+            if (changed) CharacterRegistry.recordCharacterMutation(character);
         }
         return intent;
     }
@@ -492,16 +519,27 @@ public final class PopulationSimulation {
         }
     }
 
+    /** Applies a completed action and marks the canonical Character dirty within its lease. */
+    public static void completeIntent(CharacterAccessService.Lease lease, Intent intent) {
+        Objects.requireNonNull(lease, "lease");
+        completeIntent(lease.get(), intent);
+        lease.markDirty();
+    }
+
     /** Stores a death cause and year while preserving the Character and family graph. */
     public static List<Character.Post> die(CharacterRegistry registry, String characterId, int year, String cause) {
-        Character character = registry.get(characterId);
-        if (character == null) throw new IllegalArgumentException("No character " + characterId);
-        if (!character.alive) return List.of();
-        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-            character.props.put("population.death_year", year);
-            character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
-            CharacterRegistry.recordCharacterMutation();
-            return registry.kill(characterId);
+        try (CharacterAccessService.Lease lease = registry.access().acquire(characterId)) {
+            if (lease == null) throw new IllegalArgumentException("No character " + characterId);
+            Character character = lease.get();
+            if (!character.alive) return List.of();
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+                character.props.put("population.death_year", year);
+                character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
+                CharacterRegistry.recordCharacterMutation(character);
+                List<Character.Post> dismissed = registry.kill(characterId);
+                lease.markDirty();
+                return dismissed;
+            }
         }
     }
 
@@ -513,19 +551,133 @@ public final class PopulationSimulation {
         }
     }
 
+    /**
+     * Resumable Java fallback. Processes at most maxCharacters from the append-only registry view
+     * and preserves each Character's durable receipt, so interruption/restart safely resumes.
+     * Returns true only when the complete current registry membership has been visited.
+     */
+    /** Returns the current bounded-scheduler cursor for diagnostics, or null before first work. */
+    public static WorldDayProgress worldDayProgress(CharacterRegistry registry) {
+        Objects.requireNonNull(registry, "registry");
+        synchronized (WORLD_DAY_CURSORS) {
+            WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            return cursor == null ? null : new WorldDayProgress(cursor.targetDay,
+                    cursor.membershipResetGeneration, cursor.nextIndex, cursor.catchUpPass);
+        }
+    }
+
+    public static boolean advanceToWorldDayBatch(CharacterRegistry registry, long targetWorldDay,
+                                                    long fallbackStartDay, int year, int maxCharacters) {
+        Objects.requireNonNull(registry, "registry");
+        if (targetWorldDay < 0 || fallbackStartDay < 0 || targetWorldDay < fallbackStartDay)
+            throw new IllegalArgumentException("invalid world-day range");
+        if (maxCharacters < 1) throw new IllegalArgumentException("maxCharacters must be positive");
+        synchronized (WORLD_DAY_CURSORS) {
+            long resetGeneration = registry.membershipResetGeneration();
+            long appendGeneration = registry.membershipAppendGeneration();
+            int currentSize = registry.size();
+            WorldDayCursor cursor = WORLD_DAY_CURSORS.get(registry);
+            if (cursor != null && cursor.membershipResetGeneration == resetGeneration
+                    && appendGeneration > cursor.membershipAppendGeneration) {
+                // New IDs are appended only; extend the logical boundary without replaying
+                // the acknowledged prefix or rebuilding a population-sized snapshot.
+                cursor.snapshotSize = currentSize;
+                cursor.membershipAppendGeneration = appendGeneration;
+                cursor.complete = false;
+            }
+            if (cursor != null && cursor.complete && cursor.fallbackDay == fallbackStartDay
+                    && cursor.year == year && cursor.membershipResetGeneration == resetGeneration
+                    && cursor.targetDay == targetWorldDay) return true;
+            if (cursor == null || cursor.fallbackDay != fallbackStartDay || cursor.year != year
+                    || cursor.membershipResetGeneration != resetGeneration) {
+                cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                        appendGeneration, currentSize, 0, false);
+            } else if (cursor.targetDay != targetWorldDay) {
+                if (cursor.nextIndex >= cursor.snapshotSize) {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, currentSize, 0, false);
+                } else {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, cursor.snapshotSize, cursor.nextIndex, true);
+                }
+            }
+            if (cursor.nextIndex >= cursor.snapshotSize) {
+                if (cursor.catchUpPass) {
+                    cursor = new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                            appendGeneration, cursor.snapshotSize, 0, false);
+                } else {
+                    cursor.complete = true;
+                    WORLD_DAY_CURSORS.put(registry, cursor);
+                    return true;
+                }
+            }
+            int pageEnd = (int) Math.min((long) cursor.snapshotSize, (long) cursor.nextIndex + maxCharacters);
+            List<String> page = registry.idPage(cursor.nextIndex, pageEnd - cursor.nextIndex);
+            try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+                for (String characterId : page) {
+                    cursor.nextIndex++;
+                    CharacterAccessService.Lease lease = registry.access().acquire(characterId);
+                    if (lease == null) continue;
+                    try (lease) {
+                        Character character = lease.get();
+                        if (!character.alive) continue;
+                        int currentAge = age(character, year);
+                        String nextStage = lifeStage(character, year).name().toLowerCase(Locale.ROOT);
+                        boolean stageChanged = !Objects.equals(character.props.get("population.age_years"), currentAge)
+                                || !Objects.equals(character.props.get("population.life_stage"), nextStage);
+                        registry.applyLifeStageResult(character, currentAge, nextStage, year);
+                        Object raw = character.props.get("population.last_simulated_world_day");
+                        long previous = raw == null ? fallbackStartDay : persistedNonNegativeLong(raw);
+                        if (previous < targetWorldDay) {
+                            advanceCharacterBatched(character, targetWorldDay - previous, year, targetWorldDay);
+                            lease.markDirty();
+                        } else if (stageChanged) lease.markDirty();
+                    }
+                }
+            }
+            if (registry.membershipResetGeneration() != resetGeneration) {
+                WORLD_DAY_CURSORS.remove(registry);
+                return false;
+            }
+            boolean complete = cursor.nextIndex >= cursor.snapshotSize;
+            if (complete && cursor.catchUpPass) {
+                WORLD_DAY_CURSORS.put(registry,
+                        new WorldDayCursor(targetWorldDay, fallbackStartDay, year, resetGeneration,
+                                cursor.membershipAppendGeneration, cursor.snapshotSize, 0, false));
+                return false;
+            }
+            cursor.complete = complete;
+            // Keep the append generation tied to snapshotSize. If an append raced this
+            // batch, the next call must observe it and extend the boundary.
+            WORLD_DAY_CURSORS.put(registry, cursor);
+            return complete;
+        }
+    }
+
     /** Exclusive Java fallback with per-Character durable world-day receipts. */
     public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
         Objects.requireNonNull(registry,"registry");
         if(targetWorldDay<0||fallbackStartDay<0)throw new IllegalArgumentException("world days cannot be negative");
         if(targetWorldDay<fallbackStartDay)throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
         try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
-            registry.refreshLifeStages(year);
-            for(Character character:registry.all()){
-                if(!character.alive)continue;
-                Object raw=character.props.get("population.last_simulated_world_day");
-                long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
-                if(previous>=targetWorldDay)continue;
-                advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+            for(int offset=0;offset<registry.size();offset+=128){
+                for(String characterId:registry.idPage(offset,128)){
+                    try(CharacterAccessService.Lease lease=registry.access().acquire(characterId)){
+                        if(lease==null)continue;
+                        Character character=lease.get();if(!character.alive)continue;
+                        int currentAge=age(character,year);
+                        String nextStage=lifeStage(character,year).name().toLowerCase(Locale.ROOT);
+                        boolean stageChanged=!Objects.equals(character.props.get("population.age_years"),currentAge)
+                                ||!Objects.equals(character.props.get("population.life_stage"),nextStage);
+                        registry.applyLifeStageResult(character,currentAge,nextStage,year);
+                        Object raw=character.props.get("population.last_simulated_world_day");
+                        long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
+                        if(previous<targetWorldDay){
+                            advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+                            lease.markDirty();
+                        }else if(stageChanged)lease.markDirty();
+                    }
+                }
             }
         }
     }
@@ -533,9 +685,21 @@ public final class PopulationSimulation {
     private static void advanceBatched(CharacterRegistry registry,long elapsedDays,int year,long worldDay) {
         if(elapsedDays<0)throw new IllegalArgumentException("elapsedDays cannot be negative");
         if(elapsedDays==0)return;
-        registry.refreshLifeStages(year);
-        for(Character character:registry.all())if(character.alive)
-            advanceCharacterBatched(character,elapsedDays,year,worldDay);
+        for(int offset=0;offset<registry.size();offset+=128){
+            for(String characterId:registry.idPage(offset,128)){
+                try(CharacterAccessService.Lease lease=registry.access().acquire(characterId)){
+                    if(lease==null)continue;
+                    Character character=lease.get();if(!character.alive)continue;
+                    int currentAge=age(character,year);
+                    String nextStage=lifeStage(character,year).name().toLowerCase(Locale.ROOT);
+                    boolean stageChanged=!Objects.equals(character.props.get("population.age_years"),currentAge)
+                            ||!Objects.equals(character.props.get("population.life_stage"),nextStage);
+                    registry.applyLifeStageResult(character,currentAge,nextStage,year);
+                    advanceCharacterBatched(character,elapsedDays,year,worldDay);
+                    if(stageChanged||elapsedDays>0)lease.markDirty();
+                }
+            }
+        }
     }
 
     private static void advanceCharacterBatched(Character character,long elapsedDays,int year,long worldDay){
@@ -559,7 +723,7 @@ public final class PopulationSimulation {
         character.props.put("population.simulated_days",Long.toString(nextSimulated));
         character.props.put("population.last_simulated_year",year);
         if(worldDay>=0)character.props.put("population.last_simulated_world_day",Long.toString(worldDay));
-        CharacterRegistry.recordCharacterMutation();
+        CharacterRegistry.recordCharacterMutation(character);
     }
 
     /** Exact non-negative long reader for durable decimal-string counters; accepts legacy JSON numbers. */

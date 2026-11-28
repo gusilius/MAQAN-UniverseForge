@@ -29,12 +29,28 @@ public final class NavigatorExplorationStore {
         }
     }
     public record ExploredLayer(int chunkX,int chunkZ,int sectionY,int playerY,String biome,
-                                int mapColor,long firstVisited,long lastVisited) {}
+                                int mapColor,long firstVisited,long lastVisited,int[] blockColors,int[] blockHeights) {
+        public ExploredLayer(int chunkX,int chunkZ,int sectionY,int playerY,String biome,
+                             int mapColor,long firstVisited,long lastVisited){
+            this(chunkX,chunkZ,sectionY,playerY,biome,mapColor,firstVisited,lastVisited,null,null);
+        }
+        public boolean hasBlockRaster(){return blockColors!=null&&blockColors.length==256;}
+        public int colorAt(int index){return hasBlockRaster()?blockColors[index]:mapColor;}
+        public int heightAt(int index){return blockHeights!=null&&blockHeights.length==256?blockHeights[index]:playerY;}
+    }
+    /** Snapshot of a chunk already delivered to the client; it is never a request to load a chunk. */
+    public record ChunkSample(int chunkX,int chunkZ,int surfaceY,String biome,int mapColor,
+                              int[] terrainColors,int[] terrainHeights) {}
     private static final Gson GSON=new GsonBuilder().setPrettyPrinting().create();
     private static final Type MAP_TYPE=new TypeToken<Map<String,ExploredChunk>>(){}.getType();
     private static final Map<String,Map<String,ExploredChunk>> CACHE=new ConcurrentHashMap<>();
+    /** Immutable render snapshots avoid sorting the full exploration history every frame. */
+    private static final Map<String,List<ExploredChunk>> CHUNK_SNAPSHOTS=new ConcurrentHashMap<>();
+    private static final Map<String,NavigableMap<Integer,List<ExploredChunk>>> CHUNK_X_INDEX=new ConcurrentHashMap<>();
     private static final Type LAYER_MAP_TYPE=new TypeToken<Map<String,ExploredLayer>>(){}.getType();
     private static final Map<String,Map<String,ExploredLayer>> LAYER_CACHE=new ConcurrentHashMap<>();
+    private static final Map<String,List<ExploredLayer>> LAYER_SNAPSHOTS=new ConcurrentHashMap<>();
+    private static final Map<String,NavigableMap<Integer,List<ExploredLayer>>> LAYER_X_INDEX=new ConcurrentHashMap<>();
     private NavigatorExplorationStore() {}
 
     private static String safe(String value) {
@@ -82,7 +98,38 @@ public final class NavigatorExplorationStore {
         chunks.put(key,new ExploredChunk(chunkX,chunkZ,surfaceY,
                 biome==null?"unknown":biome,mapColor,
                 previous==null?now:previous.firstVisited(),now,safeColors,safeHeights));
+        CHUNK_SNAPSHOTS.remove(dimension);
+        CHUNK_X_INDEX.remove(dimension);
         save(dimension,chunks);
+    }
+
+    /**
+     * Batch-adds only previously unseen, client-loaded chunks. One disk write per batch keeps
+     * the map useful without serializing the whole history once for every nearby chunk.
+     */
+    public static synchronized int recordLoadedChunks(String dimension,List<ChunkSample> samples) {
+        if(dimension==null||dimension.isBlank()||samples==null||samples.isEmpty())return 0;
+        Map<String,ExploredChunk> chunks=data(dimension);
+        long now=System.currentTimeMillis();
+        int added=0;
+        for(ChunkSample sample:samples){
+            if(sample==null)continue;
+            String key=key(sample.chunkX(),sample.chunkZ());
+            if(chunks.containsKey(key))continue;
+            int[] colors=sample.terrainColors()!=null&&sample.terrainColors().length==256
+                    ?sample.terrainColors().clone():null;
+            int[] heights=sample.terrainHeights()!=null&&sample.terrainHeights().length==256
+                    ?sample.terrainHeights().clone():null;
+            chunks.put(key,new ExploredChunk(sample.chunkX(),sample.chunkZ(),sample.surfaceY(),
+                    sample.biome()==null?"unknown":sample.biome(),sample.mapColor(),now,now,colors,heights));
+            added++;
+        }
+        if(added>0){
+            CHUNK_SNAPSHOTS.remove(dimension);
+            CHUNK_X_INDEX.remove(dimension);
+            save(dimension,chunks);
+        }
+        return added;
     }
 
     private static Map<String,ExploredLayer> layerData(String dimension){
@@ -102,14 +149,25 @@ public final class NavigatorExplorationStore {
     /** Records a vertical section only when the player physically enters it. */
     public static synchronized void recordPlayerLayer(String dimension,int chunkX,int chunkZ,int sectionY,
                                                        int playerY,String biome,int mapColor){
+        recordPlayerLayer(dimension,chunkX,chunkZ,sectionY,playerY,biome,mapColor,null,null);
+    }
+
+    /** Persist the actual block-color/height raster for a vertical section the player entered. */
+    public static synchronized void recordPlayerLayer(String dimension,int chunkX,int chunkZ,int sectionY,
+                                                       int playerY,String biome,int mapColor,
+                                                       int[] blockColors,int[] blockHeights){
         if(dimension==null||dimension.isBlank())return;
         Map<String,ExploredLayer> layers=layerData(dimension);
         String key=layerKey(chunkX,chunkZ,sectionY);
         long now=System.currentTimeMillis();
         ExploredLayer previous=layers.get(key);
+        int[] colors=blockColors!=null&&blockColors.length==256?blockColors.clone():null;
+        int[] heights=blockHeights!=null&&blockHeights.length==256?blockHeights.clone():null;
         layers.put(key,new ExploredLayer(chunkX,chunkZ,sectionY,playerY,
                 biome==null?"unknown":biome,mapColor,
-                previous==null?now:previous.firstVisited(),now));
+                previous==null?now:previous.firstVisited(),now,colors,heights));
+        LAYER_SNAPSHOTS.remove(dimension);
+        LAYER_X_INDEX.remove(dimension);
         Path target=layerFile(dimension),temp=target.resolveSibling(target.getFileName()+".tmp");
         try{
             Files.createDirectories(target.getParent());
@@ -123,17 +181,54 @@ public final class NavigatorExplorationStore {
 
     public static synchronized List<ExploredLayer> layers(String dimension){
         if(dimension==null||dimension.isBlank())return List.of();
-        return layerData(dimension).values().stream()
+        return LAYER_SNAPSHOTS.computeIfAbsent(dimension,id->layerData(id).values().stream()
                 .sorted(Comparator.comparingInt(ExploredLayer::sectionY)
                         .thenComparingInt(ExploredLayer::chunkX).thenComparingInt(ExploredLayer::chunkZ))
-                .toList();
+                .toList());
+    }
+
+    /** Spatially bounded vertical-discovery query for the underground map. */
+    public static synchronized List<ExploredLayer> layersInBounds(String dimension,int sectionY,
+            int minChunkX,int minChunkZ,int maxChunkX,int maxChunkZ) {
+        if(dimension==null||dimension.isBlank()||minChunkX>maxChunkX||minChunkZ>maxChunkZ)return List.of();
+        NavigableMap<Integer,List<ExploredLayer>> index=LAYER_X_INDEX.computeIfAbsent(dimension,id->{
+            NavigableMap<Integer,List<ExploredLayer>> grouped=new TreeMap<>();
+            for(ExploredLayer layer:layerData(id).values())
+                grouped.computeIfAbsent(layer.chunkX(),ignored->new ArrayList<>()).add(layer);
+            grouped.replaceAll((x,list)->List.copyOf(list));
+            return Collections.unmodifiableNavigableMap(grouped);
+        });
+        List<ExploredLayer> visible=new ArrayList<>();
+        for(List<ExploredLayer> column:index.subMap(minChunkX,true,maxChunkX,true).values())
+            for(ExploredLayer layer:column)
+                if(layer.sectionY()==sectionY&&layer.chunkZ()>=minChunkZ&&layer.chunkZ()<=maxChunkZ)
+                    visible.add(layer);
+        return List.copyOf(visible);
     }
 
     public static synchronized List<ExploredChunk> chunks(String dimension) {
         if(dimension==null||dimension.isBlank())return List.of();
-        return data(dimension).values().stream()
+        return CHUNK_SNAPSHOTS.computeIfAbsent(dimension,id->data(id).values().stream()
                 .sorted(Comparator.comparingInt(ExploredChunk::chunkX).thenComparingInt(ExploredChunk::chunkZ))
-                .toList();
+                .toList());
+    }
+
+    /** Spatially bounded immutable view for map rendering; avoids scanning remote discoveries. */
+    public static synchronized List<ExploredChunk> chunksInBounds(String dimension,
+            int minChunkX,int minChunkZ,int maxChunkX,int maxChunkZ) {
+        if(dimension==null||dimension.isBlank()||minChunkX>maxChunkX||minChunkZ>maxChunkZ)return List.of();
+        NavigableMap<Integer,List<ExploredChunk>> index=CHUNK_X_INDEX.computeIfAbsent(dimension,id->{
+            NavigableMap<Integer,List<ExploredChunk>> grouped=new TreeMap<>();
+            for(ExploredChunk chunk:data(id).values())
+                grouped.computeIfAbsent(chunk.chunkX(),ignored->new ArrayList<>()).add(chunk);
+            grouped.replaceAll((x,list)->List.copyOf(list));
+            return Collections.unmodifiableNavigableMap(grouped);
+        });
+        List<ExploredChunk> visible=new ArrayList<>();
+        for(List<ExploredChunk> column:index.subMap(minChunkX,true,maxChunkX,true).values())
+            for(ExploredChunk chunk:column)
+                if(chunk.chunkZ()>=minChunkZ&&chunk.chunkZ()<=maxChunkZ)visible.add(chunk);
+        return List.copyOf(visible);
     }
     public static synchronized boolean explored(String dimension,int chunkX,int chunkZ) {
         return data(dimension).containsKey(key(chunkX,chunkZ));

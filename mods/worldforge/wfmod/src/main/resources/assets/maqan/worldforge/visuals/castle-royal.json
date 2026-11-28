@@ -1,0 +1,22 @@
+{
+  "id": "maqan:castle.royal",
+  "category": "fortification",
+  "icon": "castle",
+  "displayName": "Замок · королевский",
+  "description": "Королевская крепость с центральной башней",
+  "mapScale": 44,
+  "mapItem": "minecraft:chiseled_stone_bricks",
+  "iconLod": 0,
+  "modelLod": 2,
+  "compatibleTypes": [
+    "castle",
+    "fort"
+  ],
+  "tags": [
+    "castle",
+    "royal",
+    "fortification"
+  ],
+  "selectable": true,
+  "defaultForCategory": false
+}

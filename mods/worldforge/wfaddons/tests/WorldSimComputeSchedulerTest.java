@@ -55,11 +55,12 @@ public final class WorldSimComputeSchedulerTest {
                     "results from another snapshot schema must be rejected");
             check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 7, 1, 2),
                     "results from another native ABI must be rejected");
-            check(result.snapshot()[0] == 1, "snapshot must be defensively copied");
             check(result.queueWaitNanos() >= 0 && result.computeNanos() >= 0,
                     "queue wait and compute duration must be measurable");
+            byte[] returnedFrame = result.emergenceFrame();
+            returnedFrame[0] = 99;
             check(result.emergenceFrame()[0] == 6 && result.decisionFrame()[0] == 7,
-                    "both compute outputs must be retained");
+                    "compute outputs must be retained defensively");
             check(calls.get() == 1, "one submitted request must execute exactly once");
             check(!scheduler.busy(), "slot must be released after poll");
         }

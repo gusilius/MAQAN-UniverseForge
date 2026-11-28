@@ -61,21 +61,18 @@ public final class WorldForgeComputeRuntime {
 
     public static final class Result {
         private final Ticket ticket;
-        private final byte[] snapshot;
         private final Output output;
         private final long startedNanos;
         private final long completedNanos;
 
-        private Result(Ticket ticket, byte[] snapshot, Output output, long startedNanos, long completedNanos) {
+        private Result(Ticket ticket, Output output, long startedNanos, long completedNanos) {
             this.ticket = ticket;
-            this.snapshot = snapshot.clone();
             this.output = output;
             this.startedNanos = startedNanos;
             this.completedNanos = completedNanos;
         }
 
         public Ticket ticket() { return ticket; }
-        public byte[] snapshot() { return snapshot.clone(); }
         public byte[] first() { return output.first(); }
         public byte[] second() { return output.second(); }
         public long queueWaitNanos() { return Math.max(0L, startedNanos - ticket.submittedNanos()); }
@@ -109,9 +106,10 @@ public final class WorldForgeComputeRuntime {
         activeOperationKey = ticket.operationKey();
         active = executor.submit(() -> {
             long started = System.nanoTime();
-            Output output = operation.compute(immutableSnapshot.clone(), immutableSecondary.clone());
+            // These private copies are never exposed to callers; pass them directly to avoid a second full-size snapshot copy.
+            Output output = operation.compute(immutableSnapshot, immutableSecondary);
             if (output == null) throw new IllegalStateException("Compute operation returned no output");
-            return new Result(ticket, immutableSnapshot, output, started, System.nanoTime());
+            return new Result(ticket, output, started, System.nanoTime());
         });
         return true;
     }

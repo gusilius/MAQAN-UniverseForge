@@ -87,6 +87,67 @@ class WorkspaceDockTreeTest {
     }
 
     @Test
+    void splitterPositionsMatchMinimumConstrainedPanelLayout() {
+        WorkspaceDockTree.Node tree = WorkspaceDockTree.dock(
+                new WorkspaceDockTree.Panel("map"), "map", "inspector",
+                WorkspaceDockTree.Side.RIGHT, 300);
+        var bounds = new WorkspaceDockTree.Rect(0, 0, 1_000, 600);
+        var minimums = Map.of(
+                "map", new WorkspaceDockTree.MinimumSize(800, 100),
+                "inspector", new WorkspaceDockTree.MinimumSize(150, 100));
+
+        var panels = WorkspaceDockTree.layout(tree, bounds, minimums);
+        var splitter = WorkspaceDockTree.splitters(tree, bounds, minimums).get(0);
+
+        assertEquals(panels.get("inspector").x(), splitter.position());
+        assertEquals(800, panels.get("map").width());
+        assertEquals(200, panels.get("inspector").width());
+    }
+
+    @Test
+    void compactViewportLayoutsStayInsideBoundsAndNeverOverlap() {
+        WorkspaceDockTree.Node tree = new WorkspaceDockTree.Panel("content");
+        tree = WorkspaceDockTree.dock(tree, "content", "navigation",
+                WorkspaceDockTree.Side.LEFT, 250);
+        tree = WorkspaceDockTree.dock(tree, "content", "inspector",
+                WorkspaceDockTree.Side.RIGHT, 250);
+        tree = WorkspaceDockTree.dock(tree, "content", "timeline",
+                WorkspaceDockTree.Side.BOTTOM, 200);
+        Map<String, WorkspaceDockTree.MinimumSize> minimums = Map.of(
+                "content", new WorkspaceDockTree.MinimumSize(420, 260),
+                "navigation", new WorkspaceDockTree.MinimumSize(180, 120),
+                "inspector", new WorkspaceDockTree.MinimumSize(180, 120),
+                "timeline", new WorkspaceDockTree.MinimumSize(200, 90));
+
+        for (int width : new int[]{0, 1, 32, 240, 319, 640}) {
+            for (int height : new int[]{0, 1, 24, 160, 240, 480}) {
+                var bounds = new WorkspaceDockTree.Rect(0, 0, width, height);
+                Map<String, WorkspaceDockTree.Rect> layout =
+                        WorkspaceDockTree.layout(tree, bounds, minimums);
+                var rectangles = layout.values().stream().toList();
+                for (var rect : rectangles) {
+                    assertTrue(rect.x() >= 0 && rect.y() >= 0);
+                    assertTrue(rect.x() + rect.width() <= width);
+                    assertTrue(rect.y() + rect.height() <= height);
+                }
+                for (int i = 0; i < rectangles.size(); i++) {
+                    for (int j = i + 1; j < rectangles.size(); j++) {
+                        var a = rectangles.get(i);
+                        var b = rectangles.get(j);
+                        boolean overlaps = a.width() > 0 && a.height() > 0
+                                && b.width() > 0 && b.height() > 0
+                                && a.x() < b.x() + b.width()
+                                && b.x() < a.x() + a.width()
+                                && a.y() < b.y() + b.height()
+                                && b.y() < a.y() + a.height();
+                        assertFalse(overlaps, "Docked panels overlap at " + width + "x" + height);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void rejectsDuplicateIdsAndInvalidSplitWeights() {
         WorkspaceDockTree.Node duplicate = new WorkspaceDockTree.Split(
                 WorkspaceDockTree.Axis.HORIZONTAL, 500,
