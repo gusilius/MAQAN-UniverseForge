@@ -287,8 +287,8 @@ public final class CommandScreen extends Screen {
     }
 
     private List<Btn> dockButtons(){
-        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Жители +","Тело"};
-        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ЖИТ+","ТЕЛО"};
+        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Жители +","NPC +","Тело","1-е лицо"};
+        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ЖИТ+","NPC+","ТЕЛО","1P"};
         int count=full.length,gap=3,available=Math.max(1,width-16);
         int buttonWidth=Math.max(20,Math.min(92,(available-gap*(count-1))/count));
         boolean compact=buttonWidth<64;
@@ -299,8 +299,8 @@ public final class CommandScreen extends Screen {
                 this::selectAllWorkers,this::selectAllTroops,
                 ()->sendSelectedOrder(Squads.Kind.STOP),()->sendSelectedOrder(Squads.Kind.HOLD),
                 this::cycleSelectedFormation,this::cycleSelectedStance,
-                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,this::addWorkers,
-                ()->CommandMode.enterBodyCommand(minecraft)
+                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,this::addWorkers,this::addNpcs,
+                this::selectPlayerBody,()->CommandMode.enterBodyCommand(minecraft)
         };
         for(int i=0;i<count;i++){
             boolean on=switch(i){case 0->!CommandMode.selected().isEmpty()&&selectedWorkerIds().size()==CommandMode.selected().size();
@@ -318,6 +318,24 @@ public final class CommandScreen extends Screen {
             if(entity instanceof TroopEntity troop&&CommandMode.SEL.isSelected(troop.getUUID().toString()))
                 ids.add(troop.getUUID().toString());
         return ids;
+    }
+
+    private void addNpcs(){
+        if(minecraft.player==null)return;
+        if(!minecraft.player.isCreative()){
+            minecraft.player.displayClientMessage(Component.literal("Произвольное создание NPC доступно в творческом режиме."),true);
+            return;
+        }
+        if(!net.minecraftforge.fml.ModList.get().isLoaded("wf_people")){
+            minecraft.player.displayClientMessage(Component.literal("Модуль wf_people не загружен."),true);
+            return;
+        }
+        minecraft.player.connection.sendCommand("wfpeople spawn \"Поселенец\" 4");
+    }
+    private void selectPlayerBody(){
+        if(minecraft.player==null)return;
+        CommandMode.SEL.set(List.of(minecraft.player.getUUID().toString()));
+        minecraft.player.displayClientMessage(Component.literal("Выбрано ваше тело. ПКМ — движение/атака, X — добыча, Ctrl+ПКМ — строительство."),true);
     }
 
     private void addWorkers(){
@@ -1158,7 +1176,10 @@ public final class CommandScreen extends Screen {
                     case "ЗОНЫ","Участки"->"Назначить рабочим лес, камень, руду и другие рабочие зоны";
                     case "НАЙМ","Найм"->"Открыть набор войск; в творческом режиме здания и ресурсы не нужны";
                     case "СТРОЙ","Стройка"->"Открыть каталог поселения и разместить чертёж";
-                    case "ЖИТ+","Жители +"->"Добавить четырёх жителей в творческом режиме";
+                    case "ЖИТ+","Жители +"->"Добавить четырёх жителей поселения в творческом режиме";
+                    case "NPC+","NPC +"->"Создать четыре принадлежащих вам автономных NPC";
+                    case "ТЕЛО","Тело"->"Выделить собственное тело как единицу RTS";
+                    case "1P","1-е лицо"->"Вернуться к непосредственному управлению от первого лица";
                     case "ТЕЛО","Тело"->"Вернуться к виду от первого лица и приказам персонажу";
                     default->key;
                 };
