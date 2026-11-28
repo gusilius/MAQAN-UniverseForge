@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.worldforge.mod.client.ClientViews;
+import dev.worldforge.mod.client.PlatformWorkspaceBridge;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Projection;
 import dev.worldforge.troops.Squads;
@@ -82,6 +83,66 @@ public final class CommandMode {
             Preferences.userNodeForPackage(CommandMode.class).node("camera-state");
     private static long lastCameraPersistNanos;
     private static final long CAMERA_PERSIST_INTERVAL_NANOS = 10_000_000_000L;
+    private static String lastWorkspaceSelection = "";
+    private static String lastWorkspaceProvider = "";
+
+    /** Mirror the exact RTS selection into the shared map/inspector context without duplicating Character identity. */
+    private static void publishWorkspaceSelection(Minecraft mc) {
+        List<String> ids = SEL.selected().stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList();
+        String signature = String.join("|", ids);
+        if (signature.equals(lastWorkspaceSelection)) return;
+        lastWorkspaceSelection = signature;
+        if (ids.isEmpty()) {
+            if (!lastWorkspaceProvider.isBlank()) PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+            lastWorkspaceProvider = "";
+            return;
+        }
+        if (ids.size() == 1) {
+            String physicalId = ids.get(0);
+            LivingEntity selected = null;
+            for (net.minecraft.world.entity.Entity candidate : mc.level.entitiesForRendering()) {
+                if (candidate instanceof LivingEntity living && physicalId.equals(candidate.getUUID().toString())) {
+                    selected = living;
+                    break;
+                }
+            }
+            if (selected != null) {
+                String provider = selected instanceof TroopEntity ? "wf_troops"
+                        : isWorkerEntity(selected) ? "wf_settle"
+                        : isOwnedNpcEntity(selected) ? "wf_people" : "wf_troops";
+                String characterId = selected instanceof TroopEntity troop ? troop.characterId
+                        : isWorkerEntity(selected) ? workerString(selected, "characterId")
+                        : invokeCharacterId(selected);
+                String entityId = characterId.isBlank() ? physicalId : characterId;
+                String type = selected instanceof TroopEntity ? "TROOP"
+                        : isWorkerEntity(selected) ? "WORKER"
+                        : isOwnedNpcEntity(selected) ? "NPC" : "CHARACTER";
+                String summary = "Physical entity UUID: " + physicalId
+                        + (characterId.isBlank() ? "" : " · canonical Character UUID: " + characterId);
+                if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals(provider))
+                    PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+                lastWorkspaceProvider = provider;
+                PlatformWorkspaceBridge.publish(provider, entityId, type, selected.getName().getString(), summary);
+                return;
+            }
+        }
+        if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals("wf_troops"))
+            PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+        lastWorkspaceProvider = "wf_troops";
+        String aggregateId = "selection:" + java.util.UUID.nameUUIDFromBytes(
+                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        PlatformWorkspaceBridge.publish("wf_troops", aggregateId, "UNIT_SELECTION",
+                "Выбрано объектов: " + ids.size(), "Общая тактическая выборка · " + ids.size() + " физических сущностей");
+    }
+
+    private static String invokeCharacterId(LivingEntity entity) {
+        try {
+            Object value = entity.getClass().getMethod("characterId").invoke(entity);
+            return value instanceof String text ? text : "";
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return "";
+        }
+    }
 
     private static String cameraDimension(Minecraft mc) {
         return mc.level == null ? "" : mc.level.dimension().location().toString();
@@ -622,6 +683,7 @@ public final class CommandMode {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            publishWorkspaceSelection(mc);
             boolean radialHeld = RADIAL_COMMAND.isDown();
             if (!radialHeld) radialSuppressed = false;
             if (mc.screen instanceof RadialCommandScreen radial) {
