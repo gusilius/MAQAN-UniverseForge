@@ -36,6 +36,17 @@ public final class SettleCommands {
                         .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> found(c.getSource(), StringArgumentType.getString(c, "name")))))
                 .then(Commands.literal("list").executes(c -> list(c.getSource())))
                 .then(Commands.literal("info").executes(c -> info(c.getSource())))
+                .then(Commands.literal("workers")
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                                        .executes(c -> order(c, colony -> {
+                                            var player = c.getSource().getPlayer();
+                                            if (player == null || !player.isCreative())
+                                                throw new Settlement.OrderException("Ручное создание жителей доступно владельцу поселения в творческом режиме; в обычном режиме население растёт через жильё, еду и настроение.");
+                                            int count = IntegerArgumentType.getInteger(c, "count");
+                                            for (int i = 0; i < count; i++) colony.s.addWorker(null);
+                                            return "Добавлено жителей: " + count + ". Канонические Character и физические тела будут материализованы штатной синхронизацией.";
+                                        }))))
                 .then(Commands.literal("schem")
                         .then(Commands.literal("list").executes(c -> {
                             var names = SchemLibrary.names();
@@ -307,6 +318,12 @@ public final class SettleCommands {
 
     private static int executeAdminMutation(CommandSourceStack source, String actionId, String target,
                                               String payload, java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
+        return executeAdminMutation(source, actionId, target, payload, false, operation);
+    }
+
+    private static int executeAdminMutation(CommandSourceStack source, String actionId, String target,
+                                              String payload, boolean allowPlayerFounding,
+                                              java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
         String actor = source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
                 ? player.getUUID().toString() : "console";
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
@@ -322,7 +339,8 @@ public final class SettleCommands {
                         Colony targetColony = SettleMod.colony(req.targetId());
                         if (SettleMod.actionsBlocked())
                             return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
-                        return op(source) ? null : "Для этой операции нужны права владельца поселения или оператора";
+                        boolean mayFound = allowPlayerFounding && source.getEntity() instanceof net.minecraft.server.level.ServerPlayer;
+                        return op(source) || mayFound ? null : "Для этой операции нужны права владельца поселения или оператора";
                     },
                     (req, attempt) -> {
                         dev.worldforge.mod.api.ActionResult result = operation.get();
@@ -352,8 +370,9 @@ public final class SettleCommands {
         ServerLevel level = s.getLevel();
         BlockPos pos = BlockPos.containing(s.getPosition());
         String payload = level.dimension().location() + "|" + pos + "|" + name.trim();
-        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, () -> {
-            Colony colony = SettleMod.found(level, name.trim(), pos);
+        String foundingOperationId = "player:found:" + java.util.UUID.randomUUID();
+        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, true, () -> {
+            Colony colony = SettleMod.found(level, name.trim(), pos, foundingOperationId);
             if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
                 colony.owner = player.getUUID().toString();
             return dev.worldforge.mod.api.ActionResult.ok(

@@ -138,7 +138,10 @@ public final class Bodies {
             boolean generatedSettlement = colony.genesisOperationId != null
                     && colony.genesisOperationId.startsWith("worldsim:settlement:")
                     && colony.s.count("village_hall", true) > 0;
-            boolean physicalSettlementReady = discoveredVillage || generatedSettlement;
+            boolean playerFoundedSettlement = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("player:found:")
+                    && colony.owner != null && !colony.owner.isBlank();
+            boolean physicalSettlementReady = discoveredVillage || generatedSettlement || playerFoundedSettlement;
             boolean retained = physicalSettlementReady && nearbyById.containsKey(colonyId)
                     && SimulationLod.shouldRetainWorkers(colony.dim, colony.cx, colony.cz);
             int workerId;
@@ -187,7 +190,10 @@ public final class Bodies {
             boolean generatedSettlement = colony.genesisOperationId != null
                     && colony.genesisOperationId.startsWith("worldsim:settlement:")
                     && colony.s.count("village_hall", true) > 0;
-            if (!discoveredVillage && !generatedSettlement) continue;
+            boolean playerFoundedSettlement = colony.genesisOperationId != null
+                    && colony.genesisOperationId.startsWith("player:found:")
+                    && colony.owner != null && !colony.owner.isBlank();
+            if (!discoveredVillage && !generatedSettlement && !playerFoundedSettlement) continue;
             ServerLevel level = colony.level(server);
             if (level == null || !SimulationLod.shouldSpawnWorkers(
                     colony.dim, colony.cx, colony.cz)) continue;

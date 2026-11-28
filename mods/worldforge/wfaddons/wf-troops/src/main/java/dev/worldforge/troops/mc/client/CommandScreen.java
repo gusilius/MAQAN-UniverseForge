@@ -104,7 +104,7 @@ public final class CommandScreen extends Screen {
         buildError = "";
         try {
             Map<String, Object> m = (Map<String, Object>) Json.parse(json);
-            if (m.get("error") != null) { buildError = String.valueOf(m.get("error")); return; }
+            if (m.get("error") != null) buildError = String.valueOf(m.get("error"));
             colName = String.valueOf(m.getOrDefault("colony", ""));
             colX = ((Number) m.getOrDefault("cx", 0)).intValue();
             colZ = ((Number) m.getOrDefault("cz", 0)).intValue();
@@ -394,7 +394,9 @@ public final class CommandScreen extends Screen {
         g.drawString(font,"−",x+w-70,y+7,0xFFE6D7B8,false);
         g.drawString(font,String.valueOf(recruitCount),x+w-50,y+7,0xFFFFFFFF,false);
         g.drawString(font,"+",x+w-25,y+7,0xFFE6D7B8,false);
-        g.drawString(font,"Готовое здание + инструктор · склад + золото",x+8,y+22,0xFF9EAFC0,false);
+        g.drawString(font,minecraft.player!=null&&minecraft.player.isCreative()
+                ?"Творческий режим · без зданий и ресурсов"
+                :"Готовое здание + инструктор · склад + золото",x+8,y+22,0xFF9EAFC0,false);
         int rowY=y+39,shown=0;
         int visibleRows=Math.max(1,(h-39-34)/23);
         recruitScroll=Math.max(0,Math.min(recruitScroll,Math.max(0,recruitOptions.size()-visibleRows)));
@@ -425,7 +427,7 @@ public final class CommandScreen extends Screen {
         int px=recruitPanelX(),py=recruitPanelY(),w=panelW(),h=recruitPanelH();
         if(y<py+19){
             if(x>=px+w-80&&x<px+w-54)recruitCount=Math.max(1,recruitCount-1);
-            else if(x>=px+w-36&&x<px+w-8)recruitCount=Math.min(Squads.MAX_SIZE,recruitCount+1);
+            else if(x>=px+w-36&&x<px+w-8)recruitCount=Math.min(minecraft.player!=null&&minecraft.player.isCreative()?1000:Squads.MAX_SIZE,recruitCount+1);
             return;
         }
         if(y>=py+39&&y<py+h-34){

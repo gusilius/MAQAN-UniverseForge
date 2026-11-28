@@ -27,8 +27,23 @@ final class BuildControl {
     static void sendList(ServerPlayer p, double x, double z) {
         Colony c = SettleMod.nearest(p.serverLevel(), x, z);
         Map<String, Object> m = new LinkedHashMap<>();
+        List<Object> units=new ArrayList<>();
+        for(var unitEntry:TroopsMod.DEFS.units.entrySet()){
+            var unit=unitEntry.getValue();
+            Map<String,Object> row=new LinkedHashMap<>();
+            row.put("id",unit.id());
+            row.put("name",unit.name());
+            row.put("role",unit.role());
+            row.put("cost",unit.cost());
+            row.put("upkeep",unit.upkeep());
+            row.put("building",TroopsMod.DEFS.recruitmentBuilding(unit));
+            row.put("supply",new LinkedHashMap<>(TroopsMod.DEFS.recruitmentCost(unit)));
+            row.put("description",unit.desc());
+            units.add(row);
+        }
+        m.put("units",units);
         if (c == null || SettleMod.DEFS == null) {
-            m.put("error", "Рядом нет поселения. Основать: /wfsettle found <имя>");
+            m.put("error", "Рядом нет поселения. В творческом режиме найм доступен без поселения; для обычного найма основайте поселение.");
             WFNet.sendView(p, VIEW, Json.write(m));
             return;
         }
@@ -51,21 +66,6 @@ final class BuildControl {
             defs.add(e);
         }
         m.put("defs", defs);
-        List<Object> units=new ArrayList<>();
-        for(var unitEntry:TroopsMod.DEFS.units.entrySet()){
-            var unit=unitEntry.getValue();
-            Map<String,Object> row=new LinkedHashMap<>();
-            row.put("id",unit.id());
-            row.put("name",unit.name());
-            row.put("role",unit.role());
-            row.put("cost",unit.cost());
-            row.put("upkeep",unit.upkeep());
-            row.put("building",TroopsMod.DEFS.recruitmentBuilding(unit));
-            row.put("supply",new LinkedHashMap<>(TroopsMod.DEFS.recruitmentCost(unit)));
-            row.put("description",unit.desc());
-            units.add(row);
-        }
-        m.put("units",units);
         Map<String, Object> stock = new LinkedHashMap<>();
         for (var e : c.s.stock.entrySet()) stock.put(e.getKey(), (int) Math.floor(e.getValue()));
         m.put("stock", stock);

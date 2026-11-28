@@ -2088,7 +2088,7 @@ public class TroopsMod {
                 }))
                 .then(Commands.literal("raise")
                         .then(Commands.argument("type", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(DEFS.units.keySet(), b))
-                                .then(Commands.argument("n", IntegerArgumentType.integer(1, Squads.MAX_SIZE)).executes(c -> raise(c.getSource(), StringArgumentType.getString(c, "type"), IntegerArgumentType.getInteger(c, "n"), ""))
+                                .then(Commands.argument("n", IntegerArgumentType.integer(1, 1000)).executes(c -> raise(c.getSource(), StringArgumentType.getString(c, "type"), IntegerArgumentType.getInteger(c, "n"), ""))
                                         .then(Commands.argument("realm", StringArgumentType.word()).requires(s -> s.hasPermission(2))
                                                 .executes(c -> raise(c.getSource(), StringArgumentType.getString(c, "type"), IntegerArgumentType.getInteger(c, "n"), StringArgumentType.getString(c, "realm")))))))
                 .then(FortService.commands())
@@ -2548,6 +2548,73 @@ public class TroopsMod {
         }
     }
 
+    /**
+     * Creative deployment is deliberately independent from settlement economy:
+     * no barracks, instructor, stock or treasury are required. Squads remain capped
+     * at MAX_SIZE, so large creative requests are split into valid independent groups.
+     */
+    private static int raiseCreative(ServerPlayer player, TroopDefs.Unit unit, int amount) {
+        if (amount < 1 || amount > 1000) {
+            player.displayClientMessage(Component.literal("Творческий призыв: допустимо от 1 до 1000 бойцов за один заказ."), true);
+            return 0;
+        }
+        ServerLevel level = player.serverLevel();
+        String owner = player.getUUID().toString();
+        List<TroopEntity> prepared = new ArrayList<>(amount);
+        List<List<TroopEntity>> groups = new ArrayList<>();
+        for (int offset = 0; offset < amount; offset += Squads.MAX_SIZE) {
+            int count = Math.min(Squads.MAX_SIZE, amount - offset);
+            int groupIndex = groups.size();
+            double angle = groupIndex * 2.399963229728653;
+            double radius = groupIndex == 0 ? 0.0 : 4.0 + Math.sqrt(groupIndex) * 2.0;
+            double centerX = player.getX() + Math.cos(angle) * radius;
+            double centerZ = player.getZ() + Math.sin(angle) * radius;
+            List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, count, 1.6);
+            List<double[]> positions = Formations.place(slots, centerX, centerZ, player.getYRot() + 180);
+            List<TroopEntity> group = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                TroopEntity troop = TROOP.get().create(level);
+                if (troop == null) {
+                    player.displayClientMessage(Component.literal("Не удалось подготовить весь отряд; создание отменено."), true);
+                    return 0;
+                }
+                double x = positions.get(i)[0], z = positions.get(i)[1];
+                int bx = (int)Math.floor(x), bz = (int)Math.floor(z);
+                if (!level.hasChunkAt(new BlockPos(bx, level.getMinBuildHeight(), bz))) {
+                    for (TroopEntity existing : prepared) existing.discard();
+                    troop.discard();
+                    player.displayClientMessage(Component.literal("Творческий призыв остановлен: область появления не загружена."), true);
+                    return 0;
+                }
+                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bx, bz);
+                troop.moveTo(x, y, z, player.getYRot(), 0);
+                troop.setup(unit, owner);
+                troop.realm = "";
+                troop.deferCharacterBinding = false;
+                group.add(troop);
+                prepared.add(troop);
+            }
+            groups.add(group);
+        }
+        for (TroopEntity troop : prepared) {
+            if (!level.addFreshEntity(troop)) {
+                for (TroopEntity spawned : prepared) spawned.discard();
+                player.displayClientMessage(Component.literal("Мир отклонил создание; все подготовленные бойцы удалены."), true);
+                return 0;
+            }
+        }
+        for (List<TroopEntity> group : groups) {
+            List<String> ids = group.stream().map(troop -> troop.getUUID().toString()).toList();
+            Squads.Squad squad = SQUADS.create(owner, null, ids);
+            squad.cx = group.get(0).getX();
+            squad.cz = group.get(0).getZ();
+            for (TroopEntity troop : group) troop.setSquadId(squad.id);
+        }
+        player.displayClientMessage(Component.literal("Творческий призыв: " + amount + " × " + unit.name()
+                + ". Создано отрядов: " + groups.size() + "; здания и ресурсы не требуются."), false);
+        return amount;
+    }
+
     /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
     private static int raise(CommandSourceStack src, String type, int n, String realm) {
         return executeMilitaryCommand(src, "military.raise", type, n + "|" + realm, () -> raiseDirect(src, type, n, realm));
@@ -2560,6 +2627,11 @@ public class TroopsMod {
 
         TroopDefs.Unit unit = DEFS.units.get(type);
         if (unit == null) { src.sendFailure(Component.literal("Нет такого типа: " + type)); return 0; }
+        if (p.isCreative()) return raiseCreative(p, unit, n);
+        if (n > Squads.MAX_SIZE) {
+            src.sendFailure(Component.literal("В обычном режиме за один заказ можно нанять не более " + Squads.MAX_SIZE + " бойцов."));
+            return 0;
+        }
         if (!ModList.get().isLoaded("wf_settle")) {
             src.sendFailure(Component.literal("Для найма требуется wf_settle и построенное военное здание."));
             return 0;
