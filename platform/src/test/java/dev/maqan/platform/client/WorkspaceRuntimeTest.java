@@ -76,6 +76,21 @@ class WorkspaceRuntimeTest {
     }
 
     @Test
+    void providerActionFailuresAreRecordedInsteadOfEscapingTheUiClickHandler() {
+        var selection = new PlatformSelectionContext.Selection(
+                "wf_people", "person-2", "CHARACTER", "Éowyn", "middle-earth", "", 2);
+        WorkspaceRuntime.registerAction(new WorkspaceRuntime.Action(
+                "wf_people.fail", "Open character", "wf_people", ignored -> true,
+                ignored -> { throw new IllegalStateException("provider unavailable"); }));
+
+        assertFalse(WorkspaceRuntime.executeAction("wf_people.fail", selection));
+        var event = WorkspaceRuntime.journal(1).get(0);
+        assertEquals(WorkspaceRuntime.Severity.ERROR, event.severity());
+        assertEquals("action", event.category());
+        assertTrue(event.message().contains("provider unavailable"));
+    }
+
+    @Test
     void shortcutRegistryRejectsConflictsAndProviderUnloadCleansRegistrations() {
         var chord = new WorkspaceRuntime.KeyChord(70, 2);
         WorkspaceRuntime.registerShortcut(new WorkspaceRuntime.Shortcut(
