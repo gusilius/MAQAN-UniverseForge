@@ -13,6 +13,20 @@ public final class MapImages {
 
     private MapImages() {}
 
+    private static int checkedPixelCount(TitleData d) {
+        if (d == null || d.w <= 0 || d.h <= 0)
+            throw new IllegalArgumentException("Некорректные размеры политической карты");
+        long count = (long) d.w * d.h;
+        if (count > 16L * 1024L * 1024L)
+            throw new IllegalArgumentException("Политическая карта превышает безопасный размер растра");
+        return (int) count;
+    }
+
+    private static void requireTerrain(int[] terrain, int expectedPixels) {
+        if (terrain == null || terrain.length != expectedPixels)
+            throw new IllegalArgumentException("Размер массива рельефа не соответствует снимку карты");
+    }
+
     public static List<String> modes(TitleData d) {
         List<String> out = new ArrayList<>();
         out.add(TERRAIN);
@@ -202,6 +216,8 @@ public final class MapImages {
 
     /** Метка в каждом пикселе: id титула нужного уровня или номер государства (1-based), 0 = нет. */
     static int[] labels(TitleData d, String mode) {
+        int pixelCount = checkedPixelCount(d);
+        if (mode == null || mode.isBlank()) throw new IllegalArgumentException("Не указан режим карты");
         int[] lut;
         if (REALMS.equals(mode) || isDip(mode)) {
             lut = d.realmLut();
@@ -212,8 +228,10 @@ public final class MapImages {
             if (ti < 0) return null;
             lut = d.provinceLut(ti);
         }
-        int[] lab = new int[d.w * d.h];
+        int[] lab = new int[pixelCount];
         short[] px = d.pixels();
+        if (px == null || px.length != pixelCount)
+            throw new IllegalArgumentException("Пиксельные данные карты повреждены");
         for (int i = 0; i < lab.length; i++) {
             int p = px[i] & 0xFFFF;
             lab[i] = p == 0 || p >= lut.length ? 0 : lut[p];
@@ -289,6 +307,9 @@ public final class MapImages {
 
     /** terrain: основа, остальные режимы: заливка цветом титулов или государств, границы. */
     public static int[] render(TitleData d, int[] terrain, String mode) {
+        int pixelCount = checkedPixelCount(d);
+        requireTerrain(terrain, pixelCount);
+        if (mode == null || mode.isBlank()) throw new IllegalArgumentException("Не указан режим карты");
         int w = d.w, h = d.h;
         if (TERRAIN.equals(mode)) return terrain.clone();
         int[] lab = labels(d, mode);
@@ -384,6 +405,7 @@ public final class MapImages {
     }
 
     public static Overlay overlay(TitleData d, String mode, int label) {
+        if (label <= 0) return null;
         int[] lab = labels(d, mode);
         if (lab == null) return null;
         int w = d.w, h = d.h, x0 = w, y0 = h, x1 = -1, y1 = -1;
