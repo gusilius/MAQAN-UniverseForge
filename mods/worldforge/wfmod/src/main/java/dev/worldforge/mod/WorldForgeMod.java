@@ -385,6 +385,10 @@ public class WorldForgeMod {
                     }
                 }
                 EditorManager.applySaved(ServerLifecycleHooks.getCurrentServer(), d);
+                if (d.ensurePoliticalData()) {
+                    LOGGER.info("WorldForge: generated starter political entities from terrain map={} provinces={} realms={}",
+                            n, d.titles.maxId(), d.titles.realmList().size());
+                }
                 String planetId = d.planetProfile == null ? n : d.planetProfile.planetId;
                 String sourceMode = d.planetProfile == null ? "image" : d.planetProfile.generationMode;
                 LOGGER.info("WorldForge: planet_id={} source_mode={} surface_id={} display_name={} virtual_size={}x{} blocks_per_pixel={}",
