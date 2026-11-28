@@ -19,6 +19,18 @@ public class MapTest {
         long t0 = System.currentTimeMillis();
         int[] terrain = TerrainImage.render(m);
         System.out.println("рельеф: " + (System.currentTimeMillis() - t0) + " мс");
+        boolean shortTerrainRejected = false;
+        try { MapImages.render(m.titles, new int[Math.max(0, terrain.length - 1)], MapImages.REALMS); }
+        catch (IllegalArgumentException expected) { shortTerrainRejected = true; }
+        check(shortTerrainRejected, "политический рендерер отклоняет неполный массив рельефа");
+        boolean nullTerrainRejected = false;
+        try { MapImages.render(m.titles, null, MapImages.TERRAIN); }
+        catch (IllegalArgumentException expected) { nullTerrainRejected = true; }
+        check(nullTerrainRejected, "географический рендерер отклоняет отсутствующий массив рельефа");
+        boolean emptyModeRejected = false;
+        try { MapImages.render(m.titles, terrain, " "); }
+        catch (IllegalArgumentException expected) { emptyModeRejected = true; }
+        check(emptyModeRejected, "пустой режим карты отклоняется контролируемой ошибкой");
         Path out = Paths.get(a[2]);
         Files.createDirectories(out);
         for (String mode : MapImages.modes(m.titles)) {
