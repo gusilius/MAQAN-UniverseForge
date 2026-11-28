@@ -24,9 +24,21 @@ public class EventLogScreen extends Screen {
     private int scroll;
     private final List<int[]> hits = new ArrayList<>();   // x,y,w,h,тип(1 чип категории,2 мои,3 все,4 запись),индекс
 
+    private final Screen parent;
+
     public EventLogScreen(EventLog log, TitleData data, String viewerRealm, Consumer<String> cmd) {
-        super(Component.literal("Журнал"));
-        this.log = log; this.data = data; this.viewer = viewerRealm; this.cmd = cmd;
+        this(log, data, viewerRealm, cmd, null);
+    }
+
+    public EventLogScreen(EventLog log, TitleData data, String viewerRealm, Consumer<String> cmd, Screen parent) {
+        super(Component.literal("Летопись мира"));
+        this.log = log; this.data = data; this.viewer = viewerRealm; this.cmd = cmd; this.parent = parent;
+    }
+
+    @Override
+    public void onClose() {
+        if (parent != null) minecraft.setScreen(parent);
+        else super.onClose();
     }
 
     @Override
