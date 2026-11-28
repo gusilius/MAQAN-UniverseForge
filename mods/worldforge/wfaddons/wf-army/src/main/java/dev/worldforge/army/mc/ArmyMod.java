@@ -74,11 +74,11 @@ public class ArmyMod {
             List<dev.worldforge.mod.Markers.Marker> markers = new ArrayList<>();
             ArmyEngine engine = armies(map);
             for (dev.worldforge.army.Army army : engine.armies.values()) {
-                if (army == null || army.men() <= 0 || army.location <= 0
-                        || army.commanderGlobalId == null || army.commanderGlobalId.isBlank()) continue;
-                dev.worldforge.mod.LeaderVisualProviders.Visual leader =
-                        dev.worldforge.mod.LeaderVisualProviders.resolve(server, army.commanderGlobalId);
-                if (leader == null) continue;
+                if (army == null || army.men() <= 0 || army.location <= 0) continue;
+                // An army remains visible even when it has no assigned commander or the leader entity is unloaded.
+                dev.worldforge.mod.LeaderVisualProviders.Visual leader = army.commanderGlobalId == null
+                        || army.commanderGlobalId.isBlank() ? null
+                        : dev.worldforge.mod.LeaderVisualProviders.resolve(server, army.commanderGlobalId);
                 dev.worldforge.mod.TitleData.Title location = map.titles.get(army.location);
                 if (location == null) continue;
                 dev.worldforge.mod.Markers.Marker marker = new dev.worldforge.mod.Markers.Marker();
@@ -90,14 +90,14 @@ public class ArmyMod {
                 dev.worldforge.mod.TitleData.Realm realm = map.titles.realms.get(army.realm);
                 marker.rgb = realm == null ? location.rgb : realm.rgb;
                 String commanderName = army.commander == null || army.commander.isBlank()
-                        ? leader.displayName() : army.commander;
+                        ? leader == null ? "" : leader.displayName() : army.commander;
                 marker.desc = "armyId=" + army.id + ";men=" + army.men()
                         + ";realm=" + (army.realm == null ? "" : army.realm)
                         + ";commander=" + (commanderName == null ? "" : commanderName)
-                        + ";commanderId=" + army.commanderGlobalId
-                        + ";leaderEntity=" + leader.entityUuid()
-                        + ";leaderType=" + leader.entityTypeId()
-                        + ";leaderModel=" + leader.modelProfile()
+                        + ";commanderId=" + (army.commanderGlobalId == null ? "" : army.commanderGlobalId)
+                        + ";leaderEntity=" + (leader == null ? "" : leader.entityUuid())
+                        + ";leaderType=" + (leader == null ? "" : leader.entityTypeId())
+                        + ";leaderModel=" + (leader == null ? "" : leader.modelProfile())
                         + ";title=" + army.location + ";moving=" + army.moving();
                 markers.add(marker);
             }
