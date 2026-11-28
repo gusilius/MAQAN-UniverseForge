@@ -46,7 +46,7 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         try { UUID.fromString(requestId); } catch (RuntimeException ex) { return false; }
         java.util.HashSet<String> unique=new java.util.HashSet<>();
         for(String id:ids)if(id==null||id.isBlank()||id.length()>40||!unique.add(id))return false;
-        if(action<ORDER||action>PLAYER_BODY)return false;
+        if(action<ORDER||action>NPC_TASK)return false;
         if(action==PLAYER_BODY){
             if(ids.size()!=1||arg<0||arg>3)return false;
             try{UUID.fromString(ids.get(0));}catch(RuntimeException ex){return false;}
