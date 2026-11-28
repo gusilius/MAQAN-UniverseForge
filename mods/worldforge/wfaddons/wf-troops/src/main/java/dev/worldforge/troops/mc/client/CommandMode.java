@@ -19,7 +19,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Marker;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -75,8 +74,6 @@ public final class CommandMode {
     static long markerUntil;
     private static CameraType prevCamera = CameraType.FIRST_PERSON;
     private static Marker camEntity;
-    private static double groundY;
-    private static boolean groundInitialized;
     private static boolean cameraPositionInitialized;
     private static double cameraSmoothX, cameraSmoothY, cameraSmoothZ;
     private static long lastFrame;
@@ -323,7 +320,7 @@ public final class CommandMode {
                 mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
         Vec3 direction = new Vec3(ray[0], ray[1], ray[2]);
         RIG.zoomBy(steps);
-        double[] desired = RIG.position(groundY);
+        double[] desired = RIG.positionRelativeToPlayer(mc.player.getY());
         Vec3 origin = new Vec3(desired[0], desired[1], desired[2]);
         if (Math.abs(direction.y) > 1.0e-5) {
             double distance = (anchor.y - origin.y) / direction.y;
@@ -445,8 +442,6 @@ public final class CommandMode {
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
         if (!restoreCamera(mc)) RIG.focusOn(mc.player.getX(), mc.player.getZ());
         lastView = RIG.view;
-        groundY = mc.player.getY();
-        groundInitialized = false;
         cameraPositionInitialized = false;
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
@@ -487,7 +482,6 @@ public final class CommandMode {
         Minecraft mc = Minecraft.getInstance();
         active = false;
         persistCamera(mc);
-        groundInitialized = false;
         cameraPositionInitialized = false;
         lastView = RIG.view;
         SEL.clear();
@@ -581,7 +575,7 @@ public final class CommandMode {
         public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
             if (active) persistCamera(Minecraft.getInstance());
             active = false; firstPersonCommand = false; camEntity = null;
-            groundInitialized = false; cameraPositionInitialized = false;
+            cameraPositionInitialized = false;
             hostedCommandView = null; SEL.clear();
         }
 
