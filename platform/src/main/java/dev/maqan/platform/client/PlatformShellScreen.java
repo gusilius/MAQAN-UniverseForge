@@ -200,7 +200,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean isPauseScreen() { return false; }
 
     @Override protected void init() {
-        CYAN = WorkspaceTheme.ACCENT;
+        CYAN = ThemeManager.accentColor();
         if (panels.isEmpty()) {
             panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
@@ -1048,20 +1048,36 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private boolean handleSettingsClick(double mx, double my) {
-        int w=popupW(260),h=popupH(190),sx=popupX(settingsX,260,false),sy=popupY(settingsY,190,height-h-12);
+        int w=popupW(260),h=popupH(220),sx=popupX(settingsX,260,false),sy=popupY(settingsY,220,height-h-12);
         if(mx>=sx+w-28&&mx<sx+w&&my>=sy&&my<sy+26){settingsVisible=false;return true;}
         if(mx>=sx&&mx<sx+w-28&&my>=sy&&my<sy+26){
             draggingPopup="settings";pointerOffsetX=(int)mx-sx;pointerOffsetY=(int)my-sy;return true;
         }
         if(mx>=sx&&mx<sx+w&&my>=sy+32&&my<sy+59){ambientGrid=!ambientGrid;saveWorkspaceState();return true;}
         if(mx>=sx&&mx<sx+w&&my>=sy+59&&my<sy+86){panelShadows=!panelShadows;saveWorkspaceState();return true;}
+        if(mx>=sx&&mx<sx+w&&my>=sy+91&&my<sy+119){
+            String[] themes=ThemeManager.themes();
+            String current=ThemeManager.selectedTheme();
+            int index=0;
+            for(int i=0;i<themes.length;i++)if(themes[i].equals(current)){index=i;break;}
+            String next=themes[(index+1)%themes.length];
+            if(ThemeManager.setTheme(next)){
+                CYAN=ThemeManager.accentColor();
+                WorkspaceRuntime.publish(WorkspaceRuntime.Severity.SUCCESS,"maqan.platform","theme",
+                        "Interface theme changed to "+next,"","");
+            }else{
+                WorkspaceRuntime.publish(WorkspaceRuntime.Severity.ERROR,"maqan.platform","theme",
+                        "Unable to load interface theme "+next,"","");
+            }
+            return true;
+        }
         // Settings is modal: clicking outside closes it but never activates a control underneath.
         settingsVisible=false;
         return true;
     }
 
     private void drawSettings(GuiGraphics g, int mx, int my) {
-        int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
+        int w=popupW(260),h=popupH(220),x=popupX(settingsX,260,false),y=popupY(settingsY,220,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
         drawCodeWindow(g, x, y, w, h, "SETTINGS", "settings");
         g.enableScissor(x,y,x+w,y+h);
@@ -1074,10 +1090,11 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
-        g.drawString(font,"Renderer",x+12,y+99,TEXT,false);
-        g.drawString(font,"JAVA · CODE ONLY",x+12,y+121,CYAN,false);
-        if(h>145)g.drawString(font,"UI assets: disabled · code renderer",x+12,y+151,MUTED,false);
-        if(h>168)g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
+        g.drawString(font,"Interface theme",x+12,y+101,TEXT,false);
+        g.drawString(font,ThemeManager.selectedTheme().toUpperCase(java.util.Locale.ROOT)+"  ›",x+w-78,y+101,CYAN,false);
+        g.drawString(font,"Renderer",x+12,y+137,TEXT,false);
+        g.drawString(font,"JAVA + THEMED SKIN",x+12,y+155,CYAN,false);
+        if(h>178)g.drawString(font,"Shared MAQAN texture renderer",x+12,y+181,MUTED,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
         g.disableScissor();
     }
