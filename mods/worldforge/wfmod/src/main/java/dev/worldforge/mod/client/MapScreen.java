@@ -1716,15 +1716,23 @@ public class MapScreen extends Screen {
             int prov = pixelProvince((int) mx, (int) my);
             if (prov > 0) {
                 selected = prov;
+                selectedMarkerId = "";
                 selLabel = labelOfProvince(prov);
                 setOverlay(selLabel);
-                TitleData.Realm r = MapTextures.titles.realmOf(MapTextures.titles.get(prov));
+                TitleData.Title selectedTitle = MapTextures.titles.get(prov);
+                TitleData.Realm r = MapTextures.titles.realmOf(selectedTitle);
+                String summary = "Провинция #" + prov + " · " + selectedTitle.name
+                        + (r == null ? " · без государства" : " · государство: " + r.name);
+                PlatformWorkspaceBridge.publish("worldforge", "province:" + prov,
+                        "PROVINCE", selectedTitle.name, summary);
                 if (MapImages.isDip(ClientState.mode) && r != null && !ClientState.mode.equals(MapImages.DIP + r.id)) setMode(MapImages.DIP + r.id, true);
                 panel.onSelected(prov);
                 centerOnProvince(prov);
             } else {
                 selected = 0;
+                selectedMarkerId = "";
                 selLabel = -1;
+                PlatformWorkspaceBridge.clear("worldforge");
                 freeOverlay();
             }
             return true;
