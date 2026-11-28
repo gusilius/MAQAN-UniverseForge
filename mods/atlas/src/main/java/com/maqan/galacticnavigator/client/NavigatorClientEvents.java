@@ -193,8 +193,8 @@ public final class NavigatorClientEvents {
         for(int dz=-2;dz<=2;dz++)for(int dx=-2;dx<=2;dx++){
             int chunkX=centerChunkX+dx,chunkZ=centerChunkZ+dz;
             if(NavigatorExplorationStore.explored(dimension,chunkX,chunkZ))continue;
-            LevelChunk chunk=level.getChunkSource().getChunk(chunkX,chunkZ,ChunkStatus.FULL,false);
-            if(chunk==null)continue;
+            var chunkAccess=level.getChunkSource().getChunk(chunkX,chunkZ,ChunkStatus.FULL,false);
+            if(!(chunkAccess instanceof LevelChunk chunk))continue;
             int[] colors=new int[256],heights=new int[256];
             int originX=chunkX<<4,originZ=chunkZ<<4;
             for(int localZ=0;localZ<16;localZ++)for(int localX=0;localX<16;localX++){
