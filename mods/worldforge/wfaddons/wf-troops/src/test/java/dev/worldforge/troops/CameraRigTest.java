@@ -67,4 +67,51 @@ class CameraRigTest {
         rig.cycle();
         assertEquals(CameraRig.View.STRATEGIC, rig.view);
     }
+    @Test
+    void cameraHeightIsRelativeToPlayerAndIndependentForEachView() {
+        CameraRig rig = new CameraRig();
+        rig.start(100, 200, 0, CameraRig.View.SKY);
+        rig.setHeightFromUser(72);
+        double[] first = rig.positionRelativeToPlayer(64);
+        assertEquals(136.0, first[1], 1.0e-9);
+
+        rig.transitionTo(CameraRig.View.TACTICS);
+        rig.setHeightFromUser(40);
+        double[] second = rig.positionRelativeToPlayer(-20);
+        assertEquals(20.0, second[1], 1.0e-9);
+
+        rig.transitionTo(CameraRig.View.SKY);
+        assertEquals(72.0, rig.heightAbovePlayer, 1.0e-9);
+        assertEquals(136.0, rig.positionRelativeToPlayer(64)[1], 1.0e-9);
+    }
+
+    @Test
+    void eachCameraHeightLockOnlyLocksItsOwnView() {
+        CameraRig rig = new CameraRig();
+        rig.start(0, 0, 0, CameraRig.View.SKY);
+        rig.setHeightFromUser(80);
+        rig.setHeightLocked(true);
+        rig.adjustHeight(16);
+        assertEquals(80.0, rig.heightAbovePlayer, 1.0e-9);
+
+        rig.transitionTo(CameraRig.View.TOP_DOWN);
+        rig.setHeightFromUser(120);
+        assertEquals(120.0, rig.heightAbovePlayer, 1.0e-9);
+
+        rig.transitionTo(CameraRig.View.SKY);
+        assertEquals(80.0, rig.heightAbovePlayer, 1.0e-9);
+        assertTrue(rig.heightLockedFor(CameraRig.View.SKY));
+        assertFalse(rig.heightLockedFor(CameraRig.View.TOP_DOWN));
+    }
+
+    @Test
+    void playerRelativeCameraHeightDoesNotDependOnFocusTerrain() {
+        CameraRig rig = new CameraRig();
+        rig.start(10, 20, 0, CameraRig.View.SKY);
+        rig.setHeightFromUser(56);
+        rig.focusOn(900, -1200);
+        assertEquals(156.0, rig.positionRelativeToPlayer(100)[1], 1.0e-9);
+        assertEquals(-44.0, rig.positionRelativeToPlayer(-100)[1], 1.0e-9);
+    }
+
 }
