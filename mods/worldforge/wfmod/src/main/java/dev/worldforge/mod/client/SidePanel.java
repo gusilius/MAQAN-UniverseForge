@@ -502,7 +502,10 @@ final class SidePanel {
         boolean hasPopulation = false;
         for (Markers.Marker marker : ClientState.markers.list()) {
             String owner = markerValue(marker.desc, "realm");
-            if (!realm.id.equals(owner) && !realm.name.equalsIgnoreCase(owner)) continue;
+            String destination = markerValue(marker.desc, "destination");
+            boolean belongs = realm.id.equals(owner) || realm.name.equalsIgnoreCase(owner)
+                    || ("caravan".equals(marker.type) && realm.id.equals(destination));
+            if (!belongs) continue;
             switch (marker.type) {
                 case "army", "corps", "unit", "commander" -> {
                     armies++; soldiers += markerInt(marker.desc, "men");
@@ -518,6 +521,14 @@ final class SidePanel {
         }
         c.head("Население и владения");
         c.kv("Поселения и крепости", String.valueOf(settlements));
+        if (!hasPopulation) {
+            Double realmPopulation = Ledger.parse(realm.props.get("population"));
+            if (realmPopulation == null) realmPopulation = Ledger.parse(realm.props.get("population.total"));
+            if (realmPopulation != null && realmPopulation >= 0) {
+                population = (int) Math.min(Integer.MAX_VALUE, Math.round(realmPopulation));
+                hasPopulation = true;
+            }
+        }
         c.kv("Население", hasPopulation ? formatAmount(population) : "нет данных в снимке объектов");
         c.head("Военная сила");
         c.kv("Военные объекты", String.valueOf(armies));
