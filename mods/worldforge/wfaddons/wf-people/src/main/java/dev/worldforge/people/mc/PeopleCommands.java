@@ -138,8 +138,9 @@ final class PeopleCommands {
             source.sendFailure(Component.literal("NPC появились, но WAL не подтвердил все записи. Не продолжайте массовое создание до проверки сохранения."));
             return spawned;
         }
-        source.sendSuccess(()->Component.literal("Создано NPC: "+spawned+" · Character ID и тела связаны · владелец: "+player.getGameProfile().getName()),true);
-        return spawned;
+        final int spawnedCount=spawned;
+        source.sendSuccess(()->Component.literal("Создано NPC: "+spawnedCount+" · Character ID и тела связаны · владелец: "+player.getGameProfile().getName()),true);
+        return spawnedCount;
     }
 
     private static void say(CommandSourceStack s, String line) {
