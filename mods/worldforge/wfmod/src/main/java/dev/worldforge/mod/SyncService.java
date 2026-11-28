@@ -154,8 +154,8 @@ public final class SyncService {
                 if (deltas.get(m) != null) WFNet.send(sp, WFNet.DELTA, deltas.get(m));
                 if (marks.get(m) != null) WFNet.send(sp, WFNet.MARKERS, marks.get(m));
                 if (strategicChanged) {
-                    WFNet.send(sp, WFNet.VIEW, ("wf:events\\n" + new String(eventSnapshot, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8));
-                    WFNet.send(sp, WFNet.VIEW, ("wf:treasury\\n" + new String(treasurySnapshot, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8));
+                    WFNet.send(sp, WFNet.VIEW, ("wf:events\n" + new String(eventSnapshot, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8));
+                    WFNet.send(sp, WFNet.VIEW, ("wf:treasury\n" + new String(treasurySnapshot, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8));
                 }
             } catch (IOException ex) {
                 WorldForgeMod.LOGGER.error("WorldForge: ошибка рассылки правок: {}", ex.toString());
