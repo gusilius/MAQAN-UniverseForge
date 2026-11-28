@@ -86,22 +86,27 @@ public final class VisualCatalogScreen extends Screen {
     private void drawPreview(GuiGraphics g, WorldObjectVisualCatalog.Entry entry, int x, int y) {
         g.fill(x - 3, y - 3, x + 27, y + 27, 0xFF211A15);
         g.renderOutline(x - 3, y - 3, 30, 30, 0xFF927348);
-        ResourceLocation preview = ResourceLocation.tryParse(entry.previewTexture());
+        String previewId = entry.previewTexture().isBlank()
+                ? entry.profile().mapTexture() : entry.previewTexture();
+        ResourceLocation preview = ResourceLocation.tryParse(previewId);
         if (preview != null) {
             g.blit(preview, x, y, 0, 0, 24, 24, 24, 24);
             return;
         }
+        // A Minecraft item sprite is only a 2D fallback, never presented as a model preview.
         String item = entry.profile().mapItem();
         ResourceLocation id = ResourceLocation.tryParse(item);
         if (id != null) {
             var value = BuiltInRegistries.ITEM.getOptional(id);
             if (value.isPresent() && !value.get().getDefaultInstance().isEmpty()) {
-                g.renderItem(new ItemStack(value.get()), x + 4, y + 4);
+                g.renderItem(new ItemStack(value.get()), x + 4, y + 2);
+                g.drawCenteredString(font, "2D", x + 12, y + 20, 0xFFE0C18B);
                 return;
             }
         }
         g.fill(x + 5, y + 5, x + 19, y + 19, 0xFFB58A4B);
         g.drawCenteredString(font, entry.profile().icon().substring(0, 1).toUpperCase(), x + 12, y + 8, 0xFF211A15);
+        g.drawCenteredString(font, "—", x + 12, y + 20, 0xFFE0C18B);
     }
 
     @Override
