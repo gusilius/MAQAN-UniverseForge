@@ -93,7 +93,7 @@ public class MapScreen extends Screen {
         // On short windows, shrink toolbar targets before allowing rows to leave the viewport.
         int availableHeight = Math.max(1, height - 24);
         if (rows * size + (rows - 1) * 5 > availableHeight) {
-            size = Math.max(18, Math.min(size,
+            size = Math.max(12, Math.min(size,
                     (availableHeight - Math.max(0, rows - 1) * 3) / rows));
             gap = 2;
         }
