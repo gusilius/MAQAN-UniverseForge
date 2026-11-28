@@ -26,10 +26,23 @@ public class LedgerScreen extends Screen {
     private final List<int[]> hits = new ArrayList<>();   // x,y,w,h,тип(1 заголовок,2 строка,3 вкладка,4 поиск),индекс
     private final Map<Integer, int[]> widths = new java.util.HashMap<>();
 
+    private final Screen parent;
+
     public LedgerScreen(TitleData data, String viewerRealm, Consumer<String> cmd) {
-        super(Component.literal("Реестр"));
+        this(data, viewerRealm, cmd, null);
+    }
+
+    public LedgerScreen(TitleData data, String viewerRealm, Consumer<String> cmd, Screen parent) {
+        super(Component.literal("Реестр государств"));
         this.ledger = Ledger.build(data, viewerRealm);
         this.cmd = cmd;
+        this.parent = parent;
+    }
+
+    @Override
+    public void onClose() {
+        if (parent != null) minecraft.setScreen(parent);
+        else super.onClose();
     }
 
     @Override
