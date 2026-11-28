@@ -371,6 +371,8 @@ public class MapScreen extends Screen {
         ClientWorldMapBootstrap.ensure();
         if (lastMapState != ClientState.state) {
             lastMapState = ClientState.state;
+            PlatformWorkspaceBridge.clear("worldforge");
+            lastPublishedDimension = "";
             fitted = false;
             selected = 0;
             hoverProv = 0;
