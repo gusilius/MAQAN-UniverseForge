@@ -51,6 +51,21 @@ final class BuildControl {
             defs.add(e);
         }
         m.put("defs", defs);
+        List<Object> units=new ArrayList<>();
+        for(var unitEntry:TroopsMod.DEFS.units.entrySet()){
+            var unit=unitEntry.getValue();
+            Map<String,Object> row=new LinkedHashMap<>();
+            row.put("id",unit.id());
+            row.put("name",unit.name());
+            row.put("role",unit.role());
+            row.put("cost",unit.cost());
+            row.put("upkeep",unit.upkeep());
+            row.put("building",TroopsMod.DEFS.recruitmentBuilding(unit));
+            row.put("supply",new LinkedHashMap<>(TroopsMod.DEFS.recruitmentCost(unit)));
+            row.put("description",unit.desc());
+            units.add(row);
+        }
+        m.put("units",units);
         Map<String, Object> stock = new LinkedHashMap<>();
         for (var e : c.s.stock.entrySet()) stock.put(e.getKey(), (int) Math.floor(e.getValue()));
         m.put("stock", stock);

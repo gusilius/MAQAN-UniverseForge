@@ -49,6 +49,12 @@ public final class CommandScreen extends Screen {
     private Settlement settlement = incomingSettlement;
     private boolean settlementOpen = true;
     private boolean buildOpen;
+    private boolean recruitOpen;
+    private int recruitCount=1;
+    private String selectedRecruitType="";
+    private record RecruitOption(String id,String name,String role,int cost,double upkeep,
+                                 String building,Map<String,Integer> supply,String description) {}
+    private final List<RecruitOption> recruitOptions=new ArrayList<>();
     private boolean workAreaDrag;
     private int workMode = -1;
     private int workOverlay = 2;
@@ -102,6 +108,22 @@ public final class CommandScreen extends Screen {
             colX = ((Number) m.getOrDefault("cx", 0)).intValue();
             colZ = ((Number) m.getOrDefault("cz", 0)).intValue();
             defs.addAll(BuildGhost.parseDefs(m.get("defs")));
+            recruitOptions.clear();
+            if(m.get("units") instanceof List<?> unitRows)for(Object rawUnit:unitRows){
+                if(!(rawUnit instanceof Map<?,?> unit))continue;
+                Map<String,Integer> supply=new TreeMap<>();
+                if(unit.get("supply") instanceof Map<?,?> costs)
+                    for(var entry:costs.entrySet())if(entry.getValue() instanceof Number amount)
+                        supply.put(String.valueOf(entry.getKey()),amount.intValue());
+                recruitOptions.add(new RecruitOption(String.valueOf(unit.get("id")),
+                        String.valueOf(unit.get("name")),String.valueOf(unit.get("role")),
+                        ((Number)unit.getOrDefault("cost",0)).intValue(),
+                        unit.get("upkeep") instanceof Number upkeep?upkeep.doubleValue():0.0,
+                        String.valueOf(unit.get("building")),Map.copyOf(supply),
+                        String.valueOf(unit.getOrDefault("description",""))));
+            }
+            if(selectedRecruitType.isBlank()&&!recruitOptions.isEmpty())
+                selectedRecruitType=recruitOptions.get(0).id();
             if (m.get("stock") instanceof Map<?, ?> s) for (var e : s.entrySet()) stock.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue());
             if (m.get("taken") instanceof List<?> l) for (Object o : l) {
                 Map<String, Object> t = (Map<String, Object>) o;
@@ -262,8 +284,8 @@ public final class CommandScreen extends Screen {
     }
 
     private List<Btn> dockButtons(){
-        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Стройка","Тело"};
-        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","СТРОЙ","ТЕЛО"};
+        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Тело"};
+        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ТЕЛО"};
         int count=full.length,gap=3,available=Math.max(1,width-16);
         int buttonWidth=Math.max(20,Math.min(92,(available-gap*(count-1))/count));
         boolean compact=buttonWidth<64;
@@ -274,12 +296,12 @@ public final class CommandScreen extends Screen {
                 this::selectAllWorkers,this::selectAllTroops,
                 ()->sendSelectedOrder(Squads.Kind.STOP),()->sendSelectedOrder(Squads.Kind.HOLD),
                 this::cycleSelectedFormation,this::cycleSelectedStance,
-                this::cycleWorkMode,this::toggleBuild,()->CommandMode.enterBodyCommand(minecraft)
+                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,()->CommandMode.enterBodyCommand(minecraft)
         };
         for(int i=0;i<count;i++){
             boolean on=switch(i){case 0->!CommandMode.selected().isEmpty()&&selectedWorkerIds().size()==CommandMode.selected().size();
                 case 1->!CommandMode.selected().isEmpty()&&selectedTroopIds().size()==CommandMode.selected().size();
-                case 6->workMode>=0;case 7->buildOpen;default->false;};
+                case 6->workMode>=0;case 7->recruitOpen;case 8->buildOpen;default->false;};
             out.add(new Btn(compact?shortLabels[i]:full[i],x,y,buttonWidth,on,actions[i]));
             x+=buttonWidth+gap;
         }
@@ -346,6 +368,81 @@ public final class CommandScreen extends Screen {
         for(Btn button:dock)button(g,button,mouseX,mouseY);
     }
 
+    private void toggleRecruit(){
+        recruitOpen=!recruitOpen;
+        if(recruitOpen){
+            buildOpen=false;
+            if(recruitOptions.isEmpty())requestBuilds();
+        }
+        picked=null;
+    }
+
+    private int recruitPanelX(){return Math.max(4,width-panelW()-4);}
+    private int recruitPanelY(){return 30;}
+    private int recruitPanelH(){return Math.max(100,Math.min(height-72,300));}
+    private boolean inRecruitPanel(double x,double y){
+        return recruitOpen&&x>=recruitPanelX()&&x<recruitPanelX()+panelW()
+                &&y>=recruitPanelY()&&y<recruitPanelY()+recruitPanelH();
+    }
+    private void drawRecruitPanel(GuiGraphics g,int mouseX,int mouseY){
+        int x=recruitPanelX(),y=recruitPanelY(),w=panelW(),h=recruitPanelH();
+        g.fill(x,y,x+w,y+h,0xE8101721);
+        g.fill(x,y,x+w,y+2,0xFFD0A65B);
+        g.renderOutline(x,y,w,h,0xFF536D83);
+        g.drawString(font,"ВОЕННЫЙ НАБОР",x+8,y+7,0xFFFFD88B,false);
+        g.drawString(font,"−",x+w-70,y+7,0xFFE6D7B8,false);
+        g.drawString(font,String.valueOf(recruitCount),x+w-50,y+7,0xFFFFFFFF,false);
+        g.drawString(font,"+",x+w-25,y+7,0xFFE6D7B8,false);
+        g.drawString(font,"Готовое здание + инструктор · склад + золото",x+8,y+22,0xFF9EAFC0,false);
+        int rowY=y+39,shown=0;
+        for(RecruitOption option:recruitOptions){
+            if(rowY+24>y+h-37)break;
+            boolean active=option.id().equals(selectedRecruitType);
+            boolean hover=mouseX>=x+5&&mouseX<x+w-5&&mouseY>=rowY&&mouseY<rowY+22;
+            if(active||hover)g.fill(x+5,rowY,x+w-5,rowY+21,active?0x664C778D:0x443B5063);
+            String title=font.plainSubstrByWidth(option.name(),w-86);
+            g.drawString(font,title,x+10,rowY+3,active?0xFFFFE4A5:0xFFE3E8EF,false);
+            String meta=option.building()+" · "+option.cost()+" зол.";
+            g.drawString(font,font.plainSubstrByWidth(meta,w-86),x+10,rowY+12,0xFF93A6B8,false);
+            if(active)g.drawString(font,"◆",x+w-19,rowY+6,0xFFFFD36A,false);
+            rowY+=23;shown++;
+        }
+        if(recruitOptions.isEmpty())
+            g.drawString(font,buildError.isBlank()?"Получение списка войск…":buildError,x+8,y+54,0xFFFFB77A,false);
+        RecruitOption selected=recruitOptions.stream().filter(o->o.id().equals(selectedRecruitType)).findFirst().orElse(null);
+        if(selected!=null){
+            String supply=selected.supply().entrySet().stream().map(e->e.getKey()+" "+e.getValue()*recruitCount)
+                    .collect(java.util.stream.Collectors.joining(" · "));
+            g.drawString(font,font.plainSubstrByWidth("Снабжение: "+supply,w-16),x+8,y+h-31,0xFF9EC7B3,false);
+            g.fill(x+8,y+h-20,x+w-8,y+h-5,0xFF315A46);
+            g.drawCenteredString(font,"НАНЯТЬ "+recruitCount+" · "+selected.id(),x+w/2,y+h-17,0xFFE9F4E9);
+        }
+    }
+    private void recruitPanelClick(double x,double y){
+        int px=recruitPanelX(),py=recruitPanelY(),w=panelW(),h=recruitPanelH();
+        if(y<py+19){
+            if(x>=px+w-80&&x<px+w-54)recruitCount=Math.max(1,recruitCount-1);
+            else if(x>=px+w-36&&x<px+w-8)recruitCount=Math.min(Squads.MAX_SIZE,recruitCount+1);
+            return;
+        }
+        if(y>=py+39&&y<py+h-34){
+            int row=(int)((y-(py+39))/23);
+            if(row>=0&&row<recruitOptions.size()){
+                int maxRows=Math.max(0,(h-39-34)/23);
+                int index=Math.min(row,recruitOptions.size()-1);
+                if(row<maxRows)selectedRecruitType=recruitOptions.get(index).id();
+            }
+            return;
+        }
+        if(y>=py+h-22){
+            RecruitOption selected=recruitOptions.stream().filter(o->o.id().equals(selectedRecruitType)).findFirst().orElse(null);
+            if(selected==null)return;
+            if(minecraft.player!=null)minecraft.player.connection.sendCommand(
+                    "wftroops raise "+selected.id()+" "+recruitCount);
+            recruitOpen=false;
+        }
+    }
+
     private int panelW() { return Math.max(1, Math.min(PANEL_W, width - 8)); }
     private int panelX() { return Math.max(0, width - panelW() - 4); }
     private int panelY() { return 26; }
@@ -376,7 +473,7 @@ public final class CommandScreen extends Screen {
                 && py >= 34 && py < 34 + settlementSummaryHeight()) return true;
         if (!CommandMode.selected().isEmpty() && px >= INSPECT_X && px < INSPECT_X + INSPECT_W
                 && py >= inspectY() && py < inspectY() + 96) return true;
-        return inBuildPanel(px, py) || inSelPanel(px, py);
+        return inBuildPanel(px, py) || inRecruitPanel(px,py) || inSelPanel(px, py);
     }
 
     private List<String> categories() {
@@ -595,6 +692,7 @@ public final class CommandScreen extends Screen {
         if (button == 0) {
             for(Btn b:dockButtons())if(b.hit(x,y)){b.run().run();return true;}
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
+            if (recruitOpen && inRecruitPanel(x,y)) { recruitPanelClick(x,y); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
             // Consume clicks on every remaining UI surface before issuing world orders.
@@ -843,6 +941,7 @@ public final class CommandScreen extends Screen {
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
+        if (key == GLFW.GLFW_KEY_N) { toggleRecruit(); return true; }
         if (key == GLFW.GLFW_KEY_H) {
             settlementOpen = !settlementOpen;
             if (settlement == null && minecraft.player != null) minecraft.player.connection.sendCommand("wfsettle view hud");
@@ -1037,6 +1136,7 @@ public final class CommandScreen extends Screen {
         if (!embeddedInMaqan) drawZoomSlider(g);
         drawHeightWidget(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
+        if (recruitOpen) drawRecruitPanel(g,mxi,myi);
         drawCommandDock(g,mxi,myi);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена"
                 : "ЛКМ выбор/рамка · ПКМ приказ · WASD — камера · Ctrl/СКМ+колесо — высота · колесо — приближение · СКМ — вращать · P патруль · G/ТЕЛО — управление персонажем · R — выход";
