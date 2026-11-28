@@ -56,6 +56,9 @@ public final class Markers {
         if (marker == null || marker.id == null || marker.id.isBlank()
                 || marker.name == null || marker.name.isBlank()
                 || marker.type == null || !TYPES.contains(marker.type)) return;
+        // User-authored markers and live provider snapshots share one identity namespace.
+        // A repeated provider tick or a conflicting ID must never render a duplicate symbol.
+        if (find(marker.id) != null) return;
         String override = visualOverrides.get(marker.id);
         if (override != null) marker.visualProfile = override;
         list.add(marker);
