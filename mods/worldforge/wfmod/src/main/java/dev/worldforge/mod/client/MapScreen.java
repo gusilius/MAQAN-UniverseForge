@@ -1116,7 +1116,8 @@ public class MapScreen extends Screen {
                 }
             }
         }
-        if (!renderedLeader && "army".equals(marker.type) && commanderBody != null && commanderBody.isAlive()) {
+        if (!renderedLeader && ("army".equals(marker.type) || "commander".equals(marker.type))
+                && commanderBody != null && commanderBody.isAlive()) {
             g.enableScissor(left + 2, top + 2, left + size - 2, top + size - 2);
             try {
                 InventoryScreen.renderEntityInInventoryFollowsMouse(g,
