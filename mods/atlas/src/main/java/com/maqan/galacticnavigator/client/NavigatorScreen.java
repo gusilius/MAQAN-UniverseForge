@@ -1519,7 +1519,7 @@ public class NavigatorScreen extends Screen {
             drawBreadcrumbs(g, mx, my);
         } else {
             renderBackground(g);
-            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderChrome(g, font, width, height, partial, 0)) drawCosmicBackdrop(g);
+            drawCosmicBackdrop(g);
             MaqanUiTheme.panel(g,12,4,width-12,38);
             g.fill(0, 38, width, 39, 0x665D7895);
             g.fill(14, 37, 54, 39, CYAN);
