@@ -58,15 +58,23 @@ public final class MapTextures {
         building = true;
         final int rev = ClientState.revision;
         final TitleData copy = st.titles.copy();
-        final int[] terrain = ClientState.terrain;
         final int tw = st.w, th = st.h;
+        final long pixelCount = (long) tw * th;
+        if (tw <= 0 || th <= 0 || pixelCount > Integer.MAX_VALUE) {
+            building = false;
+            return;
+        }
+        final int[] terrainSnapshot;
+        int[] sourceTerrain = ClientState.terrain;
+        if (sourceTerrain != null && sourceTerrain.length == (int) pixelCount) {
+            terrainSnapshot = sourceTerrain.clone();
+        } else {
+            terrainSnapshot = new int[(int) pixelCount];
+            java.util.Arrays.fill(terrainSnapshot, 0xFF1E2A3A);
+        }
         CompletableFuture.supplyAsync(() -> {
             Result r = new Result();
-            int[] base = terrain;
-            if (base == null || base.length != tw * th) {
-                base = new int[tw * th];
-                java.util.Arrays.fill(base, 0xFF1E2A3A);
-            }
+            int[] base = terrainSnapshot;
             r.img = MapImages.render(copy, base, wantMode);
             r.w = tw;
             r.h = th;
@@ -76,7 +84,9 @@ public final class MapTextures {
             return r;
         }).whenComplete((r, err) -> Minecraft.getInstance().execute(() -> {
             building = false;
-            if (err != null || r == null) return;
+            // A newer world snapshot may have arrived while this expensive raster pass was running.
+            // Never replace a current map texture with an obsolete render result.
+            if (err != null || r == null || ClientState.state == null || rev != ClientState.revision) return;
             upload(r, rev, wantMode);
         }));
     }
