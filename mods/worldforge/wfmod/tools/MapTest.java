@@ -19,6 +19,11 @@ public class MapTest {
         long t0 = System.currentTimeMillis();
         int[] terrain = TerrainImage.render(m);
         System.out.println("рельеф: " + (System.currentTimeMillis() - t0) + " мс");
+        int terrainHash = Arrays.hashCode(terrain);
+        int[] terrainRepeat = TerrainImage.render(m);
+        check(Arrays.equals(terrain, terrainRepeat), "географическая картография детерминирована между рендерами");
+        check(Arrays.hashCode(terrain) == terrainHash, "географический растр не меняется при повторном рендере");
+        check(Arrays.stream(terrain).distinct().limit(2).count() > 1, "географическая карта содержит фактические различия рельефа/биомов");
         boolean shortTerrainRejected = false;
         try { MapImages.render(m.titles, new int[Math.max(0, terrain.length - 1)], MapImages.REALMS); }
         catch (IllegalArgumentException expected) { shortTerrainRejected = true; }
