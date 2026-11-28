@@ -39,6 +39,8 @@ public final class MapTextures {
     private static DynamicTexture tex;
     private static int builtRev = -1;
     private static volatile boolean building;
+    private static volatile String requestedMode = "";
+    private static int buildToken;
     private static int counter;
 
     private MapTextures() {}
@@ -54,8 +56,10 @@ public final class MapTextures {
             release();
             return;
         }
+        requestedMode = wantMode;
         if (building || (builtRev == ClientState.revision && wantMode.equals(mode) && id != null)) return;
         building = true;
+        final int token = ++buildToken;
         final int rev = ClientState.revision;
         final TitleData copy = st.titles.copy();
         final int tw = st.w, th = st.h;
@@ -83,10 +87,11 @@ public final class MapTextures {
             r.labels = makeLabels(copy, wantMode);
             return r;
         }).whenComplete((r, err) -> Minecraft.getInstance().execute(() -> {
+            if (token != buildToken) return;
             building = false;
-            // A newer world snapshot may have arrived while this expensive raster pass was running.
-            // Never replace a current map texture with an obsolete render result.
-            if (err != null || r == null || ClientState.state == null || rev != ClientState.revision) return;
+            // A newer world snapshot, requested layer, or screen lifecycle may supersede this raster pass.
+            if (err != null || r == null || ClientState.state == null
+                    || rev != ClientState.revision || !wantMode.equals(requestedMode)) return;
             upload(r, rev, wantMode);
         }));
     }
@@ -160,6 +165,9 @@ public final class MapTextures {
     }
 
     public static void release() {
+        buildToken++;
+        building = false;
+        requestedMode = "";
         if (id != null) Minecraft.getInstance().getTextureManager().release(id);
         id = null;
         tex = null;
