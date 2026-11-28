@@ -55,6 +55,8 @@ public final class PlatformShellScreen extends Screen {
 
     private final Map<String, Panel> panels = new LinkedHashMap<>();
     private final java.util.Set<String> hiddenPanels = new java.util.LinkedHashSet<>();
+    /** RTS panels are opt-in overlays; the battlefield is unobstructed by default. */
+    private final java.util.Set<String> rtsOverlayPanels = new java.util.LinkedHashSet<>();
     // Panels hidden only because the current viewport cannot fit them without overlap.
     private final java.util.Set<String> viewportSuppressedPanels = new java.util.LinkedHashSet<>();
     private Profile profile = Profile.COSMOS;
@@ -193,8 +195,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean isPauseScreen() { return false; }
 
     @Override protected void init() {
-        ThemeManager.initialize();
-        CYAN = ThemeManager.accentColor();
+        CYAN = WorkspaceTheme.ACCENT;
         if (panels.isEmpty()) {
             panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
@@ -249,6 +250,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private boolean compactViewport() { return width < 900 || height < 520; }
+    private boolean immersiveRts() { return profile == Profile.RTS && commandCameraActive(); }
     private boolean compactTopbar() { return width < 720; }
     private int profileStartX() { return compactTopbar() ? ux(48) : Math.max(ux(178),width/2-ux(112)); }
     private int profileButtonWidth() { return compactTopbar() ? ux(28) : ux(48); }
@@ -278,12 +280,30 @@ public final class PlatformShellScreen extends Screen {
 
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
-        WorkspaceDockTree.Rect bounds = workspaceBounds();
+        WorkspaceDockTree.Rect bounds = immersiveRts()
+                ? new WorkspaceDockTree.Rect(0, 0, Math.max(1, width), Math.max(1, height))
+                : workspaceBounds();
         WorkspaceDockTree.Node root = layoutRoot();
         Map<String, WorkspaceDockTree.Rect> layout;
         if (compactViewport()) layout = Map.of("content", bounds);
         else {
             layout = WorkspaceDockTree.layout(root, bounds, workspaceMinimums());
+        }
+        if (immersiveRts()) {
+            Panel content = panels.get("content");
+            if (content != null) {
+                content.x = 0; content.y = 0; content.w = Math.max(1, width); content.h = Math.max(1, height);
+                content.visible = true;
+            }
+            for (Panel panel : panels.values()) {
+                if (panel.id.equals("content")) continue;
+                panel.visible = rtsOverlayPanels.contains(panel.id) && !hiddenPanels.contains(panel.id);
+                if (panel.visible && "FLOAT".equals(panel.dock)) {
+                    panel.x = Math.max(8, Math.min(panel.x, width - panel.w - 8));
+                    panel.y = Math.max(8, Math.min(panel.y, height - panel.h - 8));
+                }
+            }
+            return;
         }
         for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
             Panel panel = panels.get(entry.getKey());
@@ -634,13 +654,15 @@ public final class PlatformShellScreen extends Screen {
             WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        ThemeManager.renderChrome(g, width, height, profile == Profile.RTS || commandCameraActive());
-        drawTopBar(g, mouseX, mouseY);
-        drawRail(g, mouseX, mouseY);
+        boolean immersive = immersiveRts();
+        if (!immersive) {
+            drawTopBar(g, mouseX, mouseY);
+            drawRail(g, mouseX, mouseY);
+            drawDockSplitters(g, mouseX, mouseY);
+        }
         for (Panel p : panels.values())
             if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
         if (settingsVisible) drawSettings(g, mouseX, mouseY);
-        drawDockSplitters(g, mouseX, mouseY);
         if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
         if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
         if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
@@ -1000,15 +1022,8 @@ public final class PlatformShellScreen extends Screen {
         }
         if(mx>=sx&&mx<sx+w&&my>=sy+32&&my<sy+59){ambientGrid=!ambientGrid;saveWorkspaceState();return true;}
         if(mx>=sx&&mx<sx+w&&my>=sy+59&&my<sy+86){panelShadows=!panelShadows;saveWorkspaceState();return true;}
-        String[] themes=ThemeManager.themes();
-        int themeGap=4,themeWidth=Math.max(24,(w-20-themeGap*Math.max(0,themes.length-1))/Math.max(1,themes.length));
-        if(my>=sy+115&&my<sy+139&&mx>=sx+10&&mx<sx+w-10){
-            int index=(int)((mx-(sx+10))/(double)(themeWidth+themeGap));
-            if(index>=0&&index<themes.length&&ThemeManager.setTheme(themes[index])){
-                CYAN=ThemeManager.accentColor();saveWorkspaceState();
-            }
-            return true;
-        }
+        // Texture themes are disabled during the code-only UI validation pass.
+        if(my>=sy+115&&my<sy+139&&mx>=sx+10&&mx<sx+w-10) return true;
         // Settings is modal: clicking outside closes it but never activates a control underneath.
         settingsVisible=false;
         return true;
@@ -1017,7 +1032,7 @@ public final class PlatformShellScreen extends Screen {
     private void drawSettings(GuiGraphics g, int mx, int my) {
         int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
-        ThemeManager.renderWindow(g,x,y,w,h,"settings");
+        drawCodeWindow(g, x, y, w, h, "SETTINGS");
         g.enableScissor(x,y,x+w,y+h);
         g.fill(x + 8, y + 6, x + w - 8, y + 22, 0x55101824);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
@@ -1029,25 +1044,28 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
         g.drawString(font,"Interface theme",x+12,y+99,TEXT,false);
-        String[] themes=ThemeManager.themes();
-        int themeGap=4, themeWidth=Math.max(24,(w-20-themeGap*Math.max(0,themes.length-1))/Math.max(1,themes.length));
-        for(int i=0;i<themes.length;i++) {
-            int tx=x+10+i*(themeWidth+themeGap);
-            boolean selected=themes[i].equals(ThemeManager.selectedTheme());
-            g.fill(tx,y+115,tx+themeWidth,y+139,selected?0xAA3B879B:0xAA172330);
-            g.fill(tx,y+115,tx+themeWidth,y+117,selected?CYAN:EDGE);
-            g.drawCenteredString(font,themes[i].toUpperCase(java.util.Locale.ROOT),tx+themeWidth/2,y+124,selected?0xFFFFFFFF:TEXT);
-        }
-        if(h>145)g.drawString(font,"Textures: "+(ThemeManager.isThemeLoaded()?"loaded":"fallback"),x+12,y+151,MUTED,false);
+        g.fill(x+10,y+115,x+w-10,y+139,SURFACE_INSET);
+        g.drawCenteredString(font,"CODE-ONLY UI",x+w/2,y+123,CYAN);
+        if(h>145)g.drawString(font,"UI assets: disabled · code renderer",x+12,y+151,MUTED,false);
         if(h>168)g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
         g.disableScissor();
     }
 
+    private void drawCodeWindow(GuiGraphics g, int x, int y, int w, int h, String title) {
+        g.fill(x, y, x + w, y + h, WorkspaceTheme.SURFACE);
+        g.fill(x, y, x + w, y + 1, WorkspaceTheme.ACCENT);
+        g.fill(x, y + 1, x + 1, y + h, WorkspaceTheme.BORDER);
+        g.fill(x + w - 1, y + 1, x + w, y + h, WorkspaceTheme.BORDER);
+        g.fill(x, y + h - 1, x + w, y + h, WorkspaceTheme.BORDER);
+        g.fill(x + 1, y + 1, x + w - 1, Math.min(y + h, y + 26), WorkspaceTheme.SURFACE_RAISED);
+        g.drawString(font, title == null ? "PANEL" : title.toUpperCase(java.util.Locale.ROOT), x + 9, y + 8, WorkspaceTheme.TEXT, false);
+    }
+
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         int visibleH = p.minimized ? 26 : p.h;
         if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
-        ThemeManager.renderWindow(g, p.x, p.y, p.w, visibleH, p.id);
+        drawCodeWindow(g, p.x, p.y, p.w, visibleH, p.title);
         // Do not paint an opaque title strip over the supplied frame art.
         // A low-alpha backing keeps live text readable while preserving the skin.
         g.fill(p.x + 8, p.y + 6, p.x + p.w - 8, p.y + 22, 0x55101824);
@@ -1644,6 +1662,17 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void toggleWorkspacePanel(String id) {
+        if (immersiveRts() && !"content".equals(id)) {
+            if (!rtsOverlayPanels.add(id)) rtsOverlayPanels.remove(id);
+            Panel overlay = panels.get(id);
+            if (overlay != null) {
+                overlay.dock = "FLOAT";
+                overlay.visible = rtsOverlayPanels.contains(id);
+                if (overlay.x + overlay.w > width) overlay.x = Math.max(8, width - overlay.w - 8);
+                if (overlay.y + overlay.h > height) overlay.y = Math.max(8, height - overlay.h - 8);
+            }
+            return;
+        }
         Panel panel=panels.get(id);
         boolean currentlyVisible=panel!=null && panel.visible && !hiddenPanels.contains(id);
         if(!currentlyVisible) {
@@ -1936,10 +1965,10 @@ public final class PlatformShellScreen extends Screen {
             onClose(); return true;
         }
         if (workspaceManagerVisible || notificationCenterVisible || settingsVisible || contextMenuVisible) return true;
-        if (keyCode == GLFW.GLFW_KEY_F6) {
-            toggleWorkspacePanel("timeline");
-            return true;
-        }
+        if (keyCode == GLFW.GLFW_KEY_F6) { toggleWorkspacePanel("timeline"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F7) { toggleWorkspacePanel("navigation"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F8) { toggleWorkspacePanel("inspector"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F9) { toggleWorkspacePanel("tools"); return true; }
         java.util.Optional<WorkspaceRuntime.Shortcut> registered =
                 WorkspaceRuntime.shortcutFor(keyCode, modifiers);
         if (registered.isPresent()) {
