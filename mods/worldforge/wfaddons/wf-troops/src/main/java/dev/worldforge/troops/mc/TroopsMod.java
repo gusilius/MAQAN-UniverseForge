@@ -2575,6 +2575,7 @@ public class TroopsMod {
             for (int i = 0; i < count; i++) {
                 TroopEntity troop = TROOP.get().create(level);
                 if (troop == null) {
+                    for (TroopEntity existing : prepared) existing.discard();
                     player.displayClientMessage(Component.literal("Не удалось подготовить весь отряд; создание отменено."), true);
                     return 0;
                 }

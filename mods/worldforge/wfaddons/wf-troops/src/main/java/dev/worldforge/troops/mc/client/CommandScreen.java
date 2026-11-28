@@ -42,6 +42,8 @@ public final class CommandScreen extends Screen {
     private boolean heightEditing;
     private String heightInput = "";
     private boolean embeddedInMaqan;
+    private String hoveredTooltipKey = "";
+    private long hoveredTooltipSince;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private double dragX, dragY, mx, my;
     // стройка
@@ -285,8 +287,8 @@ public final class CommandScreen extends Screen {
     }
 
     private List<Btn> dockButtons(){
-        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Тело"};
-        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ТЕЛО"};
+        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Найм","Стройка","Жители +","Тело"};
+        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","НАЙМ","СТРОЙ","ЖИТ+","ТЕЛО"};
         int count=full.length,gap=3,available=Math.max(1,width-16);
         int buttonWidth=Math.max(20,Math.min(92,(available-gap*(count-1))/count));
         boolean compact=buttonWidth<64;
@@ -297,7 +299,8 @@ public final class CommandScreen extends Screen {
                 this::selectAllWorkers,this::selectAllTroops,
                 ()->sendSelectedOrder(Squads.Kind.STOP),()->sendSelectedOrder(Squads.Kind.HOLD),
                 this::cycleSelectedFormation,this::cycleSelectedStance,
-                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,()->CommandMode.enterBodyCommand(minecraft)
+                this::cycleWorkMode,this::toggleRecruit,this::toggleBuild,this::addWorkers,
+                ()->CommandMode.enterBodyCommand(minecraft)
         };
         for(int i=0;i<count;i++){
             boolean on=switch(i){case 0->!CommandMode.selected().isEmpty()&&selectedWorkerIds().size()==CommandMode.selected().size();
@@ -315,6 +318,16 @@ public final class CommandScreen extends Screen {
             if(entity instanceof TroopEntity troop&&CommandMode.SEL.isSelected(troop.getUUID().toString()))
                 ids.add(troop.getUUID().toString());
         return ids;
+    }
+
+    private void addWorkers(){
+        if(minecraft.player==null)return;
+        if(!minecraft.player.isCreative()){
+            minecraft.player.displayClientMessage(Component.literal(
+                    "В обычном режиме население растёт через жильё, еду и настроение. Ручное создание жителей — творческий инструмент."),true);
+            return;
+        }
+        minecraft.player.connection.sendCommand("wfsettle workers add 4");
     }
 
     private void selectAllWorkers(){
@@ -1096,6 +1109,27 @@ public final class CommandScreen extends Screen {
         g.fill(b.x, b.y, b.x + b.w, b.y + BTN_H, b.on ? 0xEE3A5A2A : over ? 0xEE3A3A52 : 0xDD15151F);
         g.fill(b.x, b.y, b.x + b.w, b.y + 1, b.on ? 0xFF8AD060 : 0xFF6A5A30);
         g.drawCenteredString(font, b.label, b.x + b.w / 2, b.y + 4, b.on ? 0xFFDDFFCC : 0xFFE6C875);
+        if(over){
+            String key=b.label;
+            if(!key.equals(hoveredTooltipKey)){hoveredTooltipKey=key;hoveredTooltipSince=System.currentTimeMillis();}
+            if(System.currentTimeMillis()-hoveredTooltipSince>=900){
+                String description=switch(key){
+                    case "РАБ.","Рабочие"->"Выделить всех доступных рабочих поблизости";
+                    case "ВОЙ.","Войска"->"Выделить все подконтрольные военные отряды";
+                    case "СТОП","Стоп"->"Остановить выделенных и очистить очередь приказов";
+                    case "ДЕРЖ.","Удержать"->"Удерживать текущую позицию";
+                    case "ФОРМ.","Формация"->"Сменить боевую формацию выделенных отрядов";
+                    case "СТОЙ.","Стойка"->"Сменить боевую стойку и правила вступления в бой";
+                    case "ЗОНЫ","Участки"->"Назначить рабочим лес, камень, руду и другие рабочие зоны";
+                    case "НАЙМ","Найм"->"Открыть набор войск; в творческом режиме здания и ресурсы не нужны";
+                    case "СТРОЙ","Стройка"->"Открыть каталог поселения и разместить чертёж";
+                    case "ЖИТ+","Жители +"->"Добавить четырёх жителей в творческом режиме";
+                    case "ТЕЛО","Тело"->"Вернуться к виду от первого лица и приказам персонажу";
+                    default->key;
+                };
+                g.renderTooltip(font,Component.literal(description),mxx,myy);
+            }
+        }else if(hoveredTooltipKey.equals(b.label)){hoveredTooltipKey="";hoveredTooltipSince=0;}
     }
 
     @Override

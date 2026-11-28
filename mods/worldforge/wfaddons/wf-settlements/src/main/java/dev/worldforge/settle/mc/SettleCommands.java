@@ -32,7 +32,7 @@ public final class SettleCommands {
 
     public static void register(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("wfsettle")
-                .then(Commands.literal("found").requires(SettleCommands::op)
+                .then(Commands.literal("found")
                         .then(Commands.argument("name", StringArgumentType.greedyString()).executes(c -> found(c.getSource(), StringArgumentType.getString(c, "name")))))
                 .then(Commands.literal("list").executes(c -> list(c.getSource())))
                 .then(Commands.literal("info").executes(c -> info(c.getSource())))
