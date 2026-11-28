@@ -107,11 +107,11 @@ public class MapTest {
         // Older/partially damaged marker files must not crash map loading.
         Markers missingList = Markers.fromJson("{}");
         check(missingList.list().isEmpty(), "файл меток без массива markers загружается безопасно");
-        Markers malformedEntries = Markers.fromJson("{\\"markers\\":[null,{},"
-                + "{\\"id\\":\\"bad-color\\",\\"name\\":\\"Bad color\\",\\"type\\":\\"castle\\","
-                + "\\"x\\":\\"wrong\\",\\"z\\":7,\\"color\\":\\"#GGGGGG\\"},"
-                + "{\\"id\\":\\"good\\",\\"name\\":\\"Good\\",\\"type\\":\\"commander\\","
-                + "\\"x\\":15,\\"z\\":-9,\\"color\\":\\"#AABBCC\\"}]}");
+        Markers malformedEntries = Markers.fromJson("{\"markers\":[null,{},"
+                + "{\"id\":\"bad-color\",\"name\":\"Bad color\",\"type\":\"castle\","
+                + "\"x\":\"wrong\",\"z\":7,\"color\":\"#GGGGGG\"},"
+                + "{\"id\":\"good\",\"name\":\"Good\",\"type\":\"commander\","
+                + "\"x\":15,\"z\":-9,\"color\":\"#AABBCC\"}]}");
         Markers.Marker safe = malformedEntries.find("good");
         Markers.Marker fallback = malformedEntries.find("bad-color");
         check(malformedEntries.list().size() == 2 && safe != null && safe.x == 15 && safe.z == -9
