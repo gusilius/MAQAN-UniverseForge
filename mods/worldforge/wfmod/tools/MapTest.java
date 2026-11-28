@@ -91,6 +91,34 @@ public class MapTest {
         boolean threw = false;
         try { ms.add("x", "bogus", 0, 0, 0); } catch (IllegalArgumentException e) { threw = true; }
         check(threw, "неизвестный тип метки отклонён");
+
+        // Explicit visual overrides survive persistence and are removed with their marker.
+        Markers visualMarkers = new Markers();
+        Markers.Marker commander = visualMarkers.add("Командир", "commander", 12, 34, 0xD4AF37);
+        visualMarkers.setVisualProfile(commander.id, "maqan:commander.knight");
+        Markers visualReloaded = Markers.fromJson(visualMarkers.toJson());
+        check(visualReloaded.find(commander.id) != null
+                        && "maqan:commander.knight".equals(visualReloaded.find(commander.id).visualProfile),
+                "визуальный профиль командира сохраняется и восстанавливается");
+        visualReloaded.remove(commander.id);
+        check(!visualReloaded.toJson().contains("visual_overrides"),
+                "удаление объекта очищает сохранённое визуальное переопределение");
+
+        // Older/partially damaged marker files must not crash map loading.
+        Markers missingList = Markers.fromJson("{}");
+        check(missingList.list().isEmpty(), "файл меток без массива markers загружается безопасно");
+        Markers malformedEntries = Markers.fromJson("{\\"markers\\":[null,{},"
+                + "{\\"id\\":\\"bad-color\\",\\"name\\":\\"Bad color\\",\\"type\\":\\"castle\\","
+                + "\\"x\\":\\"wrong\\",\\"z\\":7,\\"color\\":\\"#GGGGGG\\"},"
+                + "{\\"id\\":\\"good\\",\\"name\\":\\"Good\\",\\"type\\":\\"commander\\","
+                + "\\"x\\":15,\\"z\\":-9,\\"color\\":\\"#AABBCC\\"}]}");
+        Markers.Marker safe = malformedEntries.find("good");
+        Markers.Marker fallback = malformedEntries.find("bad-color");
+        check(malformedEntries.list().size() == 2 && safe != null && safe.x == 15 && safe.z == -9
+                        && fallback != null && fallback.rgb == 0xFFFFFF && fallback.x == 0,
+                "частично повреждённые записи пропускаются или восстанавливаются безопасными значениями");
+        check(Markers.TYPES.containsAll(List.of("commander", "corps", "unit", "fort")),
+                "типы военных и укреплённых объектов доступны в общем каталоге типов");
         System.out.println(fails == 0 ? "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : "ОШИБОК: " + fails);
     }
 }
