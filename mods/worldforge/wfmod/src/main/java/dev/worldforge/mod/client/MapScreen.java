@@ -1717,6 +1717,9 @@ public class MapScreen extends Screen {
             Markers.Marker marker = markerAt(mx, my);
             if (marker != null) {
                 selectedMarkerId = marker.id;
+                selected = 0;
+                selLabel = -1;
+                freeOverlay();
                 centerOnBlock(marker.x, marker.z);
                 PlatformWorkspaceBridge.publish("worldforge", marker.id, marker.type,
                         marker.name, marker.desc == null ? "" : marker.desc);
