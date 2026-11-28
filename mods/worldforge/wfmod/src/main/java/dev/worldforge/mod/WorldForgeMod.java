@@ -85,6 +85,7 @@ public class WorldForgeMod {
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;
     private static volatile boolean treasuryLoadFailed;
+    private static volatile boolean eventLogLoadFailed;
     private static volatile boolean actionExecutionLoadFailed;
     private static volatile WorldId worldId;
     private static long treasuryTicks;
@@ -140,6 +141,48 @@ public class WorldForgeMod {
     public static Path actionExecutionFile(MinecraftServer server) {
         return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                 .resolve("worldforge").resolve("wf_action_execution.json");
+    }
+
+    private static Path eventLogFile(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("wf_events.json");
+    }
+
+    private static void loadEventLog(MinecraftServer server) {
+        eventLogLoadFailed = false;
+        Path file = eventLogFile(server);
+        try {
+            if (Files.isRegularFile(file))
+                dev.worldforge.mod.api.WorldForgeApi.events().fromJson(Files.readString(file, StandardCharsets.UTF_8));
+            else
+                dev.worldforge.mod.api.WorldForgeApi.events().clear();
+            LOGGER.info("WorldForge history: loaded {} events", dev.worldforge.mod.api.WorldForgeApi.events().size());
+        } catch (Exception ex) {
+            eventLogLoadFailed = true;
+            LOGGER.error("WorldForge event history is invalid; refusing to overwrite it: {}", ex.toString());
+            throw new IllegalStateException("WorldForge cannot start with a corrupt event history", ex);
+        }
+    }
+
+    private static void saveEventLog(MinecraftServer server) {
+        if (server == null || eventLogLoadFailed) {
+            LOGGER.error("WorldForge event history save skipped; preserving the original file");
+            return;
+        }
+        Path file = eventLogFile(server);
+        Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(file.toAbsolutePath().getParent());
+            Files.writeString(temp, dev.worldforge.mod.api.WorldForgeApi.events().toJson(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException ex) {
+            LOGGER.error("WorldForge event history save failed; the in-memory journal remains available: {}", ex.toString());
+        }
     }
 
     private static void loadActionExecution(MinecraftServer server) {
@@ -427,7 +470,7 @@ public class WorldForgeMod {
     }
 
     @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); loadActionExecution(e.getServer()); ContentCommands.load(e.getServer()); }
+    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); loadActionExecution(e.getServer()); loadEventLog(e.getServer()); ContentCommands.load(e.getServer()); }
 
     @SubscribeEvent
     public void onTreasuryTick(TickEvent.ServerTickEvent e) {
@@ -436,7 +479,7 @@ public class WorldForgeMod {
     }
 
     @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) { flushTreasuryOnShutdown(e.getServer()); saveActionExecution(e.getServer()); ContentCommands.save(e.getServer()); }
+    public void onServerStopping(ServerStoppingEvent e) { flushTreasuryOnShutdown(e.getServer()); saveActionExecution(e.getServer()); saveEventLog(e.getServer()); ContentCommands.save(e.getServer()); }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
