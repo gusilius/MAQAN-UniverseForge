@@ -369,6 +369,23 @@ public class TroopsTest {
         check(Muster.plan(Map.of("spear", 9), 10, d.armyTypes()).total() == 0, "меньше SCALE людей - никого");
         Map<String, Integer> back = Muster.back(Map.of("pikeman", 5, "levy_spear", 3), d.armyTypes());
         check(back.get("spear") == 50 && back.get("levy") == 30, "возврат выживших " + back);
+        Map<String, String> collidingMap = new LinkedHashMap<>();
+        collidingMap.put("levy", "pikeman");
+        collidingMap.put("spear", "pikeman");
+        Map<String, Integer> collidingArmy = new LinkedHashMap<>();
+        collidingArmy.put("levy", 20);
+        collidingArmy.put("spear", 10);
+        Muster.Plan sourcePlan = Muster.plan(collidingArmy, 3, collidingMap);
+        check(sourcePlan.soldiers().get("pikeman") == 3
+                        && sourcePlan.allocations().get(0).armyUnitId().equals("levy")
+                        && sourcePlan.allocations().get(2).armyUnitId().equals("spear"),
+                "deployment plan keeps the exact strategic source for each physical soldier");
+        check(Muster.back("pikeman", "spear", collidingMap).equals(Map.of("spear", 10)),
+                "a physical soldier returns to its exact original strategic type");
+        boolean ambiguousLegacyReturn = false;
+        try { Muster.back(Map.of("pikeman", 1), collidingMap); }
+        catch (IllegalStateException expected) { ambiguousLegacyReturn = true; }
+        check(ambiguousLegacyReturn, "legacy troop without strategic origin fails closed on ambiguous reverse mapping");
         check(Muster.upkeep(d, Map.of("footman", 10, "knight", 2)) == 5.0, "жалованье " + Muster.upkeep(d, Map.of("footman", 10, "knight", 2)));
         int desertTotal = 0; Random rr = new Random(1);
         for (int i = 0; i < 400; i++) desertTotal += Muster.deserters(10, rr).size();

@@ -3,6 +3,7 @@ package dev.worldforge.war.mc;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.logging.LogUtils;
+import dev.worldforge.mod.AtomicFileBatch;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
@@ -46,8 +47,15 @@ public class WarMod {
     static volatile java.util.List<String> RAW = java.util.List.of();
     private static double acc;
     private static long ticks;
+    private static volatile boolean actionPersistenceBlocked;
 
     public WarMod() {
+        WarActions.installPersistenceBridge(new WarActions.PersistenceBridge() {
+            @Override public boolean actionsBlocked() { return WarMod.actionsBlocked(); }
+            @Override public boolean persist() {
+                return WarMod.persistNow(ServerLifecycleHooks.getCurrentServer());
+            }
+        });
         MinecraftForge.EVENT_BUS.register(this);
         WarActions.register(editor -> {
             for (MapData m : WorldForgeMod.loadedMaps().values()) if (EditorManager.editorFor(m) == editor) return engine(m);
@@ -80,29 +88,67 @@ public class WarMod {
                         LOGGER.info("wf_war: войны карты '{}' загружены (день {})", k.name, e.day);
                     }
                 } catch (Exception ex) {
-                    LOGGER.error("wf_war: не удалось прочитать {}: {}", f, ex.toString());
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_war: политический снимок '{}' повреждён или недоступен; исходник сохранён без перезаписи, войны и армейские приказы заблокированы: {}",
+                            f, ex.toString(), ex);
                 }
             }
             return e;
         });
     }
 
-    private static void saveAll(MinecraftServer server) {
-        for (Map.Entry<MapData, WarEngine> en : ENGINES.entrySet()) {
-            try {
-                Path dir = EditorManager.overlayDir(server, en.getKey());
-                Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_war.json"), en.getValue().toJson());
-            } catch (Exception ex) {
-                LOGGER.error("wf_war: не удалось сохранить войны карты '{}': {}", en.getKey().name, ex.toString());
+    /**
+     * Checked atomic checkpoint for all loaded political campaigns and title/realm map overlays.
+     * Existing snapshots are backed up and restored if any map replacement fails.
+     */
+    /**
+     * Commits political title/marker overlays and every loaded war snapshot in one recoverable
+     * multi-file batch. A crash before the batch manifest is removed restores the previous set.
+     */
+    public static synchronized boolean persistNow(MinecraftServer server) {
+        if (server == null || actionPersistenceBlocked) return false;
+        EditorManager.DirtySnapshot dirty = null;
+        try {
+            Path transactionRoot = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge");
+            AtomicFileBatch.recover(transactionRoot);
+            dirty = EditorManager.snapshotDirty(server);
+            Map<Path, byte[]> writes = new java.util.LinkedHashMap<>(dirty.files());
+            for (Map.Entry<MapData, WarEngine> entry : ENGINES.entrySet()) {
+                Path target = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_war.json");
+                writes.put(target, entry.getValue().toJson().getBytes(StandardCharsets.UTF_8));
             }
+            AtomicFileBatch.commit(transactionRoot, writes);
+            EditorManager.acknowledgeDirtySnapshot(dirty);
+            return true;
+        } catch (Exception error) {
+            EditorManager.blockDirtySnapshot(dirty);
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_war: политический пакет (титулы, метки, войны) не удалось зафиксировать или восстановить; действия заблокированы: {}",
+                    error.toString(), error);
+            return false;
         }
+    }
+
+    public static boolean actionsBlocked() { return actionPersistenceBlocked; }
+
+    private static void saveAll(MinecraftServer server) {
+        if (!persistNow(server)) LOGGER.error("wf_war: political snapshots were not durably committed");
     }
 
     @SubscribeEvent
     public void onStart(ServerAboutToStartEvent e) {
         ENGINES.clear();
+        actionPersistenceBlocked = false;
         acc = 0;
+        try {
+            AtomicFileBatch.recover(e.getServer().getWorldPath(
+                    net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge"));
+        } catch (Exception error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_war: аварийный политический file batch не удалось восстановить; войны и стратегические приказы заблокированы: {}",
+                    error.toString(), error);
+        }
     }
 
     @SubscribeEvent
@@ -113,7 +159,7 @@ public class WarMod {
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.END) return;
+        if (e.phase != TickEvent.Phase.END || actionPersistenceBlocked) return;
         ticks++;
         if (ticks % STEP != 0) return;
         int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_war");
@@ -134,7 +180,14 @@ public class WarMod {
                         .then(Commands.argument("realm", com.mojang.brigadier.arguments.StringArgumentType.word()).executes(c -> screen(c.getSource(), com.mojang.brigadier.arguments.StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("list").executes(c -> list(c.getSource())))
                 .then(Commands.literal("log").then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(c -> log(c.getSource(), IntegerArgumentType.getInteger(c, "id")))))
-                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c -> { saveAll(c.getSource().getServer()); return 1; })));
+                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c -> {
+                    if (!persistNow(c.getSource().getServer())) {
+                        c.getSource().sendFailure(Component.literal("Политические сохранения не подтверждены; приказы заблокированы"));
+                        return 0;
+                    }
+                    c.getSource().sendSuccess(() -> Component.literal("Войны и политическая карта сохранены"), false);
+                    return 1;
+                })));
     }
 
     private static WarEngine here(CommandSourceStack s) {

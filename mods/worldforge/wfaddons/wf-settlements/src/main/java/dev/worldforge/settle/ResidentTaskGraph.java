@@ -25,15 +25,18 @@ public final class ResidentTaskGraph {
 
     public Receipt extract(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
+        ensureCapacity(1);
         Receipt receipt = record(Stage.EXTRACTED, buildingId, workerId, resource, quantity, 0, time);
         localLots.computeIfAbsent(localKey(buildingId, resource), ignored -> new ArrayDeque<>())
                 .addLast(new Lot(receipt.id(), quantity));
+        compactReceipts();
         return receipt;
     }
 
     /** Records a processed output lot and links it to the input-processing receipt. */
     public Receipt produce(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
+        ensureCapacity(1);
         long parent = 0;
         for (int i = receipts.size() - 1; i >= 0; i--) {
             Receipt receipt = receipts.get(i);
@@ -45,6 +48,7 @@ public final class ResidentTaskGraph {
         Receipt receipt = record(Stage.PRODUCED, buildingId, workerId, resource, quantity, parent, time);
         localLots.computeIfAbsent(localKey(buildingId, resource), ignored -> new ArrayDeque<>())
                 .addLast(new Lot(receipt.id(), quantity));
+        compactReceipts();
         return receipt;
     }
 
@@ -53,6 +57,7 @@ public final class ResidentTaskGraph {
         validate(resource, quantity, time);
         Deque<Lot> source = localLots.get(localKey(buildingId, resource));
         if (source == null || source.isEmpty()) return 0;
+        ensureCapacity(chunksNeeded(source, quantity) * 2);
         double remaining = quantity, delivered = 0;
         while (remaining > 1e-9 && !source.isEmpty()) {
             Lot lot = source.removeFirst();
@@ -70,6 +75,7 @@ public final class ResidentTaskGraph {
         }
         // Never invent provenance for a quantity absent from the source buffer.
         // Legacy stock must be explicitly imported by a settlement migration adapter.
+        compactReceipts();
         return delivered;
     }
 
@@ -80,11 +86,17 @@ public final class ResidentTaskGraph {
         validate(resource, quantity, time);
         Deque<Lot> available = storedLots.get(resource);
         if (available == null || available.isEmpty()) return 0;
+        compactReceipts();
+        int requiredReceipts = chunksNeeded(available, quantity);
+        // A consumed lot is no longer active inventory. At the journal limit we
+        // still retire it safely; the treasury journal remains the durable debit
+        // record, while the task graph keeps provenance only for stock still held.
+        boolean canRecord = requiredReceipts <= MAX_RECEIPTS - receipts.size();
         double remaining = quantity, consumed = 0;
         while (remaining > 1e-9 && !available.isEmpty()) {
             Lot lot = available.removeFirst();
             double part = Math.min(remaining, lot.quantity());
-            record(stage, buildingId, workerId, resource, part, lot.receiptId(), time);
+            if (canRecord) record(stage, buildingId, workerId, resource, part, lot.receiptId(), time);
             remaining -= part;
             consumed += part;
             double tail = lot.quantity() - part;
@@ -94,11 +106,13 @@ public final class ResidentTaskGraph {
             }
         }
         // Missing stock has no provenance receipt and cannot be reported as consumed.
+        compactReceipts();
         return consumed;
     }
 
     /** Records the completed construction after all required material and work commits succeeded. */
     public Receipt built(int buildingId, int workerId, double time) {
+        ensureCapacity(1);
         long parent = 0;
         for (int i = receipts.size() - 1; i >= 0; i--) {
             Receipt receipt = receipts.get(i);
@@ -107,15 +121,96 @@ public final class ResidentTaskGraph {
                 break;
             }
         }
-        return record(Stage.BUILT, buildingId, workerId, "building:" + buildingId, 1, parent, time);
+        Receipt receipt = record(Stage.BUILT, buildingId, workerId, "building:" + buildingId, 1, parent, time);
+        compactReceipts();
+        return receipt;
+    }
+
+    /**
+     * Retires provenance for stock debited by systems that do not create a
+     * production/construction stage receipt (population upkeep, trade, raids).
+     * The canonical treasury journal records the debit; this graph tracks only
+     * provenance for quantities that remain in active inventory.
+     */
+    public double consumeStock(String resource, double quantity) {
+        if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity <= 0) return 0;
+        Deque<Lot> available = storedLots.get(resource);
+        if (available == null || available.isEmpty()) return 0;
+        double remaining = quantity, consumed = 0;
+        while (remaining > 1e-9 && !available.isEmpty()) {
+            Lot lot = available.removeFirst();
+            double part = Math.min(remaining, lot.quantity());
+            remaining -= part;
+            consumed += part;
+            double tail = lot.quantity() - part;
+            if (tail > 1e-9) {
+                available.addFirst(new Lot(lot.receiptId(), tail));
+                break;
+            }
+        }
+        compactReceipts();
+        return consumed;
     }
 
     private Receipt record(Stage stage, int buildingId, int workerId, String resource,
                            double quantity, long parent, double time) {
+        if (receipts.size() >= MAX_RECEIPTS)
+            throw new IllegalStateException("Resident task provenance journal is full; mutation was not recorded");
         Receipt receipt = new Receipt(nextId++, stage, buildingId, workerId, resource, quantity, parent, time);
         receipts.add(receipt);
-        if (receipts.size() > MAX_RECEIPTS) receipts.subList(0, receipts.size() - MAX_RECEIPTS).clear();
         return receipt;
+    }
+
+    /** Preflight the complete write set before any inventory lot is moved or consumed. */
+    private void ensureCapacity(int additional) {
+        if (additional < 0) throw new IllegalArgumentException("Invalid task receipt reservation");
+        compactReceipts();
+        if (additional > MAX_RECEIPTS - receipts.size())
+            throw new IllegalStateException("Resident task provenance is still referenced by active stock; mutation is blocked safely");
+    }
+
+    private static int chunksNeeded(Deque<Lot> lots, double requested) {
+        double remaining = requested;
+        int chunks = 0;
+        for (Lot lot : lots) {
+            if (remaining <= 1e-9) break;
+            chunks++;
+            remaining -= Math.min(remaining, lot.quantity());
+        }
+        return chunks;
+    }
+
+    /**
+     * Compact only history that is no longer needed to explain active inventory.
+     * Active lots retain their complete parent chain. The latest PROCESSED and
+     * CONSTRUCTION receipt per building remain as stable links for subsequent output/build receipts.
+     */
+    private void compactReceipts() {
+        Map<Long, Receipt> byId = new HashMap<>();
+        for (Receipt receipt : receipts) byId.put(receipt.id(), receipt);
+        Set<Long> keep = new HashSet<>();
+        Deque<Long> pending = new ArrayDeque<>();
+        for (Deque<Lot> lots : localLots.values())
+            for (Lot lot : lots) pending.addLast(lot.receiptId());
+        for (Deque<Lot> lots : storedLots.values())
+            for (Lot lot : lots) pending.addLast(lot.receiptId());
+        Map<Integer, Long> latestProcessed = new HashMap<>();
+        Map<Integer, Long> latestConstruction = new HashMap<>();
+        for (Receipt receipt : receipts) {
+            if (receipt.stage() == Stage.PROCESSED) latestProcessed.put(receipt.buildingId(), receipt.id());
+            if (receipt.stage() == Stage.CONSTRUCTION) latestConstruction.put(receipt.buildingId(), receipt.id());
+        }
+        keep.addAll(latestProcessed.values());
+        keep.addAll(latestConstruction.values());
+        pending.addAll(latestProcessed.values());
+        pending.addAll(latestConstruction.values());
+        while (!pending.isEmpty()) {
+            long id = pending.removeFirst();
+            if (!keep.add(id)) continue;
+            Receipt receipt = byId.get(id);
+            if (receipt != null && receipt.parentReceiptId() > 0) pending.addLast(receipt.parentReceiptId());
+        }
+        receipts.removeIf(receipt -> !keep.contains(receipt.id()));
     }
 
     public long count(Stage stage) { return receipts.stream().filter(r -> r.stage() == stage).count(); }
@@ -184,8 +279,10 @@ public final class ResidentTaskGraph {
 
         Map<String, Deque<Lot>> loadedLocal = new TreeMap<>();
         Map<String, Deque<Lot>> loadedStored = new TreeMap<>();
-        loadLots(local, loadedLocal, restoredNext);
-        loadLots(stored, loadedStored, restoredNext);
+        Set<Long> receiptIds = new HashSet<>();
+        for (Receipt receipt : loaded) receiptIds.add(receipt.id());
+        loadLots(local, loadedLocal, restoredNext, receiptIds);
+        loadLots(stored, loadedStored, restoredNext, receiptIds);
 
         receipts.clear();
         receipts.addAll(loaded);
@@ -201,7 +298,7 @@ public final class ResidentTaskGraph {
         return n;
     }
 
-    private static void loadLots(Object raw, Map<String,Deque<Lot>> target, long nextId) {
+    private static void loadLots(Object raw, Map<String,Deque<Lot>> target, long nextId, Set<Long> receiptIds) {
         if (!(raw instanceof Map<?,?> map))
             throw new IllegalArgumentException("Invalid resident task inventory buckets");
         for (Map.Entry<?,?> entry : map.entrySet()) {
@@ -214,8 +311,9 @@ public final class ResidentTaskGraph {
                     throw new IllegalArgumentException("Malformed resident task inventory lot");
                 double quantity = requiredNumber(lot.get("quantity"), "lot.quantity").doubleValue();
                 long receipt = requiredNumber(lot.get("receipt"), "lot.receipt").longValue();
-                if (receipt <= 0 || receipt >= nextId || quantity <= 0 || !Double.isFinite(quantity))
-                    throw new IllegalArgumentException("Invalid resident task inventory lot");
+                if (receipt <= 0 || receipt >= nextId || !receiptIds.contains(receipt)
+                        || quantity <= 0 || !Double.isFinite(quantity))
+                    throw new IllegalArgumentException("Invalid resident task inventory lot: missing or invalid provenance receipt " + receipt);
                 queue.addLast(new Lot(receipt, quantity));
             }
             // Empty FIFO buckets are significant for stable save/reload.

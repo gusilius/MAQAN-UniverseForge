@@ -161,6 +161,13 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/test-all.sh ../wfmod
+      - name: Upload deterministic world simulation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-simulation-acceptance
+          path: mods/worldforge/wfaddons/world-simulation-acceptance.json
+          if-no-files-found: error
+          retention-days: 30
 
   worldforge-native:
     name: WorldForge simulation native core (Windows x64)
