@@ -90,11 +90,11 @@ public final class CommandMode {
     private static void publishWorkspaceSelection(Minecraft mc) {
         List<String> ids = SEL.selected().stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList();
         String signature = String.join("|", ids);
-        if (signature.equals(lastWorkspaceSelection)) return;
-        lastWorkspaceSelection = signature;
+        boolean unchanged = signature.equals(lastWorkspaceSelection);
         if (ids.isEmpty()) {
             if (!lastWorkspaceProvider.isBlank()) PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
             lastWorkspaceProvider = "";
+            lastWorkspaceSelection = "";
             return;
         }
         if (ids.size() == 1) {
@@ -114,6 +114,8 @@ public final class CommandMode {
                         : isWorkerEntity(selected) ? workerString(selected, "characterId")
                         : invokeCharacterId(selected);
                 String entityId = characterId.isBlank() ? physicalId : characterId;
+                if (unchanged && provider.equals(lastWorkspaceProvider)
+                        && PlatformWorkspaceBridge.isCurrentSelection(provider, entityId)) return;
                 String type = selected instanceof TroopEntity ? "TROOP"
                         : isWorkerEntity(selected) ? "WORKER"
                         : isOwnedNpcEntity(selected) ? "NPC" : "CHARACTER";
@@ -122,15 +124,19 @@ public final class CommandMode {
                 if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals(provider))
                     PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
                 lastWorkspaceProvider = provider;
+                lastWorkspaceSelection = signature;
                 PlatformWorkspaceBridge.publish(provider, entityId, type, selected.getName().getString(), summary);
                 return;
             }
         }
+        String aggregateId = "selection:" + java.util.UUID.nameUUIDFromBytes(
+                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (unchanged && "wf_troops".equals(lastWorkspaceProvider)
+                && PlatformWorkspaceBridge.isCurrentSelection("wf_troops", aggregateId)) return;
         if (!lastWorkspaceProvider.isBlank() && !lastWorkspaceProvider.equals("wf_troops"))
             PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
         lastWorkspaceProvider = "wf_troops";
-        String aggregateId = "selection:" + java.util.UUID.nameUUIDFromBytes(
-                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        lastWorkspaceSelection = signature;
         PlatformWorkspaceBridge.publish("wf_troops", aggregateId, "UNIT_SELECTION",
                 "Выбрано объектов: " + ids.size(), "Общая тактическая выборка · " + ids.size() + " физических сущностей");
     }
