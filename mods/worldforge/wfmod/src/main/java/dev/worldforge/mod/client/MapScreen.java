@@ -611,7 +611,7 @@ public class MapScreen extends Screen {
 
     private void drawPlate(GuiGraphics g) {
         String t = militaryView ? "Военная карта" : modeName(ClientState.mode);
-        String sub = MapTextures.w + "x" + MapTextures.h + " px · " + Math.round(MapTextures.w * bpp() / 1000) + "x" + Math.round(MapTextures.h * bpp() / 1000) + " км";
+        String sub = MapTextures.w + "x" + MapTextures.h + " px · " + Math.round(MapTextures.w * bpp()) + "x" + Math.round(MapTextures.h * bpp()) + " бл.";
         int w = Math.max(font.width(t) * 3 / 2, font.width(sub)) + 20;
         bevel(g, 8, 8, w, 34, false);
         g.pose().pushPose();
@@ -636,7 +636,9 @@ public class MapScreen extends Screen {
         double per = zoom / bpp(), target = 90, raw = target / per, pw = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / pw;
         double step = (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pw;
         int px = (int) Math.round(step * per);
-        String t = step >= 1000 ? (long) (step / 1000) + " км" : (long) step + " бл.";
+        String t = step >= 10000 ? String.format(java.util.Locale.ROOT, "%.1fk бл.", step / 1000.0)
+                : step >= 1000 ? String.format(java.util.Locale.ROOT, "%.1fk бл.", step / 1000.0)
+                : Math.max(1L, Math.round(step)) + " бл.";
         int w = Math.max(px, font.width(t)) + 14, x = width - w - 8, y = height - 24;
         if (ovwW > 0) x = ovwX + ovwW + 4 - w;
         bevel(g, x, y, w, 16, false);
