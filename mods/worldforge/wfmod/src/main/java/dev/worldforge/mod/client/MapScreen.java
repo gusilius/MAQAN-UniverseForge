@@ -86,24 +86,40 @@ public class MapScreen extends Screen {
         slots.clear();
         List<String> modes = modes();
         int size = 28, gap = 3, sep = 8;
-        int columns = Math.max(1, Math.min(modes.size(), (width - 24 + gap) / (size + gap + 1)));
+        int availableWidth = Math.max(1, width - 16);
+        int columns = Math.max(1, Math.min(Math.max(1, modes.size()),
+                (availableWidth + gap) / (size + gap)));
         int rows = Math.max(1, (modes.size() + columns - 1) / columns);
-        int y0 = Math.max(8, height - rows * size - (rows - 1) * 5 - 10);
-        for (int i = 0; i < modes.size(); i++) {
-            int row = i / columns, column = i % columns;
-            int rowCount = Math.min(columns, modes.size() - row * columns);
-            int rowWidth = rowCount * (size + gap) - gap;
-            int x = Math.max(8, (width - rowWidth) / 2);
-            int y = y0 + row * (size + 5);
-            // Preserve visual grouping while keeping every hit target inside the viewport.
-            int previousGroup = column == 0 ? -1 : group(modes.get(i - 1));
-            int currentGroup = group(modes.get(i));
-            if (column > 0 && previousGroup != currentGroup) x += Math.min(sep, Math.max(0, width - x - rowWidth));
-            for (int j = 0; j < column; j++) {
-                if (group(modes.get(row * columns + j)) != group(modes.get(row * columns + j + 1)))
-                    x += Math.min(sep, 4);
+        // On short windows, shrink toolbar targets before allowing rows to leave the viewport.
+        int availableHeight = Math.max(1, height - 24);
+        if (rows * size + (rows - 1) * 5 > availableHeight) {
+            size = Math.max(18, Math.min(size,
+                    (availableHeight - Math.max(0, rows - 1) * 3) / rows));
+            gap = 2;
+        }
+        int rowGap = size <= 20 ? 3 : 5;
+        int y0 = Math.max(8, height - rows * size - (rows - 1) * rowGap - 10);
+        for (int row = 0; row < rows; row++) {
+            int first = row * columns;
+            int rowCount = Math.min(columns, modes.size() - first);
+            if (rowCount <= 0) continue;
+            int transitions = 0;
+            for (int column = 1; column < rowCount; column++) {
+                if (group(modes.get(first + column - 1)) != group(modes.get(first + column)))
+                    transitions++;
             }
-            slots.add(new Slot(modes.get(i), x + column * (size + gap), y, size));
+            int baseWidth = rowCount * size + (rowCount - 1) * gap;
+            int rowAvailable = Math.max(1, Math.min(availableWidth, baseWidth + transitions * sep));
+            int actualSep = transitions == 0 ? 0
+                    : Math.max(0, Math.min(sep, (rowAvailable - baseWidth) / transitions));
+            int x = Math.max(8, (width - (baseWidth + transitions * actualSep)) / 2);
+            int y = y0 + row * (size + rowGap);
+            for (int column = 0; column < rowCount; column++) {
+                if (column > 0 && group(modes.get(first + column - 1)) != group(modes.get(first + column)))
+                    x += actualSep;
+                slots.add(new Slot(modes.get(first + column), x, y, size));
+                x += size + gap;
+            }
         }
         nameBox = new EditBox(font, width / 2 - 100, height - 78, 200, 18, Component.literal("Название"));
         nameBox.setMaxLength(32);
