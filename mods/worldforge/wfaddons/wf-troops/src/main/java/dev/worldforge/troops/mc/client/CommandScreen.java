@@ -1112,7 +1112,7 @@ public final class CommandScreen extends Screen {
         if(over){
             String key=b.label;
             if(!key.equals(hoveredTooltipKey)){hoveredTooltipKey=key;hoveredTooltipSince=System.currentTimeMillis();}
-            if(System.currentTimeMillis()-hoveredTooltipSince>=900){
+            if(System.currentTimeMillis()-hoveredTooltipSince>=1500){
                 String description=switch(key){
                     case "РАБ.","Рабочие"->"Выделить всех доступных рабочих поблизости";
                     case "ВОЙ.","Войска"->"Выделить все подконтрольные военные отряды";
