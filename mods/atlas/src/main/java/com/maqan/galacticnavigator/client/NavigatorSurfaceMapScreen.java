@@ -337,7 +337,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             tooltip.add(hoveredRadar.getDisplayName().copy().withStyle(net.minecraft.ChatFormatting.GOLD));
             tooltip.add(Component.literal("Y "+(int)Math.floor(hoveredRadar.getY())
                     +" · ΔY "+(player==null?0:(int)Math.round(hoveredRadar.getY()-player.y()))).withStyle(net.minecraft.ChatFormatting.GRAY));
-            if(player!=null)tooltip.add(Component.literal((int)Math.round(hoveredRadar.distanceTo(player))+" blocks").withStyle(net.minecraft.ChatFormatting.GRAY));
+            if(player!=null&&dimension.equals(player.dimensionId())){double dx=hoveredRadar.getX()-player.x(),dy=hoveredRadar.getY()-player.y(),dz=hoveredRadar.getZ()-player.z();tooltip.add(Component.literal((int)Math.round(Math.sqrt(dx*dx+dy*dy+dz*dz))+" blocks").withStyle(net.minecraft.ChatFormatting.GRAY));}
             g.renderComponentTooltip(font,tooltip,mouseX,mouseY);
         }
     }
