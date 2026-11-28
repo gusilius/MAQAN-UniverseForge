@@ -330,10 +330,15 @@ public final class MapData {
     /** True only when the source package actually supplied rivers.png. */
     /** Build deterministic starter titles/realms once when a terrain package has no political layer. */
     public synchronized boolean ensurePoliticalData() {
-        if (titles != null) return false;
-        titles = PoliticalMapBootstrap.generate(this);
-        PoliticalMapRenderer.regenerateAll(this);
-        return true;
+        boolean changed = false;
+        if (titles == null) {
+            titles = PoliticalMapBootstrap.generate(this);
+            changed = true;
+        } else {
+            changed = PoliticalMapBootstrap.ensureRealms(titles);
+        }
+        if (changed) PoliticalMapRenderer.regenerateAll(this);
+        return changed;
     }
 
     public boolean hasRiverLayer() { return river != null; }
