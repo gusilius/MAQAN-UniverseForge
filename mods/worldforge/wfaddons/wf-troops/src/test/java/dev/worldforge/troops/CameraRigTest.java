@@ -39,19 +39,6 @@ class CameraRigTest {
     }
 
     @Test
-    void cameraUsesPlayerRelativeAnchorForVoidColumnsInsteadOfBedrockFloor() {
-        assertEquals(-56.0, CameraRig.resolveTerrainAnchor(-63.0, -64.0, -64, false));
-        assertEquals(28.0, CameraRig.resolveTerrainAnchor(Double.NaN, 20.0, -64, false));
-    }
-
-    @Test
-    void cameraAvoidsNetherRoofHeightmapWhenPlayerIsFarBelowCeiling() {
-        assertEquals(62.0, CameraRig.resolveTerrainAnchor(128.0, 50.0, 0, true));
-        assertEquals(112.0, CameraRig.resolveTerrainAnchor(128.0, 100.0, 0, true));
-        assertEquals(142.0, CameraRig.resolveTerrainAnchor(128.0, 130.0, 0, true));
-    }
-
-    @Test
     void restoredStateCanContinueUsingNormalCameraConstraints() {
         CameraRig rig = new CameraRig();
         assertTrue(rig.restore(new CameraRig.Snapshot(

@@ -92,9 +92,8 @@ public final class PlatformShellScreen extends Screen {
     private boolean workspaceStateLoaded;
     private Screen initializedView;
     private int initializedViewWidth = -1, initializedViewHeight = -1;
-    private Screen providerMouseCaptureView;
-    private final Map<Screen, Screen> embeddedChildParents = new java.util.IdentityHashMap<>();
-    private static final int WORKSPACE_SCHEMA = 3;
+    private boolean providerMouseCaptured;
+    private static final int WORKSPACE_SCHEMA = 2;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -277,23 +276,8 @@ public final class PlatformShellScreen extends Screen {
                 "timeline", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (160 * scale)), Math.max(40, (int) (64 * scale))));
     }
 
-    private WorkspaceDockTree.Node normalizeWorkspaceRoot(WorkspaceDockTree.Node candidate) {
-        if (candidate == null) return defaultWorkspaceTree();
-        try {
-            WorkspaceDockTree.validate(candidate);
-            if (!WorkspaceDockTree.panelIds(candidate).contains("content")) return defaultWorkspaceTree();
-            boolean contentVisible = WorkspaceDockTree.layout(candidate,
-                    new WorkspaceDockTree.Rect(0, 0, 1, 1)).containsKey("content");
-            return contentVisible ? candidate : WorkspaceDockTree.activateTab(candidate, "content");
-        } catch (RuntimeException invalidLayout) {
-            LOGGER.warn("Invalid MAQAN workspace layout; restoring the safe default", invalidLayout);
-            return defaultWorkspaceTree();
-        }
-    }
-
     private void layoutWorkspace() {
-        if (panels.isEmpty()) return;
-        workspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
+        if (workspaceRoot == null || panels.isEmpty()) return;
         WorkspaceDockTree.Rect bounds = workspaceBounds();
         WorkspaceDockTree.Node root = layoutRoot();
         Map<String, WorkspaceDockTree.Rect> layout;
@@ -354,7 +338,7 @@ public final class PlatformShellScreen extends Screen {
         try {
             String activeName = profileStore.activeProfile();
             if (activeName != null && !activeName.isBlank()) activeWorkspaceName = activeName;
-            workspaceRoot = normalizeWorkspaceRoot(profileStore.load(activeWorkspaceName));
+            workspaceRoot = profileStore.load(activeWorkspaceName);
         } catch (RuntimeException ignored) {
             activeWorkspaceName = "Default";
             workspaceRoot = defaultWorkspaceTree();
@@ -462,50 +446,6 @@ public final class PlatformShellScreen extends Screen {
         if (width > 0 && height > 0) { layoutWorkspace(); initViewInContent(view); }
     }
 
-    public static boolean pushEmbeddedChild(Screen parent, Screen child) {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.screen instanceof PlatformShellScreen shell && shell.pushChild(parent, child);
-    }
-
-    private boolean pushChild(Screen parent, Screen child) {
-        if (parent == null || child == null || activeView() != parent) return false;
-        embeddedChildParents.put(child, parent);
-        setActiveHostedView(child);
-        if (width > 0 && height > 0) initViewInContent(child);
-        return true;
-    }
-
-    public static boolean returnFromEmbeddedChild(Screen child, Screen parent) {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.screen instanceof PlatformShellScreen shell && shell.popChild(child, parent);
-    }
-
-    private boolean popChild(Screen child, Screen parent) {
-        if (child == null || parent == null || activeView() != child
-                || embeddedChildParents.get(child) != parent) return false;
-        embeddedChildParents.remove(child);
-        setActiveHostedView(parent);
-        child.removed();
-        if (width > 0 && height > 0) initViewInContent(parent);
-        return true;
-    }
-
-    private void setActiveHostedView(Screen view) {
-        if (profile == Profile.COSMOS) embeddedView = view;
-        else providerViews.put(selectedCapabilityId, view);
-    }
-
-    /** A command view remains attached while one of its modal child screens is active. */
-    public static boolean isHostedProviderViewAttached(Screen view) {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.screen instanceof PlatformShellScreen shell && shell.isViewAttached(view);
-    }
-
-    private boolean isViewAttached(Screen view) {
-        return view != null && (activeView() == view || embeddedChildParents.containsValue(view)
-                || embeddedChildParents.containsKey(view));
-    }
-
     /** Close a hosted provider view without dismissing the MAQAN workspace itself. */
     public static boolean closeEmbeddedProviderView(Screen view) {
         Minecraft mc = Minecraft.getInstance();
@@ -551,33 +491,32 @@ public final class PlatformShellScreen extends Screen {
         Panel content = contentPanel();
         if (view == null || content == null
                 || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
-        providerMouseCaptureView = view;
-        view.mouseClicked(mouseX - content.x, mouseY - content.y, button);
-        return true;
+        providerMouseCaptured = view.mouseClicked(mouseX - content.x, mouseY - content.y, button);
+        return providerMouseCaptured;
     }
 
     private boolean forwardViewMouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
-        Screen view = providerMouseCaptureView;
+        Screen view = activeView();
         Panel content = contentPanel();
-        if (view == null || content == null) return false;
+        if (view == null || content == null || !providerMouseCaptured) return false;
         return view.mouseDragged(mouseX - content.x, mouseY - content.y, button, dx, dy);
     }
 
     private boolean forwardViewMouseReleased(double mouseX, double mouseY, int button) {
-        Screen view = providerMouseCaptureView;
+        Screen view = activeView();
         Panel content = contentPanel();
-        if (view == null || content == null) return false;
-        providerMouseCaptureView = null;
-        return view.mouseReleased(mouseX - content.x, mouseY - content.y, button);
+        if (view == null || content == null || !providerMouseCaptured) return false;
+        boolean handled = view.mouseReleased(mouseX - content.x, mouseY - content.y, button);
+        providerMouseCaptured = false;
+        return handled;
     }
 
     private boolean forwardViewMouseScrolled(double mouseX, double mouseY, double delta) {
         Screen view = activeView();
         Panel content = contentPanel();
-        if (content == null
+        if (view == null || content == null
                 || !WorkspaceUi.contains(mouseX, mouseY, content.x, content.y, content.w, content.h)) return false;
-        if (view != null) view.mouseScrolled(mouseX - content.x, mouseY - content.y, delta);
-        return true;
+        return view.mouseScrolled(mouseX - content.x, mouseY - content.y, delta);
     }
 
     private void clampPanels() {
@@ -606,13 +545,8 @@ public final class PlatformShellScreen extends Screen {
         // Floating windows share one collision-free layer. Resolve saved/dragged
         // positions deterministically, while keeping every rectangle in the viewport.
         List<Panel> placed = new ArrayList<>();
-        List<Panel> dockedObstacles = panels.values().stream()
-                .filter(panel -> panel.visible && !panel.id.equals("content")
-                        && !"FLOAT".equals(panel.dock) && !panel.minimized)
-                .toList();
         for (Panel panel : floating) {
-            if (placed.stream().noneMatch(other -> overlaps(panel, other))
-                    && dockedObstacles.stream().noneMatch(other -> overlaps(panel, other))) {
+            if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
                 placed.add(panel);
                 continue;
             }
@@ -630,8 +564,7 @@ public final class PlatformShellScreen extends Screen {
                     int maxY = Math.max(35, height - (panel.minimized ? 26 : panel.h) - 4);
                     panel.x = Math.max(44, Math.min(candidate[0], maxX));
                     panel.y = Math.max(35, Math.min(candidate[1], maxY));
-                    if (placed.stream().noneMatch(other -> overlaps(panel, other))
-                            && dockedObstacles.stream().noneMatch(other -> overlaps(panel, other))) {
+                    if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
                         resolved = true;
                         break;
                     }
@@ -644,8 +577,7 @@ public final class PlatformShellScreen extends Screen {
                 for (int y = 35; y <= maxY && !resolved; y += 30) {
                     for (int x = 44; x <= maxX; x += 30) {
                         panel.x = x; panel.y = y;
-                        if (placed.stream().noneMatch(other -> overlaps(panel, other))
-                                && dockedObstacles.stream().noneMatch(other -> overlaps(panel, other))) {
+                        if (placed.stream().noneMatch(other -> overlaps(panel, other))) {
                             resolved = true;
                             break;
                         }
@@ -684,8 +616,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
-        boolean worldBacked = commandCameraActive();
-        if (!worldBacked) g.fill(0, 0, width, height, BG);
+        g.fill(0, 0, width, height, BG);
         Panel content = panels.get("content");
         if (content != null && content.visible) {
             g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
@@ -700,22 +631,20 @@ public final class PlatformShellScreen extends Screen {
                 WorkspacePreviewRenderer.render(g, font, content.w, content.h, profile.name(),
                         previewLayer, mouseX - content.x, mouseY - content.y, ambientGrid);
             }
-            if (!worldBacked) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
+            WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        if (!worldBacked) {
-            ThemeManager.renderChrome(g, width, height, profile == Profile.RTS);
-            drawTopBar(g, mouseX, mouseY);
-            drawRail(g, mouseX, mouseY);
-            for (Panel p : panels.values())
-                if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
-            if (settingsVisible) drawSettings(g, mouseX, mouseY);
-            drawDockSplitters(g, mouseX, mouseY);
-            if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
-            if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
-            if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
-            if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
-        }
+        ThemeManager.renderChrome(g, width, height, profile == Profile.RTS || commandCameraActive());
+        drawTopBar(g, mouseX, mouseY);
+        drawRail(g, mouseX, mouseY);
+        for (Panel p : panels.values())
+            if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
+        if (settingsVisible) drawSettings(g, mouseX, mouseY);
+        drawDockSplitters(g, mouseX, mouseY);
+        if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
+        if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
+        if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
+        if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
@@ -1670,7 +1599,6 @@ public final class PlatformShellScreen extends Screen {
                     : nearest == top ? WorkspaceDockTree.Side.TOP : WorkspaceDockTree.Side.BOTTOM;
             workspaceRoot = WorkspaceDockTree.dock(remaining, targetId, sourceId, side, 300);
         }
-        workspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
         WorkspaceDockTree.validate(workspaceRoot);
     }
 
@@ -1694,7 +1622,7 @@ public final class PlatformShellScreen extends Screen {
     public boolean loadWorkspaceProfile(String name) {
         if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
         try {
-            workspaceRoot = normalizeWorkspaceRoot(profileStore.load(name));
+            workspaceRoot = profileStore.load(name);
             activeWorkspaceName = name.trim();
             layoutWorkspace();
             saveWorkspaceState();
@@ -2029,16 +1957,12 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void removed() {
-        java.util.Set<Screen> closing = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        if (embeddedView != null) closing.add(embeddedView);
-        closing.addAll(providerViews.values());
-        closing.addAll(embeddedChildParents.keySet());
-        closing.addAll(embeddedChildParents.values());
-        embeddedView = null;
+        if (embeddedView != null) {
+            embeddedView.removed();
+            embeddedView = null;
+        }
+        for (Screen view : providerViews.values()) view.removed();
         providerViews.clear();
-        embeddedChildParents.clear();
-        providerMouseCaptureView = null;
-        for (Screen view : closing) view.removed();
         super.removed();
     }
 
