@@ -91,6 +91,25 @@ public class MapTest {
         boolean threw = false;
         try { ms.add("x", "bogus", 0, 0, 0); } catch (IllegalArgumentException e) { threw = true; }
         check(threw, "неизвестный тип метки отклонён");
+        boolean nullTypeRejected = false;
+        try { ms.add("null-type", null, 0, 0, 0); }
+        catch (IllegalArgumentException expected) { nullTypeRejected = true; }
+        check(nullTypeRejected, "null-тип отклоняется контролируемой ошибкой валидации");
+
+        check(Markers.fromJson("{broken-json").list().isEmpty(),
+                "синтаксически повреждённый JSON не ломает загрузку маркеров");
+
+        Path relativeFile = Paths.get("maqan-markers-relative-test-" + System.nanoTime() + ".json");
+        try {
+            Markers relativeMarkers = new Markers();
+            relativeMarkers.add("Relative", "city", 1, 2, 0x123456);
+            relativeMarkers.save(relativeFile);
+            check(Markers.load(relativeFile).find("Relative") != null,
+                    "сохранение маркеров по относительному пути без родительской папки");
+        } finally {
+            Files.deleteIfExists(relativeFile);
+            Files.deleteIfExists(relativeFile.resolveSibling(relativeFile.getFileName() + ".tmp"));
+        }
 
         // Explicit visual overrides survive persistence and are removed with their marker.
         Markers visualMarkers = new Markers();
