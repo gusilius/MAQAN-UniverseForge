@@ -40,7 +40,7 @@ public class ClockTest {
         try { budgeted.pullLimited("social", 0); } catch (IllegalArgumentException expected) { invalidBudget = true; }
         ok(invalidBudget, "zero processing budget is rejected");
         GameClock previous = new GameClock();
-        previous.load("{\\"format\\":\\"wf-clock/2\\",\\"elapsed\\":5,\\"speed\\":3,\\"last\\":4,\\"start\\":300}");
+        previous.load("{\"format\":\"wf-clock/2\",\"elapsed\":5,\"speed\":3,\"last\":4,\"start\":300}");
         ok(previous.speedName().equals("x5"), "wf-clock/2 save migrates old x5 speed index without changing speed");
         previous.setSpeed(3);
         ok(previous.speedName().equals("x4"), "new x4 speed is independently selectable");
