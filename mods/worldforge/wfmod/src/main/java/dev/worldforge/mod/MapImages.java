@@ -210,6 +210,30 @@ public final class MapImages {
         return Math.max(0, Math.min(255, value));
     }
 
+    private static int luminance(int argb) {
+        int r = (argb >> 16) & 255, g = (argb >> 8) & 255, b = argb & 255;
+        return (r * 30 + g * 59 + b * 11) / 100;
+    }
+
+    /**
+     * Directional relief engraving for the vellum map. A restrained light from
+     * the north-west gives ridges and valleys depth without hiding political fills.
+     */
+    private static int reliefPaper(int[] terrain, int x, int y, int w, int h) {
+        int left = luminance(terrain[y * w + Math.max(0, x - 1)]);
+        int right = luminance(terrain[y * w + Math.min(w - 1, x + 1)]);
+        int up = luminance(terrain[Math.max(0, y - 1) * w + x]);
+        int down = luminance(terrain[Math.min(h - 1, y + 1) * w + x]);
+        int dx = left - right;
+        int dy = up - down;
+        int directional = dx - dy;
+        int strength = Math.max(-10, Math.min(10, directional / 7));
+        int paper = parchmentBase(terrain[y * w + x], x, y, w, h);
+        if (strength < 0) return mix(paper, 0xFF6F5439, (-strength) / 95.0);
+        if (strength > 0) return mix(paper, 0xFFFFE8B5, strength / 115.0);
+        return paper;
+    }
+
     private static boolean pattern(String kind, int x, int y) {
         if ("dots".equals(kind)) return x % 11 < 4 && y % 11 < 4;
         if ("cross".equals(kind)) return Math.floorMod(x - y, 14) < 4 || (x + y) % 14 < 4;
@@ -356,8 +380,8 @@ public final class MapImages {
         }
         for (int z = 0, i = 0; z < h; z++) {
             for (int x = 0; x < w; x++, i++) {
-                int l = lab[i], t = terrain[i];
-                int paper = parchmentBase(t, x, z, w, h);
+                int l = lab[i];
+                int paper = reliefPaper(terrain, x, z, w, h);
                 if (l <= 0 || l >= color.length) { img[i] = paper; continue; }
                 int c = color[l];
                 if (realms && over[l] > 0 && pattern(pat[l], x, z)) c = color[over[l]];
