@@ -54,6 +54,40 @@ public final class WorldLayer {
     private static final Map<Integer, List<UUID>> BANDITS = new HashMap<>();
     private static long ticks;
 
+    public WorldLayer() {
+        dev.worldforge.mod.MapMarkerProviders.register("wf_trade", WorldLayer::collectStrategicCaravans);
+    }
+
+    /** Active caravans use the same capital route and day-progress function as their physical world representation. */
+    private static List<dev.worldforge.mod.Markers.Marker> collectStrategicCaravans(MinecraftServer server, MapData map) {
+        if (server == null || map == null || map.titles == null) return List.of();
+        List<dev.worldforge.mod.Markers.Marker> result = new ArrayList<>();
+        double dayFraction = WorldForgeApi.clock().elapsedDays() % 1.0;
+        for (Trade.Caravan caravan : TradeMod.TRADE.caravans.values()) {
+            if (caravan == null || !"в пути".equals(caravan.status)) continue;
+            Cap from = capTitle(caravan.from), to = capTitle(caravan.to);
+            if (from == null || to == null || from.map() != map || to.map() != map) continue;
+            double[][] way = route(caravan.from, caravan.to);
+            if (way.length < 2) continue;
+            CaravanPath.Pos position = CaravanPath.along(way,
+                    CaravanPath.progress(caravan.total, caravan.left, dayFraction));
+            TitleData.Realm owner = map.titles.realms.get(caravan.from);
+            dev.worldforge.mod.Markers.Marker marker = new dev.worldforge.mod.Markers.Marker();
+            marker.id = "wf_trade:caravan:" + caravan.id;
+            marker.name = "Караван · " + from.title().name + " → " + to.title().name;
+            marker.type = "caravan";
+            marker.x = (int) Math.round(position.x());
+            marker.z = (int) Math.round(position.z());
+            marker.rgb = owner == null ? 0xC39A54 : owner.rgb;
+            marker.desc = "realm=" + caravan.from + ";destination=" + caravan.to
+                    + ";moving=true;heading=" + Math.round(position.yaw())
+                    + ";guards=" + caravan.guards + ";cargo=" + caravan.cargo
+                    + ";status=" + caravan.status;
+            result.add(marker);
+        }
+        return List.copyOf(result);
+    }
+
     // ------------------------------------------------------------------ сохранение
 
     private static Path file(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_trade_shops.json"); }
