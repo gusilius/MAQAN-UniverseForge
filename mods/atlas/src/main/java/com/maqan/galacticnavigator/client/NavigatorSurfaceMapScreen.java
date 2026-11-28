@@ -286,8 +286,19 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 double px=projected[0],py=projected[1];
                 if(px+cell<mapLeft||px>mapRight||py+cell<mapTop||py>mapBottom)continue;
                 int base=layer.mapColor()==0?0xFF536A83:0xFF000000|layer.mapColor();
-                int color=shade(base,16+Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
-                g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
+                if(cell>=12.0){
+                    for(int rz=0;rz<16;rz++)for(int rx=0;rx<16;rx++){
+                        int index=rz*16+rx,blockColor=layer.colorAt(index);
+                        if(blockColor==0)blockColor=base;
+                        int relief=Math.max(-20,Math.min(20,(layer.heightAt(index)-layer.playerY())/2));
+                        int x0=(int)Math.floor(px+cell*rx/16.0),x1=(int)Math.ceil(px+cell*(rx+1)/16.0);
+                        int y0=(int)Math.floor(py+cell*rz/16.0),y1=(int)Math.ceil(py+cell*(rz+1)/16.0);
+                        g.fill(x0,y0,x1,y1,shade(blockColor,12+relief));
+                    }
+                }else{
+                    int color=shade(base,14+Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
+                    g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
+                }
                 g.fill((int)px,(int)py,(int)(px+cell),(int)py+1,0x886B9AC4);
                 visibleCells++;
             }

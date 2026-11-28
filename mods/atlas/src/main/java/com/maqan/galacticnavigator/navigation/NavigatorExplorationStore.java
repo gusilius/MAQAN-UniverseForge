@@ -29,7 +29,14 @@ public final class NavigatorExplorationStore {
         }
     }
     public record ExploredLayer(int chunkX,int chunkZ,int sectionY,int playerY,String biome,
-                                int mapColor,long firstVisited,long lastVisited) {}
+                                int mapColor,long firstVisited,long lastVisited,int[] blockColors,int[] blockHeights) {
+        public ExploredLayer(int chunkX,int chunkZ,int sectionY,int playerY,String biome,
+                             int mapColor,long firstVisited,long lastVisited){
+            this(chunkX,chunkZ,sectionY,playerY,biome,mapColor,firstVisited,lastVisited,null,null);
+        }
+        public int colorAt(int index){return blockColors!=null&&blockColors.length==256?blockColors[index]:mapColor;}
+        public int heightAt(int index){return blockHeights!=null&&blockHeights.length==256?blockHeights[index]:playerY;}
+    }
     /** Snapshot of a chunk already delivered to the client; it is never a request to load a chunk. */
     public record ChunkSample(int chunkX,int chunkZ,int surfaceY,String biome,int mapColor,
                               int[] terrainColors,int[] terrainHeights) {}
@@ -141,14 +148,23 @@ public final class NavigatorExplorationStore {
     /** Records a vertical section only when the player physically enters it. */
     public static synchronized void recordPlayerLayer(String dimension,int chunkX,int chunkZ,int sectionY,
                                                        int playerY,String biome,int mapColor){
+        recordPlayerLayer(dimension,chunkX,chunkZ,sectionY,playerY,biome,mapColor,null,null);
+    }
+
+    /** Persist the actual block-color/height raster for a vertical section the player entered. */
+    public static synchronized void recordPlayerLayer(String dimension,int chunkX,int chunkZ,int sectionY,
+                                                       int playerY,String biome,int mapColor,
+                                                       int[] blockColors,int[] blockHeights){
         if(dimension==null||dimension.isBlank())return;
         Map<String,ExploredLayer> layers=layerData(dimension);
         String key=layerKey(chunkX,chunkZ,sectionY);
         long now=System.currentTimeMillis();
         ExploredLayer previous=layers.get(key);
+        int[] colors=blockColors!=null&&blockColors.length==256?blockColors.clone():null;
+        int[] heights=blockHeights!=null&&blockHeights.length==256?blockHeights.clone():null;
         layers.put(key,new ExploredLayer(chunkX,chunkZ,sectionY,playerY,
                 biome==null?"unknown":biome,mapColor,
-                previous==null?now:previous.firstVisited(),now));
+                previous==null?now:previous.firstVisited(),now,colors,heights));
         LAYER_SNAPSHOTS.remove(dimension);
         LAYER_X_INDEX.remove(dimension);
         Path target=layerFile(dimension),temp=target.resolveSibling(target.getFileName()+".tmp");

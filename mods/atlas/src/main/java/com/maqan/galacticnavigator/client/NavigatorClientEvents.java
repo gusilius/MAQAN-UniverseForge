@@ -166,8 +166,25 @@ public final class NavigatorClientEvents {
                         surfaceY,biomeId,biome.getWaterColor(),terrainColors,terrainHeights);
             }
             if(newVerticalLayer){
+                // Sample the actual blocks of the section the player just entered.
+                int[] blockColors=new int[256],blockHeights=new int[256];
+                BlockPos.MutableBlockPos blockSample=new BlockPos.MutableBlockPos();
+                int sectionMin=sectionY*16,sectionMax=sectionMin+15;
+                for(int localZ=0;localZ<16;localZ++)for(int localX=0;localX<16;localX++){
+                    int index=localZ*16+localX,worldX=(chunkX<<4)+localX,worldZ=(chunkZ<<4)+localZ;
+                    int foundY=position.getY();
+                    for(int sampleY=sectionMax;sampleY>=sectionMin;sampleY--){
+                        if(sampleY<level.getMinBuildHeight()||sampleY>=level.getMaxBuildHeight())continue;
+                        blockSample.set(worldX,sampleY,worldZ);
+                        var state=level.getBlockState(blockSample);
+                        if(!state.isAir()&&state.getFluidState().isEmpty()){
+                            foundY=sampleY;blockColors[index]=state.getMapColor(level,blockSample).col;break;
+                        }
+                    }
+                    blockHeights[index]=foundY;
+                }
                 NavigatorExplorationStore.recordPlayerLayer(dimension,chunkX,chunkZ,sectionY,
-                        position.getY(),biomeId,biome.getWaterColor());
+                        position.getY(),biomeId,biome.getWaterColor(),blockColors,blockHeights);
             }
             lastExploredDimension=dimension;
             lastExploredChunkX=chunkX;
