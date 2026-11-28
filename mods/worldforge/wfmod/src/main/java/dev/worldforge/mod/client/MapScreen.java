@@ -1272,17 +1272,12 @@ public class MapScreen extends Screen {
                 g.disableScissor();
             }
         }
-        boolean architecturalMiniature = switch (visual.icon()) {
-            case "capital", "city", "settlement", "village", "castle", "fort",
-                    "port", "mine", "temple", "ruin", "caravan", "camp" -> true;
-            default -> false;
-        };
         String itemVisual = marker.visualItem == null || marker.visualItem.isBlank()
                 ? visual.mapItem() : marker.visualItem.trim();
-        // Prefer the purpose-built architectural silhouette over a generic item sprite.
-        // Item models remain a fallback for resource/unknown markers and custom visual profiles.
-        if (!renderedLeader && !architecturalMiniature
-                && zoom >= visual.modelLod() && !itemVisual.isBlank()) {
+        // At close strategic zoom, render the real Minecraft item/block model for every
+        // world object, including cities and fortifications. The vector silhouette remains
+        // the deterministic fallback when the item model is unavailable.
+        if (!renderedLeader && zoom >= visual.modelLod() && !itemVisual.isBlank()) {
             ResourceLocation itemId = ResourceLocation.tryParse(itemVisual);
             if (itemId != null) {
                 ItemStack iconStack = new ItemStack(BuiltInRegistries.ITEM.get(itemId));
