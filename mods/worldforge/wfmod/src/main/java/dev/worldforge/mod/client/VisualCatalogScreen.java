@@ -33,8 +33,8 @@ public final class VisualCatalogScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
-        int panelW = Math.min(650, width - 28);
-        int panelH = Math.min(500, height - 28);
+        int panelW = Math.max(1, Math.min(650, width - 28));
+        int panelH = Math.max(1, Math.min(500, height - 28));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         g.fill(left, top, left + panelW, top + panelH, 0xF0201A16);
         g.renderOutline(left, top, panelW, panelH, 0xFFB58A4B);
@@ -107,7 +107,7 @@ public final class VisualCatalogScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-        int panelW = Math.min(650, width - 28), panelH = Math.min(500, height - 28);
+        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.min(500, height - 28);
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int autoY = top + 62;
         if (mouseX >= left + 12 && mouseX < left + panelW - 12
@@ -144,7 +144,7 @@ public final class VisualCatalogScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelW = Math.min(650, width - 28), panelH = Math.min(500, height - 28);
+        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.min(500, height - 28);
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         if (mouseX < left || mouseX >= left + panelW || mouseY < top || mouseY >= top + panelH)
             return super.mouseScrolled(mouseX, mouseY, delta);
@@ -163,8 +163,18 @@ public final class VisualCatalogScreen extends Screen {
             Minecraft.getInstance().setScreen(parent);
             return true;
         }
+        int panelW = Math.max(1, Math.min(650, width - 28));
+        int panelH = Math.max(1, Math.min(500, height - 28));
+        int cols = panelW >= 440 ? 2 : 1;
+        int visibleRows = Math.max(1, (panelH - 111) / 60);
+        int rows = (choices.size() + cols - 1) / cols;
+        int maxScroll = Math.max(0, rows - visibleRows);
         if (key == GLFW.GLFW_KEY_UP) { scroll = Math.max(0, scroll - 1); return true; }
-        if (key == GLFW.GLFW_KEY_DOWN) { scroll++; return true; }
+        if (key == GLFW.GLFW_KEY_DOWN) { scroll = Math.min(maxScroll, scroll + 1); return true; }
+        if (key == GLFW.GLFW_KEY_ENTER && !choices.isEmpty()) {
+            apply(choices.get(Math.min(choices.size() - 1, scroll * cols)).id());
+            return true;
+        }
         return super.keyPressed(key, scanCode, modifiers);
     }
 }
