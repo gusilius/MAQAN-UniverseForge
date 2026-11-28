@@ -140,8 +140,10 @@ public class TroopsMod {
             Map<String, List<TroopEntity>> formations = new TreeMap<>();
             for (TroopEntity troop : LIVE.values()) {
                 if (troop == null || !troop.isAlive() || troop.level() != level) continue;
+                // wf-army owns strategic army symbols; this provider only projects independent garrisons.
+                if (troop.armyId > 0) continue;
                 String realm = troop.realm == null ? "" : troop.realm;
-                String key = realm + "|" + troop.armyId;
+                String key = realm + "|garrison";
                 formations.computeIfAbsent(key, ignored -> new ArrayList<>()).add(troop);
             }
             for (Map.Entry<String, List<TroopEntity>> entry : formations.entrySet()) {
