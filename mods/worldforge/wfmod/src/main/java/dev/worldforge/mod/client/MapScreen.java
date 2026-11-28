@@ -130,6 +130,7 @@ public class MapScreen extends Screen {
         argBox.setMaxLength(120);
         argBox.setVisible(false);
         addRenderableWidget(argBox);
+        ClientWorldMapBootstrap.ensure();
         MapTextures.ensure(ClientState.mode);
     }
 
