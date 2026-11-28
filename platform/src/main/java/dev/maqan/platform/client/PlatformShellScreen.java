@@ -651,7 +651,7 @@ public final class PlatformShellScreen extends Screen {
                 WorkspacePreviewRenderer.render(g, font, content.w, content.h, profile.name(),
                         previewLayer, mouseX - content.x, mouseY - content.y, ambientGrid);
             }
-            WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
+            if (!immersiveRts()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
         boolean immersive = immersiveRts();
@@ -1405,13 +1405,13 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if (settingsVisible && handleSettingsClick(mx, my)) return true;
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums())) {
+        if (!immersiveRts()) for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(layoutRoot(), workspaceBounds(), workspaceMinimums())) {
             boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
                     ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
             if (hit) { resizingSplitterPath = splitter.path(); return true; }
         }
-        if (my < uy(34)) {
+        if (!immersiveRts() && my < uy(34)) {
             if (mx >= width - ux(88) && mx < width - ux(64)) {
                 boolean open = !workspaceManagerVisible;
                 closeTransientOverlays();
@@ -1462,7 +1462,7 @@ public final class PlatformShellScreen extends Screen {
             }
             return true;
         }
-        if(mx < ux(58)) {
+        if(!immersiveRts() && mx < ux(58)) {
             if(my >= height - uy(52)) {
                 boolean open = !settingsVisible;
                 closeTransientOverlays();
@@ -1969,6 +1969,7 @@ public final class PlatformShellScreen extends Screen {
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F7) { toggleWorkspacePanel("navigation"); return true; }
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F8) { toggleWorkspacePanel("inspector"); return true; }
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F9) { toggleWorkspacePanel("tools"); return true; }
+        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F10) { settingsVisible = !settingsVisible; return true; }
         java.util.Optional<WorkspaceRuntime.Shortcut> registered =
                 WorkspaceRuntime.shortcutFor(keyCode, modifiers);
         if (registered.isPresent()) {
