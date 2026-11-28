@@ -610,14 +610,23 @@ public class MapScreen extends Screen {
     }
 
     private void drawPlate(GuiGraphics g) {
-        String t = militaryView ? "Военная карта" : modeName(ClientState.mode);
-        String sub = MapTextures.w + "x" + MapTextures.h + " px · " + Math.round(MapTextures.w * bpp()) + "x" + Math.round(MapTextures.h * bpp()) + " бл.";
-        int w = Math.max(font.width(t) * 3 / 2, font.width(sub)) + 20;
+        String title = militaryView ? "Военная карта" : modeName(ClientState.mode);
+        String sub = MapTextures.w + "x" + MapTextures.h + " px · "
+                + Math.round(MapTextures.w * bpp()) + "x" + Math.round(MapTextures.h * bpp()) + " бл.";
+        if (ClientClock.known()) {
+            String clock = ClientClock.date();
+            String pace = ClientClock.paused() ? "ПАУЗА" : ClientClock.speed();
+            if (clock != null && !clock.isBlank()) sub += " · " + clock;
+            if (pace != null && !pace.isBlank()) sub += " · " + pace;
+        }
+        int desired = Math.max(font.width(title) * 3 / 2, font.width(sub)) + 20;
+        int w = Math.max(120, Math.min(Math.max(120, width - 16), desired));
+        sub = font.plainSubstrByWidth(sub, Math.max(1, w - 14));
         bevel(g, 8, 8, w, 34, false);
         g.pose().pushPose();
         g.pose().translate(15f, 13f, 0f);
         g.pose().scale(1.5f, 1.5f, 1f);
-        g.drawString(font, t, 0, 0, 0xFFF0C85A);
+        g.drawString(font, title, 0, 0, 0xFFF0C85A);
         g.pose().popPose();
         g.drawString(font, sub, 15, 29, 0xFFA6A8B3);
     }
