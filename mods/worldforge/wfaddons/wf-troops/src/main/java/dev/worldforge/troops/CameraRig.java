@@ -26,6 +26,11 @@ public final class CameraRig {
     public static final double MIN_PITCH = 16, MAX_PITCH = 88;
     public static final double BASE_SPEED = 0.9, EDGE = 14;
     public static final double TERRAIN_CLEARANCE = 2.25;
+    public static final double MIN_HEIGHT = 8, MAX_HEIGHT = 256, HEIGHT_STEP = 4;
+    private final java.util.EnumMap<View, Double> heights = new java.util.EnumMap<>(View.class);
+    private final java.util.EnumMap<View, Boolean> heightLocks = new java.util.EnumMap<>(View.class);
+    /** Current view's vertical offset from the player's feet, in blocks. */
+    public double heightAbovePlayer = 68;
 
     /** Serializable client camera state; contains no Minecraft objects or chunk references. */
     public record Snapshot(View view, double fx, double fz, double yaw,
@@ -164,6 +169,58 @@ public final class CameraRig {
         targetZoom = zoom;
         transitioning = false;
         return true;
+    }
+
+    private static double defaultHeight(View v) {
+        return switch (v) {
+            case FREE -> 28;
+            case TACTICS -> 36;
+            case SKY -> 52;
+            case TOP_DOWN -> 88;
+            case STRATEGIC -> 68;
+        };
+    }
+
+    public double heightFor(View v) {
+        return heights.computeIfAbsent(v, CameraRig::defaultHeight);
+    }
+
+    public boolean heightLockedFor(View v) {
+        return heightLocks.getOrDefault(v, false);
+    }
+
+    public void setHeightLocked(boolean locked) {
+        heightLocks.put(view, locked);
+    }
+
+    public void setHeightFromUser(double value) {
+        if (!Double.isFinite(value) || heightLockedFor(view)) return;
+        heightAbovePlayer = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, value));
+        heights.put(view, heightAbovePlayer);
+    }
+
+    public void adjustHeight(double delta) {
+        if (!Double.isFinite(delta) || heightLockedFor(view)) return;
+        setHeightFromUser(heightAbovePlayer + delta);
+    }
+
+    public void restoreHeight(View v, double value, boolean locked) {
+        if (v == null) return;
+        if (Double.isFinite(value) && value >= MIN_HEIGHT && value <= MAX_HEIGHT)
+            heights.put(v, value);
+        heightLocks.put(v, locked);
+        if (view == v) heightAbovePlayer = heightFor(v);
+    }
+
+    /** Camera height is a player-relative offset, never a terrain or world-origin coordinate. */
+    public double[] positionRelativeToPlayer(double playerY) {
+        double p = Math.toRadians(pitch), r = Math.toRadians(yaw);
+        double horizontal = Math.cos(p) * zoom;
+        return new double[] {
+                fx + Math.sin(r) * horizontal,
+                playerY + heightAbovePlayer,
+                fz - Math.cos(r) * horizontal
+        };
     }
 
     /** Desired camera position above the focus terrain. */
