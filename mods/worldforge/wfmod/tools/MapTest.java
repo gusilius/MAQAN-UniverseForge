@@ -31,6 +31,17 @@ public class MapTest {
         try { MapImages.render(m.titles, terrain, " "); }
         catch (IllegalArgumentException expected) { emptyModeRejected = true; }
         check(emptyModeRejected, "пустой режим карты отклоняется контролируемой ошибкой");
+        boolean badPngRejected = false;
+        try { MapImages.writePng(new int[3], 2, 2, new ByteArrayOutputStream()); }
+        catch (IllegalArgumentException expected) { badPngRejected = true; }
+        check(badPngRejected, "экспорт PNG отклоняет несоответствие размера пиксельного массива");
+        boolean emptyPngRejected = false;
+        try { MapImages.writePng(new int[0], 0, 0, new ByteArrayOutputStream()); }
+        catch (IllegalArgumentException expected) { emptyPngRejected = true; }
+        check(emptyPngRejected, "экспорт PNG отклоняет нулевые размеры");
+        ByteArrayOutputStream onePixelPng = new ByteArrayOutputStream();
+        MapImages.writePng(new int[]{0xFFAA8855}, 1, 1, onePixelPng);
+        check(onePixelPng.size() > 0, "экспорт PNG сохраняет корректное однопиксельное изображение");
         Path out = Paths.get(a[2]);
         Files.createDirectories(out);
         for (String mode : MapImages.modes(m.titles)) {
