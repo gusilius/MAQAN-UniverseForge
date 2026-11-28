@@ -169,7 +169,7 @@ public final class CommandScreen extends Screen {
         double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
         CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
-    private int heightWidgetX() { return width - 174; }
+    private int heightWidgetX() { return Math.max(4, width - 174); }
     private boolean overHeightWidget(double x, double y) {
         return x >= heightWidgetX() && x <= width - 4 && y >= 4 && y <= 26;
     }
