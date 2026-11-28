@@ -177,7 +177,7 @@ public final class NavigatorClientEvents {
                         if(sampleY<level.getMinBuildHeight()||sampleY>=level.getMaxBuildHeight())continue;
                         blockSample.set(worldX,sampleY,worldZ);
                         var state=level.getBlockState(blockSample);
-                        if(!state.isAir()&&state.getFluidState().isEmpty()){
+                        if(!state.isAir()||!state.getFluidState().isEmpty()){
                             foundY=sampleY;blockColors[index]=state.getMapColor(level,blockSample).col;break;
                         }
                     }

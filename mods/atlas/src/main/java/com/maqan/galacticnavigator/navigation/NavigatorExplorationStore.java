@@ -34,7 +34,8 @@ public final class NavigatorExplorationStore {
                              int mapColor,long firstVisited,long lastVisited){
             this(chunkX,chunkZ,sectionY,playerY,biome,mapColor,firstVisited,lastVisited,null,null);
         }
-        public int colorAt(int index){return blockColors!=null&&blockColors.length==256?blockColors[index]:mapColor;}
+        public boolean hasBlockRaster(){return blockColors!=null&&blockColors.length==256;}
+        public int colorAt(int index){return hasBlockRaster()?blockColors[index]:mapColor;}
         public int heightAt(int index){return blockHeights!=null&&blockHeights.length==256?blockHeights[index]:playerY;}
     }
     /** Snapshot of a chunk already delivered to the client; it is never a request to load a chunk. */

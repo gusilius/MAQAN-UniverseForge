@@ -289,7 +289,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 if(cell>=12.0){
                     for(int rz=0;rz<16;rz++)for(int rx=0;rx<16;rx++){
                         int index=rz*16+rx,blockColor=layer.colorAt(index);
-                        if(blockColor==0)blockColor=base;
+                        if(blockColor==0)blockColor=layer.hasBlockRaster()?0xFF111923:base;
                         int relief=Math.max(-20,Math.min(20,(layer.heightAt(index)-layer.playerY())/2));
                         int x0=(int)Math.floor(px+cell*rx/16.0),x1=(int)Math.ceil(px+cell*(rx+1)/16.0);
                         int y0=(int)Math.floor(py+cell*rz/16.0),y1=(int)Math.ceil(py+cell*(rz+1)/16.0);
