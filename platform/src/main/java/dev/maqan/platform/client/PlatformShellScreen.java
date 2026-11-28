@@ -1758,6 +1758,8 @@ public final class PlatformShellScreen extends Screen {
                 Class<?> mapType = Class.forName("com.maqan.galacticnavigator.client.NavigatorSurfaceMapScreen");
                 Screen map = (Screen) mapType.getConstructor(String.class, Screen.class)
                         .newInstance(mc.level.dimension().location().toString(), parent);
+                Screen previous = embeddedView;
+                if (previous != null && previous != map) previous.removed();
                 embeddedView = map;
                 initializedView = null;
                 WorkspaceMapState.setViewType(WorkspaceMapState.ViewType.EXPLORATION);
