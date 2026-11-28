@@ -5,6 +5,7 @@ import dev.worldforge.people.CharacterAccessService;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterInventory;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.network.chat.Component;
