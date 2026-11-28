@@ -24,6 +24,7 @@ public final class PlatformShellScreen extends Screen {
     private static final int BG = WorkspaceTheme.BACKGROUND;
     private static final int SURFACE = WorkspaceTheme.SURFACE;
     private static final int SURFACE_ALT = WorkspaceTheme.SURFACE_RAISED;
+    private static final int SURFACE_INSET = WorkspaceTheme.SURFACE_INSET;
     private static final int EDGE = WorkspaceTheme.BORDER;
     private static final int TEXT = WorkspaceTheme.TEXT;
     private static final int MUTED = WorkspaceTheme.TEXT_MUTED;
