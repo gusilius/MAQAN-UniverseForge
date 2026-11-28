@@ -122,12 +122,59 @@ public class TroopsMod {
                 NET.registerMessage(0, OrderPacket.class, OrderPacket::encode, OrderPacket::decode, OrderPacket::handle));
         MinecraftForge.EVENT_BUS.register(this);
         WorldForgeModSnapshotBridge.register();
+        dev.worldforge.mod.MapMarkerProviders.register("wf_troops", TroopsMod::collectStrategicMapMarkers);
     }
 
     private static final class WorldForgeModSnapshotBridge {
         private static void register() {
             dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(TroopsMod::appendAtlasTroops);
         }
+    }
+
+    /** Live physical formations projected into the shared political/military map marker stream. */
+    private static List<dev.worldforge.mod.Markers.Marker> collectStrategicMapMarkers(MinecraftServer server, MapData map) {
+        if (server == null || map == null || map.titles == null) return List.of();
+        List<dev.worldforge.mod.Markers.Marker> result = new ArrayList<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            if (EditorManager.dataFor(level) != map) continue;
+            Map<String, List<TroopEntity>> formations = new TreeMap<>();
+            for (TroopEntity troop : LIVE.values()) {
+                if (troop == null || !troop.isAlive() || troop.level() != level) continue;
+                String realm = troop.realm == null ? "" : troop.realm;
+                String key = realm + "|" + troop.armyId;
+                formations.computeIfAbsent(key, ignored -> new ArrayList<>()).add(troop);
+            }
+            for (Map.Entry<String, List<TroopEntity>> entry : formations.entrySet()) {
+                List<TroopEntity> units = entry.getValue();
+                if (units.isEmpty()) continue;
+                TroopEntity sample = units.get(0);
+                String realmId = sample.realm == null ? "" : sample.realm;
+                TitleData.Realm realm = map.titles.realms.get(realmId);
+                double x = 0, z = 0;
+                int moving = 0;
+                Map<String, Integer> composition = new TreeMap<>();
+                for (TroopEntity unit : units) {
+                    x += unit.getX();
+                    z += unit.getZ();
+                    if (unit.hasDest) moving++;
+                    composition.merge(unit.unitId() == null ? "unknown" : unit.unitId(), 1, Integer::sum);
+                }
+                x /= units.size();
+                z /= units.size();
+                dev.worldforge.mod.Markers.Marker marker = new dev.worldforge.mod.Markers.Marker();
+                marker.id = "wf_troops:army:" + level.dimension().location() + ":" + entry.getKey().replace('|', ':');
+                marker.name = sample.armyId > 0 ? "Армия №" + sample.armyId : "Гарнизон · " + (realm == null ? realmId : realm.name);
+                marker.type = "army";
+                marker.x = (int) Math.round(x);
+                marker.z = (int) Math.round(z);
+                marker.rgb = realm == null ? 0xB65B52 : realm.rgb;
+                marker.desc = "realm=" + realmId + ";men=" + units.size() + ";moving=" + (moving > 0)
+                        + ";heading=" + Math.round(sample.getYRot()) + ";army_id=" + sample.armyId
+                        + ";composition=" + composition;
+                result.add(marker);
+            }
+        }
+        return List.copyOf(result);
     }
 
     /** Physical soldiers and army aggregates are exported in the same dimension/block frame as settlements. */
