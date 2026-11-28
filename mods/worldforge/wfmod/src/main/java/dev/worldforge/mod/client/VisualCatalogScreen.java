@@ -19,6 +19,7 @@ public final class VisualCatalogScreen extends Screen {
     private final String markerName;
     private final String markerType;
     private final List<WorldObjectVisualCatalog.Entry> choices;
+    private final String selectedProfile;
     private int scroll;
 
     public VisualCatalogScreen(MapScreen parent, Markers.Marker marker) {
@@ -27,14 +28,15 @@ public final class VisualCatalogScreen extends Screen {
         this.markerId = marker.id;
         this.markerName = marker.name;
         this.markerType = marker.type;
+        this.selectedProfile = marker.visualProfile == null || marker.visualProfile.isBlank() ? "auto" : marker.visualProfile;
         this.choices = WorldObjectVisualCatalog.choicesFor(marker.type);
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
-        int panelW = Math.max(1, Math.min(650, width - 28));
-        int panelH = Math.max(1, Math.min(500, height - 28));
+        int panelW = Math.max(1, Math.min(650, width - 16));
+        int panelH = Math.max(1, Math.min(500, height - 16));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         g.fill(left, top, left + panelW, top + panelH, 0xF0201A16);
         g.renderOutline(left, top, panelW, panelH, 0xFFB58A4B);
@@ -52,10 +54,10 @@ public final class VisualCatalogScreen extends Screen {
         g.drawString(font, "АВТОМАТИЧЕСКИ · подобрать по типу объекта", left + 22, autoY + 9, 0xFFFFE2A0, false);
 
         int contentTop = autoY + 35;
-        int contentBottom = top + panelH - 14;
+        int contentBottom = Math.max(contentTop, top + panelH - 14);
         int rowH = 54, gap = 6;
         int cols = panelW >= 440 ? 2 : 1;
-        int cardW = (panelW - 36 - (cols - 1) * gap) / cols;
+        int cardW = Math.max(1, (panelW - 36 - (cols - 1) * gap) / cols);
         int rows = (choices.size() + cols - 1) / cols;
         int visibleRows = Math.max(1, (contentBottom - contentTop) / (rowH + gap));
         scroll = Math.max(0, Math.min(scroll, Math.max(0, rows - visibleRows)));
@@ -67,8 +69,9 @@ public final class VisualCatalogScreen extends Screen {
             int y = contentTop + (row - scroll) * (rowH + gap);
             WorldObjectVisualCatalog.Entry entry = choices.get(i);
             boolean hovered = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + rowH;
-            g.fill(x, y, x + cardW, y + rowH, hovered ? 0xFF59452D : 0xFF30271F);
-            g.renderOutline(x, y, cardW, rowH, hovered ? 0xFFE3B86E : 0xFF806342);
+            boolean selected = entry.id().equalsIgnoreCase(selectedProfile);
+            g.fill(x, y, x + cardW, y + rowH, selected ? 0xFF4A3A25 : hovered ? 0xFF59452D : 0xFF30271F);
+            g.renderOutline(x, y, cardW, rowH, selected ? 0xFFFFD66B : hovered ? 0xFFE3B86E : 0xFF806342);
             drawPreview(g, entry, x + 7, y + 8);
             int textX = x + 38;
             g.drawString(font, entry.displayName(), textX, y + 7, 0xFFFFE0A0, false);
@@ -76,7 +79,8 @@ public final class VisualCatalogScreen extends Screen {
             String description = entry.description().isBlank()
                     ? "LOD " + entry.profile().iconLod() + " → " + entry.profile().modelLod()
                     : entry.description();
-            g.drawString(font, font.plainSubstrByWidth(description, cardW - 48), textX, y + 34, 0xFF988D7B, false);
+            g.drawString(font, font.plainSubstrByWidth(description, Math.max(1, cardW - 48)), textX, y + 34, 0xFF988D7B, false);
+            if (selected) g.drawString(font, "АКТИВЕН", x + cardW - 48, y + 7, 0xFFFFD66B, false);
         }
         g.disableScissor();
         g.drawString(font, "Профилей: " + choices.size(), left + 14, top + panelH - 11, 0xFF9D927F, false);
@@ -112,7 +116,7 @@ public final class VisualCatalogScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.max(1, Math.min(500, height - 28));
+        int panelW = Math.max(1, Math.min(650, width - 16)), panelH = Math.max(1, Math.min(500, height - 16));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int autoY = top + 62;
         if (mouseX >= left + 12 && mouseX < left + panelW - 12
@@ -124,7 +128,7 @@ public final class VisualCatalogScreen extends Screen {
         if (mouseY < contentTop || mouseY >= contentBottom) return true;
         int cols = panelW >= 440 ? 2 : 1;
         int gap = 6, rowH = 54;
-        int cardW = (panelW - 36 - (cols - 1) * gap) / cols;
+        int cardW = Math.max(1, (panelW - 36 - (cols - 1) * gap) / cols);
         int col = (int) ((mouseX - (left + 12)) / (cardW + gap));
         int row = (int) ((mouseY - contentTop) / (rowH + gap)) + scroll;
         if (col < 0 || col >= cols || row < 0) return true;
@@ -149,7 +153,7 @@ public final class VisualCatalogScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.max(1, Math.min(500, height - 28));
+        int panelW = Math.max(1, Math.min(650, width - 16)), panelH = Math.max(1, Math.min(500, height - 16));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         if (mouseX < left || mouseX >= left + panelW || mouseY < top || mouseY >= top + panelH)
             return super.mouseScrolled(mouseX, mouseY, delta);
@@ -168,8 +172,8 @@ public final class VisualCatalogScreen extends Screen {
             Minecraft.getInstance().setScreen(parent);
             return true;
         }
-        int panelW = Math.max(1, Math.min(650, width - 28));
-        int panelH = Math.max(1, Math.min(500, height - 28));
+        int panelW = Math.max(1, Math.min(650, width - 16));
+        int panelH = Math.max(1, Math.min(500, height - 16));
         int cols = panelW >= 440 ? 2 : 1;
         int visibleRows = Math.max(1, (panelH - 111) / 60);
         int rows = (choices.size() + cols - 1) / cols;

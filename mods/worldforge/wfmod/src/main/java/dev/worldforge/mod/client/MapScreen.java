@@ -696,6 +696,7 @@ public class MapScreen extends Screen {
 
     private int legendRev = -2;
     private String legendMode = "";
+    private TitleData legendData;
     private final List<int[]> legendRgb = new ArrayList<>();
     private final List<String> legendNames = new ArrayList<>();
     private final List<Long> legendArea = new ArrayList<>();
@@ -705,8 +706,8 @@ public class MapScreen extends Screen {
         String m = MapTextures.mode;
         TitleData d = MapTextures.titles;
         if (!(MapImages.isProp(m) || MapImages.REALMS.equals(m) || MapImages.isDip(m))) return;
-        if (legendRev != ClientState.revision || !m.equals(legendMode)) {
-            legendRev = ClientState.revision; legendMode = m;
+        if (legendRev != ClientState.revision || legendData != d || !m.equals(legendMode)) {
+            legendRev = ClientState.revision; legendData = d; legendMode = m;
             legendRgb.clear(); legendNames.clear(); legendArea.clear();
             List<Object[]> rows = new ArrayList<>();
             if (MapImages.isProp(m)) {
@@ -735,16 +736,31 @@ public class MapScreen extends Screen {
             }
         }
         if (legendNames.isEmpty()) return;
-        int w = 150, h = 22 + legendNames.size() * 12, x = 8, y = height - 34 - h;
+        int w = Math.min(212, Math.max(120, width - 16));
+        int h = 22 + legendNames.size() * 12, x = 8, y = Math.max(36, height - 34 - h);
         bevel(g, x, y, w, h, false);
-        g.drawString(font, MapImages.REALMS.equals(m) ? "Державы" : MapImages.isDip(m) ? "Дипломатия" : modeName(m), x + 8, y + 7, 0xFFF0C85A);
+        String heading = MapImages.REALMS.equals(m) ? "Державы · площадь" : MapImages.isDip(m) ? "Дипломатия · площадь" : modeName(m) + " · площадь";
+        g.drawString(font, font.plainSubstrByWidth(heading, w - 16), x + 8, y + 7, 0xFFF0C85A);
+        int areaWidth = Math.min(76, Math.max(42, w / 2));
+        int nameWidth = Math.max(1, w - 40 - areaWidth);
         for (int i = 0; i < legendNames.size(); i++) {
             int ly = y + 20 + i * 12;
             g.fill(x + 8, ly, x + 18, ly + 9, 0xFF000000);
             g.fill(x + 9, ly + 1, x + 17, ly + 8, 0xFF000000 | legendRgb.get(i)[0]);
-            String n = font.plainSubstrByWidth(legendNames.get(i), w - 34);
+            String n = font.plainSubstrByWidth(legendNames.get(i), nameWidth);
+            String area = compactArea(legendArea.get(i));
+            int ax = x + w - 8 - font.width(area);
             g.drawString(font, n, x + 23, ly + 1, 0xFFECEBE4);
+            g.drawString(font, area, Math.max(x + 23 + nameWidth, ax), ly + 1, 0xFFB8A98C);
         }
+    }
+
+
+    private static String compactArea(long blocks) {
+        if (blocks >= 1_000_000_000L) return String.format(java.util.Locale.ROOT, "%.1f млрд", blocks / 1_000_000_000.0);
+        if (blocks >= 1_000_000L) return String.format(java.util.Locale.ROOT, "%.1f млн", blocks / 1_000_000.0);
+        if (blocks >= 1_000L) return String.format(java.util.Locale.ROOT, "%.1f тыс.", blocks / 1_000.0);
+        return Math.max(0L, blocks) + "";
     }
 
     private int pixelProvince(int mx, int my) {
