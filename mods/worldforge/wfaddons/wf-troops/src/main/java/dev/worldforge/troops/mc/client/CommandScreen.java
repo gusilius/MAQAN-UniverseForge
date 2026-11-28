@@ -183,7 +183,7 @@ public final class CommandScreen extends Screen {
         g.drawCenteredString(font, "−", x + 12, y + 7, 0xFFE8EDF5);
         g.fill(x + 24, y + 4, x + 105, y + 18, 0xFF111C28);
         String value = heightEditing ? heightInput + "_" : String.format(Locale.ROOT, "%.0f", rig.heightAbovePlayer);
-        g.drawCenteredString(font, value + " м", x + 64, y + 7, 0xFFE8EDF5);
+        g.drawCenteredString(font, value + " бл.", x + 64, y + 7, 0xFFE8EDF5);
         g.fill(x + 108, y + 4, x + 125, y + 18, 0xFF263747);
         g.drawCenteredString(font, "+", x + 116, y + 7, 0xFFE8EDF5);
         g.fill(x + 128, y + 4, x + 166, y + 18, locked ? 0xFF66532B : 0xFF263747);
