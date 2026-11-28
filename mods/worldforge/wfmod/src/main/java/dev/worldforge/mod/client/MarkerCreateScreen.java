@@ -171,7 +171,7 @@ public final class MarkerCreateScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.connection.sendCommand(
                 "worldforge marker addat " + type() + " " + selectedProfile + " " + blockX + " " + blockZ + " " + name);
-        ClientScreenNavigation.returnToParent(this, parent);
+        mc.setScreen(parent);
     }
 
     @Override
@@ -191,7 +191,7 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     public boolean keyPressed(int key, int scanCode, int modifiers) {
-        if (key == GLFW.GLFW_KEY_ESCAPE) { ClientScreenNavigation.returnToParent(this, parent); return true; }
+        if (key == GLFW.GLFW_KEY_ESCAPE) { Minecraft.getInstance().setScreen(parent); return true; }
         if (key == GLFW.GLFW_KEY_LEFT) { typeIndex = Math.floorMod(typeIndex - 1, types.length); refreshChoices(); return true; }
         if (key == GLFW.GLFW_KEY_RIGHT) { typeIndex = Math.floorMod(typeIndex + 1, types.length); refreshChoices(); return true; }
         if (key == GLFW.GLFW_KEY_ENTER && nameBox != null && nameBox.isFocused()) { createMarker(); return true; }

@@ -47,7 +47,8 @@ class CameraRigTest {
     @Test
     void cameraAvoidsNetherRoofHeightmapWhenPlayerIsFarBelowCeiling() {
         assertEquals(62.0, CameraRig.resolveTerrainAnchor(128.0, 50.0, 0, true));
-        assertEquals(128.0, CameraRig.resolveTerrainAnchor(128.0, 100.0, 0, true));
+        assertEquals(112.0, CameraRig.resolveTerrainAnchor(128.0, 100.0, 0, true));
+        assertEquals(142.0, CameraRig.resolveTerrainAnchor(128.0, 130.0, 0, true));
     }
 
     @Test

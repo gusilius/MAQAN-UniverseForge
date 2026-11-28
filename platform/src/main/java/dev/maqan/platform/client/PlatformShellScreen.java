@@ -282,7 +282,9 @@ public final class PlatformShellScreen extends Screen {
         try {
             WorkspaceDockTree.validate(candidate);
             if (!WorkspaceDockTree.panelIds(candidate).contains("content")) return defaultWorkspaceTree();
-            return WorkspaceDockTree.activateTab(candidate, "content");
+            boolean contentVisible = WorkspaceDockTree.layout(candidate,
+                    new WorkspaceDockTree.Rect(0, 0, 1, 1)).containsKey("content");
+            return contentVisible ? candidate : WorkspaceDockTree.activateTab(candidate, "content");
         } catch (RuntimeException invalidLayout) {
             LOGGER.warn("Invalid MAQAN workspace layout; restoring the safe default", invalidLayout);
             return defaultWorkspaceTree();
@@ -701,17 +703,19 @@ public final class PlatformShellScreen extends Screen {
             if (!worldBacked) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        ThemeManager.renderChrome(g, width, height, profile == Profile.RTS || commandCameraActive());
-        drawTopBar(g, mouseX, mouseY);
-        drawRail(g, mouseX, mouseY);
-        for (Panel p : panels.values())
-            if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
-        if (settingsVisible) drawSettings(g, mouseX, mouseY);
-        drawDockSplitters(g, mouseX, mouseY);
-        if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
-        if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
-        if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
-        if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
+        if (!worldBacked) {
+            ThemeManager.renderChrome(g, width, height, profile == Profile.RTS);
+            drawTopBar(g, mouseX, mouseY);
+            drawRail(g, mouseX, mouseY);
+            for (Panel p : panels.values())
+                if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
+            if (settingsVisible) drawSettings(g, mouseX, mouseY);
+            drawDockSplitters(g, mouseX, mouseY);
+            if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
+            if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
+            if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
+            if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
+        }
         super.render(g, mouseX, mouseY, partialTick);
     }
 

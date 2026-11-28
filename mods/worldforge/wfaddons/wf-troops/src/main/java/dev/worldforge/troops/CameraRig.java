@@ -188,7 +188,8 @@ public final class CameraRig {
         if (!Double.isFinite(sampledSurfaceY)) return safePlayerY + 8.0;
         if (sampledSurfaceY <= minBuildHeight + 2.0)
             return Math.max(safePlayerY + 8.0, minBuildHeight + 8.0);
-        if (hasCeiling && sampledSurfaceY - safePlayerY > 48.0)
+        if (hasCeiling && (sampledSurfaceY > safePlayerY + 16.0
+                || safePlayerY > sampledSurfaceY + 4.0))
             return safePlayerY + 12.0;
         return sampledSurfaceY;
     }
