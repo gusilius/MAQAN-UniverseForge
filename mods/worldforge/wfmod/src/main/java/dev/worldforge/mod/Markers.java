@@ -80,6 +80,7 @@ public final class Markers {
         Marker m = find(q);
         if (m == null) return false;
         list.remove(m);
+        visualOverrides.remove(m.id);
         dirty = true;
         return true;
     }
@@ -109,28 +110,64 @@ public final class Markers {
     public static Markers fromJson(String json) {
         Markers ms = new Markers();
         if (json == null || json.isBlank()) return ms;
-        Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (root.get("visual_overrides") instanceof Map<?, ?> overrides) {
+        Object parsed = Json.parse(json);
+        if (!(parsed instanceof Map<?, ?> root)) return ms;
+
+        Object rawOverrides = root.get("visual_overrides");
+        if (rawOverrides instanceof Map<?, ?> overrides) {
             for (Map.Entry<?, ?> entry : overrides.entrySet()) {
                 if (entry.getKey() instanceof String id && entry.getValue() instanceof String profile
-                        && !id.isBlank() && !profile.isBlank()) ms.visualOverrides.put(id, profile);
+                        && !id.isBlank() && !profile.isBlank()
+                        && id.length() <= 128 && profile.length() <= 128) {
+                    ms.visualOverrides.put(id.trim(), profile.trim());
+                }
             }
         }
-        for (Object o : (List<Object>) root.get("markers")) {
-            Map<String, Object> e = (Map<String, Object>) o;
-            Marker m = new Marker();
-            m.id = (String) e.get("id");
-            m.name = (String) e.get("name");
-            m.type = (String) e.get("type");
-            m.x = ((Number) e.get("x")).intValue();
-            m.z = ((Number) e.get("z")).intValue();
-            m.rgb = Integer.parseInt(((String) e.get("color")).substring(1), 16);
-            m.desc = e.get("desc") == null ? "" : (String) e.get("desc");
-            m.visualProfile = e.get("visual") == null ? "" : String.valueOf(e.get("visual"));
-            m.visualItem = e.get("map_item") == null ? "" : String.valueOf(e.get("map_item"));
-            ms.list.add(m);
+
+        Object rawMarkers = root.get("markers");
+        if (!(rawMarkers instanceof List<?> markerList)) return ms;
+        for (Object raw : markerList) {
+            if (!(raw instanceof Map<?, ?> entry)) continue;
+            Object idValue = entry.get("id");
+            Object nameValue = entry.get("name");
+            Object typeValue = entry.get("type");
+            if (!(idValue instanceof String id) || id.isBlank() || id.length() > 128
+                    || !(nameValue instanceof String name) || name.isBlank()
+                    || !(typeValue instanceof String type) || !TYPES.contains(type)) continue;
+
+            Marker marker = new Marker();
+            marker.id = id.trim();
+            marker.name = name.trim();
+            marker.type = type;
+            marker.x = integer(entry.get("x"), 0);
+            marker.z = integer(entry.get("z"), 0);
+            marker.rgb = parseColor(entry.get("color"), 0xFFFFFF);
+            marker.desc = entry.get("desc") instanceof String desc ? desc : "";
+            marker.visualProfile = boundedString(entry.get("visual"), 128);
+            marker.visualItem = boundedString(entry.get("map_item"), 128);
+            String override = ms.visualOverrides.get(marker.id);
+            if (override != null) marker.visualProfile = override;
+            ms.list.add(marker);
         }
         return ms;
+    }
+
+    private static int integer(Object value, int fallback) {
+        return value instanceof Number number ? number.intValue() : fallback;
+    }
+
+    private static String boundedString(Object value, int maxLength) {
+        if (!(value instanceof String text)) return "";
+        String trimmed = text.trim();
+        return trimmed.length() <= maxLength ? trimmed : "";
+    }
+
+    private static int parseColor(Object value, int fallback) {
+        if (!(value instanceof String color)) return fallback;
+        String hex = color.startsWith("#") ? color.substring(1) : color.startsWith("0x") ? color.substring(2) : color;
+        if (hex.length() != 6) return fallback;
+        try { return Integer.parseInt(hex, 16) & 0xFFFFFF; }
+        catch (NumberFormatException invalid) { return fallback; }
     }
 
     public static Markers load(Path file) throws IOException {
