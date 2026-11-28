@@ -438,8 +438,10 @@ public final class CommandMode {
         boolean preserveSelection=firstPersonCommand;
         firstPersonCommand=false;
         active = true;
-        if(!preserveSelection)SEL.clear();
-        prevCamera = mc.options.getCameraType();
+        if(!preserveSelection){
+            SEL.clear();
+            prevCamera = mc.options.getCameraType();
+        }
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
         if (!restoreCamera(mc)) RIG.focusOn(mc.player.getX(), mc.player.getZ());
