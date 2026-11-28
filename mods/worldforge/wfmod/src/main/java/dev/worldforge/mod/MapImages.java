@@ -349,7 +349,7 @@ public final class MapImages {
             for (int x = 0; x < w; x++, i++) {
                 int l = lab[i], t = terrain[i];
                 int paper = parchmentBase(t, x, z, w, h);
-                if (l == 0) { img[i] = paper; continue; }
+                if (l <= 0 || l >= color.length) { img[i] = paper; continue; }
                 int c = color[l];
                 if (realms && over[l] > 0 && pattern(pat[l], x, z)) c = color[over[l]];
                 // Keep the terrain legible beneath political fills instead of painting opaque flat regions.
@@ -365,7 +365,10 @@ public final class MapImages {
                 while (over[cur] > 0 && g++ < 32) cur = over[cur];
                 topOf[i] = cur;
             }
-            for (int i = 0; i < top.length; i++) top[i] = lab[i] == 0 ? 0 : topOf[lab[i]];
+            for (int i = 0; i < top.length; i++) {
+                int label = lab[i];
+                top[i] = label <= 0 || label >= topOf.length ? 0 : topOf[label];
+            }
             innerGlow(img, lab, w, h, 3, 0.22);
             innerGlow(img, top, w, h, 7, 0.45);
             edges(lab, w, h, e, false);
@@ -377,9 +380,16 @@ public final class MapImages {
             inkEdges(img, e2, 0xFFC19A5B, 0.16);
         } else if (prop) {
             innerGlow(img, lab, w, h, 4, 0.3);
-            int[] low = labels(d, d.tiers.get(Math.min(1, d.tiers.size() - 1)).key);
-            edges(low, w, h, e, false);
-            inkEdges(img, e, 0xFF806344, 0.22);
+            // Some imported/minimal worlds have no title hierarchy. Property fills
+            // remain valid there; simply omit the optional county/province separator.
+            if (!d.tiers.isEmpty()) {
+                int lowTier = Math.min(1, d.tiers.size() - 1);
+                int[] low = labels(d, d.tiers.get(lowTier).key);
+                if (low != null) {
+                    edges(low, w, h, e, false);
+                    inkEdges(img, e, 0xFF806344, 0.22);
+                }
+            }
             e = new boolean[w * h];
             edges(lab, w, h, e, true);
             inkEdges(img, e, 0xFF493326, 0.72);
@@ -406,6 +416,8 @@ public final class MapImages {
 
     public static Overlay overlay(TitleData d, String mode, int label) {
         if (label <= 0) return null;
+        checkedPixelCount(d);
+        if (mode == null || mode.isBlank()) return null;
         int[] lab = labels(d, mode);
         if (lab == null) return null;
         int w = d.w, h = d.h, x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -439,6 +451,10 @@ public final class MapImages {
     }
 
     public static void writePng(int[] argb, int w, int h, java.io.OutputStream out) throws java.io.IOException {
+        long count = (long) w * h;
+        if (w <= 0 || h <= 0 || count > 16L * 1024L * 1024L
+                || argb == null || argb.length != (int) count || out == null)
+            throw new IllegalArgumentException("Некорректные данные PNG политической карты");
         java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         img.setRGB(0, 0, w, h, argb, 0, w);
         javax.imageio.ImageIO.write(img, "png", out);
