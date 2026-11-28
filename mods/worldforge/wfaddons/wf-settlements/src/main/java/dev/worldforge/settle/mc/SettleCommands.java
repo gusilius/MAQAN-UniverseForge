@@ -46,7 +46,7 @@ public final class SettleCommands {
                                             int count = IntegerArgumentType.getInteger(c, "count");
                                             for (int i = 0; i < count; i++) colony.s.addWorker(null);
                                             return "Добавлено жителей: " + count + ". Канонические Character и физические тела будут материализованы штатной синхронизацией.";
-                                        }))))
+                                        })))))
                 .then(Commands.literal("schem")
                         .then(Commands.literal("list").executes(c -> {
                             var names = SchemLibrary.names();
