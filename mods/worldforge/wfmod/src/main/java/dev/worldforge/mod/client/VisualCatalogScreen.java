@@ -107,7 +107,7 @@ public final class VisualCatalogScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.min(500, height - 28);
+        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.max(1, Math.min(500, height - 28));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int autoY = top + 62;
         if (mouseX >= left + 12 && mouseX < left + panelW - 12
@@ -144,7 +144,7 @@ public final class VisualCatalogScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.min(500, height - 28);
+        int panelW = Math.max(1, Math.min(650, width - 28)), panelH = Math.max(1, Math.min(500, height - 28));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         if (mouseX < left || mouseX >= left + panelW || mouseY < top || mouseY >= top + panelH)
             return super.mouseScrolled(mouseX, mouseY, delta);
