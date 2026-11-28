@@ -3,6 +3,7 @@ package dev.worldforge.mod.client;
 import dev.worldforge.mod.MapImages;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.api.Diplomacy;
+import dev.worldforge.mod.api.Ledger;
 import dev.worldforge.mod.Markers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -20,7 +21,7 @@ import java.util.Set;
  */
 final class SidePanel {
     enum Tab {
-        TITLE("Т", "Титул"), REALM("Г", "Государство"), DIP("Д", "Дипломатия"), EDIT("Р", "Редактор"), MARKS("М", "Метки");
+        TITLE("Т", "Титул"), REALM("Г", "Государство"), DIP("Д", "Дипломатия"), STRATEGY("Σ", "Стратегия"), EDIT("Р", "Редактор"), MARKS("М", "Метки");
 
         final String glyph, title;
 
@@ -93,7 +94,7 @@ final class SidePanel {
     }
 
     private List<Tab> tabs() {
-        List<Tab> out = new ArrayList<>(List.of(Tab.TITLE, Tab.REALM, Tab.DIP));
+        List<Tab> out = new ArrayList<>(List.of(Tab.TITLE, Tab.REALM, Tab.DIP, Tab.STRATEGY));
         if (canEdit()) out.add(Tab.EDIT);
         out.add(Tab.MARKS);
         return out;
@@ -149,6 +150,7 @@ final class SidePanel {
             case TITLE -> titleTab(c);
             case REALM -> realmTab(c);
             case DIP -> dipTab(c);
+            case STRATEGY -> strategyTab(c);
             case EDIT -> editTab(c);
             case MARKS -> marksTab(c);
         }
@@ -472,6 +474,86 @@ final class SidePanel {
             if (!a.hint.isEmpty()) c.text(a.hint, MUTED);
         }
         c.text("* только оператор", MUTED);
+    }
+
+    /** Strategic overview assembled from canonical realm, treasury, live-marker and event models. */
+    private void strategyTab(Ctx c) {
+        TitleData d = data();
+        TitleData.Title province = d == null ? null : d.get(host.selectedProv());
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) {
+            empty(c, "Выберите государство на карте, чтобы открыть стратегическую сводку.");
+            c.gap(4);
+            c.button("Открыть реестр государств", d != null, () -> Minecraft.getInstance().setScreen(new LedgerScreen(d, null, host::command, host)));
+            c.button("Открыть летопись мира", true, () -> Minecraft.getInstance().setScreen(new EventLogScreen(ClientState.events, d, null, host::command, host)));
+            return;
+        }
+        c.swatch(realm.rgb, realm.name, GOLD, 0, null);
+        c.text(realm.overlord == null ? "Суверенное государство" : relLabel(d, realm) + " · " + realm.overlord.name, MUTED);
+        c.head("Казна и финансы");
+        ClientState.TreasuryAccount treasury = ClientState.treasury.get(realm.id);
+        if (treasury == null) c.text("Казначейский счёт ещё не передан сервером.", MUTED);
+        else {
+            c.kv("Баланс", formatAmount(treasury.balance()) + " " + treasury.currency());
+            if (treasury.debt() > 0) c.kv("Долг", formatAmount(treasury.debt()) + " " + treasury.currency());
+            c.kv("Банкротство", treasury.bankrupt() ? "Да" : "Нет");
+        }
+        int armies = 0, soldiers = 0, settlements = 0, population = 0, caravans = 0, moving = 0;
+        boolean hasPopulation = false;
+        for (Markers.Marker marker : ClientState.markers.list()) {
+            String owner = markerValue(marker.desc, "realm");
+            if (!realm.id.equals(owner) && !realm.name.equalsIgnoreCase(owner)) continue;
+            switch (marker.type) {
+                case "army", "corps", "unit", "commander" -> {
+                    armies++; soldiers += markerInt(marker.desc, "men");
+                    if ("true".equalsIgnoreCase(markerValue(marker.desc, "moving"))) moving++;
+                }
+                case "city", "settlement", "village", "capital", "castle", "fort", "port" -> {
+                    settlements++; int count = markerInt(marker.desc, "population");
+                    if (count > 0) { population += count; hasPopulation = true; }
+                }
+                case "caravan" -> caravans++;
+                default -> { }
+            }
+        }
+        c.head("Население и владения");
+        c.kv("Поселения и крепости", String.valueOf(settlements));
+        c.kv("Население", hasPopulation ? formatAmount(population) : "нет данных в снимке объектов");
+        c.head("Военная сила");
+        c.kv("Военные объекты", String.valueOf(armies));
+        c.kv("Личный состав", soldiers > 0 ? formatAmount(soldiers) : "нет данных в снимке объектов");
+        c.kv("В движении", String.valueOf(moving));
+        c.head("Торговля");
+        c.kv("Караваны", String.valueOf(caravans));
+        c.text("Показатели строятся по актуальным серверным объектам карты; отсутствие маркера не означает нулевое значение симуляции.", MUTED);
+        c.head("Последние события");
+        List<dev.worldforge.mod.api.EventLog.Event> recent = ClientState.events.filter(null, realm.id, 4);
+        if (recent.isEmpty()) c.text("В летописи пока нет событий этого государства.", MUTED);
+        for (var event : recent) c.text("• " + event.text, MUTED);
+        c.gap(4);
+        c.button("Открыть реестр государств", true, () -> Minecraft.getInstance().setScreen(new LedgerScreen(d, realm.id, host::command, host)));
+        c.button("Открыть полную летопись", true, () -> Minecraft.getInstance().setScreen(new EventLogScreen(ClientState.events, d, realm.id, host::command, host)));
+        c.button("Открыть дипломатическую карту", true, () -> host.setMode(MapImages.DIP + realm.id, true));
+    }
+
+    private static int markerInt(String description, String key) {
+        try { return Math.max(0, Integer.parseInt(markerValue(description, key))); }
+        catch (NumberFormatException ignored) { return 0; }
+    }
+
+    private static String markerValue(String description, String key) {
+        if (description == null || key == null) return "";
+        String prefix = key + "=";
+        for (String field : description.split(";")) {
+            String item = field.trim();
+            if (item.startsWith(prefix)) return item.substring(prefix.length()).trim();
+        }
+        return "";
+    }
+
+    private static String formatAmount(double amount) {
+        if (!Double.isFinite(amount)) return "—";
+        return String.format(java.util.Locale.ROOT, "%,.2f", amount);
     }
 
     private void tree(Ctx c, TitleData d, TitleData.Realm node, TitleData.Realm cur, int depth) {
