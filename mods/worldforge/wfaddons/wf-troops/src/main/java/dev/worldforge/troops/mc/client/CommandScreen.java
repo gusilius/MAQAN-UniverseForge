@@ -52,6 +52,7 @@ public final class CommandScreen extends Screen {
     private boolean recruitOpen;
     private int recruitCount=1;
     private String selectedRecruitType="";
+    private int recruitScroll;
     private record RecruitOption(String id,String name,String role,int cost,double upkeep,
                                  String building,Map<String,Integer> supply,String description) {}
     private final List<RecruitOption> recruitOptions=new ArrayList<>();
@@ -117,10 +118,10 @@ public final class CommandScreen extends Screen {
                         supply.put(String.valueOf(entry.getKey()),amount.intValue());
                 recruitOptions.add(new RecruitOption(String.valueOf(unit.get("id")),
                         String.valueOf(unit.get("name")),String.valueOf(unit.get("role")),
-                        ((Number)unit.getOrDefault("cost",0)).intValue(),
+                        unit.get("cost") instanceof Number cost?cost.intValue():0,
                         unit.get("upkeep") instanceof Number upkeep?upkeep.doubleValue():0.0,
                         String.valueOf(unit.get("building")),Map.copyOf(supply),
-                        String.valueOf(unit.getOrDefault("description",""))));
+                        unit.get("description")==null?"":String.valueOf(unit.get("description"))));
             }
             if(selectedRecruitType.isBlank()&&!recruitOptions.isEmpty())
                 selectedRecruitType=recruitOptions.get(0).id();
@@ -395,8 +396,10 @@ public final class CommandScreen extends Screen {
         g.drawString(font,"+",x+w-25,y+7,0xFFE6D7B8,false);
         g.drawString(font,"Готовое здание + инструктор · склад + золото",x+8,y+22,0xFF9EAFC0,false);
         int rowY=y+39,shown=0;
-        for(RecruitOption option:recruitOptions){
-            if(rowY+24>y+h-37)break;
+        int visibleRows=Math.max(1,(h-39-34)/23);
+        recruitScroll=Math.max(0,Math.min(recruitScroll,Math.max(0,recruitOptions.size()-visibleRows)));
+        for(int optionIndex=recruitScroll;optionIndex<recruitOptions.size()&&shown<visibleRows;optionIndex++){
+            RecruitOption option=recruitOptions.get(optionIndex);
             boolean active=option.id().equals(selectedRecruitType);
             boolean hover=mouseX>=x+5&&mouseX<x+w-5&&mouseY>=rowY&&mouseY<rowY+22;
             if(active||hover)g.fill(x+5,rowY,x+w-5,rowY+21,active?0x664C778D:0x443B5063);
@@ -427,10 +430,10 @@ public final class CommandScreen extends Screen {
         }
         if(y>=py+39&&y<py+h-34){
             int row=(int)((y-(py+39))/23);
-            if(row>=0&&row<recruitOptions.size()){
-                int maxRows=Math.max(0,(h-39-34)/23);
-                int index=Math.min(row,recruitOptions.size()-1);
-                if(row<maxRows)selectedRecruitType=recruitOptions.get(index).id();
+            int visibleRows=Math.max(1,(h-39-34)/23);
+            if(row>=0&&row<visibleRows){
+                int index=recruitScroll+row;
+                if(index>=0&&index<recruitOptions.size())selectedRecruitType=recruitOptions.get(index).id();
             }
             return;
         }
@@ -899,6 +902,12 @@ public final class CommandScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double delta) {
+        if(recruitOpen&&inRecruitPanel(x,y)){
+            int visibleRows=Math.max(1,(recruitPanelH()-39-34)/23);
+            recruitScroll=Math.max(0,Math.min(Math.max(0,recruitOptions.size()-visibleRows),
+                    recruitScroll+(delta<0?1:-1)));
+            return true;
+        }
         if (buildOpen && inBuildPanel(x, y)) {
             int max = Math.max(0, visibleDefs().size() - rowsFit());
             scroll = Math.max(0, Math.min(max, scroll + (delta < 0 ? 1 : -1)));
