@@ -1,9 +1,8 @@
 package dev.worldforge.troops;
 
 /**
- * Shared tactical camera rig. The focus point is on the terrain; the game adapter
- * is responsible for sampling terrain and resolving the final camera position
- * against loaded collision geometry.
+ * Shared tactical camera rig. Horizontal focus and camera height are independent;
+ * vertical placement is always expressed relative to the player's feet.
  */
 public final class CameraRig {
     public enum View {
@@ -53,6 +52,7 @@ public final class CameraRig {
     public void setView(View v) {
         if (v == null) return;
         view = v;
+        heightAbovePlayer = heightFor(v);
         pitch = v.pitch;
         setZoom(v.zoom);
         targetPitch = pitch;
@@ -64,6 +64,7 @@ public final class CameraRig {
     public void transitionTo(View v) {
         if (v == null) return;
         view = v;
+        heightAbovePlayer = heightFor(v);
         targetPitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, v.pitch));
         targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom));
         transitioning = true;
@@ -159,6 +160,7 @@ public final class CameraRig {
                 || saved.pitch() < MIN_PITCH || saved.pitch() > MAX_PITCH
                 || saved.leash() < 8 || saved.leash() > 512) return false;
         view = saved.view();
+        heightAbovePlayer = heightFor(view);
         fx = saved.fx();
         fz = saved.fz();
         yaw = ((saved.yaw() % 360) + 360) % 360;
