@@ -7,23 +7,25 @@ package dev.worldforge.troops;
  */
 public final class CameraRig {
     public enum View {
-        FREE("Total War", 28, 28),
-        TACTICS("Изометрия", 55, 24),
-        SKY("RTS", 68, 34),
-        TOP_DOWN("Сверху", 88, 36),
-        STRATEGIC("Стратегия", 74, 48);
+        FREE("Total War", 28, 28, 20),
+        TACTICS("Изометрия", 55, 24, 28),
+        SKY("RTS", 68, 34, 40),
+        TOP_DOWN("Сверху", 88, 36, 56),
+        STRATEGIC("Стратегия", 74, 48, 48);
 
         public final String title;
-        public final double pitch, zoom;
-        View(String title, double pitch, double zoom) {
+        public final double pitch, zoom, defaultHeight;
+        View(String title, double pitch, double zoom, double defaultHeight) {
             this.title = title;
             this.pitch = pitch;
             this.zoom = zoom;
+            this.defaultHeight = defaultHeight;
         }
     }
 
     public static final double MIN_ZOOM = 6, MAX_ZOOM = 96;
     public static final double MIN_PITCH = 16, MAX_PITCH = 88;
+    public static final double MIN_HEIGHT = 4, MAX_HEIGHT = 256, HEIGHT_STEP = 2;
     public static final double BASE_SPEED = 0.9, EDGE = 14;
     public static final double TERRAIN_CLEARANCE = 2.25;
 
@@ -35,8 +37,16 @@ public final class CameraRig {
     public double fx, fz, yaw, pitch = View.SKY.pitch, zoom = View.SKY.zoom;
     private double targetPitch = View.SKY.pitch, targetZoom = View.SKY.zoom;
     private boolean transitioning;
+    private final java.util.EnumMap<View, Double> heightProfiles = new java.util.EnumMap<>(View.class);
+    private final java.util.EnumSet<View> lockedHeightProfiles = java.util.EnumSet.noneOf(View.class);
+    public double heightAbovePlayer = View.SKY.defaultHeight;
     /** Client-side loaded-area leash; never force-load chunks for camera movement. */
     public double leash = 90;
+
+    public CameraRig() {
+        for (View preset : View.values()) heightProfiles.put(preset, preset.defaultHeight);
+        heightAbovePlayer = heightProfiles.get(view);
+    }
 
     public void start(double x, double z, double yawDeg, View v) {
         fx = x;
@@ -48,6 +58,7 @@ public final class CameraRig {
     public void setView(View v) {
         if (v == null) return;
         view = v;
+        heightAbovePlayer = heightProfiles.getOrDefault(v, v.defaultHeight);
         pitch = v.pitch;
         setZoom(v.zoom);
         targetPitch = pitch;
@@ -59,6 +70,7 @@ public final class CameraRig {
     public void transitionTo(View v) {
         if (v == null) return;
         view = v;
+        heightAbovePlayer = heightProfiles.getOrDefault(v, v.defaultHeight);
         targetPitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, v.pitch));
         targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom));
         transitioning = true;
@@ -160,21 +172,45 @@ public final class CameraRig {
         pitch = saved.pitch();
         zoom = saved.zoom();
         leash = saved.leash();
+        heightAbovePlayer = heightProfiles.getOrDefault(view, view.defaultHeight);
         targetPitch = pitch;
         targetZoom = zoom;
         transitioning = false;
         return true;
     }
 
-    /** Desired camera position above the focus terrain. */
-    public double[] position(double groundY) {
+    /** Camera altitude is always measured from the player's feet Y, never terrain or map center. */
+    public double[] position(double playerY) {
         double p = Math.toRadians(pitch), r = Math.toRadians(yaw);
         double horizontal = Math.cos(p) * zoom;
-        return new double[]{
-                fx + Math.sin(r) * horizontal,
-                groundY + Math.sin(p) * zoom,
-                fz - Math.cos(r) * horizontal
-        };
+        double safePlayerY = Double.isFinite(playerY) ? playerY : 0.0;
+        return new double[]{fx + Math.sin(r) * horizontal,
+                safePlayerY + heightAbovePlayer,
+                fz - Math.cos(r) * horizontal};
+    }
+
+    public double heightFor(View preset) {
+        return preset == null ? heightAbovePlayer : heightProfiles.getOrDefault(preset, preset.defaultHeight);
+    }
+    public boolean heightLockedFor(View preset) {
+        return preset != null && lockedHeightProfiles.contains(preset);
+    }
+    public void setHeightProfile(View preset, double height, boolean locked) {
+        if (preset == null || !Double.isFinite(height)) return;
+        double safe = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, height));
+        heightProfiles.put(preset, safe);
+        if (locked) lockedHeightProfiles.add(preset); else lockedHeightProfiles.remove(preset);
+        if (view == preset) heightAbovePlayer = safe;
+    }
+    public void adjustHeight(double delta) {
+        if (!Double.isFinite(delta) || heightLockedFor(view)) return;
+        setHeightProfile(view, heightAbovePlayer + delta, false);
+    }
+    public void setHeightFromUser(double height) {
+        if (!heightLockedFor(view) && Double.isFinite(height)) setHeightProfile(view, height, false);
+    }
+    public void setHeightLocked(boolean locked) {
+        setHeightProfile(view, heightAbovePlayer, locked);
     }
 
     /**

@@ -6,6 +6,37 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CameraRigTest {
     @Test
+    void cameraAltitudeIsPlayerRelativeAndIndependentFromPitchAndZoom() {
+        CameraRig rig = new CameraRig();
+        rig.setView(CameraRig.View.SKY);
+        rig.setHeightFromUser(72);
+        rig.rotate(0, -30);
+        rig.setZoom(90);
+        assertEquals(172.0, rig.position(100.0)[1], 1.0e-9);
+        assertEquals(-28.0, rig.position(-100.0)[1], 1.0e-9);
+    }
+
+    @Test
+    void eachCameraKeepsIndependentHeightAndLock() {
+        CameraRig rig = new CameraRig();
+        rig.setView(CameraRig.View.SKY);
+        rig.setHeightFromUser(64);
+        rig.setHeightLocked(true);
+        rig.adjustHeight(20);
+        assertEquals(64.0, rig.heightAbovePlayer);
+        rig.setView(CameraRig.View.TACTICS);
+        rig.setHeightFromUser(36);
+        rig.setView(CameraRig.View.SKY);
+        assertEquals(64.0, rig.heightAbovePlayer);
+        assertTrue(rig.heightLockedFor(CameraRig.View.SKY));
+        rig.setHeightLocked(false);
+        rig.adjustHeight(4);
+        assertEquals(68.0, rig.heightAbovePlayer);
+        rig.setView(CameraRig.View.TACTICS);
+        assertEquals(36.0, rig.heightAbovePlayer);
+    }
+
+    @Test
     void snapshotRestoresCompleteCameraStateWithoutTransition() {
         CameraRig rig = new CameraRig();
         CameraRig.Snapshot saved = new CameraRig.Snapshot(

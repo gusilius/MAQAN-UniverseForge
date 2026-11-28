@@ -19,7 +19,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Marker;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -75,8 +74,6 @@ public final class CommandMode {
     static long markerUntil;
     private static CameraType prevCamera = CameraType.FIRST_PERSON;
     private static Marker camEntity;
-    private static double groundY;
-    private static boolean groundInitialized;
     private static boolean cameraPositionInitialized;
     private static double cameraSmoothX, cameraSmoothY, cameraSmoothZ;
     private static long lastFrame;
@@ -108,9 +105,20 @@ public final class CommandMode {
                     CAMERA_PREFS.getDouble("pitch." + key, Double.NaN),
                     CAMERA_PREFS.getDouble("zoom." + key, Double.NaN),
                     CAMERA_PREFS.getDouble("leash." + key, Double.NaN));
-            return RIG.restore(saved);
+            if (!RIG.restore(saved)) return false;
+            restoreHeightProfiles(key);
+            return true;
         } catch (IllegalArgumentException ignored) {
             return false;
+        }
+    }
+
+    private static void restoreHeightProfiles(String key) {
+        if (key == null || key.isBlank()) key = "default";
+        for (CameraRig.View view : CameraRig.View.values()) {
+            double height = CAMERA_PREFS.getDouble("height." + view.name() + "." + key, view.defaultHeight);
+            boolean locked = CAMERA_PREFS.getBoolean("heightLocked." + view.name() + "." + key, false);
+            RIG.setHeightProfile(view, height, locked);
         }
     }
 
@@ -128,6 +136,10 @@ public final class CommandMode {
         CAMERA_PREFS.putDouble("pitch." + key, saved.pitch());
         CAMERA_PREFS.putDouble("zoom." + key, saved.zoom());
         CAMERA_PREFS.putDouble("leash." + key, saved.leash());
+        for (CameraRig.View view : CameraRig.View.values()) {
+            CAMERA_PREFS.putDouble("height." + view.name() + "." + key, RIG.heightFor(view));
+            CAMERA_PREFS.putBoolean("heightLocked." + view.name() + "." + key, RIG.heightLockedFor(view));
+        }
         try {
             CAMERA_PREFS.flush();
             lastCameraPersistNanos = System.nanoTime();
@@ -313,7 +325,7 @@ public final class CommandMode {
                 mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
         Vec3 direction = new Vec3(ray[0], ray[1], ray[2]);
         RIG.zoomBy(steps);
-        double[] desired = RIG.position(groundY);
+        double[] desired = RIG.position(mc.player.getY());
         Vec3 origin = new Vec3(desired[0], desired[1], desired[2]);
         if (Math.abs(direction.y) > 1.0e-5) {
             double distance = (anchor.y - origin.y) / direction.y;
@@ -433,10 +445,11 @@ public final class CommandMode {
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
-        if (!restoreCamera(mc)) RIG.focusOn(mc.player.getX(), mc.player.getZ());
+        if (!restoreCamera(mc)) {
+            RIG.focusOn(mc.player.getX(), mc.player.getZ());
+            restoreHeightProfiles(cameraKey(cameraDimension(mc)));
+        }
         lastView = RIG.view;
-        groundY = mc.player.getY();
-        groundInitialized = false;
         cameraPositionInitialized = false;
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
@@ -477,7 +490,6 @@ public final class CommandMode {
         Minecraft mc = Minecraft.getInstance();
         active = false;
         persistCamera(mc);
-        groundInitialized = false;
         cameraPositionInitialized = false;
         lastView = RIG.view;
         SEL.clear();
@@ -521,34 +533,14 @@ public final class CommandMode {
         boolean fast = InputConstants.isKeyDown(win, GLFW.GLFW_KEY_LEFT_SHIFT);
         RIG.pan(fwd, right, dt, fast);
         RIG.clamp(mc.player.getX(), mc.player.getZ());
-        int gx = net.minecraft.util.Mth.floor(RIG.fx), gz = net.minecraft.util.Mth.floor(RIG.fz);
-        net.minecraft.core.BlockPos focusProbe = new net.minecraft.core.BlockPos(gx,
-                mc.player.blockPosition().getY(), gz);
-        if (mc.level.hasChunkAt(focusProbe)) {
-            // Anchor to terrain/building surfaces, not the top of a tree canopy.
-            // The boom ray below handles foliage and other intervening geometry.
-            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
-            if (Double.isFinite(target)) {
-                if (!groundInitialized) {
-                    groundY = target;
-                    groundInitialized = true;
-                } else {
-                    groundY += (target - groundY) * Math.min(1, dt * 12);
-                }
-            }
-        } else {
-            // Never force-load an edge chunk. Hold the last safe focus height and
-            // keep the camera above the player's current eye level until it is sampled.
-            groundY = Math.max(groundY, mc.player.getY() + 1.0);
-        }
-
-        double[] p = RIG.position(groundY);
+        double playerY = mc.player.getY();
+        double[] p = RIG.position(playerY);
         if (!Double.isFinite(p[0]) || !Double.isFinite(p[1]) || !Double.isFinite(p[2])) return;
 
         // Resolve the camera boom against loaded terrain/blocks. The ray starts just
         // above the focus point and ends at the desired camera position; on collision
         // shorten the boom rather than letting the view pass through a hill or cliff.
-        Vec3 focusEye = new Vec3(RIG.fx, groundY + 1.25, RIG.fz);
+        Vec3 focusEye = new Vec3(RIG.fx, playerY + 1.25, RIG.fz);
         Vec3 desired = new Vec3(p[0], p[1], p[2]);
         Vec3 boom = desired.subtract(focusEye);
         if (boom.lengthSqr() > 1.0e-4) {
@@ -556,24 +548,9 @@ public final class CommandMode {
                     ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
             if (obstruction.getType() == HitResult.Type.BLOCK) {
                 Vec3 safe = obstruction.getLocation().subtract(boom.normalize().scale(1.4));
-                p[0] = safe.x; p[1] = safe.y; p[2] = safe.z;
+                p[0] = safe.x; p[2] = safe.z;
+                p[1] = playerY + RIG.heightAbovePlayer;
             }
-        }
-
-        // The boom ray alone cannot protect against a camera point on a higher ridge.
-        // Sample the destination column only if its chunk is already present.
-        int cameraX = net.minecraft.util.Mth.floor(p[0]);
-        int cameraZ = net.minecraft.util.Mth.floor(p[2]);
-        net.minecraft.core.BlockPos cameraProbe = new net.minecraft.core.BlockPos(cameraX,
-                mc.player.blockPosition().getY(), cameraZ);
-        if (mc.level.hasChunkAt(cameraProbe)) {
-            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    cameraX, cameraZ);
-            p[1] = CameraRig.keepAboveTerrain(p[1], cameraTerrain);
-        } else {
-            // A missing destination sample must not let the camera sink below
-            // the already validated focus surface near a loaded-chunk boundary.
-            p[1] = Math.max(p[1], groundY + CameraRig.TERRAIN_CLEARANCE);
         }
 
         // Smooth the camera boom independently from the logical focus point.
@@ -585,20 +562,9 @@ public final class CommandMode {
         } else {
             double blend = 1.0 - Math.exp(-Math.max(0.0, dt) * 16.0);
             cameraSmoothX += (p[0] - cameraSmoothX) * blend;
-            cameraSmoothY += (p[1] - cameraSmoothY) * blend;
             cameraSmoothZ += (p[2] - cameraSmoothZ) * blend;
         }
-
-        int sx = net.minecraft.util.Mth.floor(cameraSmoothX);
-        int sz = net.minecraft.util.Mth.floor(cameraSmoothZ);
-        net.minecraft.core.BlockPos smoothProbe = new net.minecraft.core.BlockPos(sx,
-                mc.player.blockPosition().getY(), sz);
-        if (mc.level.hasChunkAt(smoothProbe)) {
-            double floor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sx, sz);
-            cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, floor);
-        } else {
-            cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
-        }
+        cameraSmoothY = playerY + RIG.heightAbovePlayer;
 
         // Re-check the interpolated point: a smooth transition must not tunnel
         // through a wall, cliff or building between two safe endpoints.
@@ -609,25 +575,12 @@ public final class CommandMode {
                     ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
             if (smoothObstruction.getType() == HitResult.Type.BLOCK) {
                 Vec3 safe = smoothObstruction.getLocation().subtract(smoothBoom.normalize().scale(1.4));
-                cameraSmoothX = safe.x; cameraSmoothY = safe.y; cameraSmoothZ = safe.z;
+                cameraSmoothX = safe.x; cameraSmoothZ = safe.z;
+                cameraSmoothY = playerY + RIG.heightAbovePlayer;
             }
         }
 
-        // Final floor check after collision shortening. A wall hit may move the
-        // smoothed camera into a different terrain column, so validate that exact
-        // destination rather than trusting the pre-collision sample.
-        int finalX = net.minecraft.util.Mth.floor(cameraSmoothX);
-        int finalZ = net.minecraft.util.Mth.floor(cameraSmoothZ);
-        net.minecraft.core.BlockPos finalProbe = new net.minecraft.core.BlockPos(finalX,
-                mc.player.blockPosition().getY(), finalZ);
-        if (mc.level.hasChunkAt(finalProbe)) {
-            double finalFloor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    finalX, finalZ);
-            cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, finalFloor);
-        } else {
-            cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
-        }
-
+        cameraSmoothY = playerY + RIG.heightAbovePlayer;
         camEntity.setPos(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
         camEntity.xo = cameraSmoothX; camEntity.yo = cameraSmoothY; camEntity.zo = cameraSmoothZ;
         camEntity.xOld = cameraSmoothX; camEntity.yOld = cameraSmoothY; camEntity.zOld = cameraSmoothZ;
@@ -666,7 +619,7 @@ public final class CommandMode {
         public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
             if (active) persistCamera(Minecraft.getInstance());
             active = false; firstPersonCommand = false; camEntity = null;
-            groundInitialized = false; cameraPositionInitialized = false;
+            cameraPositionInitialized = false;
             hostedCommandView = null; SEL.clear();
         }
 

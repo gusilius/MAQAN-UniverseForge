@@ -39,6 +39,8 @@ public final class CommandScreen extends Screen {
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
     private boolean dragging, midDrag, zoomDragging;
+    private boolean heightEditing;
+    private String heightInput = "";
     private boolean embeddedInMaqan;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private double dragX, dragY, mx, my;
@@ -167,6 +169,45 @@ public final class CommandScreen extends Screen {
         double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
         CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
+    private int heightWidgetX() { return width - 174; }
+    private boolean overHeightWidget(double x, double y) {
+        return x >= heightWidgetX() && x <= width - 4 && y >= 4 && y <= 26;
+    }
+    private void drawHeightWidget(GuiGraphics g) {
+        int x = heightWidgetX(), y = 4;
+        CameraRig rig = CommandMode.RIG;
+        boolean locked = rig.heightLockedFor(rig.view);
+        g.fill(x, y, width - 4, y + 22, 0xD9101721);
+        g.renderOutline(x, y, width - x - 4, 22, locked ? 0xFFCEB56E : 0xFF526D83);
+        g.fill(x + 4, y + 4, x + 21, y + 18, 0xFF263747);
+        g.drawCenteredString(font, "−", x + 12, y + 7, 0xFFE8EDF5);
+        g.fill(x + 24, y + 4, x + 105, y + 18, 0xFF111C28);
+        String value = heightEditing ? heightInput + "_" : String.format(Locale.ROOT, "%.0f", rig.heightAbovePlayer);
+        g.drawCenteredString(font, value + " м", x + 64, y + 7, 0xFFE8EDF5);
+        g.fill(x + 108, y + 4, x + 125, y + 18, 0xFF263747);
+        g.drawCenteredString(font, "+", x + 116, y + 7, 0xFFE8EDF5);
+        g.fill(x + 128, y + 4, x + 166, y + 18, locked ? 0xFF66532B : 0xFF263747);
+        g.drawCenteredString(font, locked ? "FIX" : "LOCK", x + 147, y + 7, locked ? 0xFFFFE1A0 : 0xFFB9C8D8);
+    }
+    private boolean clickHeightWidget(double x, double y) {
+        if (!overHeightWidget(x, y)) return false;
+        int local = (int) x - heightWidgetX();
+        CameraRig rig = CommandMode.RIG;
+        if (local < 23) { heightEditing = false; rig.adjustHeight(-CameraRig.HEIGHT_STEP); }
+        else if (local >= 106 && local < 127) { heightEditing = false; rig.adjustHeight(CameraRig.HEIGHT_STEP); }
+        else if (local >= 127) { heightEditing = false; rig.setHeightLocked(!rig.heightLockedFor(rig.view)); }
+        else { heightEditing = true; heightInput = String.format(Locale.ROOT, "%.0f", rig.heightAbovePlayer); }
+        return true;
+    }
+    private void applyHeightInput() {
+        try {
+            double value = Double.parseDouble(heightInput);
+            if (value >= CameraRig.MIN_HEIGHT && value <= CameraRig.MAX_HEIGHT)
+                CommandMode.RIG.setHeightFromUser(value);
+        } catch (NumberFormatException ignored) { }
+        heightEditing = false;
+    }
+
     private boolean onZoomSlider(double x, double y) {
         return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
                 && y >= zoomSliderY() - 8 && y <= zoomSliderY() + 8;
@@ -464,6 +505,7 @@ public final class CommandScreen extends Screen {
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
+        if (clickHeightWidget(x, y)) return true;
         if (overMiniMap(x,y)) {
             if (button == 0 && settlement != null
                     && x >= miniMapX()+8 && x < miniMapX()+128
@@ -683,8 +725,12 @@ public final class CommandScreen extends Screen {
         if (buildOpen && inBuildPanel(x, y)) {
             int max = Math.max(0, visibleDefs().size() - rowsFit());
             scroll = Math.max(0, Math.min(max, scroll + (delta < 0 ? 1 : -1)));
+        } else if (overHeightWidget(x, y)) {
+            return true;
         } else if (overPanel(x, y)) {
             return true; // UI surfaces consume the wheel; do not zoom the world behind them.
+        } else if (hasControlDown()) {
+            CommandMode.RIG.adjustHeight(Math.signum(delta) * CameraRig.HEIGHT_STEP);
         } else {
             CommandMode.zoomAtCursor(minecraft, x, y, delta);
         }
@@ -693,6 +739,19 @@ public final class CommandScreen extends Screen {
 
     @Override
     public boolean keyPressed(int key, int scan, int mods) {
+        if (heightEditing) {
+            if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) { applyHeightInput(); return true; }
+            if (key == GLFW.GLFW_KEY_BACKSPACE) {
+                if (!heightInput.isEmpty()) heightInput = heightInput.substring(0, heightInput.length() - 1);
+                return true;
+            }
+            if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
+                if (heightInput.length() < 3) heightInput += (char) ('0' + key - GLFW.GLFW_KEY_0);
+                return true;
+            }
+            if (key == GLFW.GLFW_KEY_ESCAPE) { heightEditing = false; return true; }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_ESCAPE) {
             if (picked != null) picked = null;
             else if (buildOpen) buildOpen = false;
@@ -895,10 +954,11 @@ public final class CommandScreen extends Screen {
         if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
         if (!embeddedInMaqan) drawZoomSlider(g);
+        drawHeightWidget(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         if (embeddedInMaqan) drawMiniMap(g);
-        String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
+        String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена"
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · Ctrl+колесо - высота · колесо - приближение · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);
