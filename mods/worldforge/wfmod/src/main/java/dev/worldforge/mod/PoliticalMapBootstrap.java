@@ -1,9 +1,12 @@
 package dev.worldforge.mod;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Deterministic bootstrap politics for worlds whose map package contains terrain
@@ -101,6 +104,42 @@ public final class PoliticalMapBootstrap {
             if (province != null) provincePixels[z * width + x] = (short) province.id;
         }
 
+        // Build real same-tier adjacency from shared land-pixel edges. The previous
+        // bootstrap emitted empty neighbor lists, which broke political geography
+        // consumers despite the province raster and title hierarchy being present.
+        Map<Integer, Node> nodesById = new HashMap<>();
+        Map<Integer, Set<Integer>> adjacency = new HashMap<>();
+        for (List<Node> level : levels) for (Node node : level) {
+            nodesById.put(node.id, node);
+            adjacency.put(node.id, new HashSet<>());
+        }
+        for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) {
+            int index = z * width + x;
+            if (!landMask[index]) continue;
+            Node here = baseByCell[(z / cellSize) * cellsX + x / cellSize];
+            if (x + 1 < width && landMask[index + 1]) {
+                Node right = baseByCell[(z / cellSize) * cellsX + (x + 1) / cellSize];
+                link(adjacency, here, right);
+            }
+            if (z + 1 < height && landMask[index + width]) {
+                Node below = baseByCell[((z + 1) / cellSize) * cellsX + x / cellSize];
+                link(adjacency, here, below);
+            }
+        }
+        for (int level = 1; level < levels.length; level++) {
+            for (Node child : levels[level - 1]) {
+                Node parent = nodesById.get(child.parentId);
+                if (parent == null) continue;
+                for (int neighborId : adjacency.get(child.id)) {
+                    Node neighbor = nodesById.get(neighborId);
+                    if (neighbor == null || neighbor.level != level - 1) continue;
+                    Node otherParent = nodesById.get(neighbor.parentId);
+                    if (otherParent != null && otherParent.id != parent.id)
+                        link(adjacency, parent, otherParent);
+                }
+            }
+        }
+
         List<Object> tierRows = new ArrayList<>();
         for (int level = 0; level < TIER_KEYS.length; level++) {
             Map<String, Object> tier = new LinkedHashMap<>();
@@ -135,7 +174,9 @@ public final class PoliticalMapBootstrap {
             row.put("color", String.format("#%06x", rgb));
             row.put("capital", capital); row.put("area_blocks", area);
             row.put("area_pct_of_land", totalLand == 0 ? 0.0 : node.landPixels * 100.0 / totalLand);
-            row.put("children", children); row.put("neighbors", List.of()); row.put("props", props);
+            List<Integer> neighbors = new ArrayList<>(adjacency.getOrDefault(node.id, Set.of()));
+            neighbors.sort(Integer::compareTo);
+            row.put("children", children); row.put("neighbors", neighbors); row.put("props", props);
             titleRows.add(row);
         }
 
@@ -228,6 +269,12 @@ public final class PoliticalMapBootstrap {
         }
         titles.refreshRealmIndex();
         return !titles.realmList().isEmpty();
+    }
+
+    private static void link(Map<Integer, Set<Integer>> adjacency, Node first, Node second) {
+        if (first == null || second == null || first.id == second.id || first.level != second.level) return;
+        adjacency.get(first.id).add(second.id);
+        adjacency.get(second.id).add(first.id);
     }
 
     private static boolean isLand(MapData map, int x, int z) {
