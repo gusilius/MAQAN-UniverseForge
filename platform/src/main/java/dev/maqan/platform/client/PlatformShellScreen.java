@@ -1664,11 +1664,18 @@ public final class PlatformShellScreen extends Screen {
 
     private void toggleWorkspacePanel(String id) {
         if (immersiveRts() && !"content".equals(id)) {
-            if (!rtsOverlayPanels.add(id)) rtsOverlayPanels.remove(id);
+            boolean open = !rtsOverlayPanels.contains(id) || hiddenPanels.contains(id);
+            if (open) {
+                rtsOverlayPanels.add(id);
+                hiddenPanels.remove(id);
+            } else {
+                rtsOverlayPanels.remove(id);
+                hiddenPanels.add(id);
+            }
             Panel overlay = panels.get(id);
             if (overlay != null) {
                 overlay.dock = "FLOAT";
-                overlay.visible = rtsOverlayPanels.contains(id);
+                overlay.visible = open;
                 if (overlay.x + overlay.w > width) overlay.x = Math.max(8, width - overlay.w - 8);
                 if (overlay.y + overlay.h > height) overlay.y = Math.max(8, height - overlay.h - 8);
             }
