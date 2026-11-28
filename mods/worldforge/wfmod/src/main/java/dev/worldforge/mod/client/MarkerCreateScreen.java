@@ -51,7 +51,7 @@ public final class MarkerCreateScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
-        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.max(1, Math.min(470, height - 24));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         g.fill(left, top, left + panelW, top + panelH, 0xF0201A16);
         g.renderOutline(left, top, panelW, panelH, 0xFFB58A4B);
@@ -120,7 +120,7 @@ public final class MarkerCreateScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.max(1, Math.min(470, height - 24));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int typeY = top + 75;
         if (mouseY >= typeY && mouseY < typeY + 25) {
@@ -171,7 +171,7 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.max(1, Math.min(470, height - 24));
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int listY = top + 163, listBottom = top + panelH - 87;
         if (mouseX < left + 10 || mouseX >= left + panelW - 10
