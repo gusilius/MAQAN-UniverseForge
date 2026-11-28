@@ -671,6 +671,9 @@ public final class PlatformShellScreen extends Screen {
             if (!immersiveRts() && !immersiveMapWorkspace()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
+        // The shared skin is rendered by the shell itself, not by individual providers.
+        // Keep the live map/3D scene underneath the transparent frame artwork.
+        if (!immersive) ThemeManager.renderChrome(g, width, height, profile == Profile.RTS);
         drawRtsMiniMap(g);
         if (!immersive) {
             drawTopBar(g, mouseX, mouseY);
@@ -1060,7 +1063,7 @@ public final class PlatformShellScreen extends Screen {
     private void drawSettings(GuiGraphics g, int mx, int my) {
         int w=popupW(260),h=popupH(190),x=popupX(settingsX,260,false),y=popupY(settingsY,190,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
-        drawCodeWindow(g, x, y, w, h, "SETTINGS");
+        drawCodeWindow(g, x, y, w, h, "SETTINGS", "settings");
         g.enableScissor(x,y,x+w,y+h);
         g.fill(x + 8, y + 6, x + w - 8, y + 22, 0x55101824);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
@@ -1079,20 +1082,22 @@ public final class PlatformShellScreen extends Screen {
         g.disableScissor();
     }
 
-    private void drawCodeWindow(GuiGraphics g, int x, int y, int w, int h, String title) {
+    private void drawCodeWindow(GuiGraphics g, int x, int y, int w, int h, String title, String panelId) {
+        // Retain a safe fallback if a user resource pack omits or corrupts a skin.
         g.fill(x, y, x + w, y + h, WorkspaceTheme.SURFACE);
         g.fill(x, y, x + w, y + 1, WorkspaceTheme.ACCENT);
         g.fill(x, y + 1, x + 1, y + h, WorkspaceTheme.BORDER);
         g.fill(x + w - 1, y + 1, x + w, y + h, WorkspaceTheme.BORDER);
         g.fill(x, y + h - 1, x + w, y + h, WorkspaceTheme.BORDER);
-        g.fill(x + 1, y + 1, x + w - 1, Math.min(y + h, y + 26), WorkspaceTheme.SURFACE_RAISED);
+        if (ThemeManager.isThemeLoaded()) ThemeManager.renderWindow(g, x, y, w, h, panelId);
+        g.fill(x + 1, y + 1, x + w - 1, Math.min(y + h, y + 26), 0xBB14202D);
         g.drawString(font, title == null ? "PANEL" : title.toUpperCase(java.util.Locale.ROOT), x + 9, y + 8, WorkspaceTheme.TEXT, false);
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         int visibleH = p.minimized ? 26 : p.h;
         if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
-        drawCodeWindow(g, p.x, p.y, p.w, visibleH, p.title);
+        drawCodeWindow(g, p.x, p.y, p.w, visibleH, p.title, p.id);
         // Do not paint an opaque title strip over the supplied frame art.
         // A low-alpha backing keeps live text readable while preserving the skin.
         g.fill(p.x + 8, p.y + 6, p.x + p.w - 8, p.y + 22, 0x55101824);
