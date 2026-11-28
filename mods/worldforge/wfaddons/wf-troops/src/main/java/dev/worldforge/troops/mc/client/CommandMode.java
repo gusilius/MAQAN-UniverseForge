@@ -682,7 +682,15 @@ public final class CommandMode {
         public void tick(TickEvent.ClientTickEvent e) {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            if (mc.player == null || mc.level == null) {
+                if (!lastWorkspaceProvider.isBlank()) PlatformWorkspaceBridge.clear(lastWorkspaceProvider);
+                lastWorkspaceProvider = "";
+                lastWorkspaceSelection = "";
+                active = false;
+                firstPersonCommand = false;
+                camEntity = null;
+                return;
+            }
             publishWorkspaceSelection(mc);
             boolean radialHeld = RADIAL_COMMAND.isDown();
             if (!radialHeld) radialSuppressed = false;
