@@ -335,46 +335,89 @@ final class SidePanel {
         TitleData.Realm r = p == null ? null : d.realmOf(p);
         if (p == null) { empty(c, "Выберите землю на карте."); return; }
         if (r == null) { empty(c, "У этой земли нет государства."); return; }
+
         c.swatch(r.rgb, r.name, GOLD, 0, null);
-        c.text(r.overlord != null ? relLabel(d, r) + " · " + r.overlord.name : "Независимое государство", MUTED);
-        c.gap(4);
-        c.kv("Правитель", r.ruler == null || r.ruler.isEmpty() ? "не назначен" : r.ruler);
-        c.kv("Площадь", r.areaBlocks / 1000 + " тыс. блоков²");
-        for (Map.Entry<String, Object> e : r.props.entrySet()) {
-            Object v = e.getValue();
-            if (v == null || v instanceof Map || v instanceof List || v.toString().isEmpty()) continue;
-            String k = e.getKey();
-            if (k.equals("allies") || k.equals("enemies")) {
-                c.kv(k.equals("allies") ? "Союзники" : "Воюет с", realmNames(d, Diplomacy.ids(r, k)));
-            } else {
-                String name = MapImages.propName(d, k);
-                c.kv(name != null ? name : k, v.toString());
+        c.text(r.overlord != null ? relLabel(d, r) + " · " + r.overlord.name : "Суверенное независимое государство", MUTED);
+        c.gap(3);
+
+        // One canonical dossier assembled from the existing title/realm registry.
+        // Do not create a parallel capital, holding or diplomacy model for the map UI.
+        List<TitleData.Title> holdings = new ArrayList<>();
+        TitleData.Title highest = null;
+        for (String key : r.titleKeys) {
+            TitleData.Title title = d.byKey(key);
+            if (title == null) continue;
+            holdings.add(title);
+            if (highest == null || title.tier > highest.tier) highest = title;
+        }
+        holdings.sort(java.util.Comparator
+                .comparingInt((TitleData.Title title) -> title.tier).reversed()
+                .thenComparing(title -> title.name == null ? "" : title.name, String.CASE_INSENSITIVE_ORDER));
+
+        c.head("Положение государства");
+        c.kv("Правитель", r.ruler == null || r.ruler.isBlank() ? "не назначен" : r.ruler);
+        c.kv("Территория", r.areaBlocks / 1000 + " тыс. блоков²");
+        c.kv("Титулы", String.valueOf(holdings.size()));
+        c.kv("Вассалы", String.valueOf(r.subjectIds.size()));
+
+        if (highest != null) {
+            TitleData.Title capital = highest.capProvince > 0 ? d.get(highest.capProvince) : null;
+            if (capital != null) {
+                c.head("Столица");
+                c.swatch(capital.rgb, capital.name, GOLD, 0,
+                        () -> host.selectProvince(capital.id));
+                c.kv("Координаты", "X " + capital.capX + " · Z " + capital.capZ);
+                c.button("Перейти к столице", true, () -> host.centerOnProvince(capital.id));
             }
         }
-        c.head("Титулы");
-        for (String key : r.titleKeys) {
-            TitleData.Title t = d.byKey(key);
-            if (t != null) c.swatch(t.rgb, d.tiers.get(t.tier).name + " " + t.name, TX, 0, () -> host.selectProvince(provinceOf(d, t)));
+
+        boolean hasRelations = false;
+        for (String key : List.of("allies", "enemies")) {
+            Set<String> ids = Diplomacy.ids(r, key);
+            if (ids.isEmpty()) continue;
+            if (!hasRelations) { c.head("Внешние отношения"); hasRelations = true; }
+            c.kv(key.equals("allies") ? "Союзники" : "Враги", realmNames(d, ids));
         }
+
+        boolean hasProperties = false;
+        for (Map.Entry<String, Object> e : r.props.entrySet()) {
+            Object value = e.getValue();
+            if (value == null || value instanceof Map || value instanceof List || value.toString().isBlank()) continue;
+            String key = e.getKey();
+            if (key.equals("allies") || key.equals("enemies")) continue;
+            String name = MapImages.propName(d, key);
+            if (!hasProperties) { c.head("Характеристики и состояние"); hasProperties = true; }
+            c.kv(name != null ? name : key, value.toString());
+        }
+
+        c.head("Титулы и владения");
+        if (holdings.isEmpty()) c.text("Титулы не назначены.", MUTED);
+        for (TitleData.Title title : holdings) {
+            c.swatch(title.rgb, d.tiers.get(title.tier).name + " · " + title.name,
+                    title == highest ? GOLD : TX, 0,
+                    () -> host.selectProvince(provinceOf(d, title)));
+        }
+
         if (!r.subjectIds.isEmpty()) {
             c.head("Подчинённые · " + r.subjectIds.size());
             for (String id : r.subjectIds) {
-                TitleData.Realm s = d.realms.get(id);
-                if (s != null) c.swatch(s.rgb, s.name + " [" + relLabel(d, s) + "]", TX, 0, () -> selectRealm(d, s));
+                TitleData.Realm subject = d.realms.get(id);
+                if (subject != null) c.swatch(subject.rgb, subject.name + " [" + relLabel(d, subject) + "]",
+                        TX, 0, () -> selectRealm(d, subject));
             }
         }
         c.gap(4);
-        c.button("Дипломатический слой", true, () -> host.setMode(MapImages.DIP + r.id, true));
+        c.button("Открыть дипломатическую карту", true, () -> host.setMode(MapImages.DIP + r.id, true));
     }
 
     private static String realmNames(TitleData d, Set<String> ids) {
-        StringBuilder sb = new StringBuilder();
+        List<String> names = new ArrayList<>();
         for (String id : ids) {
-            TitleData.Realm x = d.realms.get(id);
-            if (sb.length() > 0) sb.append(", ");
-            sb.append(x == null ? id : x.name);
+            TitleData.Realm realm = d.realms.get(id);
+            names.add(realm == null || realm.name == null || realm.name.isBlank() ? id : realm.name);
         }
-        return sb.toString();
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        return String.join(", ", names);
     }
 
     /** Любая провинция (барство) под титулом: сам титул или первый потомок-барство; для столицы берём capProvince. */
