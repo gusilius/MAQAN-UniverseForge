@@ -727,6 +727,16 @@ public final class CommandScreen extends Screen {
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
             if (overPanel(x, y)) return true;
+            if(ctrl&&minecraft.player!=null&&CommandMode.SEL.isSelected(minecraft.player.getUUID().toString())){
+                net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,x,y);
+                if(target!=null){
+                    CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,
+                            List.of(minecraft.player.getUUID().toString()),0,0,0,
+                            target.getX()+","+target.getY()+","+target.getZ(),false,OrderPacket.BODY_BUILD));
+                    minecraft.player.displayClientMessage(Component.literal("Приказ телу: построить блок из руки"),true);
+                    return true;
+                }
+            }
             LivingEntity resident = CommandMode.residentAt(minecraft, x, y);
             if (resident != null && minecraft.player != null) {
                 minecraft.player.connection.sendCommand("wfresident open " + resident.getUUID());
@@ -963,6 +973,17 @@ public final class CommandScreen extends Screen {
         if (CommandMode.TOGGLE.matches(key, scan)) { CommandMode.exit(minecraft); return true; }
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
+        if (key == GLFW.GLFW_KEY_X && minecraft.player!=null
+                &&CommandMode.SEL.isSelected(minecraft.player.getUUID().toString())) {
+            net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,mx,my);
+            if(target!=null){
+                CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,
+                        List.of(minecraft.player.getUUID().toString()),0,0,0,
+                        target.getX()+","+target.getY()+","+target.getZ(),false,OrderPacket.BODY_CHOP));
+                minecraft.player.displayClientMessage(Component.literal("Приказ телу: рубить/добывать блок"),true);
+            }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
         if (key == GLFW.GLFW_KEY_N) { toggleRecruit(); return true; }
         if (key == GLFW.GLFW_KEY_H) {

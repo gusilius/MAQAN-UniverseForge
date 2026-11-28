@@ -268,6 +268,7 @@ public final class CommandMode {
     /** Мои солдаты и рабочие поселений: то, что можно выделить. */
     static boolean selectable(Minecraft mc, LivingEntity e) {
         if (mc == null || mc.player == null || e == null) return false;
+        if(e==mc.player)return true;
         String owner=mc.player.getUUID().toString();
         if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
         if(isWorkerEntity(e)){

@@ -1586,6 +1586,8 @@ public class TroopsMod {
         if (e.phase != TickEvent.Phase.END || server == null) return;
         ticks++;
         if (ticks % 10 == 0) TroopController.step(server);
+        for (ServerPlayer player : server.getPlayerList().getPlayers())
+            PlayerBodyOrders.tick(player);
         if (ticks % 100 == 0) {
             syncArmyHierarchy();
             processPendingDeaths();
@@ -1871,7 +1873,15 @@ public class TroopsMod {
     private static ActionResult handleOrderDirect(ServerPlayer p, OrderPacket o) {
         String owner = p.getUUID().toString();
         switch (o.action()) {
+            case OrderPacket.PLAYER_BODY -> PlayerBodyOrders.issue(p,o);
             case OrderPacket.ORDER -> {
+                ActionResult playerBodyResult=null;
+                if(o.ids().contains(p.getUUID().toString())){
+                    int bodyKind=o.kind()==Squads.Kind.ATTACK.ordinal()?OrderPacket.BODY_ATTACK:OrderPacket.BODY_MOVE;
+                    OrderPacket bodyOrder=new OrderPacket(OrderPacket.PLAYER_BODY,List.of(p.getUUID().toString()),
+                            0,o.x(),o.z(),bodyKind==OrderPacket.BODY_ATTACK?o.target():"",false,bodyKind);
+                    playerBodyResult=PlayerBodyOrders.issue(p,bodyOrder);
+                }
                 Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal()
                         ? new Squads.Order(Squads.Kind.ATTACK, 0, 0, o.target())
                         : new Squads.Order(Squads.Kind.values()[Math.max(0, Math.min(o.kind(), Squads.Kind.values().length - 1))],
@@ -1895,7 +1905,7 @@ public class TroopsMod {
                     }
                 }
                 if (!mixed.commandTroops())
-                    return workerResult != null ? workerResult : ActionResult.fail("Не выбраны подходящие рабочие или военные подразделения");
+                    return playerBodyResult!=null?playerBodyResult:(workerResult != null ? workerResult : ActionResult.fail("Не выбраны подходящие рабочие или военные подразделения"));
                 for (String id : selectedTroops) {
                     Squads.Squad routed = SQUADS.squadOf(id);
                     if (routed != null && routed.owner.equals(owner) && routed.routed && ord.kind() != Squads.Kind.STOP) {
@@ -1958,9 +1968,10 @@ public class TroopsMod {
                     return ActionResult.ok(workerResult != null && !workerResult.ok
                             ? message + "; приказ рабочим не выполнен: " + workerResult.message : message);
                 }
-                return workerResult != null && workerResult.ok ? workerResult
+                return playerBodyResult!=null&&playerBodyResult.ok?playerBodyResult:
+                        (workerResult != null && workerResult.ok ? workerResult
                         : ActionResult.fail(workerResult == null
-                                ? "Не найдено принадлежащих игроку подразделений для приказа" : workerResult.message);
+                                ? "Не найдено принадлежащих игроку подразделений для приказа" : workerResult.message));
             }
             case OrderPacket.FORMATION, OrderPacket.STANCE -> {
                 Set<Squads.Squad> hit = new LinkedHashSet<>();
