@@ -1,13 +1,11 @@
 package dev.worldforge.mod.client;
 
+import dev.worldforge.mod.MapSync;
 import dev.worldforge.mod.PoliticalMapBootstrap;
 import dev.worldforge.mod.TitleData;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.resources.ResourceLocation;
@@ -54,9 +52,9 @@ public final class ClientWorldMapBootstrap {
 
                 int surfaceY = mc.level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ);
                 BlockPos surface = new BlockPos(worldX, Math.max(mc.level.getMinBuildHeight(), surfaceY - 1), worldZ);
-                BlockState block = mc.level.getBlockState(surface);
                 FluidState fluid = mc.level.getFluidState(surface);
-                ResourceLocation biomeKey = BuiltInRegistries.BIOME.getKey(mc.level.getBiome(surface).value());
+                ResourceLocation biomeKey = mc.level.getBiome(surface).unwrapKey()
+                        .map(key -> key.location()).orElse(null);
                 String biome = biomeKey == null ? "" : biomeKey.getPath();
                 boolean oceanBiome = biome.contains("ocean") || biome.equals("river");
                 boolean isLand = !fluid.is(FluidTags.WATER) && !oceanBiome
