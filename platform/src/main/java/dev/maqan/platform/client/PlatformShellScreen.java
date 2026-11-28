@@ -636,7 +636,9 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
-        g.fill(0, 0, width, height, BG);
+        boolean immersive = immersiveRts();
+        // The shell must not paint an opaque workspace background over Minecraft's live 3D scene.
+        if (!immersive) g.fill(0, 0, width, height, BG);
         Panel content = panels.get("content");
         if (content != null && content.visible) {
             g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
@@ -654,7 +656,6 @@ public final class PlatformShellScreen extends Screen {
             if (!immersiveRts()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        boolean immersive = immersiveRts();
         if (!immersive) {
             drawTopBar(g, mouseX, mouseY);
             drawRail(g, mouseX, mouseY);
