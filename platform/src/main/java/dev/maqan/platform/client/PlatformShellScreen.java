@@ -1328,6 +1328,10 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean mouseClicked(double mx,double my,int button) {
         if (button != 0 && (settingsVisible || workspaceManagerVisible || notificationCenterVisible
                 || searchVisible || contextMenuVisible)) return true;
+        if (button == 1 && immersiveRts()) {
+            // In command mode RMB is a native move/attack order, not a shell context menu.
+            return forwardViewMouseClicked(mx, my, button);
+        }
         if (button == 1) {
             Panel content = panels.get("content");
             if (content == null || !content.visible
