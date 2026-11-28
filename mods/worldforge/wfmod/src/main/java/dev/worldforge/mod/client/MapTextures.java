@@ -64,7 +64,10 @@ public final class MapTextures {
         final TitleData copy = st.titles.copy();
         final int tw = st.w, th = st.h;
         final long pixelCount = (long) tw * th;
-        if (tw <= 0 || th <= 0 || pixelCount > Integer.MAX_VALUE) {
+        // The raster pipeline temporarily holds several int[] buffers (base, labels, output).
+        // Cap the source image before allocation to avoid multi-hundred-megabyte spikes.
+        final long maxPixels = 16L * 1024L * 1024L;
+        if (tw <= 0 || th <= 0 || pixelCount > maxPixels) {
             building = false;
             return;
         }
@@ -140,6 +143,11 @@ public final class MapTextures {
     }
 
     private static void upload(Result r, int rev, String m) {
+        if (r == null || r.w <= 0 || r.h <= 0
+                || (long) r.w * r.h > 16L * 1024L * 1024L
+                || r.img == null || r.img.length != r.w * r.h
+                || r.titles == null || !m.equals(requestedMode)
+                || ClientState.state == null || rev != ClientState.revision) return;
         Minecraft mc = Minecraft.getInstance();
         NativeImage ni = new NativeImage(r.w, r.h, false);
         for (int z = 0; z < r.h; z++) {
@@ -172,6 +180,10 @@ public final class MapTextures {
         id = null;
         tex = null;
         titles = null;
+        lut = null;
+        labels = List.of();
+        w = 0;
+        h = 0;
         builtRev = -1;
         mode = "";
     }
