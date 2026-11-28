@@ -256,6 +256,15 @@ public final class PlatformShellScreen extends Screen {
 
     private boolean compactViewport() { return width < 900 || height < 520; }
     private boolean immersiveRts() { return profile == Profile.RTS && commandCameraActive(); }
+    /** Maps own the whole game viewport: sidebars and workspace chrome must not shrink or cover cartography. */
+    private boolean immersiveMapWorkspace() {
+        Screen view=activeView();
+        if(view==null)return false;
+        String name=view.getClass().getName();
+        return name.endsWith(".NavigatorSurfaceMapScreen")
+                ||name.endsWith(".NavigatorTerrain3DScreen")
+                ||name.equals("dev.worldforge.mod.client.MapScreen");
+    }
     private boolean compactTopbar() { return width < 720; }
     private int profileStartX() { return compactTopbar() ? ux(48) : Math.max(ux(178),width/2-ux(112)); }
     private int profileButtonWidth() { return compactTopbar() ? ux(28) : ux(48); }
@@ -285,7 +294,8 @@ public final class PlatformShellScreen extends Screen {
 
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
-        WorkspaceDockTree.Rect bounds = immersiveRts()
+        boolean immersiveMap=immersiveMapWorkspace();
+        WorkspaceDockTree.Rect bounds = immersiveRts() || immersiveMap
                 ? new WorkspaceDockTree.Rect(0, 0, Math.max(1, width), Math.max(1, height))
                 : workspaceBounds();
         WorkspaceDockTree.Node root = layoutRoot();
@@ -294,7 +304,7 @@ public final class PlatformShellScreen extends Screen {
         else {
             layout = WorkspaceDockTree.layout(root, bounds, workspaceMinimums());
         }
-        if (immersiveRts()) {
+        if (immersiveRts() || immersiveMap) {
             Panel content = panels.get("content");
             if (content != null) {
                 content.x = 0; content.y = 0; content.w = Math.max(1, width); content.h = Math.max(1, height);
@@ -302,7 +312,7 @@ public final class PlatformShellScreen extends Screen {
             }
             for (Panel panel : panels.values()) {
                 if (panel.id.equals("content")) continue;
-                panel.visible = rtsOverlayPanels.contains(panel.id) && !hiddenPanels.contains(panel.id);
+                panel.visible = !immersiveMap && rtsOverlayPanels.contains(panel.id) && !hiddenPanels.contains(panel.id);
                 if (panel.visible && "FLOAT".equals(panel.dock)) {
                     panel.x = Math.max(8, Math.min(panel.x, width - panel.w - 8));
                     panel.y = Math.max(8, Math.min(panel.y, height - panel.h - 8));
@@ -641,7 +651,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
-        boolean immersive = immersiveRts();
+        boolean immersive = immersiveRts() || immersiveMapWorkspace();
         // The shell must not paint an opaque workspace background over Minecraft's live 3D scene.
         if (!immersive) g.fill(0, 0, width, height, BG);
         Panel content = panels.get("content");
@@ -658,7 +668,7 @@ public final class PlatformShellScreen extends Screen {
                 WorkspacePreviewRenderer.render(g, font, content.w, content.h, profile.name(),
                         previewLayer, mouseX - content.x, mouseY - content.y, ambientGrid);
             }
-            if (!immersiveRts()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
+            if (!immersiveRts() && !immersiveMapWorkspace()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
         drawRtsMiniMap(g);
@@ -667,7 +677,7 @@ public final class PlatformShellScreen extends Screen {
             drawRail(g, mouseX, mouseY);
             drawDockSplitters(g, mouseX, mouseY);
         }
-        for (Panel p : panels.values())
+        if(!immersiveMapWorkspace()) for (Panel p : panels.values())
             if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
         if (settingsVisible) drawSettings(g, mouseX, mouseY);
         if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);

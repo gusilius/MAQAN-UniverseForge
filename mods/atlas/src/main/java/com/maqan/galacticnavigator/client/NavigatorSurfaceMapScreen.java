@@ -41,6 +41,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private boolean terrain3D;
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
+    private boolean dragMoved;
+    private double dragStartX,dragStartY;
     private Button viewModeButton,refreshSnapshotButton,radarButton,toolsButton,dioramaButton;
     private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton,terrainLayerButton;
     private boolean controlsExpanded;
@@ -220,9 +222,9 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         MaqanUiTheme.titleRight(g,font,"MAQAN  /  SURFACE CARTOGRAPHY",dimension,width);
 
         int mapLeft=18,mapTop=mapViewportTop(),mapRight=width-18,mapBottom=height-48;
-        g.fill(mapLeft,mapTop,mapRight,mapBottom,0xC908111C);
+        renderFogOfWar(g,mapLeft,mapTop,mapRight,mapBottom);
         for(int x=mapLeft;x<mapRight;x+=32)g.fill(x,mapTop,x+1,mapBottom,0x183A6680);
-        for(int y=mapTop;y<mapBottom;y+=32)g.fill(mapLeft,y,mapRight,y+1,0x183A6680);
+        for(int y=mapTop;y<mapBottom;y+=32)g.fill(mapLeft,y,y+1,0x183A6680);
 
         NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
         if(player!=null&&dimension.equals(player.dimensionId())
@@ -268,10 +270,10 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                         int x1=(int)Math.ceil(px+cell*(rx+1)/16.0);
                         int y0=(int)Math.floor(py+cell*rz/16.0);
                         int y1=(int)Math.ceil(py+cell*(rz+1)/16.0);
-                        g.fill(x0,y0,x1,y1,shade(terrain,relief));
+                        g.fill(x0,y0,x1,y1,shade(terrain,14+relief));
                     }
                 }else{
-                    int color=shade(base,Math.max(0,Math.min(28,(chunk.surfaceY()-64)/4)));
+                    int color=shade(base,18+Math.max(0,Math.min(28,(chunk.surfaceY()-64)/4)));
                     g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
                 }
                 g.fill((int)px,(int)py,(int)(px+cell),(int)py+1,0x665D8A91);
@@ -284,7 +286,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 double px=projected[0],py=projected[1];
                 if(px+cell<mapLeft||px>mapRight||py+cell<mapTop||py>mapBottom)continue;
                 int base=layer.mapColor()==0?0xFF536A83:0xFF000000|layer.mapColor();
-                int color=shade(base,Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
+                int color=shade(base,16+Math.max(0,Math.min(24,selectedSectionY<0?Math.abs(selectedSectionY):0)));
                 g.fill((int)px+1,(int)py+1,(int)(px+cell-1),(int)(py+cell-1),color);
                 g.fill((int)px,(int)py,(int)(px+cell),(int)py+1,0x886B9AC4);
                 visibleCells++;
@@ -360,6 +362,40 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             if(player!=null&&dimension.equals(player.dimensionId())){double dx=hoveredRadar.getX()-player.x(),dy=hoveredRadar.getY()-player.y(),dz=hoveredRadar.getZ()-player.z();tooltip.add(Component.literal((int)Math.round(Math.sqrt(dx*dx+dy*dy+dz*dz))+" blocks").withStyle(net.minecraft.ChatFormatting.GRAY));}
             g.renderComponentTooltip(font,tooltip,mouseX,mouseY);
         }
+    }
+
+    /**
+     * Unexplored territory is opaque cartographic fog, not a transparent viewport.
+     * Its deterministic cloud field remains stable while panning; explored chunk rasters
+     * are rendered above it and reveal only captured terrain.
+     */
+    private void renderFogOfWar(GuiGraphics g,int left,int top,int right,int bottom){
+        g.fill(left,top,right,bottom,0xFF111B27);
+        final int tile=24;
+        int dimHash=dimension.hashCode();
+        for(int y=Math.floorDiv(top,tile)*tile;y<bottom;y+=tile){
+            for(int x=Math.floorDiv(left,tile)*tile;x<right;x+=tile){
+                int wx=(int)Math.floor((x-(left+right)*0.5-panX)/(18.0*zoom)+centerChunkX);
+                int wz=(int)Math.floor((y-(top+bottom)*0.5-panY)/(18.0*zoom)+centerChunkZ);
+                int hash=wx*0x45d9f3b ^ wz*0x119de1f3 ^ dimHash;
+                hash=(hash^(hash>>>16))*0x45d9f3b;
+                hash^=hash>>>16;
+                int tone=hash&7,cloud=(hash>>>8)&15;
+                int x0=Math.max(left,x),y0=Math.max(top,y),x1=Math.min(right,x+tile),y1=Math.min(bottom,y+tile);
+                int base=tone<3?0xFF172432:tone<6?0xFF1B2937:0xFF202E3C;
+                g.fill(x0,y0,x1,y1,base);
+                if(cloud<11){
+                    int alpha=0x18+cloud*2;
+                    int fog=(alpha<<24)|0x8795A4;
+                    int cx=x+((hash>>>16)&15),cy=y+((hash>>>20)&15);
+                    g.fill(Math.max(left,cx-12),Math.max(top,cy-7),
+                            Math.min(right,cx+17),Math.min(bottom,cy+12),fog);
+                    g.fill(Math.max(left,cx-5),Math.max(top,cy-13),
+                            Math.min(right,cx+10),Math.min(bottom,cy+16),0x183E5061);
+                }
+            }
+        }
+        g.drawString(font,"НЕИССЛЕДОВАННАЯ ТЕРРИТОРИЯ",left+12,top+12,0xFF91A3B4,false);
     }
 
     private String radarLabel(){return "RADAR "+radarFilter.name()+" · "+RADAR_RANGES[radarRangeIndex]+"b";}
@@ -987,29 +1023,45 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
     }
     private static int shade(int argb,int amount){
-        int r=Math.min(255,((argb>>16)&255)+amount);
-        int green=Math.min(255,((argb>>8)&255)+amount);
-        int b=Math.min(255,(argb&255)+amount);
+        int r=Math.max(0,Math.min(255,((argb>>16)&255)+amount));
+        int green=Math.max(0,Math.min(255,((argb>>8)&255)+amount));
+        int b=Math.max(0,Math.min(255,(argb&255)+amount));
         return (argb&0xFF000000)|(r<<16)|(green<<8)|b;
     }
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
+        int left=18,top=mapViewportTop(),right=width-18,bottom=height-48;
         if(button==1&&selectWaypointAt(x,y))return true;
-        if(button==0&&selectRadarEntityAt(x,y))return true;
-        if(button==0&&selectWorldForgeAt(x,y))return true;
-        if((button==0||button==2)&&x>=18&&x<=width-18&&y>=mapViewportTop()&&y<=height-48){
-            dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
+        // Begin panning on any point of the map, including unknown/fogged terrain.
+        // Resolve object selection on release only when this was a click, not a drag.
+        if((button==0||button==2)&&insideMap(x,y,left,top,right,bottom)){
+            dragging=true;dragMoved=false;dragStartX=x;dragStartY=y;
+            dragX=x;dragY=y;cameraDrag=button==2;return true;
         }
         return false;
     }
     @Override public boolean mouseReleased(double x,double y,int button){
         boolean handled=super.mouseReleased(x,y,button);
-        if((button==0||button==2)&&dragging){dragging=false;cameraDrag=false;return true;}
+        if((button==0||button==2)&&dragging){
+            boolean click=!dragMoved;
+            dragging=false;cameraDrag=false;
+            if(click&&button==0){
+                if(selectRadarEntityAt(dragStartX,dragStartY))return true;
+                if(selectWorldForgeAt(dragStartX,dragStartY))return true;
+            }
+            return true;
+        }
         return handled;
     }
     @Override public boolean mouseDragged(double x,double y,int button,double dx,double dy){
-        if(dragging&&button==2&&cameraDrag&&terrain3D){cameraYaw+=dx*0.012;cameraPitch=SurfaceTerrainProjection.clampPitch(cameraPitch+dy*0.009);return true;}
-        if(dragging&&button==0){panX+=dx;panY+=dy;return true;}
+        if(dragging&&button==2&&cameraDrag&&terrain3D){
+            if(Math.abs(x-dragStartX)+Math.abs(y-dragStartY)>2)dragMoved=true;
+            cameraYaw+=dx*0.012;cameraPitch=SurfaceTerrainProjection.clampPitch(cameraPitch+dy*0.009);return true;
+        }
+        if(dragging&&button==0){
+            if(Math.abs(x-dragStartX)+Math.abs(y-dragStartY)>2)dragMoved=true;
+            panX+=dx;panY+=dy;return true;
+        }
         return super.mouseDragged(x,y,button,dx,dy);
     }
     @Override public boolean mouseScrolled(double x,double y,double delta){
