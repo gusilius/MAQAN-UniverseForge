@@ -98,6 +98,7 @@ final class PeopleCommands {
             }
             body.moveTo(x+0.5,y,z+0.5,player.getYRot(),0);
             body.bind(character);
+            body.setOwnerId(owner);
             body.setPost(x,z);
             if(!registry.bindEntity(character.id,"npc",body.getUUID().toString())){
                 body.discard();

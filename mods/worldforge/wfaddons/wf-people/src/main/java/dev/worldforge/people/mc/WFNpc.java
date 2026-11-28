@@ -22,6 +22,8 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
+import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
+import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.RandomStrollGoal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
@@ -42,6 +44,9 @@ public class WFNpc extends PathfinderMob {
     private String charId = "";
     private int postX, postZ;
     private boolean hasPost;
+    private String ownerId="";
+    private BlockPos commandedBlock;
+    private int commandedBlockMode; // 1 chop, 2 place from equipped BlockItem
 
     public WFNpc(EntityType<? extends WFNpc> type, Level level) {
         super(type, level);
@@ -64,6 +69,8 @@ public class WFNpc extends PathfinderMob {
     public int variant() { return this.entityData.get(VARIANT); }
 
     public String characterId() { return charId; }
+    public String ownerId() { return ownerId; }
+    public void setOwnerId(String owner) { ownerId=owner==null?"":owner; }
 
     public void setPost(int x, int z) {
         postX = x;
@@ -78,6 +85,54 @@ public class WFNpc extends PathfinderMob {
         setCustomName(Component.literal(PeopleMod.label(c)));
         setCustomNameVisible(true);
         syncEquipment(c);
+    }
+
+    /** Server-side RTS order: use vanilla path navigation rather than teleporting the NPC. */
+    public void commandMove(double x,double z){
+        if(level().isClientSide||!Double.isFinite(x)||!Double.isFinite(z))return;
+        commandedBlock=null;commandedBlockMode=0;setTarget(null);
+        int bx=(int)Math.floor(x),bz=(int)Math.floor(z);
+        if(!level().hasChunkAt(new BlockPos(bx,level().getMinBuildHeight()+1,bz)))return;
+        int y=level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,bx,bz);
+        getNavigation().moveTo(x,y,z,1.0);
+    }
+    public void commandAttack(String entityUuid){
+        if(level().isClientSide||entityUuid==null)return;
+        try{
+            java.util.UUID id=java.util.UUID.fromString(entityUuid);
+            net.minecraft.world.entity.Entity target=((ServerLevel)level()).getEntity(id);
+            if(target instanceof net.minecraft.world.entity.LivingEntity living&&living.isAlive()&&living!=this){
+                commandedBlock=null;commandedBlockMode=0;setTarget(living);getNavigation().moveTo(living,1.0);
+            }
+        }catch(RuntimeException ignored){}
+    }
+    public void commandStop(){
+        if(level().isClientSide)return;
+        commandedBlock=null;commandedBlockMode=0;setTarget(null);getNavigation().stop();
+    }
+    public void commandBlock(int x,int y,int z,int mode){
+        if(level().isClientSide||mode<1||mode>2)return;
+        BlockPos target=new BlockPos(x,y,z);
+        if(!level().hasChunkAt(target))return;
+        commandedBlock=target;commandedBlockMode=mode;setTarget(null);
+        getNavigation().moveTo(x+0.5,y,z+0.5,1.0);
+    }
+    private void tickCommandedBlock(ServerLevel level){
+        if(commandedBlock==null)return;
+        if(!level.hasChunkAt(commandedBlock)){commandStop();return;}
+        if(distanceToSqr(Vec3.atCenterOf(commandedBlock))>16.0)return;
+        BlockPos target=commandedBlock;int mode=commandedBlockMode;
+        commandedBlock=null;commandedBlockMode=0;getNavigation().stop();
+        if(mode==1)level.destroyBlock(target,true,this);
+        else if(mode==2){
+            BlockPos place=target.above();
+            if(getMainHandItem().getItem() instanceof net.minecraft.world.item.BlockItem block
+                    &&level.getBlockState(place).canBeReplaced()){
+                var state=block.getBlock().defaultBlockState();
+                if(state.canSurvive(level,place)&&level.setBlock(place,state,3)
+                        &&!getMainHandItem().isEmpty())getMainHandItem().shrink(1);
+            }
+        }
     }
 
     /** The Character owns equipment; this entity only renders the saved slots. */
@@ -117,9 +172,11 @@ public class WFNpc extends PathfinderMob {
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(1, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(2, new PostStrollGoal(this));
-        this.goalSelector.addGoal(3, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(1, new MeleeAttackGoal(this,1.0,true));
+        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(3, new PostStrollGoal(this));
+        this.goalSelector.addGoal(4, new RandomLookAroundGoal(this));
+        this.targetSelector.addGoal(1,new HurtByTargetGoal(this));
     }
 
     /** Гуляет недалеко от своего поста. */
@@ -157,7 +214,9 @@ public class WFNpc extends PathfinderMob {
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
-        if (this.tickCount % 100 != 7 || !(this.level() instanceof ServerLevel sl)) return;
+        if (!(this.level() instanceof ServerLevel sl)) return;
+        tickCommandedBlock(sl);
+        if (this.tickCount % 100 != 7) return;
         if (!SimulationLod.shouldRetainPeople(sl.dimension().location().toString(), getX(), getZ())) {
             discard();
             return;
@@ -177,6 +236,7 @@ public class WFNpc extends PathfinderMob {
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putString("wf_char", charId);
+        tag.putString("wf_owner",ownerId);
         tag.putBoolean("wf_has_post", hasPost);
         tag.putInt("wf_post_x", postX);
         tag.putInt("wf_post_z", postZ);
@@ -187,6 +247,7 @@ public class WFNpc extends PathfinderMob {
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
         charId = tag.getString("wf_char");
+        ownerId=tag.getString("wf_owner");
         hasPost = tag.getBoolean("wf_has_post");
         postX = tag.getInt("wf_post_x");
         postZ = tag.getInt("wf_post_z");
