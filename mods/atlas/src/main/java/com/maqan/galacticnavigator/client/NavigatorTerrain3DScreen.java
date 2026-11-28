@@ -185,7 +185,6 @@ public final class NavigatorTerrain3DScreen extends Screen {
 
         int rows = (index + columns - 1) / columns;
         mapTop = 44 + rows * 22 + 10;
-        updateDepthButtons();
     }
 
     @Override
