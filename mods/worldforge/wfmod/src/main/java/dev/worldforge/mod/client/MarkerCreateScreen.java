@@ -89,15 +89,19 @@ public final class MarkerCreateScreen extends Screen {
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + rowH;
             g.fill(x, y, x + cardW, y + rowH, selected ? 0xFF66502F : hover ? 0xFF51402B : 0xFF30271F);
             g.renderOutline(x, y, cardW, rowH, selected ? 0xFFE5BD76 : 0xFF806342);
-            ResourceLocation preview = ResourceLocation.tryParse(entry.previewTexture());
+            String previewId = entry.previewTexture().isBlank()
+                    ? entry.profile().mapTexture() : entry.previewTexture();
+            ResourceLocation preview = ResourceLocation.tryParse(previewId);
             if (preview != null) {
                 g.blit(preview, x + 7, y + 9, 0, 0, 24, 24, 24, 24);
             } else {
                 ResourceLocation itemId = ResourceLocation.tryParse(entry.profile().mapItem());
                 if (itemId != null) {
                     var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(itemId);
-                    if (item.isPresent() && !item.get().getDefaultInstance().isEmpty())
-                        g.renderItem(item.get().getDefaultInstance(), x + 11, y + 12);
+                    if (item.isPresent() && !item.get().getDefaultInstance().isEmpty()) {
+                        g.renderItem(item.get().getDefaultInstance(), x + 11, y + 9);
+                        g.drawCenteredString(font, "2D", x + 19, y + 30, 0xFFE0C18B);
+                    }
                 }
             }
             g.drawString(font, entry.displayName(), x + 38, y + 7, 0xFFFFE0A0, false);
@@ -132,7 +136,7 @@ public final class MarkerCreateScreen extends Screen {
                 typeIndex = Math.floorMod(typeIndex + 1, types.length); refreshChoices(); return true;
             }
         }
-        int profileY = top + 129, autoY = profileY + 15;
+        int profileY = top + 114, autoY = profileY + 15;
         if (mouseY >= autoY && mouseY < autoY + 26 && mouseX >= left + 16 && mouseX < left + panelW - 16) {
             selectedProfile = "auto"; return true;
         }
