@@ -39,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 /** Тело персонажа: только изображение. Истина о человеке лежит в CharacterRegistry, здесь хранится лишь id. */
 public class WFNpc extends PathfinderMob {
     private static final EntityDataAccessor<Integer> VARIANT = SynchedEntityData.defineId(WFNpc.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<String> OWNER = SynchedEntityData.defineId(WFNpc.class, EntityDataSerializers.STRING);
     private static final double LEASH = 12.0;
 
     private String charId = "";
@@ -64,13 +65,17 @@ public class WFNpc extends PathfinderMob {
     protected void defineSynchedData() {
         super.defineSynchedData();
         this.entityData.define(VARIANT, 0);
+        this.entityData.define(OWNER, "");
     }
 
     public int variant() { return this.entityData.get(VARIANT); }
 
     public String characterId() { return charId; }
-    public String ownerId() { return ownerId; }
-    public void setOwnerId(String owner) { ownerId=owner==null?"":owner; }
+    public String ownerId() { return this.entityData.get(OWNER); }
+    public void setOwnerId(String owner) {
+        ownerId=owner==null?"":owner;
+        this.entityData.set(OWNER,ownerId);
+    }
 
     public void setPost(int x, int z) {
         postX = x;
@@ -246,7 +251,7 @@ public class WFNpc extends PathfinderMob {
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putString("wf_char", charId);
-        tag.putString("wf_owner",ownerId);
+        tag.putString("wf_owner",ownerId());
         tag.putBoolean("wf_has_post", hasPost);
         tag.putInt("wf_post_x", postX);
         tag.putInt("wf_post_z", postZ);
@@ -258,6 +263,7 @@ public class WFNpc extends PathfinderMob {
         super.readAdditionalSaveData(tag);
         charId = tag.getString("wf_char");
         ownerId=tag.getString("wf_owner");
+        this.entityData.set(OWNER,ownerId);
         hasPost = tag.getBoolean("wf_has_post");
         postX = tag.getInt("wf_post_x");
         postZ = tag.getInt("wf_post_z");
