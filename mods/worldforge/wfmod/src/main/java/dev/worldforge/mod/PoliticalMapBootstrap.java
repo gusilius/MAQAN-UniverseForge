@@ -176,6 +176,61 @@ public final class PoliticalMapBootstrap {
                 provincePixels, map.w, map.h);
     }
 
+    /** Adds real realm records to authored province maps that omitted political entities. */
+    public static boolean ensureRealms(TitleData titles) {
+        if (titles == null || !titles.realmList().isEmpty()) return false;
+        int highest = -1;
+        for (TitleData.Title title : titles.allTitles()) highest = Math.max(highest, title.tier);
+        if (highest < 0) return false;
+
+        List<TitleData.Title> realmTitles = new ArrayList<>();
+        for (TitleData.Title title : titles.allTitles()) if (title.tier == highest) realmTitles.add(title);
+        if (realmTitles.isEmpty()) return false;
+
+        if (highest > 0) {
+            for (TitleData.Title title : realmTitles) {
+                TitleData.Realm realm = new TitleData.Realm();
+                realm.id = "emergent-" + Integer.toUnsignedString(title.key.hashCode(), 36);
+                realm.name = title.name;
+                realm.ruler = "";
+                realm.rgb = title.rgb;
+                realm.titleKeys.add(title.key);
+                realm.areaBlocks = title.areaBlocks;
+                realm.relation = "independent";
+                realm.props.put("emergence.generated", true);
+                realm.props.put("emergence.source", "authored-title-bootstrap");
+                realm.props.put("emergence.status", "unclaimed");
+                titles.realms.put(realm.id, realm);
+            }
+        } else {
+            // A province-only map still needs visible political regions. Group its
+            // existing provinces geographically; do not fabricate or rewrite land.
+            Map<Long, TitleData.Realm> groups = new LinkedHashMap<>();
+            for (TitleData.Title province : realmTitles) {
+                int gx = Math.min(7, Math.max(0, (int) (province.capNx * 8)));
+                int gz = Math.min(7, Math.max(0, (int) (province.capNy * 8)));
+                long key = (((long) gz) << 32) | (gx & 0xffffffffL);
+                TitleData.Realm realm = groups.computeIfAbsent(key, ignored -> {
+                    TitleData.Realm created = new TitleData.Realm();
+                    created.id = "emergent-grid-" + gx + "-" + gz;
+                    created.name = ROOTS[Math.floorMod(gx * 31 + gz * 17, ROOTS.length)] + " " + (gx + 1) + "-" + (gz + 1);
+                    created.ruler = "";
+                    created.rgb = color(gx, gz, 3);
+                    created.relation = "independent";
+                    created.props.put("emergence.generated", true);
+                    created.props.put("emergence.source", "province-grid-bootstrap");
+                    created.props.put("emergence.status", "unclaimed");
+                    return created;
+                });
+                realm.titleKeys.add(province.key);
+                realm.areaBlocks += province.areaBlocks;
+            }
+            for (TitleData.Realm realm : groups.values()) titles.realms.put(realm.id, realm);
+        }
+        titles.refreshRealmIndex();
+        return !titles.realmList().isEmpty();
+    }
+
     private static boolean isLand(MapData map, int x, int z) {
         int biome = map.biomeAtPx(x, z);
         if (biome < 0 || biome >= map.keys.length) return false;
