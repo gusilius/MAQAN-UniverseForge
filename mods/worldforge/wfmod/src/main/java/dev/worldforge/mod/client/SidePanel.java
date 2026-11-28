@@ -361,7 +361,10 @@ final class SidePanel {
         c.kv("Вассалы", String.valueOf(r.subjectIds.size()));
 
         if (highest != null) {
-            TitleData.Title capital = highest.capProvince > 0 ? d.get(highest.capProvince) : null;
+            // capProvince is a child title at the next lower tier, not necessarily a province.
+            // Resolve through the existing hierarchy before selecting or centering the map.
+            int capitalProvince = provinceOf(d, highest);
+            TitleData.Title capital = d.get(capitalProvince);
             if (capital != null) {
                 c.head("Столица");
                 c.swatch(capital.rgb, capital.name, GOLD, 0,
