@@ -31,7 +31,7 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     protected void init() {
-        int panelH = Math.min(470, height - 24);
+        int panelH = Math.max(1, Math.min(470, height - 24));
         int top = (height - panelH) / 2;
         nameBox = new EditBox(font, width / 2 - 150, top + panelH - 56, 300, 20, Component.literal("Название объекта"));
         nameBox.setMaxLength(64);
@@ -51,7 +51,7 @@ public final class MarkerCreateScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
-        int panelW = Math.min(620, width - 24), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         g.fill(left, top, left + panelW, top + panelH, 0xF0201A16);
         g.renderOutline(left, top, panelW, panelH, 0xFFB58A4B);
@@ -120,7 +120,7 @@ public final class MarkerCreateScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-        int panelW = Math.min(620, width - 24), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int typeY = top + 75;
         if (mouseY >= typeY && mouseY < typeY + 25) {
@@ -171,7 +171,7 @@ public final class MarkerCreateScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelW = Math.min(620, width - 24), panelH = Math.min(470, height - 24);
+        int panelW = Math.max(1, Math.min(620, width - 24)), panelH = Math.min(470, height - 24);
         int left = (width - panelW) / 2, top = (height - panelH) / 2;
         int listY = top + 163, listBottom = top + panelH - 87;
         if (mouseX < left + 10 || mouseX >= left + panelW - 10
@@ -190,8 +190,14 @@ public final class MarkerCreateScreen extends Screen {
         if (key == GLFW.GLFW_KEY_LEFT) { typeIndex = Math.floorMod(typeIndex - 1, types.length); refreshChoices(); return true; }
         if (key == GLFW.GLFW_KEY_RIGHT) { typeIndex = Math.floorMod(typeIndex + 1, types.length); refreshChoices(); return true; }
         if (key == GLFW.GLFW_KEY_ENTER && nameBox != null && nameBox.isFocused()) { createMarker(); return true; }
+        int panelW = Math.max(1, Math.min(620, width - 24));
+        int panelH = Math.max(1, Math.min(470, height - 24));
+        int cols = panelW >= 450 ? 2 : 1;
+        int visibleRows = Math.max(1, (panelH - 250) / 50);
+        int rows = (choices.size() + cols - 1) / cols;
+        int maxScroll = Math.max(0, rows - visibleRows);
         if (key == GLFW.GLFW_KEY_UP) { scroll = Math.max(0, scroll - 1); return true; }
-        if (key == GLFW.GLFW_KEY_DOWN) { scroll++; return true; }
+        if (key == GLFW.GLFW_KEY_DOWN) { scroll = Math.min(maxScroll, scroll + 1); return true; }
         return super.keyPressed(key, scanCode, modifiers);
     }
 }
