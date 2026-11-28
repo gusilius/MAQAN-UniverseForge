@@ -35,7 +35,7 @@ public final class MapData {
     public final double[] spawnNorm;         // точка спавна в долях картинки или null
     public final RegionData regions;         // политическая карта (может быть null)
     public final byte[] regionMap;           // 128x128 байт для карты-предмета (может быть null)
-    public final TitleData titles;           // иерархия титулов и государства (может быть null)
+    public volatile TitleData titles;        // иерархия титулов и государства; создаётся из рельефа, если пакет их не содержит
     /** Atlas/WorldForge seven-level settlement and planet-scale profile, if supplied. */
     public final PlanetWorldProfile planetProfile;
     public final Map<String, byte[]> mapItems; // карты-предметы по уровням и "realms"
@@ -328,6 +328,14 @@ public final class MapData {
     }
 
     /** True only when the source package actually supplied rivers.png. */
+    /** Build deterministic starter titles/realms once when a terrain package has no political layer. */
+    public synchronized boolean ensurePoliticalData() {
+        if (titles != null) return false;
+        titles = PoliticalMapBootstrap.generate(this);
+        PoliticalMapRenderer.regenerateAll(this);
+        return true;
+    }
+
     public boolean hasRiverLayer() { return river != null; }
 
     /** Whether this pixel is intentionally wild and excluded from initial civilization materialization. */
