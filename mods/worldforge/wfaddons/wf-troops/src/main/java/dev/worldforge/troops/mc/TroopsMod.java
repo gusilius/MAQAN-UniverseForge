@@ -1873,7 +1873,7 @@ public class TroopsMod {
     private static ActionResult handleOrderDirect(ServerPlayer p, OrderPacket o) {
         String owner = p.getUUID().toString();
         switch (o.action()) {
-            case OrderPacket.PLAYER_BODY -> PlayerBodyOrders.issue(p,o);
+            case OrderPacket.PLAYER_BODY -> { return PlayerBodyOrders.issue(p,o); }
             case OrderPacket.ORDER -> {
                 ActionResult playerBodyResult=null;
                 if(o.ids().contains(p.getUUID().toString())){
