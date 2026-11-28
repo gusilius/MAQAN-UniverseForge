@@ -53,6 +53,7 @@ public final class EventLog {
     private final Deque<Event> buf = new ArrayDeque<>();
     private final List<Consumer<Event>> listeners = new CopyOnWriteArrayList<>();
     private long seq;
+    private long revision;
 
     public Event post(Category c, String text, Collection<String> realmIds, long time) {
         return postScoped(c, text, realmIds, List.of(), time);
@@ -74,6 +75,7 @@ public final class EventLog {
                 e = new Event(++seq, c == null ? Category.SYSTEM : c, text == null ? "" : text,
                         ids, List.copyOf(scopes), time);
                 buf.addLast(e);
+                revision++;
                 while (buf.size() > CAPACITY) buf.removeFirst();
             }
             mutation.commit();
@@ -92,10 +94,13 @@ public final class EventLog {
 
     public synchronized int size() { return buf.size(); }
 
+    /** Monotonic snapshot revision, including clears and restored snapshots. */
+    public synchronized long revision() { return revision; }
+
     public void clear() {
         try (DomainMutationRevisions.Mutation mutation =
                      WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.EVENTS_ACTIONS)) {
-            synchronized (this) { buf.clear(); }
+            synchronized (this) { buf.clear(); revision++; }
             mutation.commit();
         }
     }
@@ -168,6 +173,7 @@ public final class EventLog {
                             List.copyOf(scopes), t instanceof Number ? ((Number) t).longValue() : 0));
                     while (buf.size() > CAPACITY) buf.removeFirst();
                 }
+                revision++;
             }
             mutation.commit();
         }
