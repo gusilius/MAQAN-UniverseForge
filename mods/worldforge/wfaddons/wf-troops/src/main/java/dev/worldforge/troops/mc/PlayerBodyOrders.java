@@ -21,7 +21,7 @@ final class PlayerBodyOrders {
     private enum Kind { MOVE, ATTACK, CHOP, BUILD }
     private static final Map<UUID,Order> ORDERS=new HashMap<>();
     private static final int MAX_VISITED=2600;
-    private static final double SPEED=0.105;
+    private static final double SPEED=0.19;
     private static final class Order {
         final Kind kind; final double x,z; final UUID target; final BlockPos block;
         List<BlockPos> path=List.of(); long lastPathTick=Long.MIN_VALUE; long lastActionTick=Long.MIN_VALUE;
@@ -61,7 +61,9 @@ final class PlayerBodyOrders {
                 if(level.getGameTime()-order.lastActionTick>=12){player.attack(target);order.lastActionTick=level.getGameTime();}
                 return;
             }
-            moveToward(player,level,order,target.getX(),target.getZ(),2.2);return;
+            BlockPos approach=approach(player,level,target.getX(),target.getZ());
+            if(approach==null){player.setDeltaMovement(Vec3.ZERO);return;}
+            moveToward(player,level,order,approach.getX()+0.5,approach.getZ()+0.5,0.9);return;
         }
         if(order.kind==Kind.MOVE){moveToward(player,level,order,order.x,order.z,1.25);return;}
         BlockPos target=order.block;
@@ -82,14 +84,16 @@ final class PlayerBodyOrders {
             }
             return;
         }
-        moveToward(player,level,order,target.getX()+0.5,target.getZ()+0.5,2.5);
+        BlockPos approach=approach(player,level,target.getX(),target.getZ());
+        if(approach==null){player.setDeltaMovement(Vec3.ZERO);return;}
+        moveToward(player,level,order,approach.getX()+0.5,approach.getZ()+0.5,0.9);
     }
 
     private static void moveToward(ServerPlayer player,ServerLevel level,Order order,double tx,double tz,double stopDistance){
         double dx=tx-player.getX(),dz=tz-player.getZ(),distance=Math.hypot(dx,dz);
         if(distance<=stopDistance){player.setDeltaMovement(Vec3.ZERO);if(order.kind==Kind.MOVE)ORDERS.remove(player.getUUID());return;}
         long tick=level.getGameTime();
-        if(order.path.isEmpty()||tick-order.lastPathTick>=12){order.path=findPath(player,level,(int)Math.floor(tx),(int)Math.floor(tz));order.lastPathTick=tick;}
+        if(order.path.isEmpty()||tick-order.lastPathTick>=30){order.path=findPath(player,level,(int)Math.floor(tx),(int)Math.floor(tz));order.lastPathTick=tick;}
         if(order.path.size()<2){player.setDeltaMovement(Vec3.ZERO);return;}
         BlockPos next=order.path.get(1);
         double nx=next.getX()+0.5-player.getX(),nz=next.getZ()+0.5-player.getZ(),horizontal=Math.hypot(nx,nz);
@@ -98,6 +102,18 @@ final class PlayerBodyOrders {
         Vec3 motion=new Vec3(nx/horizontal*step,dy,nz/horizontal*step);
         player.setYRot((float)Math.toDegrees(Math.atan2(-motion.x,motion.z)));
         player.move(MoverType.SELF,motion);player.hurtMarked=true;
+    }
+
+    /** Walkable adjacent tile; never route into the target's occupied block/entity cell. */
+    private static BlockPos approach(ServerPlayer player,ServerLevel level,double targetX,double targetZ){
+        int tx=(int)Math.floor(targetX),tz=(int)Math.floor(targetZ);
+        BlockPos best=null;double bestDistance=Double.POSITIVE_INFINITY;
+        for(int[] d:new int[][]{{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}}){
+            BlockPos candidate=surface(player,level,tx+d[0],tz+d[1]);if(candidate==null)continue;
+            double distance=player.distanceToSqr(candidate.getX()+0.5,player.getY(),candidate.getZ()+0.5);
+            if(distance<bestDistance){bestDistance=distance;best=candidate;}
+        }
+        return best;
     }
 
     private static List<BlockPos> findPath(ServerPlayer player,ServerLevel level,int goalX,int goalZ){

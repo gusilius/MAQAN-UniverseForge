@@ -1878,8 +1878,10 @@ public class TroopsMod {
                 ActionResult playerBodyResult=null;
                 if(o.ids().contains(p.getUUID().toString())){
                     int bodyKind=o.kind()==Squads.Kind.ATTACK.ordinal()?OrderPacket.BODY_ATTACK:OrderPacket.BODY_MOVE;
+                    double bodyX=(o.kind()==Squads.Kind.STOP.ordinal()||o.kind()==Squads.Kind.HOLD.ordinal())?p.getX():o.x();
+                    double bodyZ=(o.kind()==Squads.Kind.STOP.ordinal()||o.kind()==Squads.Kind.HOLD.ordinal())?p.getZ():o.z();
                     OrderPacket bodyOrder=new OrderPacket(OrderPacket.PLAYER_BODY,List.of(p.getUUID().toString()),
-                            0,o.x(),o.z(),bodyKind==OrderPacket.BODY_ATTACK?o.target():"",false,bodyKind);
+                            0,bodyX,bodyZ,bodyKind==OrderPacket.BODY_ATTACK?o.target():"",false,bodyKind);
                     playerBodyResult=PlayerBodyOrders.issue(p,bodyOrder);
                 }
                 Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal()
