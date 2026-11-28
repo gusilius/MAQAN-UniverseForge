@@ -240,8 +240,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     /** Convert reference-skin coordinates to the current Minecraft GUI-scaled viewport. */
-    private int ux(double logicalX) { return (int) Math.round(logicalX * width / ThemeManager.REFERENCE_WIDTH); }
-    private int uy(double logicalY) { return (int) Math.round(logicalY * height / ThemeManager.REFERENCE_HEIGHT); }
+    private int ux(double logicalX) { return (int) Math.round(logicalX * width / 1368); }
+    private int uy(double logicalY) { return (int) Math.round(logicalY * height / 760); }
     private int railTop(int index) { return uy(46 + index * 61); }
     private int railBottom(int index) { return uy(46 + index * 61 + 56); }
     private boolean railHit(double mouseX, double mouseY, int index) {
@@ -268,8 +268,8 @@ public final class PlatformShellScreen extends Screen {
 
     /** Shared constraints for layout, splitter hit-testing and drag/drop geometry. */
     private Map<String, WorkspaceDockTree.MinimumSize> workspaceMinimums() {
-        double scale = Math.min(1.0, Math.min(width / (double) ThemeManager.REFERENCE_WIDTH,
-                height / (double) ThemeManager.REFERENCE_HEIGHT));
+        double scale = Math.min(1.0, Math.min(width / (double) 1368,
+                height / (double) 760));
         return Map.of(
                 "navigation", new WorkspaceDockTree.MinimumSize(Math.max(72, (int) (150 * scale)), Math.max(64, (int) (120 * scale))),
                 "content", new WorkspaceDockTree.MinimumSize(Math.max(100, (int) (220 * scale)), Math.max(84, (int) (160 * scale))),
