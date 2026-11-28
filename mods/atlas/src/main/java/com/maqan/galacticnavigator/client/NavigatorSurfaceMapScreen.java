@@ -1026,7 +1026,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         int r=Math.max(0,Math.min(255,((argb>>16)&255)+amount));
         int green=Math.max(0,Math.min(255,((argb>>8)&255)+amount));
         int b=Math.max(0,Math.min(255,(argb&255)+amount));
-        return (argb&0xFF000000)|(r<<16)|(green<<8)|b;
+        // Minecraft MapColor.col is RGB-only (alpha=0). Preserve explicit alpha,
+        // but make raw map-color samples fully opaque or the explored map vanishes.
+        int alpha=(argb>>>24)&255;
+        if(alpha==0)alpha=255;
+        return (alpha<<24)|(r<<16)|(green<<8)|b;
     }
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
