@@ -27,6 +27,7 @@ public final class ClientHooks {
                 case WFNet.STATE -> {
                     ClientState.state = MapSync.decodeState(full);
                     ClientState.localWorldSnapshot = false;
+                    ClientState.localWorldOriginX = ClientState.localWorldOriginZ = 0.0;
                     Waypoints.load(ClientState.state.name);
                     ClientState.revision++;
                 }
@@ -61,6 +62,7 @@ public final class ClientHooks {
                 case WFNet.CLEAR -> {
                     ClientState.state = null;
                     ClientState.localWorldSnapshot = false;
+                    ClientState.localWorldOriginX = ClientState.localWorldOriginZ = 0.0;
                     ClientState.markers = new Markers();
                     ClientState.actions = java.util.List.of();
                     ClientState.treasury = java.util.Map.of();

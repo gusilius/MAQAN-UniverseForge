@@ -729,7 +729,9 @@ public final class CommandScreen extends Screen {
             return true;
         } else if (overPanel(x, y)) {
             return true; // UI surfaces consume the wheel; do not zoom the world behind them.
-        } else if (hasControlDown()) {
+        } else if (hasControlDown()
+                || GLFW.glfwGetMouseButton(Minecraft.getInstance().getWindow().getWindow(),
+                        GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS) {
             CommandMode.RIG.adjustHeight(Math.signum(delta) * CameraRig.HEIGHT_STEP);
         } else {
             CommandMode.zoomAtCursor(minecraft, x, y, delta);
@@ -958,7 +960,7 @@ public final class CommandScreen extends Screen {
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         if (embeddedInMaqan) drawMiniMap(g);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · Ctrl+колесо - высота · колесо - приближение · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · Ctrl/СКМ+колесо - высота · колесо - приближение · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);

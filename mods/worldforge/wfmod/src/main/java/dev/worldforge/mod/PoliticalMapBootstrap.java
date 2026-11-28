@@ -177,14 +177,19 @@ public final class PoliticalMapBootstrap {
         for (TitleData.Title title : titles.allTitles()) highest = Math.max(highest, title.tier);
         if (highest < 0) return false;
 
+        int realmTier = Math.min(highest, 3);
         List<TitleData.Title> realmTitles = new ArrayList<>();
-        for (TitleData.Title title : titles.allTitles()) if (title.tier == highest) realmTitles.add(title);
+        for (TitleData.Title title : titles.allTitles()) if (title.tier == realmTier) realmTitles.add(title);
+        if (realmTitles.isEmpty() && realmTier != highest) {
+            realmTier = highest;
+            for (TitleData.Title title : titles.allTitles()) if (title.tier == realmTier) realmTitles.add(title);
+        }
         if (realmTitles.isEmpty()) return false;
 
-        if (highest > 0) {
+        if (realmTier > 0) {
             for (TitleData.Title title : realmTitles) {
                 TitleData.Realm realm = new TitleData.Realm();
-                realm.id = "emergent-" + Integer.toUnsignedString(title.key.hashCode(), 36);
+                realm.id = "emergent-" + title.id;
                 realm.name = title.name;
                 realm.ruler = "";
                 realm.rgb = title.rgb;

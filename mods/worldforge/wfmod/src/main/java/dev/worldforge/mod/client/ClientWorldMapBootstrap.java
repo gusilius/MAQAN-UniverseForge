@@ -89,6 +89,8 @@ public final class ClientWorldMapBootstrap {
         ClientState.markers = new dev.worldforge.mod.Markers();
         ClientState.actions = java.util.List.of();
         ClientState.localWorldSnapshot = true;
+        ClientState.localWorldOriginX = originX;
+        ClientState.localWorldOriginZ = originZ;
         ClientState.revision++;
         dimension = currentDimension;
         centerX = anchorX;

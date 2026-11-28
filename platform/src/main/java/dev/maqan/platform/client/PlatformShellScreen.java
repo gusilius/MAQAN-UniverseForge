@@ -143,6 +143,10 @@ public final class PlatformShellScreen extends Screen {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
         // Selection is a world-level navigation context. Switching provider views must not erase it.
+        if ("TACTICAL".equals(capability.domain())) {
+            closeTransientOverlays();
+            rtsOverlayPanels.clear();
+        }
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
         // MapScreen is the canonical political workspace even when opened through
@@ -1024,8 +1028,6 @@ public final class PlatformShellScreen extends Screen {
         }
         if(mx>=sx&&mx<sx+w&&my>=sy+32&&my<sy+59){ambientGrid=!ambientGrid;saveWorkspaceState();return true;}
         if(mx>=sx&&mx<sx+w&&my>=sy+59&&my<sy+86){panelShadows=!panelShadows;saveWorkspaceState();return true;}
-        // Texture themes are disabled during the code-only UI validation pass.
-        if(my>=sy+115&&my<sy+139&&mx>=sx+10&&mx<sx+w-10) return true;
         // Settings is modal: clicking outside closes it but never activates a control underneath.
         settingsVisible=false;
         return true;
@@ -1045,9 +1047,8 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
         g.fill(x+10,y+91,x+w-10,y+92,EDGE);
-        g.drawString(font,"Interface theme",x+12,y+99,TEXT,false);
-        g.fill(x+10,y+115,x+w-10,y+139,SURFACE_INSET);
-        g.drawCenteredString(font,"CODE-ONLY UI",x+w/2,y+123,CYAN);
+        g.drawString(font,"Renderer",x+12,y+99,TEXT,false);
+        g.drawString(font,"JAVA · CODE ONLY",x+12,y+121,CYAN,false);
         if(h>145)g.drawString(font,"UI assets: disabled · code renderer",x+12,y+151,MUTED,false);
         if(h>168)g.drawString(font,"MAQAN / UI CORE",x+12,y+174,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
@@ -1710,6 +1711,10 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         if (profile != next) PlatformSelectionContext.clear(null);
+        if (next == Profile.RTS && profile != next) {
+            closeTransientOverlays();
+            rtsOverlayPanels.clear();
+        }
         profile=next;
         navigationScroll = 0;
         selectedCapabilityId = switch (next) {

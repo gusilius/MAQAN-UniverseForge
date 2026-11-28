@@ -42,6 +42,7 @@ public class MapScreen extends Screen {
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
     private double camX, camY, zoom;
     private boolean fitted;
+    private Object lastMapState;
     private int selected;                 // выбранная провинция
     private int hoverLabel = -1, selLabel = -1;
     private int hoverProv;
@@ -172,7 +173,18 @@ public class MapScreen extends Screen {
 
     void centerOnProvince(int prov) {
         TitleData.Title t = MapTextures.titles == null ? null : MapTextures.titles.get(prov);
-        if (t != null) centerOnBlock(t.capX, t.capZ);
+        if (t != null) centerOnBlock(t.capX + mapOriginX(), t.capZ + mapOriginZ());
+    }
+
+    private double mapOriginX() { return ClientState.localWorldSnapshot ? ClientState.localWorldOriginX : 0.0; }
+    private double mapOriginZ() { return ClientState.localWorldSnapshot ? ClientState.localWorldOriginZ : 0.0; }
+
+    private boolean denyLocalPreviewEdit() {
+        if (!ClientState.localWorldSnapshot) return false;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) mc.player.displayClientMessage(
+                Component.literal("Локальная карта — обзор загруженных чанков; политическое редактирование доступно в серверной карте WorldForge"), true);
+        return true;
     }
 
     void centerOnBlock(double bx, double bz) {
@@ -185,6 +197,7 @@ public class MapScreen extends Screen {
 
     /** Кнопка действия: без аргументов выполняется сразу, с аргументами открывает строку ввода (аргументы через |). */
     void runAction(ClientAction a, String target) {
+        if (denyLocalPreviewEdit()) return;
         if (a.params.isEmpty()) {
             command("wfaction run " + a.id + " " + target);
             return;
@@ -263,7 +276,8 @@ public class MapScreen extends Screen {
     private double bpp() { return MapTextures.titles.bpp; }
 
     private double[] blockToScreen(double bx, double bz) {
-        double px = bx / bpp() + MapTextures.w / 2.0, pz = bz / bpp() + MapTextures.h / 2.0;
+        double px = (bx - mapOriginX()) / bpp() + MapTextures.w / 2.0;
+        double pz = (bz - mapOriginZ()) / bpp() + MapTextures.h / 2.0;
         return new double[]{camX + px * zoom, camY + pz * zoom};
     }
 
@@ -332,6 +346,16 @@ public class MapScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
+        ClientWorldMapBootstrap.ensure();
+        if (lastMapState != ClientState.state) {
+            lastMapState = ClientState.state;
+            fitted = false;
+            selected = 0;
+            hoverProv = 0;
+            hoverLabel = selLabel = -1;
+            freeOverlay();
+            MapTextures.release();
+        }
         MapTextures.ensure(ClientState.mode);
         g.fill(0, 0, width, height, 0xFF12141B);
         if (!MapTextures.ready()) {
@@ -344,8 +368,8 @@ public class MapScreen extends Screen {
         double centerPixelZ = (height * 0.5 - camY) / zoom;
         double mapBpp = bpp();
         PlatformWorkspaceBridge.publishMapViewport(
-                (centerPixelX - MapTextures.w * 0.5) * mapBpp,
-                (centerPixelZ - MapTextures.h * 0.5) * mapBpp, zoom,
+                (centerPixelX - MapTextures.w * 0.5) * mapBpp + mapOriginX(),
+                (centerPixelZ - MapTextures.h * 0.5) * mapBpp + mapOriginZ(), zoom,
                 militaryView ? "MILITARY" : MapImages.TERRAIN.equals(ClientState.mode) ? "GEOGRAPHIC" : "POLITICAL");
         int mxp = (int) camX, myp = (int) camY, mw = (int) (MapTextures.w * zoom), mh = (int) (MapTextures.h * zoom);
         g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);                 // тень под картой
@@ -630,13 +654,16 @@ public class MapScreen extends Screen {
         g.drawString(font, title, 0, 0, 0xFFF0C85A);
         g.pose().popPose();
         g.drawString(font, sub, 15, 29, 0xFFA6A8B3);
+        if (ClientState.localWorldSnapshot)
+            g.drawString(font, "LOCAL PREVIEW", Math.max(8, width - font.width("LOCAL PREVIEW") - 12), 13, 0xFF9CCBEE, false);
     }
 
     private void drawCoords(GuiGraphics g, int mx, int my) {
         if (overUi(mx, my) || !MapTextures.ready()) return;
         int[] p = screenToPixel(mx, my);
         TitleData d = MapTextures.titles;
-        String t = "X " + Math.round((p[0] + 0.5 - d.w / 2.0) * d.bpp) + "  Z " + Math.round((p[1] + 0.5 - d.h / 2.0) * d.bpp);
+        String t = "X " + Math.round((p[0] + 0.5 - d.w / 2.0) * d.bpp + mapOriginX())
+                + "  Z " + Math.round((p[1] + 0.5 - d.h / 2.0) * d.bpp + mapOriginZ());
         int w = font.width(t) + 14;
         bevel(g, 8, height - 26, w, 18, false);
         g.drawString(font, t, 15, height - 21, 0xFFECEBE4);
@@ -1614,9 +1641,10 @@ public class MapScreen extends Screen {
             return true;
         }
         if (button == 1 && hasShiftDown()) {
+            if (denyLocalPreviewEdit()) return true;
             Minecraft mc = Minecraft.getInstance();
             TitleData d = MapTextures.titles;
-            int bx = (int) Math.round((p[0] - d.w / 2.0) * d.bpp), bz = (int) Math.round((p[1] - d.h / 2.0) * d.bpp);
+            int bx = (int) Math.round((p[0] - d.w / 2.0) * d.bpp + mapOriginX()), bz = (int) Math.round((p[1] - d.h / 2.0) * d.bpp + mapOriginZ());
             if (mc.player != null) mc.player.connection.sendCommand("worldforge tpxz " + bx + " " + bz);
             onClose();
             return true;
@@ -1626,9 +1654,10 @@ public class MapScreen extends Screen {
 
     /** Отправляет серверу правку в точке карты (пиксель p). */
     private void editAt(int[] p, boolean pick) {
+        if (denyLocalPreviewEdit()) return;
         TitleData d = MapTextures.titles;
         if (p[0] < 0 || p[1] < 0 || p[0] >= d.w || p[1] >= d.h) return;
-        long bx = Math.round((p[0] + 0.5 - d.w / 2.0) * d.bpp), bz = Math.round((p[1] + 0.5 - d.h / 2.0) * d.bpp);
+        long bx = Math.round((p[0] + 0.5 - d.w / 2.0) * d.bpp + mapOriginX()), bz = Math.round((p[1] + 0.5 - d.h / 2.0) * d.bpp + mapOriginZ());
         if (pick) {
             command("worldforge editor at " + bx + " " + bz + " pick");
             panel.onPicked(d.provinceIdAtPixel(p[0], p[1]));
@@ -1731,13 +1760,14 @@ public class MapScreen extends Screen {
         }
         if (key == GLFW.GLFW_KEY_C) { centerOnPlayer(); return true; }
         if (key == GLFW.GLFW_KEY_O && MapTextures.ready()) {
+            if (denyLocalPreviewEdit()) return true;
             Minecraft mc = Minecraft.getInstance();
             double mxx = mc.mouseHandler.xpos() * width / mc.getWindow().getScreenWidth();
             double myy = mc.mouseHandler.ypos() * height / mc.getWindow().getScreenHeight();
             int[] pixel = screenToPixel(mxx, myy);
             TitleData mapData = MapTextures.titles;
-            int blockX = (int) Math.round((pixel[0] - mapData.w / 2.0) * mapData.bpp);
-            int blockZ = (int) Math.round((pixel[1] - mapData.h / 2.0) * mapData.bpp);
+            int blockX = (int) Math.round((pixel[0] - mapData.w / 2.0) * mapData.bpp + mapOriginX());
+            int blockZ = (int) Math.round((pixel[1] - mapData.h / 2.0) * mapData.bpp + mapOriginZ());
             mc.setScreen(new MarkerCreateScreen(this, blockX, blockZ));
             return true;
         }
@@ -1755,12 +1785,13 @@ public class MapScreen extends Screen {
             return true;
         }
         if (key == GLFW.GLFW_KEY_B && MapTextures.ready()) {
+            if (denyLocalPreviewEdit()) return true;
             Minecraft mc = Minecraft.getInstance();
             double mxx = mc.mouseHandler.xpos() * width / mc.getWindow().getScreenWidth(), myy = mc.mouseHandler.ypos() * height / mc.getWindow().getScreenHeight();
             int[] p = screenToPixel(mxx, myy);
             TitleData d = MapTextures.titles;
-            pendingX = (int) Math.round((p[0] - d.w / 2.0) * d.bpp);
-            pendingZ = (int) Math.round((p[1] - d.h / 2.0) * d.bpp);
+            pendingX = (int) Math.round((p[0] - d.w / 2.0) * d.bpp + mapOriginX());
+            pendingZ = (int) Math.round((p[1] - d.h / 2.0) * d.bpp + mapOriginZ());
             nameBox.setVisible(true);
             nameBox.setValue("Метка " + (Waypoints.LIST.size() + 1));
             setFocused(nameBox);

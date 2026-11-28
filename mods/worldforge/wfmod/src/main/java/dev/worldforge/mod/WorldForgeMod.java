@@ -384,13 +384,16 @@ public class WorldForgeMod {
                         d = loadProceduralPlanetOrThrow(n, absentMap);
                     }
                 }
-                if (d.ensurePoliticalData()) {
-                    LOGGER.info("WorldForge: generated starter political entities from terrain map={} provinces={} realms={}",
-                            n, d.titles.maxId(), d.titles.realmList().size());
-                }
+                boolean politicalBootstrap = d.ensurePoliticalData();
                 // Bootstrap before loading persisted edits: otherwise a terrain-only map
                 // would skip its saved political overlay on the first world load.
                 EditorManager.applySaved(ServerLifecycleHooks.getCurrentServer(), d);
+                // A saved title overlay may itself contain provinces but no sovereigns.
+                politicalBootstrap |= d.ensurePoliticalData();
+                if (politicalBootstrap) {
+                    LOGGER.info("WorldForge: generated starter political entities from terrain map={} provinces={} realms={}",
+                            n, d.titles.maxId(), d.titles.realmList().size());
+                }
                 String planetId = d.planetProfile == null ? n : d.planetProfile.planetId;
                 String sourceMode = d.planetProfile == null ? "image" : d.planetProfile.generationMode;
                 LOGGER.info("WorldForge: planet_id={} source_mode={} surface_id={} display_name={} virtual_size={}x{} blocks_per_pixel={}",

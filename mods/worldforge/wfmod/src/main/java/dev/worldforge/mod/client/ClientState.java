@@ -10,6 +10,7 @@ import dev.worldforge.mod.Markers;
 public final class ClientState {
     public static MapSync.State state;               // null, если в этом измерении нет карты
     public static boolean localWorldSnapshot;        // true only for the bounded loaded-chunk fallback map
+    public static double localWorldOriginX, localWorldOriginZ; // world-space origin of the local raster
     public static int[] terrain;                     // основа ARGB (null, пока не пришла)
     public static String terrainHash = "";
     public static Markers markers = new Markers();
