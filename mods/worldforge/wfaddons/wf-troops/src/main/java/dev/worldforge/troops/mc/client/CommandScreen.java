@@ -170,11 +170,12 @@ public final class CommandScreen extends Screen {
         CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
     private int heightWidgetX() { return Math.max(4, width - 174); }
+    private int heightWidgetY() { return height - 54; }
     private boolean overHeightWidget(double x, double y) {
-        return x >= heightWidgetX() && x <= width - 4 && y >= 4 && y <= 26;
+        return x >= heightWidgetX() && x <= width - 4 && y >= heightWidgetY() && y <= heightWidgetY()+22;
     }
     private void drawHeightWidget(GuiGraphics g) {
-        int x = heightWidgetX(), y = 4;
+        int x = heightWidgetX(), y = heightWidgetY();
         CameraRig rig = CommandMode.RIG;
         boolean locked = rig.heightLockedFor(rig.view);
         g.fill(x, y, width - 4, y + 22, 0xD9101721);
@@ -232,7 +233,7 @@ public final class CommandScreen extends Screen {
 
     private int commandButtonWidth() {
         // Eight controls must remain reachable even at the smallest supported GUI scale.
-        return Math.max(18, Math.min(BTN_W, (width - 8 - 14) / 8));
+        return Math.max(18, Math.min(BTN_W, (width - 8 - 10) / 6));
     }
 
     private List<Btn> buttons() {
@@ -242,10 +243,6 @@ public final class CommandScreen extends Screen {
         int gap = 2;
         int x = width - 4 - buttonWidth;
         l.add(new Btn(compact ? "×" : "Выход (R)", x, 4, buttonWidth, false, () -> CommandMode.exit(minecraft)));
-        x -= buttonWidth + gap;
-        l.add(new Btn(compact ? "B" : "Стройка (B)", x, 4, buttonWidth, buildOpen, this::toggleBuild));
-        x -= buttonWidth + gap;
-        l.add(new Btn(compact ? "Y" : "Участки (Y)", x, 4, buttonWidth, workMode >= 0, this::cycleWorkMode));
         x -= buttonWidth + gap;
         l.add(new Btn("RTS", x, 4, buttonWidth, CommandMode.RIG.view == CameraRig.View.SKY,
                 () -> CommandMode.RIG.transitionTo(CameraRig.View.SKY)));
@@ -264,13 +261,98 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
+    private List<Btn> dockButtons(){
+        String[] full={"Рабочие","Войска","Стоп","Удержать","Формация","Стойка","Участки","Стройка","Тело"};
+        String[] shortLabels={"РАБ.","ВОЙ.","СТОП","ДЕРЖ.","ФОРМ.","СТОЙ.","ЗОНЫ","СТРОЙ","ТЕЛО"};
+        int count=full.length,gap=3,available=Math.max(1,width-16);
+        int buttonWidth=Math.max(20,Math.min(92,(available-gap*(count-1))/count));
+        boolean compact=buttonWidth<64;
+        int total=count*buttonWidth+(count-1)*gap;
+        int x=Math.max(4,(width-total)/2),y=height-23;
+        List<Btn> out=new ArrayList<>(count);
+        Runnable[] actions={
+                this::selectAllWorkers,this::selectAllTroops,
+                ()->sendSelectedOrder(Squads.Kind.STOP),()->sendSelectedOrder(Squads.Kind.HOLD),
+                this::cycleSelectedFormation,this::cycleSelectedStance,
+                this::cycleWorkMode,this::toggleBuild,()->CommandMode.enterBodyCommand(minecraft)
+        };
+        for(int i=0;i<count;i++){
+            boolean on=switch(i){case 0->!CommandMode.selected().isEmpty()&&selectedWorkerIds().size()==CommandMode.selected().size();
+                case 1->!CommandMode.selected().isEmpty()&&selectedTroopIds().size()==CommandMode.selected().size();
+                case 6->workMode>=0;case 7->buildOpen;default->false;};
+            out.add(new Btn(compact?shortLabels[i]:full[i],x,y,buttonWidth,on,actions[i]));
+            x+=buttonWidth+gap;
+        }
+        return out;
+    }
+
+    private List<String> selectedTroopIds(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof TroopEntity troop&&CommandMode.SEL.isSelected(troop.getUUID().toString()))
+                ids.add(troop.getUUID().toString());
+        return ids;
+    }
+
+    private void selectAllWorkers(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof LivingEntity living&&CommandMode.isWorkerEntity(living)
+                    &&CommandMode.selectable(minecraft,living))ids.add(entity.getUUID().toString());
+        CommandMode.SEL.set(ids);
+        if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal(
+                ids.isEmpty()?"В загруженной области нет доступных рабочих":"Выбрано рабочих: "+ids.size()),true);
+    }
+
+    private void selectAllTroops(){
+        List<String> ids=new ArrayList<>();
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+            if(entity instanceof TroopEntity troop&&CommandMode.selectable(minecraft,troop))
+                ids.add(troop.getUUID().toString());
+        CommandMode.SEL.set(ids);
+        if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal(
+                ids.isEmpty()?"В загруженной области нет доступных войск":"Выбрано бойцов: "+ids.size()),true);
+    }
+
+    private void sendSelectedOrder(Squads.Kind order){
+        List<String> ids=CommandMode.selected();
+        if(ids.isEmpty()){
+            if(minecraft.player!=null)minecraft.player.displayClientMessage(Component.literal("Сначала выделите рабочих или войска"),true);
+            return;
+        }
+        CommandMode.send(new OrderPacket(OrderPacket.ORDER,ids,order.ordinal(),0,0,"",false,0));
+    }
+
+    private void cycleSelectedFormation(){
+        if(CommandMode.selected().isEmpty())return;
+        CommandMode.formation=(CommandMode.formation+1)%Formations.Type.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.FORMATION,CommandMode.selected(),0,0,0,"",false,CommandMode.formation));
+    }
+
+    private void cycleSelectedStance(){
+        if(CommandMode.selected().isEmpty())return;
+        CommandMode.stance=(CommandMode.stance+1)%Squads.Stance.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.STANCE,CommandMode.selected(),0,0,0,"",false,CommandMode.stance));
+    }
+
+    private void drawCommandDock(GuiGraphics g,int mouseX,int mouseY){
+        List<Btn> dock=dockButtons();
+        if(dock.isEmpty())return;
+        int left=dock.get(0).x-6,right=dock.get(dock.size()-1).x+dock.get(dock.size()-1).w+6;
+        int y=height-28;
+        g.fill(left,y,right,height-2,0xB9101721);
+        g.fill(left,y,right,y+1,0xFF536D83);
+        g.renderOutline(left,y,right-left,height-y-2,0x884B657A);
+        for(Btn button:dock)button(g,button,mouseX,mouseY);
+    }
+
     private int panelW() { return Math.max(1, Math.min(PANEL_W, width - 8)); }
     private int panelX() { return Math.max(0, width - panelW() - 4); }
     private int panelY() { return 26; }
     private int panelH() {
         // The embedded settlement minimap owns the lower-right corner. The build
         // panel always ends above it, including very short GUI viewports.
-        int bottomReserve = embeddedInMaqan ? 112 : 90;
+        int bottomReserve = 42;
         return Math.max(3, height - panelY() - bottomReserve);
     }
 
@@ -287,7 +369,8 @@ public final class CommandScreen extends Screen {
     boolean overPanel(double px, double py) {
         if (py >= 4 && py < 4 + BTN_H + 2
                 && px >= width - 4 - 8 * commandButtonWidth() - 14) return true;
-        if (overMiniMap(px, py)) return true;
+        if (overHeightWidget(px,py)) return true;
+        if (py >= height-28 && py < height-2) return true;
         if (!embeddedInMaqan && onZoomSlider(px, py)) return true;
         if (settlement != null && px >= 4 && px < 254
                 && py >= 34 && py < 34 + settlementSummaryHeight()) return true;
@@ -506,15 +589,11 @@ public final class CommandScreen extends Screen {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
         if (clickHeightWidget(x, y)) return true;
-        if (overMiniMap(x,y)) {
-            if (button == 0 && settlement != null
-                    && x >= miniMapX()+8 && x < miniMapX()+128
-                    && y >= miniMapY()+18 && y < miniMapY()+88) focusMiniMap(x,y);
-            return true;
-        }
+
         if(!embeddedInMaqan && button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
         if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
+            for(Btn b:dockButtons())if(b.hit(x,y)){b.run().run();return true;}
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
@@ -958,9 +1037,9 @@ public final class CommandScreen extends Screen {
         if (!embeddedInMaqan) drawZoomSlider(g);
         drawHeightWidget(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
-        if (embeddedInMaqan) drawMiniMap(g);
+        drawCommandDock(g,mxi,myi);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · Ctrl/СКМ+колесо - высота · колесо - приближение · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD — камера · Ctrl/СКМ+колесо — высота · колесо — приближение · СКМ — вращать · P патруль · G/ТЕЛО — управление персонажем · R — выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);

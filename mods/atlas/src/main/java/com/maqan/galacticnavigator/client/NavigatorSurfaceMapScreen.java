@@ -41,8 +41,9 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private boolean terrain3D;
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
-    private Button viewModeButton,refreshSnapshotButton,radarButton;
+    private Button viewModeButton,refreshSnapshotButton,radarButton,toolsButton,dioramaButton;
     private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton,terrainLayerButton;
+    private boolean controlsExpanded;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
@@ -65,7 +66,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
 
     private record ControlBounds(int x, int y, int width) {}
 
-    private int controlRows() { return width >= 1040 ? 1 : width >= 620 ? 2 : 3; }
+    private int controlRows() { return !controlsExpanded ? 1 : width >= 1040 ? 1 : width >= 620 ? 2 : 3; }
 
     private int mapViewportTop() { return 74 + (controlRows() - 1) * 24; }
 
@@ -87,7 +88,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             sum += baseWidths[i];
         }
         int gap = 3;
-        int available = Math.max(1, width - 36 - gap * (count - 1));
+        int available = Math.max(1, width - 36 - gap * (count - 1)
+                - (controlsExpanded ? 84 : 0));
         double scale = Math.min(1.0, available / (double) Math.max(1, sum));
         int x = 18;
         for (int i = 0; i < index; i++) if (rows[i] == row)
@@ -172,7 +174,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         int planetX=width>=440?Math.max(18,width-190):18+bottomW+8;
         int planetW=width>=440?172:bottomW;
         String planetLabel=width<260?"3D":width<440?"3D MAP":"OPEN 3D PLANET MAP";
-        addRenderableWidget(Button.builder(Component.literal(planetLabel),
+        dioramaButton=addRenderableWidget(Button.builder(Component.literal(planetLabel),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
                 .bounds(planetX,bottomY,planetW,20).build());
         terrainLayerButton=addRenderableWidget(Button.builder(Component.literal(micro?"M":compact?"MAP":"MAP: OFF"),b->{
@@ -187,7 +189,25 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             else radarFilter=RadarFilter.values()[(radarFilter.ordinal()+1)%RadarFilter.values().length];
             b.setMessage(Component.literal(radarLabel()));
         }).bounds(radar.x(),radar.y(),radar.width(),20).build());
+        toolsButton=addRenderableWidget(Button.builder(Component.literal("TOOLS ▾"),b->{
+            controlsExpanded=!controlsExpanded;
+            b.setMessage(Component.literal(controlsExpanded?"TOOLS ▴":"TOOLS ▾"));
+            applyControlVisibility();
+        }).bounds(Math.max(18,width-82),48,72,20).build());
+        applyControlVisibility();
         updateDepthButtons();
+    }
+
+    private void applyControlVisibility(){
+        if(depthDownButton!=null)depthDownButton.visible=controlsExpanded;
+        if(depthUpButton!=null)depthUpButton.visible=controlsExpanded;
+        if(routeModeButton!=null)routeModeButton.visible=controlsExpanded;
+        if(clearRouteButton!=null)clearRouteButton.visible=controlsExpanded;
+        if(politicalLayerButton!=null)politicalLayerButton.visible=controlsExpanded;
+        if(terrainLayerButton!=null)terrainLayerButton.visible=controlsExpanded;
+        if(radarButton!=null)radarButton.visible=controlsExpanded;
+        if(refreshSnapshotButton!=null)refreshSnapshotButton.visible=controlsExpanded;
+        if(dioramaButton!=null)dioramaButton.visible=controlsExpanded;
     }
     private void updateDepthButtons(){
         if(depthDownButton!=null)depthDownButton.setMessage(Component.literal("Y "+(selectedSectionY*16)));

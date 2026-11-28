@@ -30,6 +30,9 @@ public final class NavigatorExplorationStore {
     }
     public record ExploredLayer(int chunkX,int chunkZ,int sectionY,int playerY,String biome,
                                 int mapColor,long firstVisited,long lastVisited) {}
+    /** Snapshot of a chunk already delivered to the client; it is never a request to load a chunk. */
+    public record ChunkSample(int chunkX,int chunkZ,int surfaceY,String biome,int mapColor,
+                              int[] terrainColors,int[] terrainHeights) {}
     private static final Gson GSON=new GsonBuilder().setPrettyPrinting().create();
     private static final Type MAP_TYPE=new TypeToken<Map<String,ExploredChunk>>(){}.getType();
     private static final Map<String,Map<String,ExploredChunk>> CACHE=new ConcurrentHashMap<>();
@@ -90,6 +93,35 @@ public final class NavigatorExplorationStore {
         CHUNK_SNAPSHOTS.remove(dimension);
         CHUNK_X_INDEX.remove(dimension);
         save(dimension,chunks);
+    }
+
+    /**
+     * Batch-adds only previously unseen, client-loaded chunks. One disk write per batch keeps
+     * the map useful without serializing the whole history once for every nearby chunk.
+     */
+    public static synchronized int recordLoadedChunks(String dimension,List<ChunkSample> samples) {
+        if(dimension==null||dimension.isBlank()||samples==null||samples.isEmpty())return 0;
+        Map<String,ExploredChunk> chunks=data(dimension);
+        long now=System.currentTimeMillis();
+        int added=0;
+        for(ChunkSample sample:samples){
+            if(sample==null)continue;
+            String key=key(sample.chunkX(),sample.chunkZ());
+            if(chunks.containsKey(key))continue;
+            int[] colors=sample.terrainColors()!=null&&sample.terrainColors().length==256
+                    ?sample.terrainColors().clone():null;
+            int[] heights=sample.terrainHeights()!=null&&sample.terrainHeights().length==256
+                    ?sample.terrainHeights().clone():null;
+            chunks.put(key,new ExploredChunk(sample.chunkX(),sample.chunkZ(),sample.surfaceY(),
+                    sample.biome()==null?"unknown":sample.biome(),sample.mapColor(),now,now,colors,heights));
+            added++;
+        }
+        if(added>0){
+            CHUNK_SNAPSHOTS.remove(dimension);
+            CHUNK_X_INDEX.remove(dimension);
+            save(dimension,chunks);
+        }
+        return added;
     }
 
     private static Map<String,ExploredLayer> layerData(String dimension){

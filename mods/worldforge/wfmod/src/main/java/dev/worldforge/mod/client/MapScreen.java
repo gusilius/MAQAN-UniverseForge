@@ -38,6 +38,8 @@ public class MapScreen extends Screen {
     private static Map<String, LivingEntity> leaderBodyIndex = Map.of();
     private boolean embeddedInMaqan;
     private boolean militaryView;
+    private boolean layerMenuOpen;
+    private int layerMenuScroll;
     public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
     private static final String[][] PROP_NAMES = {{"culture", "Культуры"}, {"religion", "Религии"}, {"faith", "Религии"}, {"race", "Народы"}, {"people", "Народы"}, {"house", "Дома"}, {"dynasty", "Династии"}, {"development", "Развитие"}, {"climate", "Климат"}};
     private double camX, camY, zoom;
@@ -379,7 +381,6 @@ public class MapScreen extends Screen {
         g.blit(MapTextures.id, 0, 0, 0f, 0f, MapTextures.w, MapTextures.h, MapTextures.w, MapTextures.h);
         if (ovId != null) g.blit(ovId, ovX, ovY, 0f, 0f, ovW, ovH, ovW, ovH);
         g.pose().popPose();
-        drawCartographicFrame(g, mxp, myp, mw, mh);
         drawCompassRose(g, mxp, myp, mw, mh);
 
         drawLabels(g);
@@ -397,9 +398,11 @@ public class MapScreen extends Screen {
         } else hoverProv = 0;
 
         drawPlate(g);
-        if (embeddedInMaqan) drawMapTypeBar(g, mx, my);
+        if (embeddedInMaqan) {
+            drawMapTypeBar(g, mx, my);
+            drawLayerMenu(g, mx, my);
+        }
         drawLegend(g);
-        drawOverview(g);
         if (!embeddedInMaqan) {
             drawScale(g);
             drawHotbar(g, mx, my);
@@ -440,6 +443,7 @@ public class MapScreen extends Screen {
                 if (mx >= bounds[0] - 6 && mx <= bounds[1] + 6 && my >= y - 6 && my <= y + 34) return true;
             }
         }
+        if (inLayerMenu(mx,my)) return true;
         if (embeddedInMaqan && mx >= mapTypeBarX() - 2
                 && mx < mapTypeBarX() + mapTypeBarWidth() + 2
                 && my >= MAP_TYPE_BAR_Y - 4 && my < MAP_TYPE_BAR_Y + MAP_TYPE_BAR_H + 4) return true;
@@ -485,6 +489,7 @@ public class MapScreen extends Screen {
         boolean compact = width < 620;
         boolean micro = width < 360;
         return List.of(
+                new MapTypeButton("layers", micro ? "L" : compact ? "LAY" : "СЛОИ", mapTypeButtonWidth(64)),
                 new MapTypeButton("political", micro ? "P" : compact ? "POL" : "POLITICAL", mapTypeButtonWidth(78)),
                 new MapTypeButton("geographic", micro ? "G" : compact ? "GEO" : "GEOGRAPHIC", mapTypeButtonWidth(88)),
                 new MapTypeButton("military", micro ? "M" : compact ? "MIL" : "MILITARY", mapTypeButtonWidth(78)),
@@ -494,7 +499,7 @@ public class MapScreen extends Screen {
 
     private int mapTypeButtonWidth(int preferred) {
         int availableWidth = panel.isOpen() ? panel.leftEdge() - 16 : width - 58;
-        int available = Math.max(10, (availableWidth - MAP_TYPE_GAP * 4) / 5);
+        int available = Math.max(10, (availableWidth - MAP_TYPE_GAP * 5) / 6);
         return Math.min(preferred, available);
     }
 
@@ -517,6 +522,7 @@ public class MapScreen extends Screen {
         for (MapTypeButton button : mapTypeButtons()) {
             int right = x + button.width();
             boolean active = switch (button.id()) {
+                case "layers" -> layerMenuOpen;
                 case "political" -> !militaryView && !MapImages.TERRAIN.equals(ClientState.mode);
                 case "geographic" -> !militaryView && MapImages.TERRAIN.equals(ClientState.mode);
                 case "military" -> militaryView;
@@ -540,11 +546,12 @@ public class MapScreen extends Screen {
             int right = x + button.width();
             if (mx >= x && mx < right) {
                 switch (button.id()) {
-                    case "political" -> { militaryView = false; setMode(MapImages.REALMS); }
-                    case "geographic" -> { militaryView = false; setMode(MapImages.TERRAIN); }
-                    case "military" -> { militaryView = true; setMode(MapImages.TERRAIN); }
-                    case "exploration" -> openExplorationMap();
-                    case "diorama" -> openDioramaView();
+                    case "layers" -> { layerMenuOpen = !layerMenuOpen; layerMenuScroll = 0; }
+                    case "political" -> { layerMenuOpen = false; militaryView = false; setMode(MapImages.REALMS); }
+                    case "geographic" -> { layerMenuOpen = false; militaryView = false; setMode(MapImages.TERRAIN); }
+                    case "military" -> { layerMenuOpen = false; militaryView = true; setMode(MapImages.TERRAIN); }
+                    case "exploration" -> { layerMenuOpen = false; openExplorationMap(); }
+                    case "diorama" -> { layerMenuOpen = false; openDioramaView(); }
                     default -> { return false; }
                 }
                 return true;
@@ -552,6 +559,87 @@ public class MapScreen extends Screen {
             x = right + MAP_TYPE_GAP;
         }
         return false;
+    }
+
+    private record MapLayerRow(String key,String label,boolean heading) {}
+
+    private List<MapLayerRow> mapLayerRows(){
+        List<String> available=modes();
+        List<MapLayerRow> rows=new ArrayList<>();
+        rows.add(new MapLayerRow("","ГЕОГРАФИЯ",true));
+        for(String key:available)if(MapImages.TERRAIN.equals(key))
+            rows.add(new MapLayerRow(key,modeName(key),false));
+        rows.add(new MapLayerRow("","ТЕРРИТОРИАЛЬНАЯ ИЕРАРХИЯ",true));
+        for(String key:available)if(!MapImages.TERRAIN.equals(key)&&!MapImages.REALMS.equals(key)
+                &&!MapImages.isDip(key)&&!MapImages.isProp(key))
+            rows.add(new MapLayerRow(key,modeName(key),false));
+        rows.add(new MapLayerRow("","ГОСУДАРСТВА И ДИПЛОМАТИЯ",true));
+        for(String key:available)if(MapImages.REALMS.equals(key)||MapImages.isDip(key))
+            rows.add(new MapLayerRow(key,modeName(key),false));
+        rows.add(new MapLayerRow("","ОБЩЕСТВО И СВОЙСТВА",true));
+        for(String key:available)if(MapImages.isProp(key))
+            rows.add(new MapLayerRow(key,modeName(key),false));
+        return rows;
+    }
+
+    private int[] layerMenuBounds(){
+        int w=Math.min(228,Math.max(164,width-16));
+        int x=Math.max(8,Math.min(mapTypeBarX(),width-w-8));
+        int y=MAP_TYPE_BAR_Y+MAP_TYPE_BAR_H+5;
+        int visible=Math.max(3,Math.min(mapLayerRows().size(),(height-y-20)/16));
+        return new int[]{x,y,w,visible*16+8,visible};
+    }
+
+    private boolean inLayerMenu(double mx,double my){
+        if(!embeddedInMaqan||!layerMenuOpen)return false;
+        int[] b=layerMenuBounds();
+        return mx>=b[0]&&mx<b[0]+b[2]&&my>=b[1]&&my<b[1]+b[3];
+    }
+
+    private void drawLayerMenu(GuiGraphics g,int mx,int my){
+        if(!layerMenuOpen)return;
+        List<MapLayerRow> rows=mapLayerRows();
+        int[] b=layerMenuBounds();
+        int x=b[0],y=b[1],w=b[2],h=b[3],visible=b[4];
+        layerMenuScroll=Math.max(0,Math.min(layerMenuScroll,Math.max(0,rows.size()-visible)));
+        g.fill(x,y,x+w,y+h,0xF0121822);
+        g.fill(x,y,x+w,y+1,0xFFB58A4B);
+        g.renderOutline(x,y,w,h,0xFF6C7888);
+        g.enableScissor(x+2,y+3,x+w-2,y+h-3);
+        for(int row=0;row<visible;row++){
+            int index=layerMenuScroll+row;
+            if(index>=rows.size())break;
+            MapLayerRow entry=rows.get(index);
+            int ry=y+4+row*16;
+            if(entry.heading()){
+                g.drawString(font,entry.label(),x+8,ry+3,0xFFE0BD78,false);
+            }else{
+                boolean active=entry.key().equals(ClientState.mode)
+                        ||(MapImages.isDip(entry.key())&&MapImages.isDip(ClientState.mode));
+                boolean hover=mx>=x+4&&mx<x+w-4&&my>=ry&&my<ry+16;
+                if(active||hover)g.fill(x+4,ry,x+w-4,ry+15,active?0x553C7183:0x443A5368);
+                g.drawString(font,active?"◆":"·",x+9,ry+3,active?0xFFFFD36A:0xFF9AAABA,false);
+                g.drawString(font,font.plainSubstrByWidth(entry.label(),w-34),x+22,ry+3,
+                        active?0xFFFFE7B0:0xFFE1E6ED,false);
+            }
+        }
+        g.disableScissor();
+    }
+
+    private boolean handleLayerMenuClick(double mx,double my){
+        if(!layerMenuOpen)return false;
+        int[] b=layerMenuBounds();
+        if(mx<b[0]||mx>=b[0]+b[2]||my<b[1]||my>=b[1]+b[3]){
+            layerMenuOpen=false;
+            return false;
+        }
+        int row=(int)((my-b[1]-4)/16)+layerMenuScroll;
+        List<MapLayerRow> rows=mapLayerRows();
+        if(row>=0&&row<rows.size()&&!rows.get(row).heading()){
+            setMode(rows.get(row).key());
+            layerMenuOpen=false;
+        }
+        return true;
     }
 
     /** Open the separate fog-of-war surface map backed by actually explored chunks. */
@@ -1594,6 +1682,7 @@ public class MapScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
+        if (button == 0 && handleLayerMenuClick(mx,my)) return true;
         if (panel.click(mx, my, button)) return true;
         if (embeddedInMaqan && button == 0 && handleMapTypeClick(mx, my)) return true;
         if (!embeddedInMaqan && button == 0) for (Slot sl : slots) if (sl.hit(mx, my)) { setMode(sl.key); return true; }
@@ -1698,6 +1787,13 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double delta) {
+        if (inLayerMenu(mx,my)) {
+            int[] bounds=layerMenuBounds();
+            int visible=bounds[4];
+            int max=Math.max(0,mapLayerRows().size()-visible);
+            layerMenuScroll=Math.max(0,Math.min(max,layerMenuScroll+(delta<0?1:-1)));
+            return true;
+        }
         if (panel.scrolled(mx, my, delta)) return true;
         if (panel.contains(mx, my)) return true;
         if (overUi((int) mx, (int) my)) return true;

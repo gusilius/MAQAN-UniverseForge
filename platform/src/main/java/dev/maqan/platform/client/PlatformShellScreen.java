@@ -661,6 +661,7 @@ public final class PlatformShellScreen extends Screen {
             if (!immersiveRts()) WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
+        drawRtsMiniMap(g);
         if (!immersive) {
             drawTopBar(g, mouseX, mouseY);
             drawRail(g, mouseX, mouseY);
@@ -674,6 +675,19 @@ public final class PlatformShellScreen extends Screen {
         if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
         if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    private void drawRtsMiniMap(GuiGraphics g){
+        if(!immersiveRts())return;
+        Screen view=activeView();
+        if(view==null||!view.getClass().getName().endsWith(".CommandScreen"))return;
+        try{
+            Class<?> miniMap=Class.forName("dev.worldforge.mod.client.MiniMap");
+            miniMap.getMethod("renderWorkspace",GuiGraphics.class,int.class,int.class)
+                    .invoke(null,g,width,height);
+        }catch(ReflectiveOperationException|LinkageError unavailable){
+            // WorldForge's minimap is optional; the shared shell remains usable without it.
+        }
     }
 
     private void drawDockSplitters(GuiGraphics g, int mx, int my) {

@@ -435,8 +435,10 @@ public final class CommandMode {
 
     static void enter(Minecraft mc) {
         if (active || mc.level == null || mc.player == null) return;
+        boolean preserveSelection=firstPersonCommand;
+        firstPersonCommand=false;
         active = true;
-        SEL.clear();
+        if(!preserveSelection)SEL.clear();
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
@@ -449,6 +451,22 @@ public final class CommandMode {
         mc.setCameraEntity(camEntity);
         openCommandView(mc, new CommandScreen());
         if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
+    }
+
+    /** Leave the RTS camera and return control to the player's body without discarding the current selection. */
+    static void enterBodyCommand(Minecraft mc){
+        if(!active||mc==null||mc.player==null)return;
+        persistCamera(mc);
+        lastView=RIG.view;
+        active=false;
+        hostedCommandView=null;
+        camEntity=null;
+        mc.setCameraEntity(mc.player);
+        mc.options.setCameraType(prevCamera);
+        firstPersonCommand=true;
+        mc.setScreen(null);
+        mc.player.displayClientMessage(Component.literal(
+                "Управление персонажем: WASD/мышь · ЛКМ выбрать · Shift+ЛКМ добавить · ПКМ приказ · Alt — круг команд · R вернуться в RTS"),false);
     }
 
     static void exit(Minecraft mc) {
@@ -610,7 +628,6 @@ public final class CommandMode {
                 }
             }
             while (TOGGLE.consumeClick()) if (mc.screen == null && !active) {
-                firstPersonCommand = false;
                 enter(mc);
             }
             if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
