@@ -2033,7 +2033,9 @@ public final class PlatformShellScreen extends Screen {
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F7) { toggleWorkspacePanel("navigation"); return true; }
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F8) { toggleWorkspacePanel("inspector"); return true; }
         if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F9) { toggleWorkspacePanel("tools"); return true; }
-        if (immersiveRts() && keyCode == GLFW.GLFW_KEY_F10) { settingsVisible = !settingsVisible; return true; }
+        if ((immersiveRts() || immersiveMapWorkspace()) && keyCode == GLFW.GLFW_KEY_F10) {
+            boolean open=!settingsVisible;closeTransientOverlays();settingsVisible=open;return true;
+        }
         java.util.Optional<WorkspaceRuntime.Shortcut> registered =
                 WorkspaceRuntime.shortcutFor(keyCode, modifiers);
         if (registered.isPresent()) {
