@@ -38,7 +38,7 @@ public final class Markers {
 
     public Marker add(String name, String type, int x, int z, int rgb) {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("Пустое имя метки");
-        if (!TYPES.contains(type)) throw new IllegalArgumentException("Тип метки: " + TYPES);
+        if (type == null || !TYPES.contains(type)) throw new IllegalArgumentException("Тип метки: " + TYPES);
         Marker m = new Marker();
         m.name = name.trim();
         m.type = type;
@@ -110,7 +110,12 @@ public final class Markers {
     public static Markers fromJson(String json) {
         Markers ms = new Markers();
         if (json == null || json.isBlank()) return ms;
-        Object parsed = Json.parse(json);
+        final Object parsed;
+        try {
+            parsed = Json.parse(json);
+        } catch (RuntimeException malformedJson) {
+            return ms;
+        }
         if (!(parsed instanceof Map<?, ?> root)) return ms;
 
         Object rawOverrides = root.get("visual_overrides");
@@ -175,7 +180,8 @@ public final class Markers {
     }
 
     public void save(Path file) throws IOException {
-        Files.createDirectories(file.getParent());
+        Path parent = file.toAbsolutePath().getParent();
+        if (parent != null) Files.createDirectories(parent);
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         Files.writeString(tmp, toJson(), StandardCharsets.UTF_8);
         Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
