@@ -177,6 +177,22 @@ public final class CameraRig {
         };
     }
 
+    /**
+     * Resolve the playable surface used by the tactical camera.
+     * A void column must not pin the camera to the bottom bedrock layer; in a
+     * ceiling dimension the roof heightmap must not send the camera outside the world.
+     */
+    public static double resolveTerrainAnchor(double sampledSurfaceY, double playerY,
+                                              int minBuildHeight, boolean hasCeiling) {
+        double safePlayerY = Double.isFinite(playerY) ? playerY : minBuildHeight + 16.0;
+        if (!Double.isFinite(sampledSurfaceY)) return safePlayerY + 8.0;
+        if (sampledSurfaceY <= minBuildHeight + 2.0)
+            return Math.max(safePlayerY + 8.0, minBuildHeight + 8.0);
+        if (hasCeiling && sampledSurfaceY - safePlayerY > 48.0)
+            return safePlayerY + 12.0;
+        return sampledSurfaceY;
+    }
+
     /** Pure safety floor used by the Minecraft adapter after sampling terrain below the camera. */
     public static double keepAboveTerrain(double cameraY, double terrainY) {
         if (!Double.isFinite(cameraY)) cameraY = terrainY + TERRAIN_CLEARANCE;

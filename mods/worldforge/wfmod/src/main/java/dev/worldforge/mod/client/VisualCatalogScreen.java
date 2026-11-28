@@ -148,7 +148,7 @@ public final class VisualCatalogScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.connection.sendCommand(
                 "worldforge marker visual " + markerId + " " + profile);
-        mc.setScreen(parent);
+        ClientScreenNavigation.returnToParent(this, parent);
     }
 
     @Override
@@ -169,7 +169,7 @@ public final class VisualCatalogScreen extends Screen {
     @Override
     public boolean keyPressed(int key, int scanCode, int modifiers) {
         if (key == GLFW.GLFW_KEY_ESCAPE) {
-            Minecraft.getInstance().setScreen(parent);
+            ClientScreenNavigation.returnToParent(this, parent);
             return true;
         }
         int panelW = Math.max(1, Math.min(650, width - 16));

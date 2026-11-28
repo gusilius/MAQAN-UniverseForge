@@ -399,6 +399,17 @@ public final class CommandMode {
         return screen != null && screen.getClass().getName().equals("dev.maqan.platform.client.PlatformShellScreen");
     }
 
+    private static boolean isHostedCommandViewAttached(Minecraft mc) {
+        if (hostedCommandView == null || !isPlatformWorkspace(mc.screen)) return false;
+        try {
+            Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            return Boolean.TRUE.equals(shell.getMethod("isHostedProviderViewAttached", Screen.class)
+                    .invoke(null, hostedCommandView));
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
     private static boolean isHostedCommandViewActive(Minecraft mc) {
         if (hostedCommandView == null || !isPlatformWorkspace(mc.screen)) return false;
         try {
@@ -488,6 +499,12 @@ public final class CommandMode {
     }
 
     /** Покадровое движение камеры: WASD / края экрана - сдвиг, Q/E - поворот, стрелки - поворот и наклон, Shift - быстрее. */
+    private static double cameraSurfaceY(Minecraft mc, int x, int z) {
+        double sampled = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        return CameraRig.resolveTerrainAnchor(sampled, mc.player.getY(),
+                mc.level.getMinBuildHeight(), mc.level.dimensionType().hasCeiling());
+    }
+
     static void frame(Minecraft mc) {
         if (!active || camEntity == null || mc.player == null || mc.level == null) return;
         long now = System.nanoTime();
@@ -527,7 +544,7 @@ public final class CommandMode {
         if (mc.level.hasChunkAt(focusProbe)) {
             // Anchor to terrain/building surfaces, not the top of a tree canopy.
             // The boom ray below handles foliage and other intervening geometry.
-            double target = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz);
+            double target = cameraSurfaceY(mc, gx, gz);
             if (Double.isFinite(target)) {
                 if (!groundInitialized) {
                     groundY = target;
@@ -539,7 +556,7 @@ public final class CommandMode {
         } else {
             // Never force-load an edge chunk. Hold the last safe focus height and
             // keep the camera above the player's current eye level until it is sampled.
-            groundY = Math.max(groundY, mc.player.getY() + 1.0);
+            groundY = Math.max(groundY, mc.player.getY() + 8.0);
         }
 
         double[] p = RIG.position(groundY);
@@ -567,8 +584,7 @@ public final class CommandMode {
         net.minecraft.core.BlockPos cameraProbe = new net.minecraft.core.BlockPos(cameraX,
                 mc.player.blockPosition().getY(), cameraZ);
         if (mc.level.hasChunkAt(cameraProbe)) {
-            double cameraTerrain = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    cameraX, cameraZ);
+            double cameraTerrain = cameraSurfaceY(mc, cameraX, cameraZ);
             p[1] = CameraRig.keepAboveTerrain(p[1], cameraTerrain);
         } else {
             // A missing destination sample must not let the camera sink below
@@ -594,7 +610,7 @@ public final class CommandMode {
         net.minecraft.core.BlockPos smoothProbe = new net.minecraft.core.BlockPos(sx,
                 mc.player.blockPosition().getY(), sz);
         if (mc.level.hasChunkAt(smoothProbe)) {
-            double floor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sx, sz);
+            double floor = cameraSurfaceY(mc, sx, sz);
             cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, floor);
         } else {
             cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
@@ -621,13 +637,13 @@ public final class CommandMode {
         net.minecraft.core.BlockPos finalProbe = new net.minecraft.core.BlockPos(finalX,
                 mc.player.blockPosition().getY(), finalZ);
         if (mc.level.hasChunkAt(finalProbe)) {
-            double finalFloor = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    finalX, finalZ);
+            double finalFloor = cameraSurfaceY(mc, finalX, finalZ);
             cameraSmoothY = CameraRig.keepAboveTerrain(cameraSmoothY, finalFloor);
         } else {
             cameraSmoothY = Math.max(cameraSmoothY, groundY + CameraRig.TERRAIN_CLEARANCE);
         }
 
+        cameraSmoothY = Math.max(cameraSmoothY, mc.player.getEyeY() + 8.0);
         camEntity.setPos(cameraSmoothX, cameraSmoothY, cameraSmoothZ);
         camEntity.xo = cameraSmoothX; camEntity.yo = cameraSmoothY; camEntity.zo = cameraSmoothZ;
         camEntity.xOld = cameraSmoothX; camEntity.yOld = cameraSmoothY; camEntity.zOld = cameraSmoothZ;
@@ -704,8 +720,8 @@ public final class CommandMode {
                 firstPersonCommand = false;
                 enter(mc);
             }
-            if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewActive(mc))
-                exit(mc); // Exit only when the embedded command view is no longer active.
+            if (active && !(mc.screen instanceof CommandScreen) && !isHostedCommandViewAttached(mc))
+                exit(mc); // Exit only when the command view and its modal child screens are detached.
             if (active) {
                 java.util.Set<String> alive = new java.util.HashSet<>();
                 for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) if (en.isAlive()) alive.add(en.getUUID().toString());

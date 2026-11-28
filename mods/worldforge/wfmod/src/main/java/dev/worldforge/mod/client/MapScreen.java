@@ -1753,7 +1753,7 @@ public class MapScreen extends Screen {
             TitleData mapData = MapTextures.titles;
             int blockX = (int) Math.round((pixel[0] - mapData.w / 2.0) * mapData.bpp);
             int blockZ = (int) Math.round((pixel[1] - mapData.h / 2.0) * mapData.bpp);
-            mc.setScreen(new MarkerCreateScreen(this, blockX, blockZ));
+            ClientScreenNavigation.open(this, new MarkerCreateScreen(this, blockX, blockZ));
             return true;
         }
         if (key == GLFW.GLFW_KEY_V) {
@@ -1762,7 +1762,7 @@ public class MapScreen extends Screen {
                 if (selectedMarkerId.equals(marker.id)) { visualTarget = marker; break; }
             }
             if (visualTarget != null) {
-                Minecraft.getInstance().setScreen(new VisualCatalogScreen(this, visualTarget));
+                ClientScreenNavigation.open(this, new VisualCatalogScreen(this, visualTarget));
             } else if (Minecraft.getInstance().player != null) {
                 Minecraft.getInstance().player.displayClientMessage(
                         Component.literal("Сначала выберите политический объект или армию на карте"), true);
