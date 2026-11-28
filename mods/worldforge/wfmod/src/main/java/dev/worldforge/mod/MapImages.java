@@ -95,9 +95,15 @@ public final class MapImages {
     }
 
     public static PropInfo propInfo(TitleData d, String key) {
+        checkedPixelCount(d);
+        if (key == null || key.isBlank())
+            throw new IllegalArgumentException("Не указан ключ свойства политической карты");
+        long lutLength = (long) d.maxId() + 1L;
+        if (lutLength <= 0 || lutLength > 16L * 1024L * 1024L)
+            throw new IllegalArgumentException("Некорректный диапазон идентификаторов титулов");
         PropInfo pi = new PropInfo();
         java.util.Map<String, Integer> idx = new java.util.HashMap<>();
-        int[] lut = new int[d.maxId() + 1];
+        int[] lut = new int[(int) lutLength];
         java.util.List<Long> areas = new ArrayList<>();
         for (TitleData.Title p : d.allTitles()) {
             if (p.tier != 0) continue;
@@ -124,7 +130,11 @@ public final class MapImages {
         // порядок значений из prop_defs.order идёт первым: так цвета и легенда стабильны
         if (def != null && def.get("order") instanceof List) {
             java.util.List<String> pre = new ArrayList<>();
-            for (Object o : (List<?>) def.get("order")) if (idx.containsKey(String.valueOf(o))) pre.add(String.valueOf(o));
+            java.util.Set<String> ordered = new java.util.HashSet<>();
+            for (Object o : (List<?>) def.get("order")) {
+                String value = String.valueOf(o);
+                if (idx.containsKey(value) && ordered.add(value)) pre.add(value);
+            }
             java.util.List<Long> oldAreas = new ArrayList<>(areas);
             java.util.List<String> oldVals = new ArrayList<>(pi.vals);
             int[] remap = new int[oldVals.size() + 1];
@@ -344,7 +354,6 @@ public final class MapImages {
                 color[i] = dev.worldforge.mod.api.Diplomacy.relation(d, focus, r, adj).rgb;
             }
         }
-        double alpha = realms ? 0.66 : 0.62;
         for (int z = 0, i = 0; z < h; z++) {
             for (int x = 0; x < w; x++, i++) {
                 int l = lab[i], t = terrain[i];
