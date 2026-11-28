@@ -36,27 +36,34 @@ public final class PoliticalMapBootstrap {
 
     public static TitleData generate(MapData map) {
         if (map == null) throw new IllegalArgumentException("map is required");
-        long pixels = (long) map.w * map.h;
-        if (map.w <= 0 || map.h <= 0 || pixels > 16L * 1024L * 1024L)
+        long pixelCount = (long) map.w * map.h;
+        if (map.w <= 0 || map.h <= 0 || pixelCount > 16L * 1024L * 1024L)
             throw new IllegalArgumentException("Political bootstrap map dimensions exceed the 16M pixel budget");
+        boolean[] land = new boolean[(int) pixelCount];
+        for (int z = 0; z < map.h; z++) for (int x = 0; x < map.w; x++)
+            land[z * map.w + x] = isLand(map, x, z);
+        return generate(map.w, map.h, map.bpp, land);
+    }
 
-        // At most 64x64 base cells: a predictable number of titles on large planets.
-        int cellSize = Math.max(4, (Math.max(map.w, map.h) + 63) / 64);
-        int cellsX = (map.w + cellSize - 1) / cellSize;
-        int cellsZ = (map.h + cellSize - 1) / cellSize;
+    /** Same political bootstrap for a client-side snapshot of an ordinary Minecraft world. */
+    public static TitleData generate(int width, int height, double blocksPerPixel, boolean[] landMask) {
+        long pixelCount = (long) width * height;
+        if (width <= 0 || height <= 0 || pixelCount > 16L * 1024L * 1024L
+                || landMask == null || landMask.length != pixelCount
+                || !Double.isFinite(blocksPerPixel) || blocksPerPixel <= 0)
+            throw new IllegalArgumentException("Invalid political bootstrap raster");
+
+        // At most 64x64 base cells: a predictable number of titles on large maps.
+        int cellSize = Math.max(4, (Math.max(width, height) + 63) / 64);
+        int cellsX = (width + cellSize - 1) / cellSize;
+        int cellsZ = (height + cellSize - 1) / cellSize;
         int cellCount = Math.multiplyExact(cellsX, cellsZ);
         long[] counts = new long[cellCount], sumX = new long[cellCount], sumZ = new long[cellCount];
         long totalLand = 0;
-
-        for (int z = 0; z < map.h; z++) {
-            for (int x = 0; x < map.w; x++) {
-                if (!isLand(map, x, z)) continue;
-                int cell = (z / cellSize) * cellsX + x / cellSize;
-                counts[cell]++;
-                sumX[cell] += x;
-                sumZ[cell] += z;
-                totalLand++;
-            }
+        for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) {
+            if (!landMask[z * width + x]) continue;
+            int cell = (z / cellSize) * cellsX + x / cellSize;
+            counts[cell]++; sumX[cell] += x; sumZ[cell] += z; totalLand++;
         }
 
         List<Node>[] levels = new List[4];
@@ -70,7 +77,6 @@ public final class PoliticalMapBootstrap {
             node.landPixels = counts[cell]; node.sumX = sumX[cell]; node.sumZ = sumZ[cell];
             levels[0].add(node); baseByCell[cell] = node;
         }
-
         for (int level = 1; level < levels.length; level++) {
             Map<Long, Node> grouped = new LinkedHashMap<>();
             for (Node child : levels[level - 1]) {
@@ -83,19 +89,16 @@ public final class PoliticalMapBootstrap {
                 }
                 parent.children.add(child);
                 parent.landPixels += child.landPixels;
-                parent.sumX += child.sumX;
-                parent.sumZ += child.sumZ;
+                parent.sumX += child.sumX; parent.sumZ += child.sumZ;
                 child.parentId = parent.id;
             }
         }
 
-        short[] provincePixels = new short[(int) pixels];
-        for (int z = 0; z < map.h; z++) {
-            for (int x = 0; x < map.w; x++) {
-                if (!isLand(map, x, z)) continue;
-                Node province = baseByCell[(z / cellSize) * cellsX + x / cellSize];
-                if (province != null) provincePixels[z * map.w + x] = (short) province.id;
-            }
+        short[] provincePixels = new short[(int) pixelCount];
+        for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) {
+            if (!landMask[z * width + x]) continue;
+            Node province = baseByCell[(z / cellSize) * cellsX + x / cellSize];
+            if (province != null) provincePixels[z * width + x] = (short) province.id;
         }
 
         List<Object> tierRows = new ArrayList<>();
@@ -104,41 +107,36 @@ public final class PoliticalMapBootstrap {
             tier.put("index", level); tier.put("key", TIER_KEYS[level]); tier.put("name", TIER_NAMES[level]);
             tierRows.add(tier);
         }
-
         List<Object> titleRows = new ArrayList<>();
         Map<Node, String> keys = new java.util.IdentityHashMap<>();
         for (int level = 0; level < levels.length; level++) for (Node node : levels[level])
             keys.put(node, "emergent:" + TIER_KEYS[level] + "/" + node.gx + "/" + node.gz);
 
-        for (int level = 0; level < levels.length; level++) {
-            for (Node node : levels[level]) {
-                double nx = (node.centerX() + 0.5) / map.w;
-                double nz = (node.centerZ() + 0.5) / map.h;
-                long area = Math.max(1L, Math.round(node.landPixels * map.bpp * map.bpp));
-                Map<String, Object> capital = new LinkedHashMap<>();
-                capital.put("x", Math.round((node.centerX() + 0.5 - map.w * 0.5) * map.bpp));
-                capital.put("z", Math.round((node.centerZ() + 0.5 - map.h * 0.5) * map.bpp));
-                capital.put("nx", nx); capital.put("ny", nz);
-                capital.put("province", level == 0 ? node.id : firstProvince(node));
-
-                List<Integer> children = new ArrayList<>();
-                for (Node child : node.children) children.add(child.id);
-                int rgb = color(node.gx, node.gz, level);
-                Map<String, Object> props = new LinkedHashMap<>();
-                props.put("emergence.generated", true);
-                props.put("emergence.source", "terrain-bootstrap");
-                props.put("emergence.level", TIER_KEYS[level]);
-
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("id", node.id); row.put("key", keys.get(node));
-                row.put("name", name(level, node.gx, node.gz));
-                row.put("tier", level); row.put("parent", node.parentId);
-                row.put("color", String.format("#%06x", rgb));
-                row.put("capital", capital); row.put("area_blocks", area);
-                row.put("area_pct_of_land", totalLand == 0 ? 0.0 : node.landPixels * 100.0 / totalLand);
-                row.put("children", children); row.put("neighbors", List.of()); row.put("props", props);
-                titleRows.add(row);
-            }
+        for (int level = 0; level < levels.length; level++) for (Node node : levels[level]) {
+            double nx = (node.centerX() + 0.5) / width;
+            double nz = (node.centerZ() + 0.5) / height;
+            long area = Math.max(1L, Math.round(node.landPixels * blocksPerPixel * blocksPerPixel));
+            Map<String, Object> capital = new LinkedHashMap<>();
+            capital.put("x", Math.round((node.centerX() + 0.5 - width * 0.5) * blocksPerPixel));
+            capital.put("z", Math.round((node.centerZ() + 0.5 - height * 0.5) * blocksPerPixel));
+            capital.put("nx", nx); capital.put("ny", nz);
+            capital.put("province", level == 0 ? node.id : firstProvince(node));
+            List<Integer> children = new ArrayList<>();
+            for (Node child : node.children) children.add(child.id);
+            int rgb = color(node.gx, node.gz, level);
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("emergence.generated", true);
+            props.put("emergence.source", "terrain-bootstrap");
+            props.put("emergence.level", TIER_KEYS[level]);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", node.id); row.put("key", keys.get(node));
+            row.put("name", name(level, node.gx, node.gz));
+            row.put("tier", level); row.put("parent", node.parentId);
+            row.put("color", String.format("#%06x", rgb));
+            row.put("capital", capital); row.put("area_blocks", area);
+            row.put("area_pct_of_land", totalLand == 0 ? 0.0 : node.landPixels * 100.0 / totalLand);
+            row.put("children", children); row.put("neighbors", List.of()); row.put("props", props);
+            titleRows.add(row);
         }
 
         List<Object> realmRows = new ArrayList<>();
@@ -155,25 +153,21 @@ public final class PoliticalMapBootstrap {
             realm.put("titles", List.of(keys.get(kingdom)));
             realm.put("overlord", null); realm.put("relation", "independent");
             realm.put("subjects", List.of());
-            realm.put("area_blocks", Math.max(1L, Math.round(kingdom.landPixels * map.bpp * map.bpp)));
+            realm.put("area_blocks", Math.max(1L, Math.round(kingdom.landPixels * blocksPerPixel * blocksPerPixel)));
             realm.put("props", props);
             realmRows.add(realm);
         }
-
         Map<String, Object> titlesRoot = new LinkedHashMap<>();
         titlesRoot.put("format", "worldforge-titles/1");
-        titlesRoot.put("size_px", List.of(map.w, map.h));
-        titlesRoot.put("blocks_per_pixel", map.bpp);
+        titlesRoot.put("size_px", List.of(width, height));
+        titlesRoot.put("blocks_per_pixel", blocksPerPixel);
         titlesRoot.put("tiers", tierRows); titlesRoot.put("titles", titleRows);
-
         Map<String, Object> realmsRoot = new LinkedHashMap<>();
         realmsRoot.put("format", "worldforge-realms/1");
         realmsRoot.put("relation_types", Map.of());
-        realmsRoot.put("realms", realmRows);
-        realmsRoot.put("relations", List.of());
-
+        realmsRoot.put("realms", realmRows); realmsRoot.put("relations", List.of());
         return TitleData.create(Json.write(titlesRoot), Json.write(realmsRoot),
-                provincePixels, map.w, map.h);
+                provincePixels, width, height);
     }
 
     /** Adds real realm records to authored province maps that omitted political entities. */
