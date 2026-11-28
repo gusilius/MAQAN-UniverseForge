@@ -176,7 +176,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
       - name: Run integrated Stage A on a real Forge dedicated Minecraft server
-        if: success()
+        # Real-world save acceptance is opt-in; normal UI/map work only runs build and domain diagnostics.
+        if: success() && vars.MAQAN_RUN_STAGE_A == 'true'
         shell: bash
         env:
           WF_ACCEPTANCE_MODE: stage-a
@@ -190,7 +191,7 @@ jobs:
             "$RUNNER_TEMP/maqan-stage-a"
 
       - name: Upload Stage A real-server diagnostics
-        if: always()
+        if: always() && vars.MAQAN_RUN_STAGE_A == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: maqan-living-world-stage-a
