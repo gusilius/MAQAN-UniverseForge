@@ -1749,6 +1749,26 @@ public final class PlatformShellScreen extends Screen {
         setProfile(target);
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
+        if ("maqan.atlas.exploration".equals(capability.id())) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return;
+            try {
+                Class<?> parentType = Class.forName("com.maqan.galacticnavigator.client.NavigatorScreen");
+                Screen parent = (Screen) parentType.getDeclaredConstructor().newInstance();
+                Class<?> mapType = Class.forName("com.maqan.galacticnavigator.client.NavigatorSurfaceMapScreen");
+                Screen map = (Screen) mapType.getConstructor(String.class, Screen.class)
+                        .newInstance(mc.level.dimension().location().toString(), parent);
+                embeddedView = map;
+                initializedView = null;
+                WorkspaceMapState.setViewType(WorkspaceMapState.ViewType.EXPLORATION);
+                initViewInContent(map);
+                saveWorkspaceState();
+                return;
+            } catch (ReflectiveOperationException | LinkageError error) {
+                LOGGER.warn("Unable to open the native exploration map", error);
+                return;
+            }
+        }
         Screen view = activeView();
         if (view != null) {
             initViewInContent(view);
