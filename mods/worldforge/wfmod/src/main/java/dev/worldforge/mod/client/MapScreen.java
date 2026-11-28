@@ -45,6 +45,11 @@ public class MapScreen extends Screen {
     private double camX, camY, zoom;
     private boolean fitted;
     private Object lastMapState;
+    private double lastPublishedCenterX = Double.NaN;
+    private double lastPublishedCenterZ = Double.NaN;
+    private double lastPublishedZoom = Double.NaN;
+    private String lastPublishedDimension = "";
+    private String lastPublishedViewType = "";
     private int selected;                 // выбранная провинция
     private int hoverLabel = -1, selLabel = -1;
     private int hoverProv;
@@ -180,6 +185,21 @@ public class MapScreen extends Screen {
 
     private double mapOriginX() { return ClientState.localWorldSnapshot ? ClientState.localWorldOriginX : 0.0; }
     private double mapOriginZ() { return ClientState.localWorldSnapshot ? ClientState.localWorldOriginZ : 0.0; }
+
+    private void publishWorkspaceViewport(double centerX, double centerZ, double currentZoom, String viewType) {
+        String dimension = PlatformWorkspaceBridge.worldId();
+        if (dimension.equals(lastPublishedDimension)
+                && viewType.equals(lastPublishedViewType)
+                && Double.compare(centerX, lastPublishedCenterX) == 0
+                && Double.compare(centerZ, lastPublishedCenterZ) == 0
+                && Double.compare(currentZoom, lastPublishedZoom) == 0) return;
+        PlatformWorkspaceBridge.publishMapViewport(centerX, centerZ, currentZoom, viewType);
+        lastPublishedDimension = dimension;
+        lastPublishedViewType = viewType;
+        lastPublishedCenterX = centerX;
+        lastPublishedCenterZ = centerZ;
+        lastPublishedZoom = currentZoom;
+    }
 
     private boolean denyLocalPreviewEdit() {
         if (!ClientState.localWorldSnapshot) return false;
@@ -369,10 +389,10 @@ public class MapScreen extends Screen {
         double centerPixelX = (width * 0.5 - camX) / zoom;
         double centerPixelZ = (height * 0.5 - camY) / zoom;
         double mapBpp = bpp();
-        PlatformWorkspaceBridge.publishMapViewport(
+        publishWorkspaceViewport(
                 (centerPixelX - MapTextures.w * 0.5) * mapBpp + mapOriginX(),
                 (centerPixelZ - MapTextures.h * 0.5) * mapBpp + mapOriginZ(), zoom,
-                militaryView ? "MILITARY" : MapImages.TERRAIN.equals(ClientState.mode) ? "GEOGRAPHIC" : "POLITICAL");
+                MapImages.TERRAIN.equals(ClientState.mode) ? "GEOGRAPHIC" : "POLITICAL");
         int mxp = (int) camX, myp = (int) camY, mw = (int) (MapTextures.w * zoom), mh = (int) (MapTextures.h * zoom);
         g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);                 // тень под картой
         g.pose().pushPose();
