@@ -730,10 +730,17 @@ public final class CommandScreen extends Screen {
             if(ctrl&&minecraft.player!=null&&CommandMode.SEL.isSelected(minecraft.player.getUUID().toString())){
                 net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,x,y);
                 if(target!=null){
-                    CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,
-                            List.of(minecraft.player.getUUID().toString()),0,0,0,
-                            target.getX()+","+target.getY()+","+target.getZ(),false,OrderPacket.BODY_BUILD));
-                    minecraft.player.displayClientMessage(Component.literal("Приказ телу: построить блок из руки"),true);
+                    String coordinates=target.getX()+","+target.getY()+","+target.getZ();
+                    if(CommandMode.SEL.isSelected(minecraft.player.getUUID().toString()))
+                        CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,List.of(minecraft.player.getUUID().toString()),
+                                0,0,0,coordinates,false,OrderPacket.BODY_BUILD));
+                    List<String> npcs=new ArrayList<>();
+                    for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+                        if(entity instanceof LivingEntity living&&CommandMode.isOwnedNpcEntity(living)
+                                &&CommandMode.selectable(minecraft,living)&&CommandMode.SEL.isSelected(entity.getUUID().toString()))
+                            npcs.add(entity.getUUID().toString());
+                    if(!npcs.isEmpty())CommandMode.send(new OrderPacket(OrderPacket.NPC_TASK,npcs,0,0,0,coordinates,false,2));
+                    minecraft.player.displayClientMessage(Component.literal("Приказ: построить из имеющихся блоков"),true);
                     return true;
                 }
             }
@@ -974,13 +981,20 @@ public final class CommandScreen extends Screen {
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
         if (key == GLFW.GLFW_KEY_X && minecraft.player!=null
-                &&CommandMode.SEL.isSelected(minecraft.player.getUUID().toString())) {
+                &&!CommandMode.SEL.selected().isEmpty()) {
             net.minecraft.core.BlockPos target=CommandMode.blockAt(minecraft,mx,my);
             if(target!=null){
-                CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,
-                        List.of(minecraft.player.getUUID().toString()),0,0,0,
-                        target.getX()+","+target.getY()+","+target.getZ(),false,OrderPacket.BODY_CHOP));
-                minecraft.player.displayClientMessage(Component.literal("Приказ телу: рубить/добывать блок"),true);
+                String coordinates=target.getX()+","+target.getY()+","+target.getZ();
+                if(CommandMode.SEL.isSelected(minecraft.player.getUUID().toString()))
+                    CommandMode.send(new OrderPacket(OrderPacket.PLAYER_BODY,List.of(minecraft.player.getUUID().toString()),
+                            0,0,0,coordinates,false,OrderPacket.BODY_CHOP));
+                List<String> npcs=new ArrayList<>();
+                for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering())
+                    if(entity instanceof LivingEntity living&&CommandMode.isOwnedNpcEntity(living)
+                            &&CommandMode.selectable(minecraft,living)&&CommandMode.SEL.isSelected(entity.getUUID().toString()))
+                        npcs.add(entity.getUUID().toString());
+                if(!npcs.isEmpty())CommandMode.send(new OrderPacket(OrderPacket.NPC_TASK,npcs,0,0,0,coordinates,false,1));
+                minecraft.player.displayClientMessage(Component.literal("Приказ: рубить/добывать выбранным телам"),true);
             }
             return true;
         }

@@ -1874,6 +1874,7 @@ public class TroopsMod {
         String owner = p.getUUID().toString();
         switch (o.action()) {
             case OrderPacket.PLAYER_BODY -> { return PlayerBodyOrders.issue(p,o); }
+            case OrderPacket.NPC_TASK -> { return NpcBodyOrders.work(p,o); }
             case OrderPacket.ORDER -> {
                 ActionResult playerBodyResult=null;
                 if(o.ids().contains(p.getUUID().toString())){
@@ -1884,6 +1885,7 @@ public class TroopsMod {
                             0,bodyX,bodyZ,bodyKind==OrderPacket.BODY_ATTACK?o.target():"",false,bodyKind);
                     playerBodyResult=PlayerBodyOrders.issue(p,bodyOrder);
                 }
+                ActionResult npcResult=NpcBodyOrders.command(p,o);
                 Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal()
                         ? new Squads.Order(Squads.Kind.ATTACK, 0, 0, o.target())
                         : new Squads.Order(Squads.Kind.values()[Math.max(0, Math.min(o.kind(), Squads.Kind.values().length - 1))],
@@ -1907,7 +1909,7 @@ public class TroopsMod {
                     }
                 }
                 if (!mixed.commandTroops())
-                    return playerBodyResult!=null?playerBodyResult:(workerResult != null ? workerResult : ActionResult.fail("Не выбраны подходящие рабочие или военные подразделения"));
+                    return playerBodyResult!=null?playerBodyResult:(npcResult!=null?npcResult:(workerResult != null ? workerResult : ActionResult.fail("Не выбраны подходящие рабочие или военные подразделения")));
                 for (String id : selectedTroops) {
                     Squads.Squad routed = SQUADS.squadOf(id);
                     if (routed != null && routed.owner.equals(owner) && routed.routed && ord.kind() != Squads.Kind.STOP) {

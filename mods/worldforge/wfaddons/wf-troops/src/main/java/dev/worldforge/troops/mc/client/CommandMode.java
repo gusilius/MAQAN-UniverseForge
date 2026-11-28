@@ -249,6 +249,15 @@ public final class CommandMode {
     static boolean isWorkerEntity(LivingEntity e){
         return e!=null&&"wf_settle:worker".equals(e.getType().builtInRegistryHolder().key().location().toString());
     }
+    static boolean isOwnedNpcEntity(LivingEntity e){
+        return e!=null&&"wf_people:npc".equals(e.getType().builtInRegistryHolder().key().location().toString());
+    }
+    private static String npcOwnerId(LivingEntity entity){
+        if(!isOwnedNpcEntity(entity))return "";
+        try{return String.valueOf(entity.getClass().getMethod("ownerId").invoke(entity));}
+        catch(ReflectiveOperationException|RuntimeException ignored){return "";}
+    }
+
     private static Object workerValue(LivingEntity e,String method){
         if(!isWorkerEntity(e))return null;
         try{
@@ -275,6 +284,7 @@ public final class CommandMode {
             String workerOwner=workerString(e,"ownerId");
             return owner.equals(workerOwner)||mc.hasSingleplayerServer();
         }
+        if(isOwnedNpcEntity(e))return owner.equals(npcOwnerId(e));
         return false;
     }
 
