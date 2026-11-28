@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Рассылает клиентам политическую карту при входе, смене измерения и после правок редактора. */
