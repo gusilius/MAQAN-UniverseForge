@@ -450,9 +450,8 @@ public final class CommandScreen extends Screen {
     private int panelX() { return Math.max(0, width - panelW() - 4); }
     private int panelY() { return 26; }
     private int panelH() {
-        // The embedded settlement minimap owns the lower-right corner. The build
-        // panel always ends above it, including very short GUI viewports.
-        int bottomReserve = 42;
+        // Keep the build list above the shared RTS command dock.
+        int bottomReserve = 56;
         return Math.max(3, height - panelY() - bottomReserve);
     }
 
